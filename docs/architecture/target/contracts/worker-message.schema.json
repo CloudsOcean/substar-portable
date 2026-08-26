@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/worker-message.v1.json",
+  "title": "Substar worker message",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "attempt",
+    "sequence",
+    "message_type",
+    "occurred_at",
+    "data"
+  ],
+  "properties": {
+    "schema_version": { "const": "substar.worker-message.v1" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "message_type": {
+      "enum": ["ready", "progress", "notice", "artifact", "result", "error", "cancelled"]
+    },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "progress": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "step": { "type": ["string", "null"] },
+    "data": { "type": "object" }
+  }
+}

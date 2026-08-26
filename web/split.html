@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
+  <title>切分 · Substar</title>
+  <link rel="stylesheet" href="/assets/split.css?v=20260825-dual-tutorial-1">
+  <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
+  <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
+  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
+  <script src="/assets/theme/personalization.js?v=20260814-8"></script>
+</head>
+<body>
+  <header class="app-bar app-header">
+    <a class="brand" href="/split" aria-label="Substar 首页">
+      <svg class="ui-icon brand-mark" aria-hidden="true"><use href="/assets/ui-icons.svg?v=20260814-star-1#brand"></use></svg><span>Substar</span>
+    </a>
+    <nav class="main-nav app-nav" aria-label="主导航">
+      <a class="active" href="/split">切分</a>
+      <a href="/editor">编辑</a>
+      <a href="/glossary">词库</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <div class="app-header-actions">
+      <div class="system-state app-status" id="systemState"><i></i><span>正在检查环境</span></div>
+    </div>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero">
+      <div>
+        <h1>生成一份可以立即编辑的切分稿</h1>
+      </div>
+    </section>
+
+    <div class="workspace-grid">
+      <section class="creation-card" aria-labelledby="createTitle">
+        <div class="section-heading">
+          <div><span class="step-number">01</span><h2 id="createTitle">任务配置</h2></div>
+          <div id="creationTutorialActions" class="creation-tutorial-actions hidden">
+            <button id="creationTutorialButton" class="creation-tutorial-button" type="button">启动初级教程</button>
+            <button id="advancedTutorialButton" class="creation-tutorial-button advanced" type="button">启动进阶教程</button>
+          </div>
+        </div>
+
+        <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
+          <input id="videoInput" type="file" multiple accept="video/*,audio/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden>
+          <span class="drop-icon">↓</span>
+          <strong id="dropTitle">拖入视频或音频</strong>
+          <span id="dropHint">MP4 / MOV / MKV / WEBM / MP3 / WAV / M4A</span>
+          <button class="secondary-button" type="button" id="chooseVideoButton">选择文件</button>
+          <div class="file-chip hidden" id="videoFileChip"></div>
+        </div>
+
+        <div class="srt-row reference-row hidden" id="referenceRow">
+          <div>
+            <strong>参考文稿 <em>必选</em></strong>
+            <span>支持 TXT / DOCX / SRT；批量任务按同名文件自动配对</span>
+          </div>
+          <input id="referenceInput" type="file" multiple accept=".txt,.docx,.srt,text/plain,application/x-subrip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <button class="secondary-button" type="button" id="chooseReferenceButton">选择参考文稿</button>
+          <span class="selected-file" id="referenceFileName">未添加</span>
+        </div>
+
+        <div class="parameter-panel">
+          <!-- Legacy wording retained for old static-contract readers only: 原文字符数上限 → 译文字符数上限 -->
+          <div class="parameter-grid primary-parameters">
+            <input id="recognitionProfileInput" type="hidden" value="qwen_cloud">
+            <label>
+              <span>原文语言</span>
+              <select id="languageInput">
+                <option value="mixed">中英混合</option>
+                <option value="Auto">自动识别</option>
+                <option value="zh">中文</option>
+                <option value="en">英文</option>
+                <option value="ja">日文</option>
+                <option value="ko">韩文</option>
+              </select>
+            </label>
+            <label>
+              <span>目标语言</span>
+              <select id="targetLanguageInput">
+                <option value="zh-CN">中文</option>
+                <option value="en">英文</option>
+                <option value="ja">日文</option>
+                <option value="ko">韩文</option>
+              </select>
+            </label>
+            <label>
+              <span>切分模式</span>
+              <select id="splitWorkflowInput">
+                <option value="disabled">仅使用听写结果</option>
+                <option value="one_step">AI 辅助切分</option>
+                <option value="reference_script">参考文稿辅助切分</option>
+              </select>
+              <small id="splitWorkflowHelp">启用后生成适合逐词编辑的字幕草稿</small>
+            </label>
+            <label id="referenceBreakSymbolsField" class="hidden">
+              <span>切分符号</span>
+              <input id="referenceBreakSymbolsInput" type="text" maxlength="32" value="，。？！.?!" autocomplete="off">
+              <small>按原文语言提供预设；可自定义，每个字符都会产生断点并保留在左侧字幕</small>
+            </label>
+          </div>
+
+          <details class="language-limit-settings">
+            <summary>字符数上限设置 <span>按原文与目标语言自动选用硬上限</span></summary>
+            <div class="parameter-grid language-limit-grid">
+              <label><span>中英混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
+              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
+              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
+              <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
+              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="32"><em>字符</em></div></label>
+            </div>
+          </details>
+
+          <input id="chunkSecondsInput" type="hidden" value="180">
+          <input id="workersInput" type="hidden" value="16">
+          <input id="retryInput" type="hidden" value="3">
+          <input id="repairInput" type="hidden" value="1">
+        </div>
+
+        <div class="create-footer">
+          <p id="formMessage">选择素材后即可开始</p>
+          <button class="primary-button" id="startButton" type="button" disabled>
+            <span>创建项目</span><b>→</b>
+          </button>
+        </div>
+      </section>
+
+      <aside class="pipeline-card" aria-labelledby="pipelineTitle">
+        <div class="section-heading compact">
+          <div><span class="step-number">02</span><h2 id="pipelineTitle">流水线作业</h2></div>
+          <span class="status-pill idle" id="statusPill">等待任务</span>
+        </div>
+        <section id="quickStartPanel" class="quick-start hidden" aria-label="快速开始">
+          <div class="quick-start-intro">
+            <span class="quick-start-mark">✦</span>
+            <div><strong>先连接完成字幕所需的两项服务</strong><p>密钥只保存在本机。测试通过后自动保存，不需要离开当前页面。</p></div>
+            <button id="quickStartTutorial" type="button"><span><b>启动初级教程</b><small>跟随内置案例完成配置并创建第一个项目</small></span><strong aria-hidden="true">→</strong></button>
+            <button id="quickStartAdvancedTutorial" class="quick-advanced-tutorial" type="button"><span><b>启动进阶教程</b><small>载入固定案例，体验 AI 切分、校准、翻译与审阅</small></span><strong aria-hidden="true">→</strong></button>
+          </div>
+          <article id="qwenQuickCard" class="quick-provider-card" data-provider="qwen">
+            <div class="quick-provider-heading">
+              <span class="quick-provider-index">1</span>
+              <div><strong>Qwen ASR</strong><small>把音视频转换为带时间信息的听写结果</small></div>
+              <span id="qwenQuickState" class="quick-provider-state">待配置</span>
+            </div>
+            <label class="quick-secret-field">
+              <span>阿里云百炼 API Key</span>
+              <div><input id="qwenQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="qwenQuickKey" aria-label="显示 Qwen 密钥">显示</button></div>
+            </label>
+            <button id="qwenQuickTest" class="quick-test-button" type="button">测试连接</button>
+            <p id="qwenQuickResult" class="quick-test-result" aria-live="polite">使用 Qwen 云端文件听写默认配置</p>
+          </article>
+          <article id="deepseekQuickCard" class="quick-provider-card" data-provider="deepseek">
+            <div class="quick-provider-heading">
+              <span class="quick-provider-index">2</span>
+              <div><strong>DeepSeek LLM</strong><small>负责语义切分，以及后续翻译、校准和审阅</small></div>
+              <span id="deepseekQuickState" class="quick-provider-state">待配置</span>
+            </div>
+            <label class="quick-secret-field">
+              <span>DeepSeek API Key</span>
+              <div><input id="deepseekQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="deepseekQuickKey" aria-label="显示 DeepSeek 密钥">显示</button></div>
+            </label>
+            <button id="deepseekQuickTest" class="quick-test-button" type="button">测试连接</button>
+            <p id="deepseekQuickResult" class="quick-test-result" aria-live="polite">使用 DeepSeek 官方 API 与当前默认模型</p>
+          </article>
+          <div class="quick-start-footer"><span id="quickStartProgress">完成 0 / 2</span><small>连接完成后，这里会自动变为流水线作业。</small></div>
+        </section>
+        <div id="pipelinePanel" class="pipeline-panel">
+          <div class="empty-pipeline" id="emptyPipeline">
+            <svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg>
+            <strong>还没有正在处理的任务</strong>
+            <p>开始后可以离开本页，任务会在后台继续运行。</p>
+          </div>
+          <div class="pipeline-jobs hidden" id="pipelineJobs" aria-live="polite"></div>
+          <details class="runtime-log" id="runtimeLog" open>
+            <summary><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg> 任务进度（仅阶段与报错）</summary>
+            <div class="runtime-log-lines" id="runtimeLogLines"><p>暂无进度</p></div>
+          </details>
+        </div>
+      </aside>
+    </div>
+
+    <section class="recent-section">
+      <div class="recent-head"><div><span class="step-number">03</span><h2>最近任务</h2></div><div><button id="refreshJobsButton" class="text-button" type="button">刷新</button><button id="importProjectButton" class="text-button" type="button">导入</button><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden></div></div>
+      <div class="recent-list" id="recentJobs"><p class="recent-empty">正在读取任务…</p></div>
+    </section>
+  </main>
+  <div id="splitTutorialLayer" class="split-tutorial-layer hidden" aria-hidden="true">
+    <div id="splitTutorialSpotlight" class="split-tutorial-spotlight" aria-hidden="true"></div>
+    <section id="splitTutorialCard" class="split-tutorial-card" role="dialog" aria-modal="false" aria-labelledby="splitTutorialTitle" tabindex="-1">
+      <header><span id="splitTutorialProgress">初级教程 · 1 / 10</span><button id="skipSplitTutorial" type="button">退出教程</button></header>
+      <div class="split-tutorial-copy"><h2 id="splitTutorialTitle">连接 QWEN 听写服务</h2><p id="splitTutorialDescription"></p><a id="splitTutorialLink" class="split-tutorial-link hidden" href="#" target="_blank" rel="noopener noreferrer"></a></div>
+      <div class="split-tutorial-actions"><button id="splitTutorialSecondary" class="tutorial-secondary hidden" type="button"></button><button id="splitTutorialPrimary" class="tutorial-primary hidden" type="button"></button></div>
+    </section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div id="renameProjectDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="renameProjectTitle">
+    <form id="renameProjectForm" class="text-dialog">
+      <strong id="renameProjectTitle">重命名项目</strong>
+      <label><span>项目名称</span><input id="renameProjectName" maxlength="120" autocomplete="off" required></label>
+      <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
+    </form>
+  </div>
+  <script src="/assets/split.js?v=20260825-tutorial-registration-1" defer></script>
+</body>
+</html>

@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
+    <title>设置 · Substar</title>
+    <link rel="stylesheet" href="/assets/settings.css?v=20260826-v101-hotfix-1" />
+    <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
+    <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
+    <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260814-8" />
+    <script src="/assets/theme/personalization.js?v=20260814-8"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="/split"
+        ><svg class="ui-icon brand-mark" aria-hidden="true"><use href="/assets/ui-icons.svg?v=20260814-star-1#brand"></use></svg><span>Substar</span></a
+      >
+      <nav class="app-nav" aria-label="主导航">
+        <a href="/split">切分</a><a href="/editor">编辑</a
+        ><a href="/glossary">词库</a><a class="active" href="/settings">设置</a>
+      </nav>
+      <div id="saveState" class="header-state app-status">正在读取配置…</div>
+    </header>
+
+    <main class="settings-layout asset-layout">
+      <aside class="settings-sidebar asset-sidebar">
+        <div class="sidebar-title asset-sidebar-heading">
+          <h1>设置</h1>
+          <p>全局默认值会用于新任务，运行中的项目仍使用自己的配置快照。</p>
+        </div>
+        <div class="category-list asset-sidebar-list" role="tablist">
+          <button class="category asset-sidebar-item active" data-panel="general" type="button"><span class="asset-sidebar-copy"><b>通用</b><small>文件与默认导出位置</small></span></button>
+          <button class="category asset-sidebar-item" data-panel="shortcuts" type="button"><span class="asset-sidebar-copy"><b>快捷键</b><small>统一配置编辑操作</small></span></button>
+          <button
+            class="category asset-sidebar-item"
+            data-panel="api"
+            type="button"
+          >
+            <span class="asset-sidebar-copy"
+              ><b>模型</b><small>服务商、连接与模型</small></span
+            ><i class="asset-sidebar-meta" id="apiBadge">读取中</i>
+          </button>
+          <button
+            class="category asset-sidebar-item"
+            data-panel="recognition"
+            type="button"
+          >
+            <span class="asset-sidebar-copy"
+              ><b>引擎</b><small>识别、对齐与导入</small></span
+            ><i class="asset-sidebar-meta" id="recognitionBadge">读取中</i>
+          </button>
+          <button
+            class="category asset-sidebar-item"
+            data-panel="segmentation"
+            type="button"
+          >
+            <span class="asset-sidebar-copy"
+              ><b>切分</b><small>长度、接缝与阶段参数</small></span
+            >
+          </button>
+          <button
+            class="category asset-sidebar-item"
+            data-panel="translation"
+            type="button"
+          >
+            <span class="asset-sidebar-copy"
+              ><b>翻译</b><small>语言、风格与质量复核</small></span
+            >
+          </button>
+          <button class="category asset-sidebar-item" data-panel="audit" type="button">
+            <span class="asset-sidebar-copy"><b>审校</b><small>AI 校准、审阅与 Fallback</small></span>
+          </button>
+          <button class="category asset-sidebar-item" data-panel="prompts" type="button">
+            <span class="asset-sidebar-copy"><b>提示词</b><small>编辑模板与查看路由</small></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
+          </button>
+          <button class="category asset-sidebar-item" data-panel="advanced" type="button">
+            <span class="asset-sidebar-copy"><b>高级</b><small>Worker、云端与运行资源</small></span>
+          </button>
+          <button class="category asset-sidebar-item" data-panel="personalization" type="button">
+            <span class="asset-sidebar-copy"><b>个性化</b><small>外观、颜色与动效</small></span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="settings-content">
+        <form id="settingsForm">
+          <section class="settings-panel active" data-settings-panel="general">
+            <div class="panel-heading"><div><small>GENERAL</small><h2>通用设置</h2><p>导出文件时会由 Windows“另存为”窗口选择文件名与保存位置。</p></div></div>
+          </section>
+          <section class="settings-panel" data-settings-panel="shortcuts">
+            <div class="panel-heading"><div><small>KEYBOARD</small><h2>快捷键</h2><p>点击输入框后直接按下新的组合键。</p></div></div>
+            <div class="card shortcut-settings-card">
+              <div class="shortcut-row"><div><strong>撤销</strong><small>返回上一个编辑器文档版本</small></div><input name="shortcut_undo" data-shortcut-input="undo" readonly aria-label="撤销快捷键"><button type="button" class="secondary" data-shortcut-reset="undo">恢复默认</button></div>
+              <div class="shortcut-row"><div><strong>重做</strong><small>重新应用刚刚撤销的文档版本</small></div><input name="shortcut_redo" data-shortcut-input="redo" readonly aria-label="重做快捷键"><button type="button" class="secondary" data-shortcut-reset="redo">恢复默认</button></div>
+              <p id="shortcutMessage" class="shortcut-message wide">默认：撤销 Ctrl+Z，重做 Ctrl+Y。</p>
+            </div>
+          </section>
+          <section class="settings-panel" data-settings-panel="api">
+                        <div class="provider-workspace">
+              <aside class="provider-rail" aria-label="模型服务提供商">
+                <div class="provider-rail-heading"><span>服务提供商</span></div>
+                <button class="provider-item active" type="button" data-model-provider="deepseek" data-base-url="https://api.deepseek.com"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>DeepSeek</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item" type="button" data-model-provider="openai" data-base-url="https://api.openai.com/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#model"></use></svg></span><span><b>OpenAI</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item" type="button" data-model-provider="siliconflow" data-base-url="https://api.siliconflow.cn/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#accelerate"></use></svg></span><span><b>硅基流动</b><small>OpenAI 兼容</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item" type="button" data-model-provider="aliyun" data-base-url="https://dashscope.aliyuncs.com/compatible-mode/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>阿里云百炼</b><small>兼容模式</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item" type="button" data-model-provider="custom" data-base-url=""><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#local"></use></svg></span><span><b>自定义服务</b><small>兼容端点</small></span><span class="provider-item-state"></span></button>
+              </aside>
+              <div class="provider-detail">
+                <header class="detail-heading">
+                  <div><span class="detail-provider-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><div><small>当前活动服务</small><h3 id="modelProviderTitle">DeepSeek</h3></div></div>
+                </header>
+            <div class="card featured provider-card">
+              <div class="field wide">
+                <label for="translation_api_base_url">Base URL</label
+                ><input
+                  id="translation_api_base_url"
+                  name="translation_api_base_url"
+                  value="https://api.deepseek.com"
+                  autocomplete="off"
+                /><small>兼容 OpenAI Chat Completions 的服务地址</small>
+              </div>
+              <div class="field wide">
+                <label for="translation_api_key">API Key</label>
+                <div class="key-test-row"><div class="secret-field">
+                  <input
+                    id="translation_api_key"
+                    name="translation_api_key"
+                    type="password"
+                    placeholder="已保存的密钥不会显示"
+                    autocomplete="new-password"
+                  /><button
+                    class="reveal-key"
+                    type="button"
+                    aria-label="显示密钥"
+                  >
+                    <svg class="ui-icon"><use href="/assets/ui-icons.svg#eye"></use></svg>
+                  </button>
+                </div><button class="secondary test-api icon-button key-test-button" type="button"><svg class="ui-icon"><use href="/assets/ui-icons.svg#test"></use></svg>测试连通性</button></div>
+                <small id="keyHint">尚未保存密钥</small>
+              </div>
+              <div class="field wide">
+                <label for="translation_api_model">连接测试模型</label
+                ><input
+                  id="translation_api_model"
+                  name="translation_api_model"
+                  value="deepseek-v4-flash"
+                  list="officialModelIds"
+                  autocomplete="off"
+                /><datalist id="officialModelIds"></datalist>
+                <div class="reasoning-capability-row"><small id="reasoningCapabilitySummary">正在读取模型能力…</small><button id="probeReasoning" class="secondary" type="button">探测推理档位</button></div>
+                <div id="reasoningProbeResult" class="test-result wide" aria-live="polite"></div>
+                <small>模型、思考与输出参数在「切分」「翻译」中按 Stage 设置。</small>
+              </div>
+              <div
+                id="testResult"
+                class="test-result wide"
+                aria-live="polite"
+              ></div>
+            </div>
+            <details class="advanced card">
+              <summary>
+                <span
+                  ><b>高级 API 参数</b
+                  ><small>认证、超时、阶段模型与密钥管理</small></span
+                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+              </summary>
+              <div class="advanced-grid">
+                <div class="field">
+                  <label>服务类型</label
+                  ><select name="translation_api_provider">
+                    <option value="openai_chat">OpenAI-compatible Chat</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>认证方式</label
+                  ><select name="translation_api_auth_mode">
+                    <option value="bearer">Bearer</option>
+                    <option value="api-key">API Key Header</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>请求超时（秒）</label
+                  ><input
+                    name="translation_api_timeout_seconds"
+                    type="number"
+                    min="30"
+                    max="600"
+                    value="300"
+                  />
+                </div>
+                <label class="switch-field"
+                  ><input
+                    name="clear_translation_api_key"
+                    type="checkbox"
+                  /><span></span><b>保存时清除已有 API Key</b></label
+                >
+              </div>
+            </details>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="recognition">
+                        <div class="provider-workspace engine-workspace">
+              <aside class="provider-rail" aria-label="识别服务提供商">
+                <div class="provider-rail-heading"><span>服务提供商</span></div>
+                <button class="provider-item active" type="button" data-engine-profile="qwen_cloud"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>Qwen 云端</b><small>文件听写 · 原生词级时间</small></span><span class="provider-item-state"></span></button>
+              </aside>
+              <div class="provider-detail">
+                <header class="detail-heading">
+                  <div><span class="detail-provider-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><div><small>当前识别路线</small><h3 id="engineProviderTitle">Qwen 云端 · 文件听写</h3></div></div>
+                </header>
+            <div class="card provider-card">
+              <div class="field wide">
+                <label>默认识别方案</label>
+                <select name="recognition_profile_id" id="recognitionProfile"></select>
+                <small id="recognitionProfileDescription">正在读取已注册方案…</small>
+              </div>
+              <div class="recognition-adapters wide" id="recognitionAdapters">
+                <div><span>主稿适配器</span><b id="transcriptAdapterLabel">—</b></div>
+                <div><span>时间适配器</span><b id="alignmentAdapterLabel">—</b></div>
+                <div><span>说话人适配器</span><b>未启用</b></div>
+              </div>
+              <div class="field wide" data-recognition-profiles="qwen_cloud">
+                <label>阿里云百炼 API Key</label>
+                <div class="key-test-row"><input name="api_key" type="password" autocomplete="off" placeholder="留空则保留已保存的密钥" /><button class="secondary test-qwen-cloud icon-button key-test-button" type="button"><svg class="ui-icon"><use href="/assets/ui-icons.svg#test"></use></svg>测试连通性</button></div>
+                <small id="qwenCloudKeyHint">输入新密钥并保存会覆盖旧密钥；留空则继续使用已保存的密钥。</small>
+              </div>
+              <div class="field" data-recognition-profiles="qwen_cloud">
+                <label>服务地域</label>
+                <select name="qwen_cloud_region"><option value="beijing">中国（北京）</option><option value="singapore">国际（新加坡）</option></select>
+              </div>
+              <div class="field" data-recognition-profiles="qwen_cloud">
+                <label>文件听写模型</label>
+                <input name="qwen_cloud_model" value="qwen-audio-3.0-asr-flash-filetrans" readonly />
+              </div>
+              <div class="field wide" data-recognition-profiles="qwen_cloud">
+                <label>自定义 DashScope API Base URL（可选）</label>
+                <input name="qwen_cloud_base_url" placeholder="留空则按地域自动选择" spellcheck="false" />
+              </div>
+              <div class="field" data-recognition-profiles="qwen_cloud">
+                <label>单次请求超时（秒）</label>
+                <input name="qwen_cloud_request_timeout_seconds" type="number" min="10" max="600" value="120" />
+              </div>
+              <div class="field" data-recognition-profiles="qwen_cloud">
+                <label>任务总等待上限（秒）</label>
+                <input name="qwen_cloud_task_timeout_seconds" type="number" min="60" max="43200" value="7200" />
+              </div>
+              <div class="field" data-recognition-profiles="qwen_cloud">
+                <label>轮询间隔（秒）</label>
+                <input name="qwen_cloud_poll_interval_seconds" type="number" min="1" max="30" step="0.5" value="3" />
+              </div>
+              <label class="switch-field" data-recognition-profiles="qwen_cloud"><input name="qwen_cloud_temporary_upload" type="checkbox" checked disabled /><span></span><b>临时上传（Beta · URL 48 小时有效）</b></label>
+              <div id="qwenCloudTestResult" class="test-result wide" data-recognition-profiles="qwen_cloud"></div>
+              <div class="field">
+                <label>默认识别语言</label>
+                <input name="language" value="Auto" placeholder="Auto / zh / en / ja / ko" />
+              </div>
+            <details class="advanced card">
+              <summary>
+                <span
+                  ><b>运行与输出</b><small>路径、识别上下文和兼容字段</small></span
+                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+              </summary>
+              <div class="advanced-grid">
+                <div class="field wide">
+                </div>
+                <div class="field wide">
+                  <label>识别上下文</label
+                  ><textarea
+                    name="context"
+                    rows="3"
+                    placeholder="节目名、人名、地名、机构名"
+                  ></textarea>
+                </div>
+              </div>
+            </details>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="segmentation">
+                        <div class="card route-choice-card">
+              <div class="field wide">
+                <label>正式切分链路</label>
+                <input type="hidden" name="split_workflow_mode" value="one_step" />
+                <strong>确定性规划 → 语义切分</strong>
+                <small>唯一正式切分链路：程序按时长与停顿规划长节目块，模型只负责语义分组和最终切点。</small>
+              </div>
+            </div>
+            <div class="card">
+              <div class="field">
+                <label>最短 cue（ms）</label
+                ><input
+                  name="minimum_cue_duration_ms"
+                  type="number"
+                  min="0"
+                  max="5000"
+                  value="400"
+                />
+              </div>
+              <div class="field">
+                <label>最长 cue（ms）</label
+                ><input
+                  name="maximum_cue_duration_ms"
+                  type="number"
+                  min="1"
+                  max="60000"
+                  value="7000"
+                />
+              </div>
+              <div class="field">
+                <label>自动吸附阈值（ms）</label
+                ><input
+                  name="snap_threshold_ms"
+                  type="number"
+                  min="0"
+                  max="2000"
+                  value="500"
+                />
+              </div>
+              <div class="field">
+                <label>右端补偿（ms）</label
+                ><input
+                  name="tail_padding_ms"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  value="120"
+                />
+              </div>
+            </div>
+            <div class="stage-settings" id="segmentationStageSettings"></div>
+            <details class="advanced card">
+              <summary>
+                <span
+                  ><b>流水线高级参数</b
+                  ><small>块大小、重叠上下文与有界重试</small></span
+                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+              </summary>
+              <div class="advanced-grid">
+                <div class="field">
+                  <label>阶段块时长（秒）</label
+                  ><input
+                    name="segmentation_chunk_seconds"
+                    type="number"
+                    min="75"
+                    max="100"
+                  />
+                </div>
+                <div class="field">
+                  <label>重叠上下文（秒）</label
+                  ><input
+                    name="segmentation_overlap_seconds"
+                    type="number"
+                    min="5"
+                    max="120"
+                  />
+                </div>
+                <div class="field">
+                  <label>每批意义组</label
+                  ><input
+                    name="segmentation_batch_groups"
+                    type="number"
+                    min="1"
+                    max="50"
+                  />
+                </div>
+                <div class="field">
+                  <label>HTTP 总尝试次数</label
+                  ><input
+                    name="http_retry_attempts"
+                    type="number"
+                    min="1"
+                    max="8"
+                  />
+                </div>
+                <div class="field">
+                  <label>切分复议次数</label
+                  ><input
+                    name="segmentation_repair_attempts"
+                    type="number"
+                    min="0"
+                    max="4"
+                  />
+                </div>
+                <div class="field">
+                  <label>单阶段上限（秒）</label
+                  ><input
+                    name="stage_timeout_seconds"
+                    type="number"
+                    min="60"
+                    max="21600"
+                  />
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="translation">
+                        <div class="card route-choice-card">
+              <div class="field wide">
+                <label>正式翻译链路</label>
+                <input type="hidden" name="translation_workflow_mode" value="one_step" />
+                <strong>翻译增强</strong>
+                <small>唯一正式翻译链路：直接生成固定 Cue 对应的最终译文。</small>
+              </div>
+            </div>
+            <div class="card">
+              <div class="field wide">
+                <label>基本设置</label>
+                <small>配置双语字幕的显示顺序与翻译任务并发数。</small>
+              </div>
+              <div class="field">
+                <label>双语顺序</label
+                ><select name="display_order">
+                  <option value="source_target">原文在上 · 译文在下</option>
+                  <option value="target_source">译文在上 · 原文在下</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>并发任务数</label
+                ><input
+                  name="translation_workers"
+                  type="number"
+                  min="1"
+                  max="256"
+                  value="64"
+                />
+              </div>
+            </div>
+            <div class="stage-settings" id="translationStageSettings"></div>
+            <details class="advanced card">
+              <summary>
+                <span
+                  ><b>字幕输出高级参数</b
+                  ><small>标点、计数和阅读速度</small></span
+                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+              </summary>
+              <div class="advanced-grid">
+                <p class="settings-note">字符数统一按显示文本统计：空格、标点、数字、拉丁字母和其他符号全部计入。</p>
+                <div class="field">
+                  <label>拉丁文字最大 CPS</label
+                  ><input
+                    name="maximum_cps_latin"
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="0.5"
+                  />
+                </div>
+                <div class="field">
+                  <label>中日韩最大 CPS</label
+                  ><input
+                    name="maximum_cps_cjk"
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="0.5"
+                  />
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="audit">
+                        <div class="stage-settings" id="auditStageSettings"></div>
+          </section>
+
+          <section class="settings-panel prompt-settings-panel" data-settings-panel="prompts">
+            <div class="panel-heading prompt-panel-heading">
+              <div><small>PROMPT REGISTRY</small><h2>生产提示词</h2><p>可修改模型实际加载的模板、语言规则与构造案例；任务和语言的路由及组合顺序保持只读。</p></div>
+              <span class="prompt-readonly-pill"><i></i>路由只读</span>
+            </div>
+            <div class="prompt-metrics" id="promptMetrics" aria-label="提示词规模">
+              <article><small>提示词族</small><strong>—</strong><span>注册任务</span></article>
+              <article><small>路由组合</small><strong>—</strong><span>语言与策略变体</span></article>
+              <article><small>生产组件</small><strong>—</strong><span>唯一 Markdown</span></article>
+              <article><small>核心 / 案例</small><strong>—</strong><span>规则与示例分离</span></article>
+            </div>
+            <section class="prompt-lifecycle" aria-label="提示词生效路径">
+              <div class="prompt-flow-node source"><small>唯一权威</small><b>生产注册表</b><span>版本 · 文件 · SHA-256</span></div>
+              <i class="prompt-flow-arrow">→</i>
+              <div class="prompt-flow-node route"><small>运行时路由</small><b>任务 × 语言</b><span>按顺序组合共享组件</span></div>
+              <i class="prompt-flow-arrow">→</i>
+              <div class="prompt-flow-branches">
+                <div><b>字幕切分</b><span>创建项目时冻结快照</span></div>
+                <div><b>翻译 / 审校 / 外部 AI</b><span>执行时读取当前注册表</span></div>
+              </div>
+            </section>
+            <div class="prompt-category-tabs" id="promptCategoryTabs" role="tablist" aria-label="提示词分类"></div>
+            <div class="prompt-workspace">
+              <section class="prompt-family-column">
+                <div class="prompt-section-title"><div><small>ROUTES</small><h3 id="promptCategoryTitle">正在读取</h3></div><span id="promptCategorySummary">—</span></div>
+                <div class="prompt-family-list" id="promptFamilyList"><div class="prompt-loading">正在读取生产提示词注册表…</div></div>
+              </section>
+              <aside class="prompt-inspector" aria-live="polite">
+                <header><div><small id="promptInspectorKind">COMPONENT</small><h3 id="promptInspectorTitle">选择一个提示词组件</h3></div><span id="promptInspectorCount">—</span></header>
+                <div class="prompt-route-chain" id="promptRouteChain"><span>点击左侧语言路由，查看实际组合顺序。</span></div>
+                <div class="prompt-file-meta" id="promptFileMeta"></div>
+                <textarea id="promptSourceView" aria-label="提示词正文" spellcheck="false" disabled>提示词正文将在这里显示。</textarea>
+                <div class="prompt-editor-actions">
+                  <span id="promptSaveMessage">选择组件后即可编辑。</span>
+                  <button id="promptReloadButton" type="button" disabled>重新载入</button>
+                  <button id="promptSaveButton" class="primary" type="button" disabled>保存提示词</button>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="advanced">
+            <div class="panel-heading">
+              <div><small>RUNTIME</small><h2>高级运行设置</h2><p>控制后台 Worker 与共享资源。保存后在下次启动 Substar 时生效。</p></div>
+            </div>
+            <div class="card advanced-grid">
+              <label class="field"><span>Worker 并发</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台 Worker 总数。</small></label>
+              <label class="field"><span>云端任务并发</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>Qwen、AI 切分等云端调用共享，默认 4。</small></label>
+              <label class="field"><span>媒体处理并发</span><input name="runtime_media_concurrency" type="number" min="1" max="8"><small>转码、抽取音轨与波形准备。</small></label>
+              <label class="field"><span>本地 GPU 并发</span><input name="runtime_gpu_concurrency" type="number" min="1" max="4"><small>只约束本地模型；Qwen 云端不占用。</small></label>
+              <label class="field"><span>下载并发</span><input name="runtime_download_concurrency" type="number" min="1" max="8"><small>模型与远端结果下载资源。</small></label>
+              <div class="field"><span>Finalizer 提交</span><strong>按项目事务提交</strong><small>提交阶段只持有项目级短事务；同一项目保持串行与版本冲突保护。</small></div>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="personalization">
+            <div class="personalization-grid">
+              <label class="field"><span>外观</span><select name="appearance_mode"><option value="dark">深色</option><option value="light">浅色</option></select><small>默认使用深色，可手动切换为浅色。</small></label>
+              <label class="field"><span>强调色</span><select name="accent_color"><option value="purple">紫色</option><option value="blue">蓝色</option><option value="cyan">青色</option><option value="green">绿色</option><option value="orange">橙色</option><option value="pink">粉色</option></select><small>用于选中状态、主按钮和重点提示。</small></label>
+              <label class="field"><span>界面材质</span><select name="surface_style"><option value="standard">标准</option><option value="glass">通透毛玻璃</option></select><small>毛玻璃会提高透明度和背景模糊。</small></label>
+              <label class="field"><span>界面密度</span><select name="ui_density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select><small>紧凑模式会减少主要容器的间距。</small></label>
+              <label class="field"><span>动态效果</span><select name="motion_level"><option value="full">完整</option><option value="reduced">精简</option><option value="none">关闭</option></select><small>减少或关闭非必要过渡与动画。</small></label>
+              <label class="field"><span>字号</span><select name="font_scale"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option></select><small>统一调整应用界面的基础字号。</small></label>
+            </div>
+            <section class="background-settings" aria-labelledby="backgroundSettingsTitle">
+              <div class="background-settings-heading">
+                <div><h3 id="backgroundSettingsTitle">页面背景图</h3><p>四个页面可分别设置；背景会覆盖顶部导航区域，并保留遮罩保证文字清晰。</p></div>
+                <span>本机保存</span>
+              </div>
+              <div class="background-page-grid">
+                <article class="background-page-card" data-background-page="split">
+                  <div class="background-page-preview"><span>切分</span></div>
+                  <div class="background-page-copy"><strong>切分</strong><small data-background-name>使用默认背景</small></div>
+                  <input data-background-input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+                  <div class="background-page-actions"><button class="secondary" data-background-select type="button">选择图片</button><button class="secondary" data-background-all type="button" disabled>应用到全部</button><button class="text-button" data-background-remove type="button" disabled>移除</button></div>
+                </article>
+                <article class="background-page-card" data-background-page="editor">
+                  <div class="background-page-preview"><span>编辑</span></div>
+                  <div class="background-page-copy"><strong>编辑</strong><small data-background-name>使用默认背景</small></div>
+                  <input data-background-input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+                  <div class="background-page-actions"><button class="secondary" data-background-select type="button">选择图片</button><button class="secondary" data-background-all type="button" disabled>应用到全部</button><button class="text-button" data-background-remove type="button" disabled>移除</button></div>
+                </article>
+                <article class="background-page-card" data-background-page="glossary">
+                  <div class="background-page-preview"><span>词库</span></div>
+                  <div class="background-page-copy"><strong>词库</strong><small data-background-name>使用默认背景</small></div>
+                  <input data-background-input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+                  <div class="background-page-actions"><button class="secondary" data-background-select type="button">选择图片</button><button class="secondary" data-background-all type="button" disabled>应用到全部</button><button class="text-button" data-background-remove type="button" disabled>移除</button></div>
+                </article>
+                <article class="background-page-card" data-background-page="settings">
+                  <div class="background-page-preview"><span>设置</span></div>
+                  <div class="background-page-copy"><strong>设置</strong><small data-background-name>使用默认背景</small></div>
+                  <input data-background-input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" hidden>
+                  <div class="background-page-actions"><button class="secondary" data-background-select type="button">选择图片</button><button class="secondary" data-background-all type="button" disabled>应用到全部</button><button class="text-button" data-background-remove type="button" disabled>移除</button></div>
+                </article>
+              </div>
+            </section>
+            <div class="theme-preview" aria-label="主题预览">
+              <div class="theme-preview-dots"><span></span><span></span><span></span></div>
+              <strong>Substar 外观预览</strong>
+              <p>修改选项会立即预览，保存后应用到全部页面。</p>
+              <button class="primary" type="button">主要操作</button>
+              <button class="secondary" type="button">次要操作</button>
+            </div>
+          </section>
+
+          <section class="settings-panel" data-settings-panel="environment">
+            <div class="panel-heading">
+              <div>
+                <small>ASSETS &amp; RUNTIME</small>
+                <h2>资产与运行环境</h2>
+                <p>检查程序真正使用的运行组件、本地模型和五套识别方案；不会上传本机信息。</p>
+              </div>
+              <button id="detectEnvironment" class="secondary" type="button">重新检测</button>
+            </div>
+            <div class="environment-overview" id="environmentOverview">
+              <article><small>识别方案</small><strong id="environmentProfilesMetric">—</strong><span>当前可完整运行</span></article>
+              <article><small>GPU 加速</small><strong id="environmentGpuMetric">—</strong><span>驱动与 PyTorch CUDA</span></article>
+              <article><small>本地资产</small><strong id="environmentAssetsMetric">—</strong><span>已安装模型</span></article>
+            </div>
+            <section class="card environment-section">
+              <div class="asset-section-heading">
+                <div><small>RUNTIME</small><h3>基础运行组件</h3><p id="environmentSummary">尚未检测</p></div>
+                <button id="configureEnvironment" class="secondary" type="button">初始化程序目录</button>
+              </div>
+              <div id="environmentChecks" class="environment-checks"></div>
+            </section>
+            <section class="card environment-section">
+              <div class="asset-section-heading">
+                <div><small>LOCAL ASSETS</small><h3>本地模型资产</h3><p>缺失项可在当前页面直接下载安装；已安装项仍可打开引擎配置。</p></div>
+              </div>
+              <div id="environmentAssets" class="environment-assets"></div>
+            </section>
+            <section class="card environment-section">
+              <div class="asset-section-heading"><div><small>RECOGNITION ROUTES</small><h3>方案可用性</h3><p>同时验证 Python 依赖和每条路线实际需要的模型资产。</p></div></div>
+              <div id="environmentProfiles" class="environment-profiles"></div>
+            </section>
+          </section>
+
+          <div class="save-bar">
+            <span id="formMessage">修改后保存，后续任务将使用新配置。</span
+            ><button id="saveButton" class="primary" type="submit">
+              保存设置
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  <script src="/assets/settings.js?v=20260826-hotfix-1"></script>
+  </body>
+</html>

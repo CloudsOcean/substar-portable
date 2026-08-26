@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_global_plan.schema.json",
+  "title": "Substar whole-program one-shot source boundary plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_language", "groups"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.global-plan.v1"},
+    "source_language": {"type": "string", "minLength": 1},
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id",
+          "alignment_start",
+          "alignment_end",
+          "line_breaks_after"
+        ],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "line_breaks_after": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    }
+  }
+}

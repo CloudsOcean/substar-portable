@@ -1,0 +1,8 @@
+fastapi>=0.115,<1.0
+opencc-python-reimplemented>=0.1.7,<0.2
+uvicorn>=0.34,<1.0
+requests>=2.32,<3.0
+python-multipart>=0.0.18,<1.0
+orjson>=3.10,<4.0
+qwen-asr==0.0.6
+faster-whisper>=1.2,<2.0

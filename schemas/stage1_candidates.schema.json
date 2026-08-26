@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_candidates.schema.json",
+  "title": "Substar Stage 1.2 hierarchical candidates",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "groups"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.candidates.v2"},
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["group_id", "candidates"],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "candidates": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "candidate_id", "strategy", "cues", "cut_after_alignment",
+                "hard_violations", "strong_soft_splits", "tradeoffs"
+              ],
+              "properties": {
+                "candidate_id": {"type": "string", "minLength": 1},
+                "strategy": {
+                  "enum": [
+                    "phrase_integrity", "prosody_timing", "boundary_coverage"
+                  ]
+                },
+                "cues": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {"type": "string", "minLength": 1}
+                },
+                "cut_after_alignment": {
+                  "type": "array",
+                  "items": {"type": "integer", "minimum": 0}
+                },
+                "hard_violations": {"type": "array", "maxItems": 0},
+                "strong_soft_splits": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["span_id", "after_alignment", "constraint", "reason"],
+                    "properties": {
+                      "span_id": {"type": "string"},
+                      "after_alignment": {"type": "integer", "minimum": 0},
+                      "constraint": {"enum": ["hard_character_limit", "time_envelope"]},
+                      "reason": {"type": "string", "minLength": 1}
+                    }
+                  }
+                },
+                "tradeoffs": {"type": "array", "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

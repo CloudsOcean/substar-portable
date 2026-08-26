@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/api-error.v1.json",
+  "title": "Substar API error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "code",
+    "category",
+    "message",
+    "retryable",
+    "request_id",
+    "details"
+  ],
+  "properties": {
+    "schema_version": { "const": "substar.api-error.v1" },
+    "code": { "type": "string", "minLength": 1 },
+    "category": {
+      "enum": [
+        "validation",
+        "configuration",
+        "authentication",
+        "not_found",
+        "conflict",
+        "provider_unavailable",
+        "provider_rate_limited",
+        "provider_timeout",
+        "media_invalid",
+        "process_failed",
+        "artifact_invalid",
+        "revision_conflict",
+        "cancel_failed",
+        "internal"
+      ]
+    },
+    "message": { "type": "string", "minLength": 1 },
+    "retryable": { "type": "boolean" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "details": { "type": "object" }
+  }
+}

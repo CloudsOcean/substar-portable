@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/segmentation-request.schema.json",
+  "title": "Substar segmentation request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "transcription", "source_kind", "source_asset_id",
+    "mode", "language", "reference_document", "prompt_snapshot",
+    "glossary_snapshot", "constraints", "provider", "input_fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.segmentation-request.v1"},
+    "transcription": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "input_fingerprint", "media_sha256", "evidence_relative_path"],
+      "properties": {
+        "task_id": {"type": "string", "pattern": "^tsk_[0-9a-f]{32}$"},
+        "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "media_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "evidence_relative_path": {"const": "recognition_evidence.json"}
+      }
+    },
+    "source_kind": {"const": "asr"},
+    "source_asset_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "mode": {"enum": ["semantic", "sentence_boundaries", "reference_script"]},
+    "language": {"type": "string", "maxLength": 40},
+    "reference_document": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["relative_path", "sha256", "byte_size"],
+          "properties": {
+            "relative_path": {"type": "string", "minLength": 1, "maxLength": 500},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "byte_size": {"type": "integer", "minimum": 1, "maximum": 52428800}
+          }
+        }
+      ]
+    },
+    "prompt_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "sha256", "file_count"],
+      "properties": {
+        "relative_path": {"type": "string", "minLength": 1, "maxLength": 500},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_count": {"type": "integer", "minimum": 1, "maximum": 10000}
+      }
+    },
+    "glossary_snapshot": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {"type": "object"}
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_seconds", "english_hard_limit", "chinese_hard_limit",
+        "mixed_hard_limit", "japanese_hard_limit", "korean_hard_limit",
+        "sentence_boundary_policy", "repair_attempts", "request_timeout_seconds",
+        "task_timeout_seconds"
+      ],
+      "properties": {
+        "target_seconds": {"type": "integer", "minimum": 30, "maximum": 600},
+        "english_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "chinese_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "mixed_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "japanese_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "korean_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "sentence_boundary_policy": {"enum": ["reference", "reconstruct", "unpunctuated"]},
+        "repair_attempts": {"type": "integer", "minimum": 0, "maximum": 4},
+        "request_timeout_seconds": {"type": "integer", "minimum": 10, "maximum": 3600},
+        "task_timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 86400}
+        ,"reference_break_symbols": {"type": "string", "minLength": 1, "maxLength": 32}
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_url", "grouping", "repair"],
+      "properties": {
+        "base_url": {"type": "string", "minLength": 1, "maxLength": 500},
+        "grouping": {"$ref": "#/$defs/model_policy"},
+        "repair": {"$ref": "#/$defs/model_policy"}
+      }
+    },
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "$defs": {
+    "model_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "thinking_mode", "reasoning_effort", "max_tokens", "temperature"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1, "maxLength": 300},
+        "thinking_mode": {"enum": ["enabled", "disabled"]},
+        "reasoning_effort": {"enum": ["low", "medium", "high", "max", "xhigh"]},
+        "max_tokens": {"type": "integer", "minimum": 256, "maximum": 500000},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "reference_script"}}},
+      "then": {
+        "properties": {
+          "reference_document": {"type": "object"},
+          "constraints": {"required": ["reference_break_symbols"]}
+        }
+      }
+    }
+  ]
+}

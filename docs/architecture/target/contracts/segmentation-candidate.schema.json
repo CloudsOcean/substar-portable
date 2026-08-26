@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/segmentation-candidate.schema.json",
+  "title": "Substar segmentation candidate v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "input_fingerprint", "mode", "source", "execution_plan",
+    "semantic_groups", "display_breaks", "cues", "notices", "validation", "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.segmentation-candidate.v1"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "mode": {"enum": ["semantic", "sentence_boundaries", "reference_script"]},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transcription_task_id", "transcription_input_fingerprint", "media_sha256"],
+      "properties": {
+        "transcription_task_id": {"type": "string", "pattern": "^tsk_[0-9a-f]{32}$"},
+        "transcription_input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "media_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "execution_plan": {"type": "object"},
+    "semantic_groups": {"type": "array"},
+    "display_breaks": {"type": "array", "items": {"type": "integer"}},
+    "cues": {"type": "array", "minItems": 1},
+    "notices": {"type": "array"},
+    "validation": {"type": "object"},
+    "provenance": {"type": "object"}
+  }
+}

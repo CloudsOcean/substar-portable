@@ -1,0 +1,25 @@
+{
+  "schema_version": "substar.tutorial-example.v1",
+  "case_id": "advanced-ai-v1",
+  "level": "advanced",
+  "display_name": "进阶教程",
+  "source_language": "en",
+  "target_language": "zh-CN",
+  "source_hard_limit": 55,
+  "target_hard_limit": 25,
+  "split_workflow": "one_step",
+  "assets": {
+    "media": "media.wav",
+    "segmentation": "segmented.json",
+    "calibration": "calibrated.json",
+    "translation": "translated.json",
+    "review": "review.json"
+  },
+  "sha256": {
+    "media.wav": "fe82b4574c51dab8578a5d6f203bb8ae52ef15cbba192e0292814815b0190c6f",
+    "segmented.json": "88967eca6e50dc793746ae329d843c126eeb5c12682f75564a7d972c4377e4c7",
+    "calibrated.json": "1c3bf21d5be555943fbaf0736225861232e36be9121d9d7bd7356b5f233ba85a",
+    "translated.json": "e391f45799af578442564dd362e31a39713983ff6f3be76877fa5b93a4882356",
+    "review.json": "fd14e1da3865f4659d3bf732b4a7b97373191b5326c28a357cf56df80e501a50"
+  }
+}

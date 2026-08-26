@@ -1,0 +1,77 @@
+name: Release Windows EXE
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-2022
+    env:
+      PYTHONUTF8: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements-release.txt
+            requirements-test.txt
+      - name: Prepare FFmpeg release binaries
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-release-essentials.zip'
+          $target = Join-Path $env:RUNNER_TEMP 'ffmpeg-release'
+          Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $target -Force
+          $ffmpeg = Get-ChildItem -LiteralPath $target -Recurse -File -Filter 'ffmpeg.exe' | Select-Object -First 1
+          if (-not $ffmpeg) { throw 'Downloaded FFmpeg archive does not contain ffmpeg.exe.' }
+          "SUBSTAR_FFMPEG_DIR=$($ffmpeg.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install release dependencies
+        run: python -m pip install -r requirements-release.txt
+      - name: Prepare transparent portable runtime
+        shell: pwsh
+        run: |
+          $runtimePython = Join-Path $PWD 'runtime\python'
+          $runtimeFfmpeg = Join-Path $PWD 'runtime\ffmpeg\bin'
+          New-Item -ItemType Directory -Path $runtimePython, $runtimeFfmpeg -Force | Out-Null
+          Copy-Item -Path (Join-Path $env:pythonLocation '*') -Destination $runtimePython -Recurse -Force
+          foreach ($binary in @('ffmpeg.exe', 'ffprobe.exe')) {
+            $source = Join-Path $env:SUBSTAR_FFMPEG_DIR $binary
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Downloaded FFmpeg archive does not contain $binary." }
+            Copy-Item -LiteralPath $source -Destination (Join-Path $runtimeFfmpeg $binary) -Force
+          }
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
+      - name: Verify source and packaging contracts
+        run: |
+          python -m compileall -q app.py launcher.py substar_core scripts
+          python -m pytest tests -q -p no:cacheprovider --basetemp .pytest-tmp\ci
+          node --test tests\*.test.js
+      - name: Build Substar Windows bundle
+        shell: pwsh
+        run: .\scripts\build-windows.ps1 -SkipTests
+      - name: Create release archive
+        shell: pwsh
+        run: Compress-Archive -LiteralPath 'dist\Substar' -DestinationPath 'Substar-Windows-x64-${{ github.ref_name }}.zip' -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Substar-Windows-x64-${{ github.ref_name }}
+          path: Substar-Windows-x64-${{ github.ref_name }}.zip
+          if-no-files-found: error
+      - uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: Substar-Windows-x64-${{ github.ref_name }}.zip

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/transcription-request.schema.json",
+  "title": "Substar transcription request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "media",
+    "profile_id",
+    "language",
+    "prompt",
+    "hotwords",
+    "options",
+    "input_fingerprint"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.transcription-request.v1"},
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relative_path", "original_name", "sha256", "byte_size"],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+        },
+        "original_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "byte_size": {"type": "integer", "minimum": 1}
+      }
+    },
+    "profile_id": {"type": "string", "minLength": 1, "maxLength": 100},
+    "language": {"type": "string", "minLength": 1, "maxLength": 40},
+    "prompt": {"type": "string", "maxLength": 20000},
+    "hotwords": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "weight"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1, "maxLength": 300},
+          "weight": {"type": "integer", "minimum": 1, "maximum": 5}
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "alignment_language",
+          "alignment_source",
+          "api_auth_mode",
+          "api_base_url",
+          "api_model",
+          "api_provider",
+          "api_timeout_seconds",
+          "audio_denoise_mode",
+          "hf_endpoint",
+          "http_retry_attempts",
+          "mimo_base64_limit_mb",
+          "mimo_boundary_search_seconds",
+          "mimo_mp3_bitrate_kbps",
+          "mimo_overlap_seconds",
+          "mimo_request_target_seconds",
+          "mimo_seam_context_seconds",
+          "parakeet_device",
+          "parakeet_dtype",
+          "parakeet_model",
+          "qwen_aligner_model",
+          "qwen_asr_model",
+          "qwen_cloud_base_url",
+          "qwen_cloud_model",
+          "qwen_cloud_poll_interval_seconds",
+          "qwen_cloud_region",
+          "qwen_cloud_request_timeout_seconds",
+          "qwen_cloud_task_timeout_seconds",
+          "qwen_cloud_temporary_upload",
+          "stage_timeout_seconds",
+          "transcript_source",
+          "whisper_beam_size",
+          "whisper_compute_type",
+          "whisper_device",
+          "whisper_model",
+          "whisper_vad_filter",
+          "whisperx_alignment_model",
+          "whisperx_batch_size"
+        ]
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "integer", "boolean", "null"]
+      }
+    },
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

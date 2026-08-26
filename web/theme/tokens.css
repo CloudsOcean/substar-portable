@@ -1,0 +1,670 @@
+:root {
+  color-scheme: dark;
+  --theme-accent: #8b5cf6;
+  --theme-accent-soft: #a78bfa;
+  --theme-bg: #0b0d12;
+  --theme-panel: #12151c;
+  --theme-panel-2: #171b24;
+  --theme-field: #0d1016;
+  --theme-text: #f3f5f8;
+  --theme-muted: #9299a8;
+  --theme-line: #282d39;
+  --theme-line-strong: #363d4c;
+  --theme-success: #35d39a;
+  --theme-danger: #fb7185;
+  --theme-blue: #5ca9ff;
+  --theme-surface-alpha: .93;
+  --theme-surface-mix: 93%;
+  --theme-blur: 18px;
+  --theme-radius-scale: 1;
+  --theme-density-scale: 1;
+  --theme-font-size: 100%;
+  --theme-font-factor: 1;
+  --theme-duration: .2s;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --theme-bg: #f3f4f7;
+  --theme-panel: #ffffff;
+  --theme-panel-2: #f7f8fa;
+  --theme-field: #ffffff;
+  --theme-text: #17191f;
+  --theme-muted: #626a78;
+  --theme-line: #d9dde5;
+  --theme-line-strong: #c7ccd6;
+  --theme-success: #16845b;
+  --theme-danger: #c43b55;
+  --theme-blue: #1677d2;
+  --theme-surface-alpha: .86;
+  --theme-surface-mix: 86%;
+}
+
+html[data-accent="blue"] { --theme-accent: var(--op-blue-6); --theme-accent-soft: #74b9ff; }
+html[data-accent="cyan"] { --theme-accent: var(--op-cyan-6); --theme-accent-soft: #66d9e8; }
+html[data-accent="green"] { --theme-accent: var(--op-green-6); --theme-accent-soft: #69db7c; }
+html[data-accent="orange"] { --theme-accent: var(--op-orange-6); --theme-accent-soft: #ffa94d; }
+html[data-accent="pink"] { --theme-accent: var(--op-pink-6); --theme-accent-soft: #f783ac; }
+html[data-accent="blue"] { --v2-purple: var(--op-blue-6); --v2-purple-soft: #74b9ff; }
+html[data-accent="cyan"] { --v2-purple: var(--op-cyan-6); --v2-purple-soft: #66d9e8; }
+html[data-accent="green"] { --v2-purple: var(--op-green-6); --v2-purple-soft: #69db7c; }
+html[data-accent="orange"] { --v2-purple: var(--op-orange-6); --v2-purple-soft: #ffa94d; }
+html[data-accent="pink"] { --v2-purple: var(--op-pink-6); --v2-purple-soft: #f783ac; }
+
+html[data-surface="glass"] { --theme-surface-alpha: .72; --theme-surface-mix: 72%; --theme-blur: 26px; }
+html[data-density="compact"] { --theme-density-scale: .82; }
+html[data-font-scale="small"] { --theme-font-size: 94%; --theme-font-factor: .94; }
+html[data-font-scale="large"] { --theme-font-size: 108%; --theme-font-factor: 1.08; }
+html[data-motion="reduced"] { --theme-duration: .08s; }
+html[data-motion="none"] { --theme-duration: 0s; }
+html[data-motion="none"] *, html[data-motion="none"] *::before, html[data-motion="none"] *::after {
+  animation-duration: .001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0s !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion="full"]) *, html:not([data-motion="full"]) *::before, html:not([data-motion="full"]) *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html { font-size: var(--theme-font-size); }
+
+/* Accent aliases keep the current default purple while allowing personalization. */
+:root {
+  --purple: var(--theme-accent);
+  --purple2: var(--theme-accent-soft);
+  --purple-2: color-mix(in srgb, var(--theme-accent) 74%, #19004c);
+  --purple-soft: color-mix(in srgb, var(--theme-accent) 14%, transparent);
+  --shell-purple: var(--theme-accent);
+  --v2-purple: var(--theme-accent);
+  --v2-purple-soft: color-mix(in srgb, var(--theme-accent) 19%, transparent);
+}
+
+/* Existing screens use many explicit pixel sizes. Zooming the application shell is
+   the only reliable way to make the font preference visibly affect all of them,
+   including editor controls, while keeping their internal proportions intact. */
+html[data-font-scale="small"] body {
+  zoom: .94;
+}
+html[data-font-scale="large"] body {
+  zoom: 1.08;
+}
+/* The editor is a fixed-height three-pane workspace. Let its own viewport math
+   remain untouched; scale its type and controls without zooming the entire grid. */
+html[data-font-scale="small"] body.editor-shell,
+html[data-font-scale="large"] body.editor-shell { zoom: 1; }
+html[data-font-scale="small"] body.editor-shell :is(button, input, select, textarea, label, p, span, strong, small) { font-size: .94em; }
+html[data-font-scale="large"] body.editor-shell :is(button, input, select, textarea, label, p, span, strong, small) { font-size: 1.08em; }
+html[data-font-scale="large"] body.editor-shell :is(button, input, select, textarea) { min-height: 1.08em; }
+
+/* Accent ownership: buttons, selected navigation, focused fields and active rows
+   all derive from the selected accent instead of the original hard-coded purple. */
+.primary,
+.primary-button,
+.glossary-primary,
+.translation-command:not(.retry),
+.debug-primary {
+  border-color: color-mix(in srgb, var(--theme-accent) 72%, white 10%) !important;
+  background: linear-gradient(135deg, var(--theme-accent), color-mix(in srgb, var(--theme-accent) 72%, #160040)) !important;
+  box-shadow: 0 9px 28px color-mix(in srgb, var(--theme-accent) 28%, transparent) !important;
+  color: white !important;
+}
+.primary:disabled,
+.primary-button:disabled {
+  border-color: var(--theme-line-strong) !important;
+  background: color-mix(in srgb, var(--theme-panel-2) 92%, var(--theme-muted)) !important;
+  box-shadow: none !important;
+  color: var(--theme-muted) !important;
+}
+.app-header nav a.active,
+.main-nav a.active,
+.category.active,
+.provider-item.active,
+.filter-tabs button.active,
+.search-scope-toggle button.active,
+.debug-tabs button.active {
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--theme-line)) !important;
+  background: color-mix(in srgb, var(--theme-accent) 15%, var(--theme-panel-2)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent) 14%, transparent) !important;
+  color: var(--theme-text) !important;
+}
+.category.active .category-icon,
+.provider-item.active .provider-mark,
+.step-number {
+  border-color: color-mix(in srgb, var(--theme-accent) 34%, var(--theme-line)) !important;
+  background: color-mix(in srgb, var(--theme-accent) 19%, var(--theme-panel-2)) !important;
+  color: color-mix(in srgb, var(--theme-accent-soft) 82%, white) !important;
+}
+.mode-card.active,
+.cue-row.current {
+  border-color: color-mix(in srgb, var(--theme-accent) 68%, var(--theme-line)) !important;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--theme-accent) 22%, var(--theme-panel)), var(--theme-panel)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent) 12%, transparent) !important;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--theme-accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-accent) 16%, transparent) !important;
+}
+input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color: var(--theme-accent); }
+.switch-field input:checked + span,
+.toggle-label input:checked + i,
+.enable-toggle input:checked + span { background: var(--theme-accent) !important; }
+.brand-mark { color: var(--theme-accent) !important; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--theme-accent) 48%, transparent)) !important; }
+
+/* Glass needs something behind translucent panels. These fixed radial lights are
+   deliberately subtle in dark mode and remain visible beneath every page shell. */
+html[data-surface="glass"][data-theme] body {
+  background:
+    radial-gradient(circle at 13% 8%, color-mix(in srgb, var(--theme-accent) 20%, transparent) 0, transparent 29rem),
+    radial-gradient(circle at 88% 22%, color-mix(in srgb, var(--theme-blue) 13%, transparent) 0, transparent 34rem),
+    radial-gradient(circle at 55% 92%, color-mix(in srgb, var(--theme-accent-soft) 10%, transparent) 0, transparent 32rem),
+    var(--theme-bg) !important;
+  background-attachment: fixed !important;
+}
+
+/* Per-page artwork begins at the top edge of the document, including the
+   navigation bar. The fixed overlay keeps controls readable on bright images. */
+html[data-theme][data-has-background="true"] body {
+  background-image:
+    linear-gradient(180deg, rgb(5 8 14 / 44%) 0, rgb(5 8 14 / 70%) 34%, rgb(5 8 14 / 84%) 100%),
+    var(--theme-background-image) !important;
+  background-position: center top !important;
+  background-repeat: no-repeat !important;
+  background-size: cover !important;
+  background-attachment: fixed !important;
+}
+html[data-theme="light"][data-has-background="true"] body {
+  background-image:
+    linear-gradient(180deg, rgb(243 244 247 / 35%) 0, rgb(243 244 247 / 72%) 42%, rgb(243 244 247 / 88%) 100%),
+    var(--theme-background-image) !important;
+}
+html[data-has-background="true"] .app-header,
+html[data-has-background="true"] .v2-command-bar {
+  background-color: color-mix(in srgb, var(--theme-panel) 64%, transparent) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+}
+html[data-has-background="true"] :is(
+  .settings-sidebar, .provider-workspace, .provider-rail, .provider-detail, .card,
+  .personalization-grid, .background-settings, .theme-preview, .save-bar,
+  .creation-card, .pipeline-card, .recent-section, .parameter-panel,
+  .library-sidebar, .glossary-main, .content-card, .term-card,
+  .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel
+) {
+  background-color: color-mix(in srgb, var(--theme-panel) 78%, transparent) !important;
+  background-image: linear-gradient(145deg, rgb(255 255 255 / 4%), transparent 58%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(135%);
+  backdrop-filter: blur(20px) saturate(135%);
+}
+html[data-surface="glass"][data-theme] :is(
+  .app-header, .settings-sidebar, .provider-workspace, .provider-rail, .provider-detail,
+  .card, .personalization-grid, .theme-preview, .save-bar,
+  .creation-card, .pipeline-card, .recent-section, .parameter-panel, .srt-row,
+  .mode-card, .queue-job, .recent-item, .batch-item,
+  .library-sidebar, .glossary-main, .content-card, .term-card,
+  .v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane,
+  .cue-timeline-panel, .cue-row, .v2-command-popover
+) {
+  background-color: color-mix(in srgb, var(--theme-panel) var(--theme-surface-mix), transparent) !important;
+  background-image: linear-gradient(145deg, color-mix(in srgb, white 4%, transparent), transparent 58%) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-line)) !important;
+  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(145%);
+  backdrop-filter: blur(var(--theme-blur)) saturate(145%);
+}
+html[data-surface="glass"][data-theme] :is(.card, .personalization-grid, .theme-preview, .creation-card, .pipeline-card, .recent-section, .content-card) {
+  box-shadow: 0 20px 60px rgb(0 0 0 / 24%), inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+/* Compact mode changes layout density only; font sizing remains an independent
+   preference. Overrides cover shared shells plus each main workspace. */
+html[data-density="compact"] :is(.settings-layout, .glossary-layout, .workspace-grid) { gap: 12px !important; }
+html[data-density="compact"] :is(.settings-sidebar, .library-sidebar) { padding: 14px !important; }
+html[data-density="compact"] :is(.category, .provider-item) { min-height: 48px !important; padding: 7px 9px !important; gap: 8px !important; }
+html[data-density="compact"] :is(.provider-detail, .card, .personalization-grid, .theme-preview, .creation-card, .pipeline-card, .recent-section) { padding: 14px !important; }
+html[data-density="compact"] :is(.parameter-grid, .field-grid, .personalization-grid, .stage-grid, .runtime-grid) { gap: 10px !important; }
+html[data-density="compact"] :is(.detail-heading, .save-bar, .section-heading, .recent-head) { padding-top: 9px !important; padding-bottom: 9px !important; }
+html[data-density="compact"] .page-shell { padding-top: 34px !important; padding-bottom: 48px !important; }
+html[data-density="compact"] .hero { margin-bottom: 18px !important; }
+html[data-density="compact"] .drop-zone { min-height: 155px !important; padding: 14px !important; }
+html[data-density="compact"] :is(.srt-row, .recent-item, .queue-job, .batch-item, .term-card) { padding: 9px 11px !important; }
+html[data-density="compact"] .pipeline-card { min-height: 540px !important; }
+html[data-density="compact"] :is(.v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel) { gap: 5px !important; }
+html[data-density="compact"] :is(.cue-row, .tool-locator-row, .translation-track) { padding-top: 5px !important; padding-bottom: 5px !important; }
+
+html[data-theme="light"] {
+  --bg: var(--theme-bg);
+  --panel: var(--theme-panel);
+  --panel2: var(--theme-panel-2);
+  --panel-2: var(--theme-panel-2);
+  --field: var(--theme-field);
+  --text: var(--theme-text);
+  --muted: var(--theme-muted);
+  --line: var(--theme-line);
+  --line2: var(--theme-line-strong);
+  --line-strong: var(--theme-line-strong);
+  --green: var(--theme-success);
+  --red: var(--theme-danger);
+  --blue: var(--theme-blue);
+}
+
+html[data-theme="light"] body { background: var(--theme-bg); color: var(--theme-text); }
+html[data-theme="light"] body > .app-header,
+html[data-theme="light"] .app-header {
+  border-bottom-color: var(--theme-line);
+  background: rgb(255 255 255 / var(--theme-surface-alpha));
+}
+html[data-theme="light"] input,
+html[data-theme="light"] select,
+html[data-theme="light"] textarea { color: var(--theme-text); background-color: var(--theme-field); border-color: var(--theme-line-strong); }
+html[data-theme="light"] .settings-sidebar,
+html[data-theme="light"] .provider-workspace,
+html[data-theme="light"] .provider-rail,
+html[data-theme="light"] .provider-detail,
+html[data-theme="light"] .card,
+html[data-theme="light"] .save-bar,
+html[data-theme="light"] .glossary-sidebar,
+html[data-theme="light"] .glossary-content { background-color: var(--theme-panel); border-color: var(--theme-line); }
+html[data-theme="light"] .category:hover,
+html[data-theme="light"] .provider-item:hover { background: var(--theme-panel-2); }
+html[data-theme="light"] .category.active,
+html[data-theme="light"] .provider-item.active { background: color-mix(in srgb, var(--theme-accent) 12%, white); border-color: color-mix(in srgb, var(--theme-accent) 28%, var(--theme-line)); }
+
+html[data-theme="light"] .creation-card,
+html[data-theme="light"] .pipeline-card,
+html[data-theme="light"] .recent-section { background: linear-gradient(145deg, #fff, #f7f8fa); box-shadow: var(--op-shadow-2); }
+html[data-theme="light"] .mode-card,
+html[data-theme="light"] .srt-row,
+html[data-theme="light"] .parameter-panel,
+html[data-theme="light"] .batch-item,
+html[data-theme="light"] .recent-item,
+html[data-theme="light"] .queue-job { background: var(--theme-panel-2); }
+html[data-theme="light"] .drop-zone { background: rgb(255 255 255 / 60%); border-color: var(--theme-line-strong); }
+html[data-theme="light"] .quiet-button,
+html[data-theme="light"] .secondary-button,
+html[data-theme="light"] .text-button,
+html[data-theme="light"] .recent-item a,
+html[data-theme="light"] .recent-item button { color: var(--theme-text); background: var(--theme-panel); border-color: var(--theme-line); }
+html[data-theme="light"] .runtime-log { background: #f4f5f7; }
+html[data-theme="light"] .text-dialog,
+html[data-theme="light"] .validation-dialog { color: var(--theme-text); background: var(--theme-panel); border-color: var(--theme-line-strong); }
+
+html[data-theme="light"] .library-sidebar,
+html[data-theme="light"] .glossary-main,
+html[data-theme="light"] .content-card,
+html[data-theme="light"] .term-card { background-color: var(--theme-panel); border-color: var(--theme-line); }
+
+/* Page-specific aliases bridge the current editor palette to the theme. */
+html[data-theme="light"] {
+  --v2-bg: var(--theme-bg);
+  --v2-panel: var(--theme-panel);
+  --v2-panel-2: var(--theme-panel-2);
+  --v2-panel-3: #edf0f4;
+  --v2-line: var(--theme-line);
+  --v2-line-strong: var(--theme-line-strong);
+  --v2-muted: var(--theme-muted);
+  --v2-text: var(--theme-text);
+  --v2-purple: var(--theme-accent);
+  --v2-purple-soft: var(--theme-accent-soft);
+}
+html[data-theme="light"] .v2-command-bar,
+html[data-theme="light"] .v2-tool-sidebar,
+html[data-theme="light"] .v2-cue-pane,
+html[data-theme="light"] .v2-preview-pane,
+html[data-theme="light"] .cue-timeline-panel { background: var(--theme-panel); border-color: var(--theme-line); }
+html[data-theme="light"] .cue-row,
+html[data-theme="light"] .tool-locator-row,
+html[data-theme="light"] .translation-track,
+html[data-theme="light"] .v2-command-popover { color: var(--theme-text); background: var(--theme-panel-2); border-color: var(--theme-line); }
+html[data-theme="light"] .cue-row.current { background: color-mix(in srgb, var(--theme-accent) 10%, white); }
+html[data-theme="light"] .media-frame,
+html[data-theme="light"] .media-stage,
+html[data-theme="light"] .media-viewport,
+html[data-theme="light"] .timeline-track { background: #050607; }
+
+/* --------------------------------------------------------------------------
+   Theme contract
+
+   Page styles predate personalization and contain a number of literal dark
+   colors.  Keep the page files focused on layout and let this final layer own
+   the palette.  New themes only need to provide these semantic tokens; the
+   selectors below are deliberately shared by every screen.
+   -------------------------------------------------------------------------- */
+:root {
+  --theme-header: rgba(8, 11, 17, .92);
+  --theme-hover: #171d28;
+  --theme-inset: #0d1119;
+  --theme-code: #0b0f15;
+  --theme-overlay: rgb(5 8 14 / 72%);
+  --theme-timeline-bg: #0b0e14;
+  --theme-timeline-ruler: #080a0f;
+  --theme-timeline-grid: #3a4150;
+  --theme-timeline-waveform: rgba(221, 201, 226, .78);
+  --theme-timeline-cue: rgba(45, 38, 52, .94);
+  --theme-timeline-cue-alt: rgba(53, 43, 60, .94);
+  --theme-timeline-text: #f0eaf2;
+  --theme-timeline-outline: rgba(153, 133, 166, .72);
+  --theme-timeline-selected: #ffe06a;
+  --theme-timeline-label-shadow: rgba(0, 0, 0, .78);
+  --theme-timeline-speaker-0: rgba(28, 65, 111, .94);
+  --theme-timeline-speaker-1: rgba(94, 38, 69, .94);
+  --theme-timeline-speaker-2: rgba(22, 82, 68, .94);
+  --theme-timeline-speaker-3: rgba(96, 57, 22, .94);
+  --cyan: #5ed8ff;
+  --shadow: 0 24px 70px rgb(0 0 0 / 28%);
+}
+
+html[data-theme="light"] {
+  --theme-bg: #eef2f6;
+  --theme-panel: #ffffff;
+  --theme-panel-2: #f6f8fb;
+  --theme-field: #ffffff;
+  --theme-text: #172033;
+  --theme-muted: #5f6c7d;
+  --theme-line: #d7dee8;
+  --theme-line-strong: #b9c5d4;
+  --theme-header: rgb(255 255 255 / 90%);
+  --theme-hover: #edf2f7;
+  --theme-inset: #e8edf3;
+  --theme-code: #edf1f5;
+  --theme-overlay: rgb(255 255 255 / 74%);
+  --theme-timeline-bg: #eef2f6;
+  --theme-timeline-ruler: #e4eaf1;
+  --theme-timeline-grid: #b6c2d0;
+  --theme-timeline-waveform: rgba(66, 86, 111, .74);
+  --theme-timeline-cue: rgba(207, 218, 231, .94);
+  --theme-timeline-cue-alt: rgba(220, 229, 239, .96);
+  --theme-timeline-text: #203047;
+  --theme-timeline-outline: rgba(92, 112, 138, .8);
+  --theme-timeline-selected: #a36300;
+  --theme-timeline-label-shadow: rgba(255, 255, 255, .92);
+  --theme-timeline-speaker-0: rgba(187, 214, 241, .96);
+  --theme-timeline-speaker-1: rgba(239, 201, 220, .96);
+  --theme-timeline-speaker-2: rgba(190, 231, 216, .96);
+  --theme-timeline-speaker-3: rgba(244, 218, 185, .96);
+  --cyan: #087f9b;
+  --shadow: 0 18px 45px rgb(31 47 67 / 12%);
+  --v2-panel-3: #edf2f7;
+}
+
+/* Shared document and navigation surfaces. */
+html[data-theme="light"] body,
+html[data-theme="light"] body.editor-shell {
+  background: radial-gradient(circle at 50% -20%, color-mix(in srgb, var(--theme-accent) 8%, transparent), var(--theme-bg) 52%) !important;
+  color: var(--theme-text) !important;
+}
+html[data-theme="light"] :is(.app-header, .app-bar, .v2-command-bar) {
+  color: var(--theme-text) !important;
+  background: var(--theme-header) !important;
+  border-color: var(--theme-line) !important;
+  box-shadow: 0 8px 24px rgb(31 47 67 / 5%);
+}
+html[data-theme="light"] :is(.app-nav, .main-nav) {
+  background: var(--theme-inset) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.app-header nav a, .app-nav a, .main-nav a, .nav-current) {
+  color: var(--theme-muted) !important;
+}
+html[data-theme="light"] :is(.app-header nav a:hover, .app-nav a:hover, .main-nav a:hover) {
+  color: var(--theme-text) !important;
+  background: var(--theme-hover) !important;
+}
+html[data-theme="light"] :is(.app-header nav a.active, .app-nav a.active, .main-nav a.active, .nav-current) {
+  color: var(--theme-text) !important;
+  background: color-mix(in srgb, var(--theme-accent) 16%, var(--theme-panel)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent) 28%, transparent) !important;
+}
+html[data-theme="light"] :is(.brand, .app-header .brand) { color: var(--theme-text) !important; }
+html[data-theme="light"] :is(.system-state, .header-state, .app-status, .badge) { color: var(--theme-muted) !important; }
+
+/* Large surfaces across settings, split, glossary and editor. */
+html[data-theme="light"] :is(
+  .settings-sidebar, .asset-sidebar, .library-sidebar,
+  .provider-workspace, .provider-detail, .card, .provider-card,
+  .personalization-grid, .theme-preview, .background-settings,
+  .creation-card, .pipeline-card, .recent-section, .parameter-panel,
+  .srt-row, .batch-item, .recent-item, .queue-job,
+  .entry-card, .content-card, .glossary-main, .term-card,
+  .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel,
+  .cue-row, .tool-locator-row, .v2-command-popover, .cue-task-island,
+  .text-dialog, .validation-dialog, .debug-float, .ai-review-float
+) {
+  color: var(--theme-text) !important;
+  background-color: var(--theme-panel) !important;
+  background-image: none !important;
+  border-color: var(--theme-line) !important;
+  box-shadow: var(--shadow);
+}
+html[data-theme="light"] :is(.settings-sidebar, .asset-sidebar, .library-sidebar, .provider-rail, .v2-tool-sidebar) {
+  background-color: var(--theme-panel-2) !important;
+}
+html[data-theme="light"] :is(.provider-rail, .provider-detail, .v2-cue-pane, .v2-preview-pane) {
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.provider-card, .provider-workspace details.advanced, .stage-config-card,
+  .recognition-adapters div, .download-policy, .model-asset-row, .asset-root code,
+  .environment-overview article, .environment-section, .entry-details,
+  .runtime-log, .debug-tab details, .ai-review-issue) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.panel-heading, .detail-heading, .section-heading, .recent-head,
+  .content-heading, .asset-section-heading, .background-settings-heading,
+  .stage-config-card header, .preview-heading, .timeline-heading) {
+  color: var(--theme-text) !important;
+}
+
+/* Controls and secondary actions. Primary actions remain accent-owned. */
+html[data-theme="light"] :is(input, select, textarea) {
+  color: var(--theme-text) !important;
+  background-color: var(--theme-field) !important;
+  border-color: var(--theme-line-strong) !important;
+  color-scheme: light;
+}
+html[data-theme="light"] :is(input::placeholder, textarea::placeholder) { color: var(--theme-muted) !important; }
+html[data-theme="light"] :is(
+  .secondary, .secondary-button, .quiet-button, .text-button,
+  .v2-command-bar button, .v2-command-link, .cue-actions button,
+  .cue-page-control, .token-selection-menu button, .debug-tabs button,
+  .recent-item a, .recent-item button, .batch-item-actions a,
+  .export-menu > summary, .export-menu-panel, .square-button,
+  .expand-entry, .delete-entry, .file-button
+):not(.primary):not(.primary-button):not(.glossary-primary):not(.editor-button):not(.translation-command):not(.debug-primary) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html[data-theme="light"] :is(
+  .secondary:hover, .secondary-button:hover, .quiet-button:hover,
+  .text-button:hover, .v2-command-bar button:hover, .v2-command-link:hover,
+  .cue-actions button:hover, .token-selection-menu button:hover,
+  .recent-item a:hover, .recent-item button:hover, .export-menu-panel a:hover
+) { background: var(--theme-hover) !important; }
+html[data-theme="light"] :is(.primary, .primary-button, .glossary-primary, .editor-button, .translation-command, .debug-primary) {
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--theme-accent), color-mix(in srgb, var(--theme-accent) 72%, #3b1a88)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 72%, var(--theme-line-strong)) !important;
+}
+html[data-theme="light"] :is(.primary:disabled, .primary-button:disabled) {
+  color: var(--theme-muted) !important;
+  background: var(--theme-inset) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.field, .field label, .parameter-grid label > span,
+  .fixed-model > span, .stage-models h3, .mini-grid label, .tool-section label,
+  .debug-tab label, .ai-review-controls > label) { color: var(--theme-text) !important; }
+html[data-theme="light"] :is(.muted, .hint, .settings-note, .field small, .parameter-grid label > small,
+  .panel-heading p, .sidebar-title p, .stage-models p, .provider-item small,
+  .asset-section-heading p, .background-settings-heading p, .hero p,
+  .recent-item span, .queue-job-detail span, .runtime-log-lines pre,
+  .preview-heading, .timeline-heading span, .tool-status, .ai-review-empty) { color: var(--theme-muted) !important; }
+
+/* Settings rail, provider list and stage cards. */
+html[data-theme="light"] :is(.category:hover, .provider-item:hover, .asset-sidebar-item:hover) { background: var(--theme-hover) !important; }
+html[data-theme="light"] :is(.category.active, .provider-item.active, .asset-sidebar-item.active) {
+  color: var(--theme-text) !important;
+  background: color-mix(in srgb, var(--theme-accent) 13%, var(--theme-panel)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 35%, var(--theme-line)) !important;
+}
+html[data-theme="light"] :is(.category-icon, .asset-sidebar-icon, .provider-mark, .detail-provider-icon) {
+  color: var(--theme-accent) !important;
+  background: var(--theme-inset) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.category.active .category-icon, .provider-item.active .provider-mark) {
+  color: var(--theme-accent) !important;
+  background: color-mix(in srgb, var(--theme-accent) 15%, var(--theme-panel)) !important;
+}
+html[data-theme="light"] :is(.stage-config-card, .stage-mode-pill, .download-policy, .recognition-adapters div) {
+  background: var(--theme-panel-2) !important;
+}
+html[data-theme="light"] :is(.provider-rail-heading, .asset-sidebar-heading, .sidebar-title) {
+  border-color: var(--theme-line) !important;
+}
+
+/* Split and glossary internals that used to retain dark fills. */
+html[data-theme="light"] :is(.drop-zone, .empty-state) {
+  color: var(--theme-text) !important;
+  background: color-mix(in srgb, var(--theme-panel-2) 82%, transparent) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html[data-theme="light"] :is(.drop-zone:hover, .drop-zone:focus-visible, .drop-zone.dragging) {
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-panel)) !important;
+}
+html[data-theme="light"] :is(.file-type, .route-badge, .status-pill.idle, .stage-list li > i,
+  .overall-track, .queue-progress, .progress) { background: var(--theme-inset) !important; color: var(--theme-text) !important; }
+html[data-theme="light"] :is(.parameter-panel, .srt-row, .batch-item, .recent-item, .queue-job) {
+  background: var(--theme-panel-2) !important;
+}
+html[data-theme="light"] :is(.filter-tabs button.active, .export-menu-panel a:hover) {
+  color: var(--theme-text) !important;
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--theme-panel)) !important;
+}
+html[data-theme="light"] :is(.entry-target .type-chip) {
+  color: color-mix(in srgb, var(--theme-accent) 75%, var(--theme-text)) !important;
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-panel)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 30%, var(--theme-line)) !important;
+}
+html[data-theme="light"] :is(.glossary-table-wrap, .glossary-table th) {
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] .glossary-table th { color: var(--theme-muted) !important; }
+
+/* Editor document, token controls, task panels and tool rail. */
+html[data-theme="light"] :is(.cue-row, .tool-locator-row, .translation-track, .display-token,
+  .token-selection-menu button, .cue-page-control, .debug-stage-summary,
+  .debug-tab textarea, .ai-review-controls textarea, .ai-review-controls select,
+  .ai-review-issue, .review-suggestion) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] :is(.cue-row.current, .mode-card.active) {
+  background: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-panel)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 52%, var(--theme-line)) !important;
+}
+html[data-theme="light"] :is(.display-token:hover, .translation-track:hover) {
+  background: var(--theme-hover) !important;
+}
+html[data-theme="light"] .inline-token-editor {
+  color: var(--theme-text) !important;
+  background: var(--theme-field) !important;
+  outline-color: var(--theme-accent) !important;
+}
+html[data-theme="light"] :is(.cue-meta strong, .display-token b, .preview-heading span:first-child,
+  .cue-actions button, .revision-menu-row span, .project-picker, .project-picker select) {
+  color: var(--theme-text) !important;
+}
+html[data-theme="light"] :is(.cue-meta, .cue-meta .cue-count, .cue-count-line,
+  .revision-label, .pane-live-controls label, .pane-live-controls output,
+  .media-controls span, .media-speed-control, .timeline-heading span) { color: var(--theme-muted) !important; }
+html[data-theme="light"] :is(.token-selection-menu, .cue-task-island, .translation-task-panel,
+  .cue-history-row, .debug-float, .ai-review-float) {
+  background: color-mix(in srgb, var(--theme-panel) 96%, transparent) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html[data-theme="light"] :is(.translation-progress, .debug-progress) { background: var(--theme-line) !important; }
+html[data-theme="light"] :is(.ordinary-error, .hard-issue) {
+  color: var(--theme-danger) !important;
+  background: color-mix(in srgb, var(--theme-danger) 8%, var(--theme-panel)) !important;
+  border-color: color-mix(in srgb, var(--theme-danger) 28%, var(--theme-line)) !important;
+}
+html[data-theme="light"] :is(.timeline-track, .cue-timeline-panel) {
+  background: var(--theme-timeline-bg) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] .timeline-cue { color: var(--theme-timeline-text) !important; }
+html[data-theme="light"] .timeline-cue span { color: var(--theme-muted) !important; }
+
+/* The editor has its own three-pane shell.  These surfaces sit one level
+   above the Cue cards, so leaving the legacy fills in place makes the light
+   theme look like a dark strip behind otherwise-light cards. */
+html[data-theme="light"] :is(.v2-editor-layout, .v2-document-pane, .pane-heading) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel) !important;
+  border-color: var(--theme-line) !important;
+}
+html[data-theme="light"] .v2-editor-layout { background: var(--theme-bg) !important; }
+html[data-theme="light"] .v2-document-pane { background: var(--theme-panel-2) !important; }
+html[data-theme="light"] .pane-heading {
+  background: var(--theme-panel) !important;
+  border-bottom-color: var(--theme-line) !important;
+}
+html[data-theme="light"] .cue-list { scrollbar-color: var(--theme-line-strong) var(--theme-panel-2); }
+html[data-theme="light"] :is(.search-scope-toggle button, .tool-button-pair button) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html[data-theme="light"] .search-scope-toggle button.active {
+  color: var(--theme-text) !important;
+  background: color-mix(in srgb, var(--theme-accent) 13%, var(--theme-panel)) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--theme-line)) !important;
+}
+html[data-theme="light"] :is(.tool-section, .tool-section:first-child) { border-color: var(--theme-line) !important; }
+html[data-theme="light"] :is(
+  .v2-command-menu > summary, .v2-command-link,
+  .v2-tool-sidebar button, .pane-heading button, .cue-history-row button,
+  .v2-command-popover button
+):not(.translation-command):not(.primary):not(.primary-button) {
+  color: var(--theme-text) !important;
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html[data-theme="light"] :is(
+  .v2-command-menu > summary:hover, .v2-command-link:hover,
+  .v2-tool-sidebar button:hover, .pane-heading button:hover,
+  .cue-history-row button:hover, .v2-command-popover button:hover
+):not(.translation-command):not(.primary):not(.primary-button) {
+  background: var(--theme-hover) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--theme-line)) !important;
+}
+
+/* Keep the video itself true to the media, while the surrounding editor is themed. */
+html[data-theme="light"] :is(.media-frame, .media-stage, .media-viewport) { background: #050607 !important; }
+html[data-theme="light"] .media-controls { background: linear-gradient(180deg, rgb(13 16 21 / 18%), rgb(13 16 21 / 96%) 45%) !important; }
+
+/* Glass is a material choice, not a second palette. */
+html[data-theme="light"][data-surface="glass"] :is(
+  .app-header, .app-bar, .settings-sidebar, .library-sidebar, .provider-workspace,
+  .provider-rail, .provider-detail, .card, .personalization-grid, .theme-preview,
+  .background-settings, .creation-card, .pipeline-card, .recent-section,
+  .parameter-panel, .srt-row, .mode-card, .queue-job, .recent-item, .batch-item,
+  .v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane,
+  .cue-timeline-panel, .cue-row, .content-card, .entry-card
+) {
+  background-color: color-mix(in srgb, var(--theme-panel) var(--theme-surface-mix), transparent) !important;
+  background-image: linear-gradient(145deg, rgb(255 255 255 / 58%), transparent 60%) !important;
+  border-color: color-mix(in srgb, var(--theme-accent) 14%, var(--theme-line)) !important;
+  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(135%);
+  backdrop-filter: blur(var(--theme-blur)) saturate(135%);
+}

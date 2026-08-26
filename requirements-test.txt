@@ -1,0 +1,4 @@
+# Test-only dependencies used by local and GitHub release gates.
+pytest==8.3.4
+jsonschema==4.26.0
+httpx==0.28.1

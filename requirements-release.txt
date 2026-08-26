@@ -1,0 +1,13 @@
+# Direct dependencies frozen inside runtime/python for transparent Windows builds.
+fastapi==0.141.1
+starlette==1.6.0
+pydantic==2.13.4
+uvicorn==0.52.2
+requests==2.34.2
+python-multipart==0.0.32
+orjson==3.11.9
+opencc-python-reimplemented==0.1.7
+numpy==2.2.6
+cryptography==43.0.3
+cffi==2.1.1
+pycparser==3.0

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/task.v1.json",
+  "title": "Substar durable task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "task_type",
+    "state",
+    "attempt",
+    "progress",
+    "input_schema",
+    "created_at",
+    "updated_at",
+    "links"
+  ],
+  "properties": {
+    "schema_version": { "const": "substar.task.v1" },
+    "task_id": { "type": "string", "minLength": 1 },
+    "project_id": { "type": ["string", "null"] },
+    "parent_task_id": { "type": ["string", "null"] },
+    "task_type": {
+      "enum": [
+        "transcription",
+        "reference_matching",
+        "segmentation",
+        "translation",
+        "calibration",
+        "review",
+        "model_download",
+        "export",
+        "dubbing"
+      ]
+    },
+    "state": {
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelling",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+    "progress_message": { "type": ["string", "null"] },
+    "step": { "type": ["string", "null"] },
+    "wait_reason": { "type": ["string", "null"] },
+    "input_schema": { "type": "string", "minLength": 1 },
+    "expected_revision_id": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "started_at": { "type": ["string", "null"], "format": "date-time" },
+    "finished_at": { "type": ["string", "null"], "format": "date-time" },
+    "cancel_requested_at": { "type": ["string", "null"], "format": "date-time" },
+    "result": { "type": ["object", "null"] },
+    "error": {
+      "anyOf": [
+        { "$ref": "https://substar.local/schemas/api-error.v1.json" },
+        { "type": "null" }
+      ]
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["self", "events"],
+      "properties": {
+        "self": { "type": "string" },
+        "events": { "type": "string" },
+        "project": { "type": ["string", "null"] },
+        "cancel": { "type": ["string", "null"] },
+        "retry": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

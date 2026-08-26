@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
+    <title>词库 · Substar</title>
+    <link rel="stylesheet" href="/assets/glossary.css?v=20260802-1" />
+    <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
+    <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
+    <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260815-surface-opacity-1" />
+    <script src="/assets/theme/personalization.js?v=20260815-surface-opacity-1"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <a class="brand" href="/split"
+        ><svg class="ui-icon brand-mark" aria-hidden="true"><use href="/assets/ui-icons.svg?v=20260814-star-1#brand"></use></svg><span>Substar</span></a
+      >
+      <nav class="app-nav" aria-label="主导航">
+        <a href="/split">切分</a><a href="/editor">编辑</a
+        ><a class="active" href="/glossary">词库</a><a href="/settings">设置</a>
+      </nav>
+      <div id="saveState" class="header-state app-status">正在读取词库…</div>
+    </header>
+    <main class="glossary-layout asset-layout">
+      <aside class="library-sidebar asset-sidebar">
+        <div class="library-head asset-sidebar-heading with-action">
+          <div>
+            <h1>词库</h1>
+          </div>
+          <button
+            id="addEntryTop"
+            class="square-button"
+            type="button"
+            title="新增术语"
+          >
+            ＋
+          </button>
+        </div>
+        <label class="search"
+          ><span>⌕</span
+          ><input id="searchInput" placeholder="搜索原词、译文或别名"
+        /></label>
+        <div class="filter-tabs asset-sidebar-list">
+          <button
+            class="active asset-sidebar-item"
+            data-filter="all"
+            type="button"
+          >
+            <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#glossary"></use></svg></span
+            ><span class="asset-sidebar-copy"
+              ><b>全部词条</b><small>所有作用域</small></span
+            ><i class="asset-sidebar-meta" id="allCount">0</i></button
+          ><button
+            class="asset-sidebar-item"
+            data-filter="global"
+            type="button"
+          >
+            <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#search"></use></svg></span
+            ><span class="asset-sidebar-copy"
+              ><b>全局词库</b><small>用于所有项目</small></span
+            ></button
+          ><button
+            class="asset-sidebar-item"
+            data-filter="project"
+            type="button"
+          >
+            <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg></span
+            ><span class="asset-sidebar-copy"
+              ><b>项目词库</b><small>匹配指定项目</small></span
+            >
+          </button>
+        </div>
+        <div class="library-summary">
+          <div><strong id="enabledCount">0</strong><span>已启用</span></div>
+          <div><strong id="projectCount">0</strong><span>项目词</span></div>
+        </div>
+        <p class="library-note">
+          切分、翻译和 AI 纠错都会读取已启用词条。项目词优先于全局词。
+        </p>
+      </aside>
+
+      <section class="glossary-content">
+        <div class="content-heading">
+          <div>
+            <h2>术语与专有名词</h2>
+            <p>锁定标准原文和译法，也可以标记不翻译或大小写敏感。</p>
+          </div>
+          <div class="toolbar">
+            <button id="importButton" class="secondary" type="button">
+              导入</button
+            ><input
+              id="importFile"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              hidden
+            />
+            <details class="export-menu">
+              <summary class="secondary">导出</summary>
+              <div>
+                <button data-export="xlsx" type="button">热词表（Excel）</button>
+              </div>
+            </details>
+            <button id="addEntry" class="primary" type="button">
+              ＋ 新增术语
+            </button>
+          </div>
+        </div>
+        <div id="emptyState" class="empty-state" hidden>
+          <h3>还没有术语</h3>
+          <p>添加常用人名、机构、品牌或容易误识别的词。</p>
+          <button class="primary" type="button">新增第一条术语</button>
+        </div>
+        <div id="entryList" class="entry-list"></div>
+        <div class="save-bar">
+          <span id="formMessage">词库尚未修改</span
+          ><button id="saveButton" class="primary" type="button">
+            保存词库
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <template id="entryTemplate">
+      <article class="entry-card">
+        <div class="entry-main-row">
+          <label class="enable-toggle" title="启用词条"
+            ><input data-field="enabled" type="checkbox" checked /><span></span
+          ></label>
+          <div class="entry-title">
+            <input
+              data-field="source"
+              placeholder="原词或错误识别"
+              maxlength="300"
+            /><input
+              data-field="standard_source"
+              placeholder="标准原文（可选）"
+              maxlength="300"
+            />
+          </div>
+          <span class="type-chip">其他</span>
+          <button class="expand-entry" type="button" aria-label="展开详情">
+            <svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg>
+          </button>
+          <button class="delete-entry" type="button" aria-label="删除术语">
+            ⌫
+          </button>
+        </div>
+        <div class="entry-target">
+          <span>→</span
+          ><input
+            data-field="target"
+            placeholder="指定译文；不翻译时可以留空"
+            maxlength="300"
+          />
+        </div>
+        <div class="entry-details">
+          <div class="field">
+            <label>别名／常见误识别</label
+            ><input data-field="aliases" placeholder="多个别名用逗号分隔" />
+          </div>
+          <div class="field">
+            <label>类型</label
+            ><select data-field="type">
+              <option value="person">人名</option>
+              <option value="organization">机构</option>
+              <option value="place">地名</option>
+              <option value="program">节目</option>
+              <option value="product">产品／品牌</option>
+              <option value="technical">专业术语</option>
+              <option value="other">其他</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>作用域</label
+            ><select data-field="scope">
+              <option value="global">全局</option>
+              <option value="project">指定项目</option>
+            </select>
+          </div>
+          <div class="field project-field">
+            <label>项目名</label
+            ><input data-field="project" placeholder="项目名称" />
+          </div>
+          <div class="field">
+            <label>热词权重</label
+            ><input data-field="hotword_weight" type="number" min="1" max="5" step="1" value="4" />
+          </div>
+          <div class="field wide">
+            <label>备注</label
+            ><textarea
+              data-field="notes"
+              rows="2"
+              maxlength="1000"
+              placeholder="补充用法或上下文"
+            ></textarea>
+          </div>
+          <label class="check"
+            ><input
+              data-field="case_sensitive"
+              type="checkbox"
+            />区分大小写</label
+          >
+          <label class="check"
+            ><input
+              data-field="do_not_translate"
+              type="checkbox"
+            />保持原文，不翻译</label
+          >
+        </div>
+      </article>
+    </template>
+    <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
+    <script src="/assets/glossary.js?v=20260826-system-save-as-1"></script>
+  </body>
+</html>

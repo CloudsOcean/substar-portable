@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_direct.schema.json",
+  "title": "Substar Stage 03A index-only boundary plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_language", "groups", "coverage_check"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.direct.v1"},
+    "source_language": {"type": "string", "minLength": 1},
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id", "alignment_start", "alignment_end", "line_breaks_after",
+          "confidence", "needs_review", "protected_spans", "deletions",
+          "corrections", "reason", "continuity_after"
+        ],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "line_breaks_after": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0}
+          },
+          "alternative_breaks_after": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0}
+          },
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "needs_review": {"type": "boolean"},
+          "protected_spans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "alignment_start", "alignment_end", "category",
+                "protection_level"
+              ],
+              "properties": {
+                "span_id": {"type": "string"},
+                "alignment_start": {"type": "integer", "minimum": 0},
+                "alignment_end": {"type": "integer", "minimum": 0},
+                "category": {"type": "string", "minLength": 1},
+                "protection_level": {
+                  "enum": ["hard", "strong_soft", "outer_soft"]
+                },
+                "parent_span_id": {
+                  "type": ["string", "null"]
+                },
+                "child_span_ids": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              }
+            }
+          },
+          "deletions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["alignment_index", "confidence", "reason"],
+              "properties": {
+                "alignment_index": {"type": "integer", "minimum": 0},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "reason": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "corrections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["alignment_index", "proposal", "confidence", "reason"],
+              "properties": {
+                "alignment_index": {"type": "integer", "minimum": 0},
+                "proposal": {"type": "string", "minLength": 1},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "reason": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "continuity_after": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["relation", "confidence", "reason"],
+            "properties": {
+              "relation": {
+                "enum": ["continuous", "related", "separate"]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "speaker_transition": {
+                "enum": ["same", "change", "unknown"]
+              }
+            }
+          },
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "coverage_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "ordered"],
+      "properties": {
+        "complete": {"const": true},
+        "ordered": {"const": true}
+      }
+    }
+  }
+}

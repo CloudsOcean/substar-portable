@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/segmentation-result.schema.json",
+  "title": "Substar finalized segmentation result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "candidate", "revision", "summary"],
+  "properties": {
+    "schema_version": {"const": "substar.segmentation-task-result.v1"},
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "byte_size"],
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "byte_size": {"type": "integer", "minimum": 1}
+      }
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "project_id", "revision_id", "revision_number",
+        "document_hash", "task_id", "attempt"
+      ],
+      "properties": {
+        "schema_version": {"const": "substar.editor-revision-pointer.v1"},
+        "project_id": {"type": "string", "minLength": 1},
+        "revision_id": {"type": "string", "minLength": 1},
+        "revision_number": {"type": "integer", "minimum": 1},
+        "document_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "task_id": {"type": "string", "pattern": "^tsk_[0-9a-f]{32}$"},
+        "attempt": {"type": "integer", "minimum": 1}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode", "cue_count", "source_token_count", "review_required_count",
+        "input_fingerprint", "document_sha256"
+      ],
+      "properties": {
+        "mode": {"enum": ["semantic", "sentence_boundaries", "reference_script"]},
+        "cue_count": {"type": "integer", "minimum": 1},
+        "source_token_count": {"type": "integer", "minimum": 1},
+        "review_required_count": {"type": "integer", "minimum": 0},
+        "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "document_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

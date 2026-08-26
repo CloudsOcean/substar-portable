@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_boundary_audit.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "issues"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.boundary-audit.v1"},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "issue_id", "group_id", "boundary_after", "boundary_kind",
+          "category", "severity", "reason", "search_radius"
+        ],
+        "properties": {
+          "issue_id": {"type": "string", "minLength": 1},
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "boundary_after": {"type": "integer", "minimum": 0},
+          "boundary_kind": {"enum": ["line", "group"]},
+          "category": {
+            "enum": [
+              "dependency_split", "modifier_head_split", "predicate_complement_split",
+              "prepositional_split", "relative_clause_split", "apposition_split",
+              "named_entity_split", "parallel_structure_split", "fixed_expression_split",
+              "non_independent_fragment", "crossed_sentence", "meaning_group_error"
+            ]
+          },
+          "severity": {"enum": ["high", "medium"]},
+          "reason": {"type": "string", "minLength": 1},
+          "search_radius": {"type": "integer", "minimum": 1, "maximum": 6}
+        }
+      }
+    }
+  }
+}

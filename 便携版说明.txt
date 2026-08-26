@@ -1,0 +1,3 @@
+双击“启动_Substar.cmd”。首次使用请打开“设置”：在“识别”中填写阿里云百炼 API Key，在“模型”中填写 DeepSeek 或其他兼容服务的 API Key，并分别保存、测试。完整申请步骤见 README.md。
+
+程序代码、前端、提示词和契约保持开发版目录结构；固定 Python 与 FFmpeg 位于 runtime/。发行 ZIP 不包含 data/。首次运行后，设置、项目与凭据都保存在 data/。凭据由 data/.substar-workbench/credentials.enc 与 credentials.key 共同组成；复制或备份时必须保留整个 data/，不可只复制其中一个文件。

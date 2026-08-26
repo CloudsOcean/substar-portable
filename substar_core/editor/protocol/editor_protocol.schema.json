@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "substar.editor-protocol.v1",
+  "title": "Substar Editor Operation Protocol",
+  "$defs": {
+    "operationType": {
+      "type": "string",
+      "enum": [
+        "replace",
+        "set_target",
+        "set_cue_time",
+        "set_cue_times",
+        "insert_cue",
+        "merge",
+        "delete",
+        "purge_cue",
+        "restore",
+        "insert",
+        "split_cue",
+        "merge_cues",
+        "set_cue_speaker",
+        "set_speaker_names",
+        "batch_replace"
+      ]
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_id", "revision_id", "document_hash"],
+      "properties": {
+        "document_id": {"type": "string", "minLength": 1},
+        "revision_id": {"type": "string", "minLength": 1},
+        "document_hash": {"type": "string", "minLength": 1}
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["operation_id", "type", "base", "payload"],
+      "properties": {
+        "operation_id": {"type": "string", "minLength": 1},
+        "type": {"$ref": "#/$defs/operationType"},
+        "base": {"$ref": "#/$defs/base"},
+        "payload": {"type": "object"},
+        "retention": {"type": "object"}
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "operation"],
+      "properties": {
+        "schema_version": {"const": "substar.editor-operation.v1"},
+        "operation": {"$ref": "#/$defs/operation"}
+      }
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "batch_id", "base", "operations"],
+      "properties": {
+        "schema_version": {"const": "substar.editor-operation-batch.v1"},
+        "batch_id": {"type": "string", "minLength": 1},
+        "base": {"$ref": "#/$defs/base"},
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {"$ref": "#/$defs/operation"}
+        }
+      }
+    }
+  ]
+}

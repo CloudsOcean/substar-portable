@@ -1,0 +1,131 @@
+{
+  "schema_version": "substar.prompt-registry.v1",
+  "categories": [
+    {"id": "segmentation", "title": "字幕切分", "description": "语义分组、句界证据与语言切分规则"},
+    {"id": "translation", "title": "字幕翻译", "description": "上下文翻译、坏块修复与目标语言规则"},
+    {"id": "editor", "title": "编辑器 AI", "description": "源文校准与双轨质量审阅"},
+    {"id": "exchange", "title": "外部 AI", "description": "导出给 Web LLM 的分阶段工作流"}
+  ],
+  "prompts": {
+    "semantic_grouping": {
+      "title": "语义分组",
+      "category": "segmentation",
+      "description": "按源语言规则重建自然字幕语义组。",
+      "version": "2026-08-19.1",
+      "variants": {
+        "en": ["segmentation/common/semantic_grouping.md", "segmentation/en/rules.md", "cases/semantic_grouping_en.constructed.md"],
+        "zh": ["segmentation/common/semantic_grouping.md", "segmentation/zh/rules.md", "cases/semantic_grouping_zh.constructed.md"],
+        "ja": ["segmentation/common/semantic_grouping.md", "segmentation/ja/rules.md", "cases/semantic_grouping_ja.constructed.md"],
+        "ko": ["segmentation/common/semantic_grouping.md", "segmentation/ko/rules.md", "cases/semantic_grouping_ko.constructed.md"],
+        "mixed": ["segmentation/common/semantic_grouping.md"]
+      }
+    },
+    "semantic_grouping_repair": {
+      "title": "语义分组修复",
+      "category": "segmentation",
+      "description": "只修复未通过契约验收的切分范围。",
+      "version": "2026-08-19.1",
+      "variants": {
+        "en": ["segmentation/common/semantic_grouping_repair.md", "segmentation/en/rules.md"],
+        "zh": ["segmentation/common/semantic_grouping_repair.md", "segmentation/zh/rules.md"],
+        "ja": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ja/rules.md"],
+        "ko": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ko/rules.md"],
+        "mixed": ["segmentation/common/semantic_grouping_repair.md"]
+      }
+    },
+    "boundary_evidence": {
+      "title": "句界证据",
+      "category": "segmentation",
+      "description": "根据参考文稿、原始标点或无标点输入选择句界策略。",
+      "version": "2026-08-17.1",
+      "variants": {
+        "reference": ["segmentation/common/sentence_boundary_reference.md"],
+        "reconstruct": ["segmentation/common/sentence_boundary_reconstruct.md"],
+        "unpunctuated": ["segmentation/common/unpunctuated_reconstruct.md"]
+      }
+    },
+    "contextual_translation": {
+      "title": "上下文翻译",
+      "category": "translation",
+      "description": "整组理解后进行多对多意义单元翻译与 Cue 分配。",
+      "version": "2026-08-18.7",
+      "variants": {
+        "en_to_zh": ["translation/common/contextual_translation.md", "translation/en_to_zh/rules.md", "cases/contextual_translation_en_to_zh.constructed.md"],
+        "zh_to_en": ["translation/common/contextual_translation.md", "translation/zh_to_en/rules.md", "cases/contextual_translation_zh_to_en.constructed.md"],
+        "zh_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_zh_to_ja.constructed.md"],
+        "zh_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_zh_to_ko.constructed.md"],
+        "en_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_en_to_ja.constructed.md"],
+        "en_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_en_to_ko.constructed.md"],
+        "ja_to_zh": ["translation/common/contextual_translation.md", "translation/target/zh.md", "cases/contextual_translation_ja_to_zh.constructed.md"],
+        "ja_to_en": ["translation/common/contextual_translation.md", "translation/target/en.md", "cases/contextual_translation_ja_to_en.constructed.md"],
+        "ja_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_ja_to_ko.constructed.md"],
+        "ko_to_zh": ["translation/common/contextual_translation.md", "translation/target/zh.md", "cases/contextual_translation_ko_to_zh.constructed.md"],
+        "ko_to_en": ["translation/common/contextual_translation.md", "translation/target/en.md", "cases/contextual_translation_ko_to_en.constructed.md"],
+        "ko_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_ko_to_ja.constructed.md"],
+        "generic": ["translation/common/contextual_translation.md"]
+      }
+    },
+    "contextual_translation_repair": {
+      "title": "上下文翻译修复",
+      "category": "translation",
+      "description": "保留已接受译文，只重做缺失或无效意义组。",
+      "version": "2026-08-18.2",
+      "variants": {
+        "en_to_zh": ["translation/common/contextual_translation_repair.md", "translation/en_to_zh/rules.md"],
+        "zh_to_en": ["translation/common/contextual_translation_repair.md", "translation/zh_to_en/rules.md"],
+        "zh_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
+        "zh_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
+        "en_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
+        "en_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
+        "ja_to_zh": ["translation/common/contextual_translation_repair.md", "translation/target/zh.md"],
+        "ja_to_en": ["translation/common/contextual_translation_repair.md", "translation/target/en.md"],
+        "ja_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
+        "ko_to_zh": ["translation/common/contextual_translation_repair.md", "translation/target/zh.md"],
+        "ko_to_en": ["translation/common/contextual_translation_repair.md", "translation/target/en.md"],
+        "ko_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
+        "generic": ["translation/common/contextual_translation_repair.md"]
+      }
+    },
+    "external_ai_prooftranslation": {
+      "title": "外部 AI 校译",
+      "category": "exchange",
+      "description": "编排 Web AI 校准确认、翻译确认和结构化安全回导；业务规则使用活动校准与翻译提示词快照。",
+      "version": "2026-08-24.1",
+      "variants": {
+        "default": ["exchange/external_ai_prooftranslation.md"]
+      }
+    },
+    "external_ai_split": {
+      "title": "外部 AI 切分",
+      "category": "exchange",
+      "description": "编排 Web AI 切分预览、用户确认和边界回导；业务规则使用活动切分提示词快照。",
+      "version": "2026-08-24.1",
+      "variants": {
+        "default": ["exchange/external_ai_split.md"]
+      }
+    },
+    "external_ai_edit": {
+      "title": "外部 AI 编辑",
+      "category": "exchange",
+      "description": "编排 Web AI 校准、翻译、审阅和最终 SRT 交付；业务规则使用活动校准与翻译提示词快照。",
+      "version": "2026-08-24.1",
+      "variants": {
+        "default": ["exchange/external_ai_edit.md"]
+      }
+    },
+    "editor_review": {
+      "title": "AI 双轨审阅",
+      "category": "editor",
+      "description": "分别输出源文和译文问题，不自动修改文档。",
+      "version": "2026-08-19.1",
+      "variants": {"default": ["editor/review.md"]}
+    },
+    "calibration": {
+      "title": "源文 AI 校准",
+      "category": "editor",
+      "description": "应用大小写、标点、专名与确定性 ASR 修正。",
+      "version": "2026-08-19.1",
+      "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
+    }
+  }
+}

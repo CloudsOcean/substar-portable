@@ -1,0 +1,183 @@
+flowchart LR
+  subgraph layer_api["api"]
+    composition_root["FastAPI composition root and project-creation facade"]
+    editor_api["Editor HTTP API"]
+    runtime_api["Canonical task HTTP API"]
+  end
+  subgraph layer_application["application"]
+    creation_graph["Subtitle creation task graph"]
+    creation_projection["Project creation read-model projection"]
+    editor_application["Editor application and repository ports"]
+    model_stage_scheduler["Prompt registry and per-stage model scheduler"]
+    settings_service["Configuration and edition service"]
+  end
+  subgraph layer_application_service["application_service"]
+    project_exchange_service["External AI and subtitle project exchange"]
+    task_info_service["Canonical project task information service"]
+  end
+  subgraph layer_contract["contract"]
+    recognition_contracts["Recognition profile and artifact contracts"]
+    segmentation_input_contract["Canonical segmentation input projection"]
+    worker_protocol["Worker JSONL protocol"]
+  end
+  subgraph layer_delivery["delivery"]
+    packaging["Windows portable packaging and release contract"]
+  end
+  subgraph layer_domain["domain"]
+    editor_domain["Editor document domain and operation engine"]
+    segmentation_domain["Segmentation domain helpers and validators"]
+    translation_domain["Translation domain contracts and grouping"]
+  end
+  subgraph layer_domain_service["domain_service"]
+    cloud_transcription_pipeline["Cloud transcription media pipeline"]
+    execution_planner["Long-media execution planner"]
+    export_service["Subtitle export service"]
+    glossary_service["Glossary, hotword and XLSX service"]
+    media_service["Editor media and waveform service"]
+    presentation_service["Presentation, punctuation and script conversion"]
+    reference_manuscript_service["Reference manuscript service"]
+  end
+  subgraph layer_finalizer["finalizer"]
+    segmentation_finalizer["Segmentation Finalizer"]
+    transcription_finalizer["Transcription Finalizer"]
+  end
+  subgraph layer_frontend["frontend"]
+    editor_ui["Editor browser application"]
+    web_shell["Static web routes, theme and personalization"]
+  end
+  subgraph layer_frontend_connector["frontend_connector"]
+    editor_api_client["Editor browser API caller"]
+    glossary_ui["Glossary browser application and API caller"]
+    settings_ui["Settings browser application and API caller"]
+    split_ui["Project creation UI"]
+  end
+  subgraph layer_handler["handler"]
+    segmentation_handler["Segmentation task handler"]
+    transcription_handler["Transcription task handler"]
+  end
+  subgraph layer_infrastructure["infrastructure"]
+    shared_security_utilities["Shared filesystem, security and canonicalization utilities"]
+  end
+  subgraph layer_model_orchestration["model_orchestration"]
+    calibration_service["AI calibration service"]
+    review_service["Advisory AI review service"]
+    semantic_segmentation_algorithm["Semantic grouping algorithm"]
+    translation_service["Editor translation service"]
+  end
+  subgraph layer_optional_capability["optional_capability"]
+    local_environment_service["Optional local environment and model assets"]
+  end
+  subgraph layer_persistence["persistence"]
+    editor_task_repository["Exclusive editor AI operation repository"]
+    project_store["ProjectStore revision repository"]
+    runtime_store["SQLite runtime store"]
+  end
+  subgraph layer_process["process"]
+    launcher_runtime["Launcher, backend instance ownership and graceful shutdown"]
+  end
+  subgraph layer_provider_connector["provider_connector"]
+    provider_test_service["Provider test, discovery and capability service"]
+    qwen_connector["Qwen Cloud ASR connector"]
+    segmentation_model_connector["Segmentation model connector"]
+  end
+  subgraph layer_runtime["runtime"]
+    handler_registry["Task handler registry"]
+    scheduler["Canonical task Scheduler"]
+    task_service["Task application service"]
+    worker_supervisor["Worker process supervisor"]
+  end
+  subgraph layer_security["security"]
+    credential_store["Credential store and resolver"]
+  end
+  subgraph layer_worker["worker"]
+    segmentation_worker["Segmentation Worker"]
+    transcription_worker["Transcription Worker"]
+  end
+  split_ui --> composition_root
+  split_ui --> editor_api
+  composition_root --> creation_graph
+  composition_root --> creation_projection
+  composition_root --> runtime_api
+  composition_root --> editor_api
+  composition_root --> credential_store
+  composition_root --> model_stage_scheduler
+  creation_graph --> task_service
+  runtime_api --> task_service
+  runtime_api --> handler_registry
+  task_service --> runtime_store
+  handler_registry --> transcription_handler
+  handler_registry --> segmentation_handler
+  scheduler --> task_service
+  scheduler --> handler_registry
+  scheduler --> worker_supervisor
+  scheduler --> transcription_finalizer
+  scheduler --> segmentation_finalizer
+  worker_supervisor --> worker_protocol
+  worker_supervisor --> transcription_worker
+  worker_supervisor --> segmentation_worker
+  transcription_handler --> transcription_worker
+  transcription_handler --> transcription_finalizer
+  transcription_worker --> cloud_transcription_pipeline
+  transcription_worker --> worker_protocol
+  cloud_transcription_pipeline --> qwen_connector
+  segmentation_handler --> segmentation_worker
+  segmentation_handler --> segmentation_finalizer
+  segmentation_worker --> segmentation_input_contract
+  segmentation_worker --> reference_manuscript_service
+  segmentation_worker --> execution_planner
+  segmentation_worker --> semantic_segmentation_algorithm
+  segmentation_worker --> worker_protocol
+  semantic_segmentation_algorithm --> segmentation_model_connector
+  segmentation_finalizer --> segmentation_input_contract
+  segmentation_finalizer --> reference_manuscript_service
+  segmentation_finalizer --> project_store
+  editor_api --> project_store
+  editor_api --> task_info_service
+  editor_api --> editor_task_repository
+  editor_api --> reference_manuscript_service
+  editor_api --> translation_service
+  editor_api --> calibration_service
+  editor_api --> review_service
+  editor_api --> media_service
+  editor_api --> project_exchange_service
+  task_info_service --> settings_service
+  translation_service --> editor_task_repository
+  translation_service --> project_store
+  calibration_service --> editor_task_repository
+  calibration_service --> project_store
+  review_service --> editor_task_repository
+  editor_ui --> editor_api
+  editor_api_client --> editor_api
+  editor_api_client --> composition_root
+  editor_application --> editor_domain
+  editor_application --> project_store
+  reference_manuscript_service --> editor_domain
+  presentation_service --> editor_domain
+  export_service --> presentation_service
+  project_exchange_service --> export_service
+  project_exchange_service --> editor_domain
+  project_exchange_service --> project_store
+  project_exchange_service --> task_info_service
+  project_exchange_service --> creation_projection
+  project_exchange_service --> model_stage_scheduler
+  settings_ui --> settings_service
+  settings_ui --> provider_test_service
+  settings_ui --> local_environment_service
+  settings_ui --> model_stage_scheduler
+  settings_service --> credential_store
+  settings_service --> model_stage_scheduler
+  provider_test_service --> qwen_connector
+  glossary_ui --> glossary_service
+  launcher_runtime --> composition_root
+  launcher_runtime --> scheduler
+  web_shell --> split_ui
+  web_shell --> editor_ui
+  web_shell --> settings_ui
+  web_shell --> glossary_ui
+  segmentation_domain --> editor_domain
+  segmentation_domain --> reference_manuscript_service
+  packaging --> launcher_runtime
+  packaging --> composition_root
+  packaging --> transcription_worker
+  packaging --> segmentation_worker
+  packaging --> translation_service

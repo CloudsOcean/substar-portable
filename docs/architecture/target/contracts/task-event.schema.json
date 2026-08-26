@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/task-event.v1.json",
+  "title": "Substar task/project event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "data"
+  ],
+  "properties": {
+    "schema_version": { "const": "substar.task-event.v1" },
+    "event_id": { "type": "integer", "minimum": 1 },
+    "event_type": {
+      "enum": [
+        "task.created",
+        "task.started",
+        "task.progress",
+        "task.waiting",
+        "task.cancel_requested",
+        "task.cancelled",
+        "task.succeeded",
+        "task.failed",
+        "task.interrupted",
+        "task.artifact_registered",
+        "project.created",
+        "project.updated",
+        "project.revision_created",
+        "stream.reset_required"
+      ]
+    },
+    "task_id": { "type": ["string", "null"] },
+    "project_id": { "type": ["string", "null"] },
+    "attempt": { "type": ["integer", "null"], "minimum": 0 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "request_id": { "type": ["string", "null"] },
+    "data": { "type": "object" }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/semantic-grouping-result.v1.schema.json",
+  "title": "Semantic grouping result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "input_fingerprint",
+    "block_id",
+    "ownership",
+    "meaning_groups",
+    "exceptions"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.semantic-grouping-result.v1"},
+    "input_fingerprint": {"$ref": "#/$defs/digest"},
+    "block_id": {"type": "string", "pattern": "^c[0-9]{4,}$"},
+    "ownership": {"$ref": "#/$defs/span"},
+    "meaning_groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["alignment_start", "alignment_end", "line_breaks_after"],
+        "properties": {
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "line_breaks_after": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "alignment_start", "alignment_end", "detail"],
+        "properties": {
+          "code": {
+            "enum": [
+              "indivisible_overflow",
+              "source_timing_conflict",
+              "speaker_boundary_conflict"
+            ]
+          },
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "detail": {"type": "string", "minLength": 1, "maxLength": 500}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alignment_start", "alignment_end"],
+      "properties": {
+        "alignment_start": {"type": "integer", "minimum": 0},
+        "alignment_end": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

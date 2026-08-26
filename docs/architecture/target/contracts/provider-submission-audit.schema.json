@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/provider-submission-audit.schema.json",
+  "title": "Substar provider submission audit v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "provider",
+    "model",
+    "input_fingerprint",
+    "resumed_remote_task",
+    "submitted_body_sha256",
+    "public_body",
+    "compilation"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.provider-submission-audit.v1"},
+    "provider": {"type": "string", "minLength": 1},
+    "model": {"type": "string", "minLength": 1},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "resumed_remote_task": {"type": "boolean"},
+    "submitted_body_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "public_body": {"type": "object"},
+    "compilation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested_prompt_sha256",
+        "submitted_context_sha256",
+        "requested_prompt_characters",
+        "hotwords_sha256",
+        "submitted_vocabulary"
+      ],
+      "properties": {
+        "requested_prompt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "submitted_context_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requested_prompt_characters": {"type": "integer", "minimum": 0},
+        "hotwords_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "submitted_vocabulary": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 50}
+        }
+      }
+    }
+  }
+}

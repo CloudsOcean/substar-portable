@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from substar_core import config, credential_store
+from substar_core.credential_store import (
+    ALIGN_DEEPSEEK,
+    ASR_GENERIC,
+    ASR_QWEN,
+    SEGMENT_DEEPSEEK,
+    TRANSLATE_DEEPSEEK,
+)
+
+
+class ConfigStorageTests(unittest.TestCase):
+    def test_general_editor_defaults_are_part_of_the_persisted_contract(self) -> None:
+        self.assertEqual(config.DEFAULTS["shortcut_undo"], "Ctrl+Z")
+        self.assertEqual(config.DEFAULTS["shortcut_redo"], "Ctrl+Y")
+        self.assertNotIn("default_export_dir", config.DEFAULTS)
+        self.assertEqual(config._canonical_shortcut("ctrl+shift+z"), "Ctrl+Shift+Z")
+        self.assertIsNone(config._canonical_shortcut("Z"))
+
+    def test_portable_data_dir_is_inside_install_root(self) -> None:
+        expected_parent = (config.INSTALL_ROOT / "data").resolve()
+        self.assertEqual(config.PORTABLE_APP_DATA_DIR.parent, expected_parent)
+
+    def test_unified_credentials_round_trip_keeps_provider_roles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            active = Path(temp_dir) / "credentials.dpapi"
+            wrap = lambda value, **_kwargs: f"wrapped:{value}"
+            unwrap = lambda value, **_kwargs: value[len("wrapped:") :]
+            values = {
+                ASR_QWEN: "qwen-key-123",
+                ASR_GENERIC: "qwen-key-123",
+                SEGMENT_DEEPSEEK: "llm-key-123",
+                TRANSLATE_DEEPSEEK: "llm-key-123",
+                ALIGN_DEEPSEEK: "alignment-key-123",
+            }
+            with patch.object(config, "CREDENTIALS_FILE", active), patch.object(
+                config, "credential_file_candidates", return_value=(active,)
+            ), patch.object(credential_store, "protect_text", side_effect=wrap), patch.object(
+                credential_store, "unprotect_text", side_effect=unwrap
+            ):
+                config._write_credential_envelope(values)
+                self.assertEqual(config.load_credentials(), values)
+
+            self.assertTrue(active.is_file())
+
+    def test_portable_credential_envelope_survives_directory_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "machine-a"
+            destination = Path(temp_dir) / "machine-b"
+            source.mkdir()
+            destination.mkdir()
+            envelope = source / "credentials.enc"
+            values = {ASR_QWEN: "portable-qwen-key", TRANSLATE_DEEPSEEK: "portable-llm-key"}
+
+            credential_store.write_envelope(envelope, values)
+            (destination / envelope.name).write_bytes(envelope.read_bytes())
+            key = source / "credentials.key"
+            (destination / key.name).write_bytes(key.read_bytes())
+
+            loaded = credential_store.load_store((destination / envelope.name,))
+            self.assertEqual(loaded, values)
+            self.assertNotIn("portable-qwen-key", envelope.read_text(encoding="ascii"))
+
+    def test_explicit_translation_clear_removes_canonical_roles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            active = Path(temp_dir) / "credentials.dpapi"
+            values = {
+                ASR_QWEN: "qwen-key-123",
+                ASR_GENERIC: "qwen-key-123",
+                ALIGN_DEEPSEEK: "llm-key-123",
+                SEGMENT_DEEPSEEK: "llm-key-123",
+                TRANSLATE_DEEPSEEK: "llm-key-123",
+            }
+            with patch.object(config, "CREDENTIALS_FILE", active), patch.object(
+                config, "credential_file_candidates", return_value=(active,)
+            ), patch.object(
+                credential_store, "protect_text", side_effect=lambda value, **_kwargs: f"wrapped:{value}"
+            ), patch.object(
+                credential_store,
+                "unprotect_text",
+                side_effect=lambda value, **_kwargs: value[len("wrapped:") :],
+            ):
+                config._write_credential_envelope(values)
+                saved = config.save_credentials_from_settings(
+                    {"clear_translation_api_key": True}
+                )
+                loaded = config.load_credentials()
+
+            self.assertNotIn(TRANSLATE_DEEPSEEK, saved)
+            self.assertNotIn(TRANSLATE_DEEPSEEK, loaded)
+            self.assertNotIn(SEGMENT_DEEPSEEK, loaded)
+
+    def test_settings_status_is_derived_from_unified_credentials(self) -> None:
+        credentials = {
+            ASR_QWEN: "qwen-key-123",
+            ASR_GENERIC: "qwen-key-123",
+            ALIGN_DEEPSEEK: "llm-key-123",
+            SEGMENT_DEEPSEEK: "llm-key-123",
+            TRANSLATE_DEEPSEEK: "llm-key-123",
+        }
+        with patch.object(config, "load_credentials", return_value=credentials):
+            settings = config.load_settings()
+
+        self.assertTrue(settings["api_key_set"])
+        self.assertTrue(settings["alignment_api_key_set"])
+        self.assertTrue(settings["translation_api_key_set"])
+
+
+if __name__ == "__main__":
+    unittest.main()

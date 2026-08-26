@@ -1,0 +1,27 @@
+{
+  "schema_version": "substar.release-package.v1",
+  "edition": "cloud",
+  "version": "1.0.2-preview.1",
+  "package_layout": "transparent-source-runtime",
+  "source_commit": "build-time",
+  "builtin_examples": [
+    "reference-script-v1",
+    "advanced-ai-v1"
+  ],
+  "models_included": false,
+  "model_assets": [],
+  "capabilities": {
+    "cloud_only": true,
+    "transcription": [
+      "qwen_cloud"
+    ],
+    "segmentation": [
+      "semantic"
+    ],
+    "editor_ai_tasks": [
+      "translation",
+      "calibration",
+      "review"
+    ]
+  }
+}

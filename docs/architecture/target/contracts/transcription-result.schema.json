@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/transcription-result.schema.json",
+  "title": "Substar transcription result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "recognition_evidence", "summary", "outputs"],
+  "properties": {
+    "schema_version": {"const": "substar.transcription-result.v1"},
+    "recognition_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_type", "schema_version", "sha256", "byte_size"],
+      "properties": {
+        "artifact_type": {"const": "recognition_evidence"},
+        "schema_version": {"const": "substar.recognition-evidence.v1"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "byte_size": {"type": "integer", "minimum": 1}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "language",
+        "duration_seconds",
+        "unit_count",
+        "sentence_count",
+        "media_sha256",
+        "input_fingerprint"
+      ],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "language": {"type": "string"},
+        "duration_seconds": {"type": "number", "minimum": 0},
+        "unit_count": {"type": "integer", "minimum": 1},
+        "sentence_count": {"type": "integer", "minimum": 0},
+        "media_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence", "transcript", "alignment_table", "segmentation_material"],
+      "properties": {
+        "evidence": {"const": "recognition_evidence.json"},
+        "transcript": {"const": "master_transcript.txt"},
+        "alignment_table": {"const": "alignment.tsv"},
+        "segmentation_material": {"const": "segmentation_material.json"}
+      }
+    }
+  }
+}

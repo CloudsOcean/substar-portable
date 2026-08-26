@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_analysis.schema.json",
+  "title": "Substar Stage 1.1 hierarchical semantic analysis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_language", "groups", "coverage_check"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.analysis.v2"},
+    "source_language": {"type": "string", "minLength": 1},
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id", "source_text", "alignment_start", "alignment_end",
+          "protected_spans", "parallel_structures", "preferred_boundaries",
+          "forbidden_boundaries", "deletion_candidates",
+          "correction_candidates", "insertion_candidates"
+        ],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "source_text": {"type": "string", "minLength": 1},
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "protected_spans": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/span"}
+          },
+          "parallel_structures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["category", "members"],
+              "properties": {
+                "category": {"type": "string"},
+                "members": {
+                  "type": "array",
+                  "minItems": 2,
+                  "items": {"type": "string"}
+                }
+              }
+            }
+          },
+          "preferred_boundaries": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/preferred_boundary"}
+          },
+          "forbidden_boundaries": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/forbidden_boundary"}
+          },
+          "deletion_candidates": {"$ref": "#/$defs/edits"},
+          "correction_candidates": {"$ref": "#/$defs/edits"},
+          "insertion_candidates": {"$ref": "#/$defs/edits"},
+          "notes": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "coverage_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["complete", "ordered", "notes"],
+      "properties": {
+        "complete": {"const": true},
+        "ordered": {"const": true},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "$defs": {
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "span_id", "alignment_start", "alignment_end", "category",
+        "protection_level", "reason"
+      ],
+      "properties": {
+        "span_id": {"type": "string", "minLength": 1},
+        "alignment_start": {"type": "integer", "minimum": 0},
+        "alignment_end": {"type": "integer", "minimum": 0},
+        "category": {"type": "string", "minLength": 1},
+        "protection_level": {
+          "enum": ["hard", "strong_soft", "outer_soft"]
+        },
+        "reason": {"type": "string"}
+      }
+    },
+    "preferred_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after_alignment", "priority", "relation", "reason"],
+      "properties": {
+        "after_alignment": {"type": "integer", "minimum": 0},
+        "priority": {"enum": ["normal", "high"]},
+        "relation": {"type": "string"},
+        "reason": {"type": "string"}
+      }
+    },
+    "forbidden_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["after_alignment", "reason"],
+      "properties": {
+        "after_alignment": {"type": "integer", "minimum": 0},
+        "reason": {"type": "string"}
+      }
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "alignment_start", "alignment_end", "source", "proposal",
+          "confidence", "reason"
+        ],
+        "properties": {
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "source": {"type": "string"},
+          "proposal": {"type": "string"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

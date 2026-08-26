@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_language", "groups"],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.global-analysis.v1"},
+    "source_language": {"type": "string"},
+    "groups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id", "alignment_start", "alignment_end",
+          "protected_spans", "preferred_breaks_after",
+          "forbidden_breaks_after", "continuity_after"
+        ],
+        "properties": {
+          "group_id": {"type": "string", "pattern": "^g[0-9]{4,}$"},
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "protected_spans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "alignment_start", "alignment_end", "category",
+                "protection_level"
+              ],
+              "properties": {
+                "alignment_start": {"type": "integer", "minimum": 0},
+                "alignment_end": {"type": "integer", "minimum": 0},
+                "category": {"type": "string"},
+                "protection_level": {
+                  "enum": ["hard", "strong_soft", "outer_soft"]
+                }
+              }
+            }
+          },
+          "preferred_breaks_after": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0}
+          },
+          "forbidden_breaks_after": {
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0}
+          },
+          "continuity_after": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["relation", "confidence", "reason"],
+            "properties": {
+              "relation": {
+                "enum": ["continuous", "related", "separate"]
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "speaker_transition": {
+                "enum": ["same", "change", "unknown"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

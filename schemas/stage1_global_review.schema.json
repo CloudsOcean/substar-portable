@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "overall_risk", "priority_review_count",
+    "issues", "strengths", "summary"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.global-review.v1"},
+    "overall_risk": {"enum": ["low", "medium", "high"]},
+    "priority_review_count": {"type": "integer", "minimum": 0},
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id", "severity", "category", "alignment_start",
+          "alignment_end", "after_alignment", "observation",
+          "review_direction"
+        ],
+        "properties": {
+          "group_id": {"type": "string"},
+          "severity": {"enum": ["high", "medium", "low"]},
+          "category": {"type": "string"},
+          "alignment_start": {"type": "integer", "minimum": 0},
+          "alignment_end": {"type": "integer", "minimum": 0},
+          "after_alignment": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "observation": {"type": "string"},
+          "review_direction": {"type": "string"}
+        }
+      }
+    },
+    "strengths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["group_id", "observation"],
+        "properties": {
+          "group_id": {"type": "string"},
+          "observation": {"type": "string"}
+        }
+      }
+    },
+    "summary": {"type": "string"}
+  }
+}

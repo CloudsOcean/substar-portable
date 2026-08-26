@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/schemas/stage1_local_judge.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "scores", "winner_id",
+    "materially_better", "confidence", "reason"
+  ],
+  "properties": {
+    "schema_version": {"const": "substar.stage1.local-judge.v1"},
+    "scores": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id", "language_dependency", "meaning_rhetoric",
+          "independent_value", "timing_readability", "visual_balance",
+          "total", "worst_risk"
+        ],
+        "properties": {
+          "candidate_id": {"type": "string", "minLength": 1},
+          "language_dependency": {"type": "number", "minimum": 0, "maximum": 100},
+          "meaning_rhetoric": {"type": "number", "minimum": 0, "maximum": 100},
+          "independent_value": {"type": "number", "minimum": 0, "maximum": 100},
+          "timing_readability": {"type": "number", "minimum": 0, "maximum": 100},
+          "visual_balance": {"type": "number", "minimum": 0, "maximum": 100},
+          "total": {"type": "number", "minimum": 0, "maximum": 100},
+          "worst_risk": {"type": "string"}
+        }
+      }
+    },
+    "winner_id": {"type": "string", "minLength": 1},
+    "materially_better": {"type": "boolean"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "reason": {"type": "string", "minLength": 1}
+  }
+}

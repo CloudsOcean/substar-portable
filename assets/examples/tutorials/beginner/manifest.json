@@ -1,0 +1,10 @@
+{
+  "schema_version": "substar.tutorial-example.v1",
+  "case_id": "reference-script-v1",
+  "level": "beginner",
+  "display_name": "初级教程",
+  "assets": {
+    "media": "media.mp3",
+    "reference": "reference.txt"
+  }
+}
