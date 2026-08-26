@@ -51,11 +51,12 @@ jobs:
           }
       - name: Install test dependencies
         run: python -m pip install -r requirements-test.txt
-      - name: Verify source and packaging contracts
-        run: |
-          python -m compileall -q app.py launcher.py substar_core scripts
-          python -m pytest tests -q -p no:cacheprovider --basetemp "${{ runner.temp }}\pytest-ci"
-          node --test tests\*.test.js
+      - name: Compile Python sources
+        run: python -m compileall -q app.py launcher.py substar_core scripts
+      - name: Run Python tests
+        run: python -m pytest tests -q -p no:cacheprovider --basetemp "${{ runner.temp }}\pytest-ci"
+      - name: Run Node tests
+        run: node --test tests\*.test.js
       - name: Build Substar Windows bundle
         shell: pwsh
         run: .\scripts\build-windows.ps1 -SkipTests
