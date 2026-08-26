@@ -1756,7 +1756,9 @@ async def create_workbench_split_job(
     overrides = profile_settings(
         {**overrides, "recognition_profile_id": recognition_profile.id}
     )
-    output_root = _relay_output_root()
+    # Compare canonical paths. Test and portable callers may provide a relative
+    # relay root, while ``job_dir`` is resolved below.
+    output_root = _relay_output_root().resolve()
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_split_" + uuid.uuid4().hex[:6]
     job_dir = (output_root / job_id).resolve()
     if output_root not in job_dir.parents:

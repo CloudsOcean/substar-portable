@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from substar_core.artifacts import atomic_write_json, atomic_write_text
+from substar_core.config import INSTALL_ROOT
 from substar_core.qwen_cloud_asr import DEFAULT_MODEL, run_qwen_cloud_asr
 from substar_core.recognition.registry import profile_settings
 
@@ -15,6 +18,21 @@ from .artifacts import alignment_tsv, segmentation_material
 
 
 Progress = Callable[[str, float], None]
+
+
+def _media_tool(name: str) -> str:
+    suffix = ".exe" if os.name == "nt" else ""
+    for candidate in (
+        INSTALL_ROOT / "runtime" / "ffmpeg" / "bin" / f"{name}{suffix}",
+        INSTALL_ROOT / "ffmpeg" / "bin" / f"{name}{suffix}",
+        INSTALL_ROOT / "tools" / "ffmpeg" / "bin" / f"{name}{suffix}",
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    resolved = shutil.which(name)
+    if resolved:
+        return resolved
+    raise FileNotFoundError(f"{name} is unavailable")
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -31,7 +49,7 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 def _probe_media(path: Path) -> dict[str, Any]:
     result = _run(
         [
-            "ffprobe",
+            _media_tool("ffprobe"),
             "-v",
             "error",
             "-show_entries",
@@ -66,7 +84,7 @@ def _extract_audio(media_path: Path, wav_path: Path, denoise_mode: str) -> None:
     if wav_path.is_file() and wav_path.stat().st_size > 44:
         return
     command = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(media_path),
+        _media_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", str(media_path),
         "-vn", "-ac", "1", "-ar", "16000",
     ]
     if denoise_mode == "light":

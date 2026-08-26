@@ -203,7 +203,17 @@ class ProductionTranscriptionHandlerTests(unittest.TestCase):
             self.scheduler.start()
             completed = self.wait_terminal(task["task_id"])
 
-        self.assertEqual(completed["state"], "succeeded", completed.get("error"))
+        self.assertEqual(
+            completed["state"],
+            "succeeded",
+            {
+                "error": completed.get("error"),
+                "stderr": [
+                    path.read_text(encoding="utf-8", errors="replace")
+                    for path in (self.root / "task-runtime").rglob("stderr.log")
+                ],
+            },
+        )
         self.assertEqual(completed["step"], "transcription.artifact_finalize")
         self.assertEqual(
             completed["progress_message"], "Validating transcription artifacts."

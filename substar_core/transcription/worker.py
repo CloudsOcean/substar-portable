@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -376,7 +377,8 @@ def run(command: WorkerCommand) -> int:
     except BaseException as exc:
         # Public runtime state receives only the stable code. Full diagnostics
         # remain on stderr in the attempt-owned private log.
-        print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         emit(WorkerMessageType.ERROR, {"code": "transcription_worker_failed"})
         return 1
 

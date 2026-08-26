@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from substar_core.runtime import (
@@ -36,7 +37,7 @@ class TaskRuntimeTest(unittest.TestCase):
         return self.service.create_task(**values)
 
     def test_migration_creates_frozen_runtime_tables(self) -> None:
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             tables = {
                 row[0]
                 for row in connection.execute(
@@ -59,7 +60,7 @@ class TaskRuntimeTest(unittest.TestCase):
 
     def test_v1_artifacts_migrate_to_their_current_attempt(self) -> None:
         legacy = Path(self.temporary.name) / "legacy-runtime.sqlite3"
-        with sqlite3.connect(legacy) as connection:
+        with closing(sqlite3.connect(legacy)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE schema_migrations (
@@ -100,7 +101,7 @@ class TaskRuntimeTest(unittest.TestCase):
 
         migrated = RuntimeStore(legacy)
         artifacts = migrated.list_artifacts("legacy-task")
-        with sqlite3.connect(legacy) as connection:
+        with closing(sqlite3.connect(legacy)) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             columns = {
                 row[1]
