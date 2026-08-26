@@ -166,7 +166,7 @@ def test_reference_script_document_ignores_source_hard_limit_and_exports_script(
     assert "结束。" in rendered
 
 
-def test_reference_script_keeps_reference_only_insertions_deleted_until_restored() -> None:
+def test_reference_script_applies_reference_only_insertions() -> None:
     material, breaks, report = materialize_reference_script(
         "销量达到二十万（内部统计），你相信吗？",
         _asr_units("销量达到二十万你相信吗"),
@@ -180,7 +180,7 @@ def test_reference_script_keeps_reference_only_insertions_deleted_until_restored
     )
 
     rendered = render_document_srt(document, SubtitleExportMode.SOURCE)
-    assert "（内部统计）" not in rendered
+    assert "（内部统计）" in rendered
     assert "你相信吗？" in rendered
     inserted = [
         token
@@ -188,28 +188,11 @@ def test_reference_script_keeps_reference_only_insertions_deleted_until_restored
         if token.provenance.operation == "reference_manuscript_insert"
     ]
     assert inserted
-    assert all(token.state.value == "deleted" for token in inserted)
+    assert all(token.state.value == "active" for token in inserted)
     assert all(not token.source_token_ids for token in inserted)
     audit = document.changes[-1]
     assert audit.operation == "reference_manuscript_alignment"
     assert audit.metadata["insertion_count"] > 0
-    restored = apply_document_operation(
-        document,
-        {
-            "operation_id": "restore-reference-only-insertions",
-            "type": "restore",
-            "payload": {
-                "token_ids": [token.token_id for token in inserted],
-                "cue_ids": [],
-                "provenance": {
-                    "kind": "manual",
-                    "operation": "restore",
-                    "actor": "test",
-                },
-            },
-        },
-    )
-    assert "（内部统计）" in render_document_srt(restored, SubtitleExportMode.SOURCE)
 
 
 def test_reference_script_never_deletes_asr_only_content() -> None:
@@ -238,7 +221,7 @@ def _cue_texts(document) -> list[str]:
     ]
 
 
-def test_reference_script_keeps_asr_boundaries_outside_reference_coverage() -> None:
+def test_reference_script_uses_reference_boundaries_for_retained_asr_content() -> None:
     material, breaks, report = materialize_reference_script(
         "项羽来了。",
         _asr_units("开场，", "继续。", "项羽来了。"),
@@ -251,11 +234,11 @@ def test_reference_script_keeps_asr_boundaries_outside_reference_coverage() -> N
         reference_report=report,
     )
 
-    assert _cue_texts(document) == ["开场，", "继续。", "项羽来了。"]
-    assert report["asr_breaks"][:2] == [1, 3]
+    assert _cue_texts(document) == ["开场，继续。项羽来了。"]
+    assert breaks == []
 
 
-def test_reference_omission_does_not_remove_aligned_asr_punctuation() -> None:
+def test_reference_omission_removes_aligned_asr_punctuation() -> None:
     material, breaks, report = materialize_reference_script(
         "项羽杀宋义掌握兵权。",
         _asr_units("项羽杀宋义，", "掌握兵权。"),
@@ -268,8 +251,8 @@ def test_reference_omission_does_not_remove_aligned_asr_punctuation() -> None:
         reference_report=report,
     )
 
-    assert _cue_texts(document) == ["项羽杀宋义，", "掌握兵权。"]
-    assert not any(
+    assert _cue_texts(document) == ["项羽杀宋义掌握兵权。"]
+    assert any(
         item["before"] == "义，" and item["after"] == "义"
         for item in report["replacements"]
     )

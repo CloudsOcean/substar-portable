@@ -54,7 +54,7 @@ jobs:
       - name: Verify source and packaging contracts
         run: |
           python -m compileall -q app.py launcher.py substar_core scripts
-          python -m pytest tests -q -p no:cacheprovider --basetemp .pytest-tmp\ci
+          python -m pytest tests -q -p no:cacheprovider --basetemp "${{ runner.temp }}\pytest-ci"
           node --test tests\*.test.js
       - name: Build Substar Windows bundle
         shell: pwsh
