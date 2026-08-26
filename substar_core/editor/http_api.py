@@ -2890,6 +2890,27 @@ _TRANSLATION_REVIEW_ACTIONS = {
 }
 
 
+def _review_text_is_damaged(value: Any) -> bool:
+    if isinstance(value, str):
+        return "\ufffd" in value
+    if isinstance(value, Mapping):
+        return any(_review_text_is_damaged(child) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_review_text_is_damaged(child) for child in value)
+    return False
+
+
+def _review_response_valid(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and any(
+            isinstance(value.get(key), list)
+            for key in ("source_issues", "translation_issues")
+        )
+        and not _review_text_is_damaged(value)
+    )
+
+
 def _validate_review_issue(
     raw: Any,
     *,
@@ -3064,13 +3085,7 @@ def _ai_review_project(
         settings=settings, system_prompt=prompt, blocks=blocks,
         failure_key="issues", stage_name="review",
         retry_stage=None,
-        response_validator=lambda value: (
-            isinstance(value, Mapping)
-            and any(
-                isinstance(value.get(key), list)
-                for key in ("source_issues", "translation_issues")
-            )
-        ),
+        response_validator=_review_response_valid,
         progress_callback=lambda done, total: _write_editor_task(
             project_id, "review", status="running",
             progress=0.08 + 0.82 * done / max(1, total),
@@ -3105,7 +3120,7 @@ def _ai_review_project(
             failure_key="issues",
             stage_name="audit_repair",
             retry_stage=None,
-            response_validator=lambda value: isinstance(value, Mapping),
+            response_validator=_review_response_valid,
         )
         for block_id, repair_value, repair_metadata in repaired:
             original, original_metadata = result_by_block.get(block_id, ({}, {}))
@@ -3237,6 +3252,14 @@ def latest_ai_review_project(project_id: str) -> dict[str, Any]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=500, detail={"code": "review_artifact_invalid", "message": str(exc)}) from exc
+    if _review_text_is_damaged(value):
+        return {
+            "review_id": str(value.get("review_id", "")),
+            "based_on_revision_id": str(value.get("based_on_revision_id", "")),
+            "issues": [],
+            "failed_blocks": list(value.get("failed_blocks", [])),
+            "encoding_error": True,
+        }
     return value
 
 

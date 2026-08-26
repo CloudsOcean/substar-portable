@@ -47,6 +47,21 @@ assert.equal(summarize({
   failed_blocks:["block_2"]
 }, "rev_current").status, "已完成 · 1 项 · 1 块失败");
 
+assert.deepEqual(summarize({
+  review_id:"review_broken",
+  based_on_revision_id:"rev_current",
+  issues:[],
+  failed_blocks:[],
+  encoding_error:true
+}, "rev_current"), {
+  completed:true,
+  stale:false,
+  issueCount:0,
+  status:"历史审阅已损坏",
+  emptyMessage:"旧审阅响应存在编码损坏，已停止展示；请重新审阅当前版本。",
+  buttonLabel:"重新审阅"
+});
+
 assert.equal(summarize(null, "rev_current", true).status, "审阅中");
 
 console.log("editor_ai_review_state: ok");

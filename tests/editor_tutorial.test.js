@@ -56,6 +56,7 @@ assert.equal(result.anchors.referenceTwenty, referenceTwenty.token_id);
 assert.equal(result.anchors.referenceWan, reference.find(token => token.text === "万，").token_id);
 assert.equal(result.anchors.manualGap.followingCueId, "cue_gap_right");
 assert.equal(result.anchors.manualGap.gap, 1);
+assert.deepEqual(result.anchors.baselineCueIds, cueViews.map(item => item.cue_id));
 
 const joined = tokens(["压缩", "章邯"]);
 const joinedCue = cue("cue_joined", 0, 0, 1, joined);

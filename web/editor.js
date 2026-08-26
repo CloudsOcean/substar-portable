@@ -3092,6 +3092,10 @@
           revealTimeline:false
         });
       },
+      onZoom(detail) {
+        observeEditorTutorialEvent("timeline_zoom", detail);
+        scheduleEditorTutorialPosition();
+      },
       onOperation(_operation, intent) { handleTimelineIntent(intent); }
     });
     if (state.view) {
@@ -3374,9 +3378,12 @@
     {title:"编辑词元", description:"双击“20”进入编辑，改成“二十”，然后按 Enter 或点击空白处保存。", focus:() => tutorialCueRow(state.tutorial.anchors?.referenceCue)},
     {title:"选择并合并词元", description:"选中“二十”和“万”：可以按住左键拖选，也可以用 Ctrl＋左键逐个选择，或用 Shift＋左键连续选择。然后点击浮动菜单中的“合并”。", focus:() => [tutorialCueRow(state.tutorial.anchors?.referenceCue), $("#tokenSelectionMenu:not(.hidden)")]},
     {title:"撤销与重做", description:() => `点击编辑区底部的“撤销”，恢复合并前的状态。也可以按 ${state.shortcuts.undo}；重做可使用 ${state.shortcuts.redo}。`, focus:() => document.querySelector("#cueTaskIsland .cue-history-row")},
-    {title:"调整时间边界", description:"在下方当前字幕的时间块上，把左边界向左拖动。", focus:() => $("#timelineTrack")},
-    {title:"创建新 Cue", description:"教程已定位到一处稳定空隙。在当前字幕与上一条字幕之间的时间轴空白处右键，新建 Cue 并填写“测试”。", focus:() => $("#timelineTrack")},
-    {title:"隐藏与删除", description:"对“测试”Cue 依次执行隐藏、恢复和删除。隐藏可直接恢复；删除需通过撤销或历史版本找回。", focus:() => tutorialCueRow(state.tutorial.flags?.createdCueId) || $("#cueList")},
+    {title:"调整时间边界", description:() => tutorialPlayheadBlocksBoundary()
+      ? "红色播放线挡住了左边界。先单击当前时间块中部，把播放线移开，再把左边界向左拖动。"
+      : "沿虚拟鼠标提示，把当前字幕的左边界向左拖动。", focus:() => tutorialTimelineFocus()},
+    {title:"放大时间轴", description:"教程已标出一处稳定空隙。把鼠标放在标记线上，按住 Alt 并向上滚动鼠标滚轮，放大时间轴。", focus:() => tutorialTimelineFocus()},
+    {title:"创建新 Cue", description:"在标记线位置右键创建 Cue。字幕内容可自由填写，任意非空字符都算完成。", focus:() => tutorialTimelineFocus()},
+    {title:"隐藏、恢复与删除", description:() => tutorialCreatedCueInstruction(), focus:() => tutorialCreatedCueFocus()},
     {title:"查找字幕", description:"查找“控制”，然后点击查找下一个。", focus:() => document.querySelector('[data-tool-panel="search"]')},
     {title:"标点处理", description:"在上行字幕的“消除符号”中填写“，。”，然后应用规则。", focus:() => document.querySelector('[data-tool-panel="punctuation"]')},
     {title:"自动吸附", description:"选择智能吸附，把阈值从 400 改为 500，然后点击执行。", focus:() => $("#autoSnapMenu")},
@@ -3478,6 +3485,97 @@
   function clearEditorTutorialTarget() {
     state.tutorial.focus = null;
     $("#editorTutorialSpotlight").style.display = "none";
+    $("#editorTutorialTimelineTarget")?.classList.add("hidden");
+    $("#editorTutorialGhostMouse")?.classList.add("hidden");
+  }
+
+  function tutorialTimelineFocus() {
+    const target = $("#editorTutorialTimelineTarget");
+    return target && !target.classList.contains("hidden") ? target : $("#timelineTrack");
+  }
+
+  function tutorialPlayheadBlocksBoundary() {
+    const anchors = state.tutorial.anchors;
+    const timeline = state.timelineController;
+    if (!anchors?.referenceCue || !timeline?.getState) return false;
+    const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
+    const info = timeline.getState();
+    if (!cue || !Number.isFinite(Number(info?.playhead_time))) return false;
+    const span = Math.max(.001, Number(info.view_end) - Number(info.view_start));
+    return Math.abs(Number(info.playhead_time) - Number(cue.start)) <= Math.max(.04, span * .009);
+  }
+
+  function tutorialCreatedCueInstruction() {
+    const flags = state.tutorial.flags || {};
+    if (!flags.hiddenCue) return "教程已定位并高亮你刚创建的 Cue。点击右侧的隐藏按钮。";
+    if (!flags.restoredCue) return "该 Cue 已隐藏。点击它右侧的“恢复”，让它重新回到时间轴。";
+    return "Cue 已恢复。点击右侧的删除按钮并确认；之后仍可通过全局撤销或历史版本找回。";
+  }
+
+  function tutorialCreatedCueFocus() {
+    const row = tutorialCueRow(state.tutorial.flags?.createdCueId);
+    if (!row) return $("#cueList");
+    const selector = !state.tutorial.flags?.hiddenCue
+      ? '[data-cue-action="hide"]'
+      : !state.tutorial.flags?.restoredCue ? '[data-cue-action="restore"]' : '[data-cue-action="purge"]';
+    return [row, row.querySelector(selector)];
+  }
+
+  function positionEditorTutorialTimelineGuide() {
+    const target = $("#editorTutorialTimelineTarget");
+    const ghost = $("#editorTutorialGhostMouse");
+    if (!target || !ghost) return;
+    target.classList.add("hidden");
+    ghost.className = "editor-tutorial-ghost-mouse hidden";
+    if (isAdvancedTutorial() || ![11,12,13].includes(state.tutorial.step)) return;
+    const timeline = state.timelineController;
+    const anchors = state.tutorial.anchors || {};
+    let rect = null;
+    let ghostX = null;
+    let label = "";
+    let mode = "";
+    let badge = "";
+    if (state.tutorial.step === 11) {
+      const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
+      if (!cue) return;
+      rect = timeline?.getTimeRect?.(cue.start, cue.start);
+      if (!rect) return;
+      const cueRect = timeline.getTimeRect(cue.start, cue.end);
+      const blocked = tutorialPlayheadBlocksBoundary();
+      const description = $("#editorTutorialDescription");
+      if (description) description.textContent = blocked
+        ? "红色播放线挡住了左边界。先单击当前时间块中部，把播放线移开，再把左边界向左拖动。"
+        : "沿虚拟鼠标提示，把当前字幕的左边界向左拖动。";
+      ghostX = blocked ? Math.min(cueRect.right - 18, cueRect.left + Math.max(42, cueRect.width * .45)) : rect.left;
+      label = blocked ? "先移开红线" : "向左拖边界";
+      mode = blocked ? "click" : "drag";
+      badge = blocked ? "单击" : "拖动";
+      rect = {...rect, left:rect.left - 8, right:rect.right + 8, width:16};
+    } else {
+      const gap = anchors.manualGap;
+      if (!gap) return;
+      rect = timeline?.getTimeRect?.(gap.start, gap.end);
+      if (!rect) return;
+      ghostX = rect.left + rect.width / 2;
+      label = state.tutorial.step === 12 ? "在这里放大" : "在这里右键";
+      mode = state.tutorial.step === 12 ? "zoom" : "context";
+      badge = state.tutorial.step === 12 ? "Alt＋滚轮↑" : "右键";
+    }
+    const visibleLeft = Math.max(0, rect.left);
+    const visibleRight = Math.min(innerWidth, rect.right);
+    if (!(visibleRight > visibleLeft)) return;
+    Object.assign(target.style, {
+      left:`${visibleLeft}px`, top:`${rect.top + 22}px`,
+      width:`${Math.max(8, visibleRight - visibleLeft)}px`, height:`${Math.max(28, rect.bottom - rect.top - 26)}px`
+    });
+    $("#editorTutorialTimelineTargetLabel").textContent = label;
+    target.classList.remove("hidden");
+    $("#editorTutorialGhostBadge").textContent = badge;
+    ghost.className = `editor-tutorial-ghost-mouse ${mode}`;
+    Object.assign(ghost.style, {
+      left:`${Math.max(4, Math.min(innerWidth - 34, ghostX - 12))}px`,
+      top:`${Math.max(4, rect.top + Math.max(42, (rect.bottom - rect.top) * .48))}px`
+    });
   }
 
   function editorTutorialFocusRect(value) {
@@ -3493,6 +3591,7 @@
 
   function positionEditorTutorial() {
     if (!state.tutorial.active) return;
+    positionEditorTutorialTimelineGuide();
     const step = currentEditorTutorialSteps()[state.tutorial.step];
     const focus = step?.focus?.() || $("#editorWorkbench");
     state.tutorial.focus = focus;
@@ -3569,15 +3668,19 @@
     if (state.tutorial.step === 3) cueId = anchors.mergedCue;
     if (state.tutorial.step === 5) cueId = anchors.threatCue;
     if ([6,7,8,9,10].includes(state.tutorial.step)) cueId = anchors.referenceCue;
-    if (state.tutorial.step === 12) cueId = anchors.manualGap?.followingCueId;
+    if ([12,13].includes(state.tutorial.step)) cueId = anchors.manualGap?.followingCueId;
+    if (state.tutorial.step === 14) cueId = state.tutorial.flags?.createdCueId;
     if (cueId) {
       selectCue(cueId, false);
       state.tutorial.centerCueId = cueId;
       scheduleEditorTutorialCueCenter(cueId);
     }
-    const panel = ({1:"locator", 4:"locator", 14:"search", 15:"punctuation", 16:"auto-snap"})[state.tutorial.step];
+    if ([12,13].includes(state.tutorial.step) && anchors.manualGap) {
+      state.timelineController?.revealRange?.(anchors.manualGap.start, anchors.manualGap.end);
+    }
+    const panel = ({1:"locator", 4:"locator", 15:"search", 16:"punctuation", 17:"auto-snap"})[state.tutorial.step];
     if (panel) document.querySelector(`[data-tool-panel="${panel}"]`)?.setAttribute("open", "");
-    if (state.tutorial.step === 16) $("#snapThreshold").value = "400";
+    if (state.tutorial.step === 17) $("#snapThreshold").value = "400";
     scheduleEditorTutorialPosition();
   }
 
@@ -3611,8 +3714,8 @@
       ordinaryError("案例教程已完成");
       return;
     }
-    const retained = expectedStep === 12 && state.tutorial.flags?.createdCueId
-      ? {createdCueId:state.tutorial.flags.createdCueId} : {};
+    const retained = expectedStep === 13 && state.tutorial.flags?.createdCueId
+      ? {createdCueId:state.tutorial.flags.createdCueId, createdCueText:state.tutorial.flags.createdCueText} : {};
     state.tutorial.step += 1;
     state.tutorial.flags = retained;
     renderEditorTutorial();
@@ -3662,18 +3765,27 @@
       const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
       if (cue && Number(cue.start) < Number(anchors.referenceStart) - 0.0005) return advanceEditorTutorial(11);
     }
-    if (step === 12 && name === "insert_cue" && String(payload.text || "").trim() === "测试") {
-      const baselineCueIds = new Set(Object.values(anchors).filter(value => typeof value === "string" && value.startsWith("cue_")));
-      const created = state.view?.cue_views.find(cue => !baselineCueIds.has(cue.cue_id)
-        && cue.display_token_ids.map(id => state.view.token_views.find(token => token.token_id === id)?.text || "").join("").trim() === "测试");
-      if (created) flags.createdCueId = created.cue_id;
-      return created ? advanceEditorTutorial(12) : undefined;
+    if (step === 13 && name === "insert_cue" && String(payload.text || "").trim()) {
+      const baselineCueIds = new Set((anchors.baselineCueIds || []).map(String));
+      const gap = anchors.manualGap || {};
+      const tokenById = new Map((state.view?.token_views || []).map(token => [String(token.token_id), token]));
+      const created = state.view?.cue_views.find(cue => {
+        const text = (cue.display_token_ids || []).map(id => tokenById.get(String(id))?.text || "").join("").trim();
+        return cue.state === "active" && !baselineCueIds.has(String(cue.cue_id)) && text
+          && Number(cue.start) >= Number(gap.start) - .01 && Number(cue.end) <= Number(gap.end) + .01;
+      });
+      if (created) {
+        flags.createdCueId = created.cue_id;
+        flags.createdCueText = (created.display_token_ids || []).map(id => tokenById.get(String(id))?.text || "").join("").trim();
+      }
+      return created ? advanceEditorTutorial(13) : undefined;
     }
     const createdCueId = flags.createdCueId;
-    if (step === 13 && createdCueId && cueIds.has(createdCueId)) {
+    if (step === 14 && createdCueId && cueIds.has(createdCueId)) {
       if (name === "hide_cue") flags.hiddenCue = true;
       if (name === "restore_cue" && flags.hiddenCue) flags.restoredCue = true;
-      if (name === "purge_cue" && flags.restoredCue) return advanceEditorTutorial(13);
+      if (name === "purge_cue" && flags.restoredCue) return advanceEditorTutorial(14);
+      renderEditorTutorial();
     }
   }
 
@@ -3686,10 +3798,16 @@
     if (step === 4 && type === "hard_issue_next") return advanceEditorTutorial(4);
     if (step === 6 && type === "token_select" && detail.tokenId === state.tutorial.anchors?.referenceTwenty) return advanceEditorTutorial(6);
     if (step === 10 && type === "revision_restore" && detail.navigation === "undo") return advanceEditorTutorial(10);
-    if (step === 14 && type === "search" && detail.query === "控制" && detail.found) return advanceEditorTutorial(14);
-    if (step === 15 && type === "punctuation_apply" && detail.upperRemove?.includes("，") && detail.upperRemove?.includes("。")) return advanceEditorTutorial(15);
-    if (step === 16 && type === "auto_snap" && detail.smart && detail.threshold === 500) return advanceEditorTutorial(16);
-    if (step === 17 && type === "export") return advanceEditorTutorial(17);
+    if (step === 12 && type === "timeline_zoom" && detail.direction === "in") {
+      const gap = state.tutorial.anchors?.manualGap;
+      if (gap && Number(detail.pointer_time) >= Number(gap.start) - .02 && Number(detail.pointer_time) <= Number(gap.end) + .02) {
+        return advanceEditorTutorial(12);
+      }
+    }
+    if (step === 15 && type === "search" && detail.query === "控制" && detail.found) return advanceEditorTutorial(15);
+    if (step === 16 && type === "punctuation_apply" && detail.upperRemove?.includes("，") && detail.upperRemove?.includes("。")) return advanceEditorTutorial(16);
+    if (step === 17 && type === "auto_snap" && detail.smart && detail.threshold === 500) return advanceEditorTutorial(17);
+    if (step === 18 && type === "export") return advanceEditorTutorial(18);
   }
 
   function beginEditorTutorialState() {

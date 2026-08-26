@@ -7,6 +7,26 @@ from typing import Any
 import requests
 
 
+def _response_json_utf8(response: requests.Response) -> Any:
+    """Decode JSON bytes by the JSON UTF-8 contract, ignoring a bad charset header."""
+
+    return json.loads(response.content.decode("utf-8-sig"))
+
+
+def _response_text_utf8(response: requests.Response) -> str:
+    return response.content.decode("utf-8-sig", errors="replace")
+
+
+def _wire_json(value: Any) -> str:
+    """Keep the child-to-parent pipe ASCII-only across Windows code pages."""
+
+    return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+
+
+def _emit(value: Any) -> None:
+    print(_wire_json(value), flush=True)
+
+
 def main() -> int:
     request: dict[str, Any] = json.loads(sys.stdin.read())
     try:
@@ -20,27 +40,27 @@ def main() -> int:
             data=json.dumps(request["payload"], ensure_ascii=False).encode("utf-8"),
             timeout=int(request["timeout"]),
         )
-        body_text = response.text
+        body_text = _response_text_utf8(response)
         if not response.ok:
-            print(json.dumps({
+            _emit({
                 "ok": False,
                 "status": response.status_code,
                 "error": body_text[:1000],
-            }, ensure_ascii=False))
+            })
             return 0
         try:
-            body = response.json()
-        except ValueError:
-            print(json.dumps({
+            body = _response_json_utf8(response)
+        except (UnicodeDecodeError, ValueError):
+            _emit({
                 "ok": False,
                 "status": response.status_code,
                 "error": "provider response was not JSON",
-            }, ensure_ascii=False))
+            })
             return 0
-        print(json.dumps({"ok": True, "body": body}, ensure_ascii=False))
+        _emit({"ok": True, "body": body})
         return 0
     except requests.RequestException as exc:
-        print(json.dumps({"ok": False, "status": 0, "error": str(exc)}, ensure_ascii=False))
+        _emit({"ok": False, "status": 0, "error": str(exc)})
         return 0
 
 

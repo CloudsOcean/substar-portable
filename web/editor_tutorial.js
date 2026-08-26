@@ -106,6 +106,7 @@
         referenceTwenty:reference.twentyTokenId,
         referenceWan:reference.wanTokenId,
         referenceStart:Number(referenceCue.start),
+        baselineCueIds:activeCues.map(cue => cue.cue_id),
         manualGap
       }
     };

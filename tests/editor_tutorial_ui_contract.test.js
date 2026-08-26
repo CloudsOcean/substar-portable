@@ -28,14 +28,18 @@ test("first entry points both tutorial cases at the real editor tutorial command
 });
 
 test("editor tutorial covers the agreed hands-on workflow", () => {
-  for (const text of ["选择与播放", "定位问题字幕", "合并相邻 Cue", "在文字间切分", "判断参考稿差异", "编辑词元", "选择并合并词元", "撤销与重做", "调整时间边界", "创建新 Cue", "隐藏与删除", "查找字幕", "标点处理", "自动吸附", "导出字幕"]) {
+  for (const text of ["选择与播放", "定位问题字幕", "合并相邻 Cue", "在文字间切分", "判断参考稿差异", "编辑词元", "选择并合并词元", "撤销与重做", "调整时间边界", "放大时间轴", "创建新 Cue", "隐藏、恢复与删除", "查找字幕", "标点处理", "自动吸附", "导出字幕"]) {
     assert.match(js, new RegExp(text));
   }
-  assert.match(html, /案例教程 · 1 \/ 18/);
+  assert.match(html, /案例教程 · 1 \/ 19/);
   assert.match(js, /双击“20”进入编辑/);
   assert.match(js, /Ctrl＋左键逐个选择/);
   assert.match(js, /state\.shortcuts\.undo[\s\S]*state\.shortcuts\.redo/);
   assert.match(js, /#snapThreshold"\)\.value = "400"/);
+  assert.match(js, /type === "timeline_zoom" && detail\.direction === "in"/);
+  assert.match(js, /String\(payload\.text \|\| ""\)\.trim\(\)/);
+  assert.match(html, /id="editorTutorialTimelineTarget"/);
+  assert.match(html, /id="editorTutorialGhostMouse"/);
   assert.match(css, /\.editor-tutorial-card[^}]*width: min\(460px/);
   assert.match(css, /\.editor-tutorial-intro section \{[^}]*width: min\(360px[^}]*border-radius: 14px/s);
   assert.match(css, /\.editor-tutorial-intro button \{[^}]*border-radius: 8px[^}]*background: #1a1b25/s);

@@ -484,7 +484,21 @@ body.hide-editor-translations .translation-track { display: none; }
 #startEditorTutorial.tutorial-entry-target { position: relative; z-index: 505; border-color: #c28aff; color: #fff; background: #4b2672; box-shadow: 0 0 0 7px rgba(143,85,223,.32), 0 0 34px rgba(173,102,255,.72); }
 .editor-tutorial-shade { position: fixed; z-index: 500; background: rgba(3,5,10,.74); pointer-events: auto; }
 .editor-tutorial-spotlight { position: fixed; z-index: 501; box-sizing: border-box; border: 2px solid #8f55df; border-radius: 12px; box-shadow: 0 0 0 7px rgba(143,85,223,.18); pointer-events: none; transition: left .08s ease, top .08s ease, width .08s ease, height .08s ease; }
-.editor-tutorial-card { position: fixed; z-index: 502; box-sizing: border-box; width: min(460px, calc(100vw - 36px)); max-height: calc(100vh - 36px); overflow: auto; padding: 22px 28px 24px; border: 1px solid #7451a5; border-radius: 20px; background: #12131d; box-shadow: 0 24px 90px rgba(0,0,0,.58); pointer-events: auto; }
+.editor-tutorial-timeline-target { position: fixed; z-index: 502; box-sizing: border-box; min-width: 8px; border: 2px dashed #63e6d5; border-radius: 8px; background: rgba(67,224,203,.13); box-shadow: 0 0 0 5px rgba(67,224,203,.1), 0 0 22px rgba(67,224,203,.28); pointer-events: none; }
+.editor-tutorial-timeline-target::before { content: ""; position: absolute; left: 50%; top: -8px; bottom: -8px; width: 2px; background: #63e6d5; box-shadow: 0 0 9px rgba(99,230,213,.9); transform: translateX(-50%); }
+.editor-tutorial-timeline-target span { position: absolute; left: 50%; top: 6px; max-width: 180px; padding: 3px 7px; border-radius: 6px; color: #071411; background: #63e6d5; font-size: 11px; font-weight: 800; white-space: nowrap; transform: translateX(-50%); }
+.editor-tutorial-ghost-mouse { position: fixed; z-index: 503; width: 30px; height: 42px; pointer-events: none; filter: drop-shadow(0 5px 9px rgba(0,0,0,.6)); }
+.editor-tutorial-ghost-mouse i { display: block; box-sizing: border-box; width: 24px; height: 34px; border: 2px solid #fff; border-radius: 12px 12px 10px 10px; background: rgba(13,17,26,.92); }
+.editor-tutorial-ghost-mouse i::before { content: ""; position: absolute; left: 10px; top: 5px; width: 3px; height: 8px; border-radius: 3px; background: #63e6d5; }
+.editor-tutorial-ghost-mouse span { position: absolute; left: 15px; top: 28px; padding: 2px 5px; border: 1px solid #8054bd; border-radius: 5px; color: #fff; background: #54317e; font: 800 10px/1.2 "Segoe UI", sans-serif; white-space: nowrap; }
+.editor-tutorial-ghost-mouse.zoom i::before { animation: tutorial-wheel 1s ease-in-out infinite; }
+.editor-tutorial-ghost-mouse.drag { animation: tutorial-drag-left 1.4s ease-in-out infinite; }
+.editor-tutorial-ghost-mouse.click { animation: tutorial-click .9s ease-in-out infinite; }
+.editor-tutorial-ghost-mouse.context i::after { content: ""; position: absolute; left: 13px; top: 2px; width: 9px; height: 13px; border-radius: 0 9px 0 0; background: rgba(99,230,213,.42); }
+@keyframes tutorial-wheel { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes tutorial-drag-left { 0%,100% { transform: translateX(14px); } 55% { transform: translateX(-14px); } }
+@keyframes tutorial-click { 0%,100% { transform: scale(1); } 45% { transform: scale(.86); } }
+.editor-tutorial-card { position: fixed; z-index: 504; box-sizing: border-box; width: min(460px, calc(100vw - 36px)); max-height: calc(100vh - 36px); overflow: auto; padding: 22px 28px 24px; border: 1px solid #7451a5; border-radius: 20px; background: #12131d; box-shadow: 0 24px 90px rgba(0,0,0,.58); pointer-events: auto; }
 .editor-tutorial-card header, .editor-tutorial-card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .editor-tutorial-card > header { min-height: 0; padding: 0; border: 0; background: transparent; }
 .editor-tutorial-card header button { border: 0; background: transparent; color: #aaa4b4; font-size: 12px; }

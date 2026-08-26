@@ -9,6 +9,7 @@
     const issues = Array.isArray(review?.issues) ? review.issues : [];
     const failedBlocks = Array.isArray(review?.failed_blocks) ? review.failed_blocks : [];
     const completed = Boolean(String(review?.review_id || "").trim());
+    const encodingError = Boolean(review?.encoding_error);
     const basedOn = String(review?.based_on_revision_id || "").trim();
     const current = String(currentRevisionId || "").trim();
     const stale = completed && Boolean(basedOn && current && basedOn !== current);
@@ -31,6 +32,16 @@
         status:"等待开始",
         emptyMessage:"开始审阅后，疑似项会显示在这里。",
         buttonLabel:"开始审阅"
+      };
+    }
+    if (encodingError) {
+      return {
+        completed:true,
+        stale,
+        issueCount:0,
+        status:"历史审阅已损坏",
+        emptyMessage:"旧审阅响应存在编码损坏，已停止展示；请重新审阅当前版本。",
+        buttonLabel:"重新审阅"
       };
     }
 

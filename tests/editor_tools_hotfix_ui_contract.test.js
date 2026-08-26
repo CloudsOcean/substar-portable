@@ -21,10 +21,11 @@ test("release keeps the non-dubbing editor tool contract", () => {
 
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
-    "editor.css":"20260826-v101-hotfix-1",
-    "editor.js":"20260826-translation-soft-limit-1",
+    "editor.css":"20260826-tutorial-target-1",
+    "editor.js":"20260826-tutorial-target-1",
     "editor_document.js":"20260826-topology-stable-1",
-    "editor_timeline.js":"20260826-v101-hotfix-4",
+    "editor_timeline.js":"20260826-tutorial-target-1",
+    "editor_tutorial.js":"20260826-tutorial-target-1",
   };
   for (const [asset, version] of Object.entries(fingerprints)) {
     assert.match(html, new RegExp(`${asset.replace(".", "\\.")}\\?v=${version}`));

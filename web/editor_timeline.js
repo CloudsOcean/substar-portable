@@ -818,6 +818,15 @@
       viewStart = clamp(anchor - span * ratio, 0, Math.max(0, duration - span));
       viewEnd = viewStart + span;
       draw();
+      options.onZoom?.({
+        old_span:oldSpan,
+        new_span:span,
+        direction:span < oldSpan ? "in" : span > oldSpan ? "out" : "none",
+        anchor_time:anchor,
+        pointer_time:timeAt(pointer.x, pointer.width),
+        view_start:viewStart,
+        view_end:viewEnd
+      });
     }
 
     function handleKeyDown(event) {
@@ -932,6 +941,30 @@
         }
         draw();
       },
+      revealRange(start, end) {
+        const left = clamp(Math.min(number(start), number(end)), 0, duration);
+        const right = clamp(Math.max(number(start), number(end)), left, duration);
+        const span = visibleSpan();
+        const midpoint = (left + right) / 2;
+        viewStart = clamp(midpoint - span / 2, 0, Math.max(0, duration - span));
+        viewEnd = viewStart + span;
+        draw();
+      },
+      getTimeRect(start, end = start) {
+        const rect = canvas.getBoundingClientRect();
+        const leftTime = Math.min(number(start), number(end));
+        const rightTime = Math.max(number(start), number(end));
+        const left = rect.left + clamp(xAt(leftTime, rect.width), 0, rect.width);
+        const right = rect.left + clamp(xAt(rightTime, rect.width), 0, rect.width);
+        return {
+          left,
+          right:Math.max(left, right),
+          top:rect.top,
+          bottom:rect.bottom,
+          width:Math.max(0, right - left),
+          height:rect.height
+        };
+      },
       seek(time) {
         const value = clamp(number(time), 0, duration);
         if (media) media.currentTime = value;
@@ -950,6 +983,7 @@
           view_start:viewStart,
           view_end:viewEnd,
           duration,
+          playhead_time:number(media?.currentTime),
           preview:preview ? JSON.parse(JSON.stringify(preview)) : null
         };
       },

@@ -39,6 +39,16 @@ class Stage2Error(RuntimeError):
     pass
 
 
+def _response_json_utf8(response: requests.Response) -> Any:
+    """Decode provider JSON as UTF-8 even when a compatible API mislabels charset."""
+
+    return json.loads(response.content.decode("utf-8-sig"))
+
+
+def _response_text_utf8(response: requests.Response) -> str:
+    return response.content.decode("utf-8-sig", errors="replace")
+
+
 @dataclass
 class Cue:
     cue_id: int
@@ -280,7 +290,7 @@ def call_translation_model(
                         timeout=timeout,
                     )
                     response.raise_for_status()
-                    body = response.json()
+                    body = _response_json_utf8(response)
                 break
             except requests.RequestException as exc:
                 last_error = exc
@@ -288,7 +298,7 @@ def call_translation_model(
                     time.sleep(min(3.0, attempt * 0.75))
                     continue
                 detail = (
-                    getattr(exc.response, "text", "")[:1000]
+                    _response_text_utf8(exc.response)[:1000]
                     if getattr(exc, "response", None)
                     else ""
                 )
