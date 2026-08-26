@@ -157,6 +157,14 @@ body.editor-shell {
 .tone-reference-inserted-deleted { border-bottom: 2px dashed #4fc98b; opacity: .62; }
 .tone-reference-suggested { border-bottom: 2px dashed #4caee0; }
 .tone-reference-retained { border-bottom: 2px dashed #e1a84b; }
+.sidebar-legend i.tone-reference-applied,
+.sidebar-legend i.tone-reference-inserted,
+.sidebar-legend i.tone-reference-inserted-deleted,
+.sidebar-legend i.tone-reference-suggested,
+.sidebar-legend i.tone-reference-retained {
+  height: 0;
+  border-radius: 0;
+}
 .tone-external-ai-prooftranslation, .display-token.external-ai-prooftranslation { border-bottom: 2px solid var(--accent); }
 .tone-deleted { border: 1px dashed #7b8290; background: #343944; }
 .sidebar-usage { display: grid; gap: 4px; margin-top: 9px; padding-top: 9px; border-top: 1px solid #282d38; }

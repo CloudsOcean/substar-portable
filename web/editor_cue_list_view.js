@@ -33,31 +33,48 @@
     let context = null;
     let windowStart = 0;
     let windowEnd = 0;
-    let loading = false;
+    let windowLoading = false;
 
-    function captureViewport() {
-      const listRect = container.getBoundingClientRect();
-      const anchor = [...container.querySelectorAll(".cue-row")]
-        .find(row => row.getBoundingClientRect().bottom > listRect.top + 1);
-      return {
-        scrollTop:container.scrollTop,
-        cueId:anchor?.dataset.cueId || null,
-        offset:anchor ? anchor.getBoundingClientRect().top - listRect.top : 0
-      };
-    }
+    const reuseOrPatchRow = (existing, next) => {
+      if (!existing || existing.dataset.cueId !== next.dataset.cueId) return next;
+      if (existing.isEqualNode(next)) return existing;
+      const existingNumber = existing.querySelector(".cue-meta strong");
+      const nextNumber = next.querySelector(".cue-meta strong");
+      if (!existingNumber || !nextNumber) return next;
+      const authoritativeNumber = nextNumber.textContent;
+      nextNumber.textContent = existingNumber.textContent;
+      const differsOnlyByNumber = existing.isEqualNode(next);
+      nextNumber.textContent = authoritativeNumber;
+      if (!differsOnlyByNumber) return next;
+      existingNumber.textContent = authoritativeNumber;
+      return existing;
+    };
 
-    function restoreViewport(viewport) {
-      if (!viewport) return;
-      const anchor = viewport.cueId
-        ? [...container.querySelectorAll(".cue-row")].find(row => row.dataset.cueId === viewport.cueId)
-        : null;
-      if (!anchor) {
-        container.scrollTop = viewport.scrollTop;
-        return;
-      }
-      const listRect = container.getBoundingClientRect();
-      container.scrollTop += anchor.getBoundingClientRect().top - listRect.top - viewport.offset;
-    }
+    const reconcileRows = desiredRows => {
+      // One existing node may be reused for each authoritative Cue ID. Any
+      // historical duplicate is intentionally left out of `kept` and removed.
+      const existingById = new Map();
+      [...container.children].forEach(node => {
+        const cueId = node?.dataset?.cueId;
+        if (cueId && !existingById.has(cueId)) existingById.set(cueId, node);
+      });
+      const finalRows = desiredRows.map(next =>
+        reuseOrPatchRow(existingById.get(next.dataset.cueId), next)
+      );
+      finalRows.forEach((node, index) => {
+        const current = container.children[index] || null;
+        if (current === node) return;
+        if (current?.dataset?.cueId === node.dataset.cueId) {
+          container.replaceChild(node, current);
+          return;
+        }
+        container.insertBefore(node, current);
+      });
+      const kept = new Set(finalRows);
+      [...container.children].forEach(node => {
+        if (!kept.has(node)) node.remove();
+      });
+    };
 
     const notify = () => {
       if (typeof onWindowChange === "function") onWindowChange({start:windowStart, end:windowEnd});
@@ -90,8 +107,8 @@
     };
 
     container.addEventListener("scroll", () => {
-      if (!context || loading) return;
-      loading = true;
+      if (!context || windowLoading) return;
+      windowLoading = true;
       requestAnimationFrame(() => {
         if (container.scrollTop + container.clientHeight >= container.scrollHeight - 480 && windowEnd < context.cues.length) {
           const nextEnd = Math.min(context.cues.length, windowEnd + pageSize);
@@ -105,33 +122,31 @@
           windowStart = nextStart;
           notify();
         }
-        loading = false;
+        windowLoading = false;
       });
     }, {passive:true});
 
     function render({cues, tokenById, activeCueId, pageStart = 0, preservePage = false}) {
-      const viewport = preservePage ? captureViewport() : null;
       context = {cues, tokenById};
       const activeIndex = Math.max(0, cues.findIndex(cue => cue.cue_id === activeCueId));
       const preserved = preservedWindow(cues.length, windowStart, windowEnd);
       const keepWindow = preservePage
         && preserved.end > preserved.start
         && preserved.start < cues.length;
+      const preservedSize = Math.max(pageSize, preserved.end - preserved.start);
       const page = keepWindow
-        ? preserved
+        ? pageWindow(cues.length, preserved.start, activeIndex, preservedSize, true)
         : pageWindow(cues.length, pageStart, activeIndex, pageSize, false);
       windowStart = page.start;
       windowEnd = page.end;
-      const fragment = document.createDocumentFragment();
+      const desiredRows = [];
       for (let index = page.start; index < page.end; index += 1) {
         const cue = cues[index];
-        if (cue) fragment.append(renderCue(cue, index, tokenById));
+        if (cue) desiredRows.push(renderCue(cue, index, tokenById));
       }
-      // Rebuild the visible Cue window from the authoritative view in one DOM
-      // replacement.  Never reuse a changed row with the same Cue ID: doing so
-      // can leave an interactive stale duplicate after split/merge/undo.
-      container.replaceChildren(fragment);
-      restoreViewport(viewport);
+      // Preserve unchanged Cue DOM nodes. A split updates one row and inserts
+      // one row instead of replacing the whole scrolling surface.
+      reconcileRows(desiredRows);
       notify();
       return page;
     }

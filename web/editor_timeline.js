@@ -149,17 +149,27 @@
     const threshold = thresholdMs === null || thresholdMs === undefined
       ? null : clamp(number(thresholdMs), 0, 2000) / 1000;
     const forwardStarts = options.forwardStarts || {};
-    const starts = cues.map((cue, index) => {
-      const requested = Object.prototype.hasOwnProperty.call(forwardStarts, cue.cue_id)
-        ? number(forwardStarts[cue.cue_id], cue.start) : cue.start;
-      const minimum = index ? cues[index - 1].end : 0;
-      return clamp(requested, minimum, cue.start);
-    });
+    const starts = cues.map(cue => cue.start);
     const ends = cues.map(cue => cue.end);
+    for (let index = 0; index < cues.length; index += 1) {
+      const cue = cues[index];
+      if (!Object.prototype.hasOwnProperty.call(forwardStarts, cue.cue_id)) continue;
+      const requested = number(forwardStarts[cue.cue_id], cue.start);
+      const minimum = index ? starts[index - 1] + MIN_CUE_SECONDS : 0;
+      const snapped = clamp(requested, minimum, cue.start);
+      starts[index] = snapped;
+      if (index && snapped < ends[index - 1] - 0.0005) {
+        // A touching pair owns one boundary.  Move both sides together instead
+        // of rejecting a valid onset merely because the old ranges touched.
+        ends[index - 1] = snapped;
+      }
+    }
     if (threshold !== null) {
       for (let index = 0; index < cues.length - 1; index += 1) {
-        const gap = cues[index + 1].start - cues[index].end;
-        if (gap > 0.001 && gap <= threshold) ends[index] = Math.max(ends[index], starts[index + 1]);
+        const remainingGap = starts[index + 1] - ends[index];
+        if (remainingGap > 0.001 && remainingGap <= threshold) {
+          ends[index] = starts[index + 1];
+        }
       }
     }
     const changes = [];

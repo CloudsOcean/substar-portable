@@ -59,11 +59,13 @@ def smart_forward_snap(
     audio: Path,
     cue_starts: Iterable[Mapping[str, Any]],
     *,
-    search_window_ms: int = 150,
+    search_window_ms: int = 1000,
+    pre_roll_ms: int = 40,
 ) -> dict[str, Any]:
-    """Return only trustworthy silence-to-speech onsets before Cue starts."""
+    """Return trustworthy local speech onsets with a small leading cushion."""
 
-    search_seconds = max(0.05, min(0.3, int(search_window_ms) / 1000.0))
+    search_seconds = max(0.1, min(1.0, int(search_window_ms) / 1000.0))
+    pre_roll_seconds = max(0.0, min(0.1, int(pre_roll_ms) / 1000.0))
     prepared = [
         {
             "cue_id": str(item.get("cue_id", "")),
@@ -82,7 +84,7 @@ def smart_forward_snap(
             original = min(duration, max(0.0, item["start"]))
             minimum = min(original, item["minimum_start"])
             window_start = max(minimum, original - search_seconds)
-            if original - window_start < 0.015:
+            if original - window_start < 0.04:
                 continue
             rms, actual_start = _window_rms(
                 source,
@@ -92,31 +94,48 @@ def smart_forward_snap(
             original_index = min(
                 len(rms), max(0, int(round((original - actual_start) / 0.01)))
             )
+            before = rms[:original_index]
             post = rms[original_index : min(len(rms), original_index + 30)]
             if len(post) < 5:
                 continue
-            threshold = max(0.003, _percentile(post, 0.75) * 0.12)
+            signal_level = _percentile(post, 0.75)
+            noise_floor = _percentile(before, 0.25)
+            if signal_level < 0.002:
+                continue
+            threshold = max(
+                0.002,
+                min(
+                    signal_level * 0.45,
+                    max(noise_floor * 2.2, signal_level * 0.12),
+                ),
+            )
             candidates: list[tuple[int, float]] = []
-            for index in range(6, min(original_index + 1, len(rms) - 8)):
-                quiet = rms[index - 6 : index]
-                voiced = rms[index : index + 8]
+            for index in range(4, min(original_index + 1, len(rms) - 6)):
+                quiet = rms[index - 4 : index]
+                voiced = rms[index : index + 6]
                 quiet_ratio = sum(value < threshold for value in quiet) / len(quiet)
                 voiced_ratio = sum(value >= threshold for value in voiced) / len(voiced)
                 quiet_mean = sum(quiet) / len(quiet)
                 voiced_mean = sum(voiced) / len(voiced)
                 contrast = voiced_mean / max(quiet_mean, 0.0001)
-                if quiet_ratio >= 2 / 3 and voiced_ratio >= 5 / 8 and contrast >= 1.8:
+                if (
+                    quiet_ratio >= 0.5
+                    and voiced_ratio >= 2 / 3
+                    and voiced_mean >= threshold
+                    and contrast >= 1.5
+                ):
                     confidence = min(
                         1.0,
-                        0.45 * quiet_ratio
+                        0.4 * quiet_ratio
                         + 0.35 * voiced_ratio
-                        + 0.2 * min(contrast / 4, 1),
+                        + 0.25 * min(contrast / 4, 1),
                     )
                     candidates.append((index, confidence))
             if not candidates:
                 continue
-            index, confidence = candidates[-1]
-            snapped = max(minimum, actual_start + index * 0.01)
+            index, confidence = max(candidates, key=lambda item: (item[1], item[0]))
+            onset = actual_start + index * 0.01
+            snapped = max(minimum, onset - pre_roll_seconds)
             offset_ms = round((original - snapped) * 1000)
             if offset_ms < 15:
                 continue
@@ -132,6 +151,7 @@ def smart_forward_snap(
     return {
         "schema_version": "substar.smart-forward-snap.v1",
         "search_window_ms": round(search_seconds * 1000),
+        "pre_roll_ms": round(pre_roll_seconds * 1000),
         "analyzed": len(prepared),
         "changes": changes,
     }

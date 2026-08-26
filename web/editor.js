@@ -3336,7 +3336,7 @@
       state.projectId = state.projects.some(item => item.project_id === requested)
         ? requested : state.projects[0]?.project_id || "";
       renderProjectList();
-      if (state.projectId) await loadProject(state.projectId, {resetTutorial:true});
+      if (state.projectId) await loadProject(state.projectId);
     } catch (error) {
       ordinaryError(error.message);
     }
@@ -3957,7 +3957,7 @@
     const button = event.target.closest("[data-project-id]");
     if (!button) return;
     $("#projectMenu").open = false;
-    loadProject(button.dataset.projectId, {resetTutorial:true});
+    loadProject(button.dataset.projectId);
   });
   $("#saveCheckpoint").onclick = createCheckpoint;
   $("#taskInfoMenu").addEventListener("toggle", () => {
@@ -4192,7 +4192,7 @@
   $("#showTranslations").onchange = event => {
     document.body.classList.toggle("hide-editor-translations", !event.target.checked);
   };
-  $("#refreshDocumentBottom").onclick = () => state.projectId && loadProject(state.projectId, {resetTutorial:true});
+  $("#refreshDocumentBottom").onclick = () => state.projectId && loadProject(state.projectId);
   $("#undoDocument").onclick = undoLatestRevision;
   $("#redoDocument").onclick = redoLatestRevision;
   $("#resetDocument").onclick = resetToCheckpoint;

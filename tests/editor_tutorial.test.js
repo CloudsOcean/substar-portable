@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   tokenAfterTextBoundary,
   resolveBeginnerAnchors
@@ -73,5 +75,22 @@ const missing = resolveBeginnerAnchors({cue_views:[cueViews[0]], token_views:fir
 assert.equal(missing.ok, false);
 assert.ok(missing.missing.includes("“压缩｜章邯”切分边界"));
 assert.ok(missing.missing.includes("“20／二十万”参考差异"));
+
+const editorSource = fs.readFileSync(path.join(__dirname, "../web/editor.js"), "utf8");
+assert.match(
+  editorSource,
+  /#refreshDocumentBottom"\)\.onclick = \(\) => state\.projectId && loadProject\(state\.projectId\);/,
+  "ordinary refresh must reload the latest revision without resetting a tutorial project"
+);
+assert.match(
+  editorSource,
+  /restartEditorTutorial[\s\S]*?loadProject\(state\.projectId, \{restoreTranslation:false, resetTutorial:true, showTutorialIntro:false\}\)/,
+  "only the explicit tutorial restart path should request a tutorial reset"
+);
+assert.doesNotMatch(
+  editorSource,
+  /loadProject\((?:state\.projectId|button\.dataset\.projectId), \{resetTutorial:true\}\)/,
+  "opening, switching, and refreshing projects must preserve tutorial revisions"
+);
 
 console.log("editor_tutorial: ok");

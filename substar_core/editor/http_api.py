@@ -56,6 +56,7 @@ from substar_core.editor.api import (
     commit_single_operation,
 )
 from substar_core.editor.domain.cue_ordering import canonicalize_document_cues
+from substar_core.editor.domain.cue_timing import smart_snap_search_minimum
 from substar_core.editor.infrastructure import SQLiteProjectRepository
 from substar_core.editor.tasks.contracts import EditorAiTaskKind, EditorAiTaskState
 from substar_core.editor.tasks.repository import (
@@ -1273,7 +1274,8 @@ def preview_project_auto_snap(
         cue for cue in latest.document.cues if cue.state.value == "active"
     ]
     candidates: list[dict[str, Any]] = []
-    previous_end = 0.0
+    previous_cue = None
+    previous_is_manual = False
     for cue in active_cues:
         is_manual = all(
             not display_tokens[token_id].source_token_ids
@@ -1284,10 +1286,16 @@ def preview_project_auto_snap(
                 {
                     "cue_id": cue.cue_id,
                     "start": cue.start,
-                    "minimum_start": previous_end,
+                    "minimum_start": smart_snap_search_minimum(
+                        previous_start=(previous_cue.start if previous_cue else None),
+                        previous_end=(previous_cue.end if previous_cue else None),
+                        current_start=cue.start,
+                        previous_is_manual=previous_is_manual,
+                    ),
                 }
             )
-        previous_end = max(previous_end, cue.end)
+        previous_cue = cue
+        previous_is_manual = is_manual
     result = smart_forward_snap(audio, candidates)
     return {**result, "revision_id": latest.revision_id}
 

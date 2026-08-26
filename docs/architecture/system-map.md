@@ -238,7 +238,7 @@ flowchart LR
 | `translation_service` | `model_orchestration` | Translate meaning units with full group context, materialize one authoritative final text for each Cue, and terminate the owned translation process when cancellation is requested. | `substar_core/editor/translation/service.py`<br>`substar_core/editor/translation/contextual.py`<br>`scripts/run_production_translation.py` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference`<br>`translation_request` | `translation_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
 | `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference` | `calibration_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
 | `review_service` | `model_orchestration` | Produce independent source and translation issue tracks without mutating the document. | `substar_core/editor/http_api.py`<br>`substar_core/editor/review/contracts.py`<br>`prompts/production/editor/review.md` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference` | `source_review_result`<br>`translation_review_result` | `editor_task_repository` |
-| `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
+| `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
 | `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_ai_review_state.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`editor_operation_state`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info`<br>`external_ai_exchange` | `editor_operation`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`editor_operation_state`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
@@ -1641,7 +1641,7 @@ Change impact contracts: `editor_operation_state`<br>`editor_revision`<br>`sourc
 
 Layer: `domain_service`
 
-Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, and materialize verified packaged tutorial media into the canonical project locations.
+Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations.
 
 Code:
 
@@ -1660,6 +1660,7 @@ Invariants:
 - Media path is project-contained
 - Media kind prefers frozen stream evidence over filename inference
 - Waveform request is bounded
+- Smart forward snapping searches up to one second for a local silence-to-speech transition, preserves bounded pre-roll, may move touching non-manual Cues as one shared boundary, and treats real gaps and manual Cues as hard barriers
 - Launching an advanced packaged tutorial repairs both canonical audio locations from the hash-verified example asset
 - HTTP Range semantics remain valid
 
@@ -1673,7 +1674,7 @@ Recovery: Rebuild waveform cache from canonical audio; media relink is explicit.
 
 Reuses: `canonical audio`; restarts: `waveform cache generation`; terminal behavior: Return explicit missing-media response.
 
-Tests: `tests/test_media_info.py`, `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`, `tests/test_tutorial_examples.py`
+Tests: `tests/test_media_info.py`, `tests/test_smart_forward_snap.py`, `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`, `tests/test_tutorial_examples.py`
 
 Change impact modules: `editor_api`<br>`editor_ui`<br>`project_store`
 
@@ -1712,7 +1713,7 @@ Invariants:
 - Selected project_id never silently falls back to another project
 - The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner
 - Large Cue lists are windowed
-- Cue redraws atomically replace the visible window without reusing stale rows or reading/writing its scroll position
+- Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar
 - AI review distinguishes not started, completed with zero issues, partial failure and results based on an older revision
 - Every user-visible export opens the operating-system Save As picker before requesting or writing bytes
 - Document edits use the current revision basis
@@ -1729,7 +1730,7 @@ Invariants:
 - Left-clicking remains reserved for token selection
 - Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers
 - Reference choices appear above the selected token and remain reversible
-- Search supports contiguous token sequences, smart snap uses forward starts and bounded backward endpoints, and every editor control including speaker setup shares the operation lock contract
+- Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract
 
 Failure modes:
 
@@ -1742,7 +1743,7 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_ai_review_state.test.js`, `tests/editor_tutorial.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
+Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_ai_review_state.test.js`, `tests/editor_tutorial.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
 
 Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`media_service`<br>`project_exchange_service`
 
