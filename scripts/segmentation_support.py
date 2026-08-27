@@ -58,7 +58,7 @@ from substar_core.segmentation.hierarchy import (  # noqa: E402
 from substar_core.config import load_settings  # noqa: E402
 from substar_core.glossary import active_glossary, glossary_prompt  # noqa: E402
 from substar_core.policy import classify_language  # noqa: E402
-from substar_core.reasoning_capabilities import resolve_reasoning_effort  # noqa: E402
+from substar_core.reasoning_capabilities import reasoning_effort_for_request  # noqa: E402
 
 
 PROMPTS = {
@@ -189,7 +189,7 @@ def call_model(
     request_attempts: int = 2,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     requested_effort = str(reasoning_effort or "high")
-    effective_effort = resolve_reasoning_effort(base_url, model, requested_effort)
+    effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [

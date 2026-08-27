@@ -189,6 +189,9 @@ body.editor-shell {
 .editor-tool-sidebar .auto-snap-options { display: grid; gap: 6px; }
 .editor-tool-sidebar .auto-snap-option { box-sizing: border-box; width: 100%; min-height: 30px; display: grid; grid-template-columns: 14px minmax(0,1fr); align-items: center; gap: 8px; padding: 0 7px; border: 1px solid #292f3b; border-radius: 6px; background: #0d1016; color: #aeb4c1; font-size: 10px; cursor: pointer; }
 .editor-tool-sidebar .auto-snap-threshold { grid-template-columns: 14px 28px minmax(0,1fr) 18px; }
+.editor-tool-sidebar .auto-snap-smart-option { display: grid; grid-template-columns: 1fr; gap: 7px; padding: 7px; cursor: default; }
+.editor-tool-sidebar .auto-snap-mode-label { display: grid; grid-template-columns: 14px minmax(0,1fr); align-items: center; gap: 8px; cursor: pointer; }
+.editor-tool-sidebar .auto-snap-parameter { display: grid; grid-template-columns: minmax(0,1fr) 54px 18px; align-items: center; gap: 6px; color: #8992a2; }
 .editor-tool-sidebar .auto-snap-popover input[type="radio"] { width: 14px; min-width: 14px; height: 14px; margin: 0; padding: 0; }
 .editor-tool-sidebar .auto-snap-popover input[type="number"] { width: 100%; min-width: 0; height: 24px; padding: 0 5px; font: 10px/1 Consolas, monospace; text-align: right; }
 .editor-tool-sidebar .auto-snap-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }

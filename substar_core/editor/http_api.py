@@ -168,6 +168,8 @@ class RestoreRevisionRequest(BaseModel):
 
 class SmartForwardSnapRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
+    pre_roll_ms: int = Field(default=40, ge=0, le=100)
+    sensitivity: int = Field(default=50, ge=0, le=100)
 
 
 class PresentationRequest(BaseModel):
@@ -1296,7 +1298,12 @@ def preview_project_auto_snap(
             )
         previous_cue = cue
         previous_is_manual = is_manual
-    result = smart_forward_snap(audio, candidates)
+    result = smart_forward_snap(
+        audio,
+        candidates,
+        pre_roll_ms=payload.pre_roll_ms,
+        sensitivity=payload.sensitivity,
+    )
     return {**result, "revision_id": latest.revision_id}
 
 

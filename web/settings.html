@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20260826-v101-hotfix-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20260827-general-merge-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260814-8" />
@@ -30,8 +30,7 @@
           <p>全局默认值会用于新任务，运行中的项目仍使用自己的配置快照。</p>
         </div>
         <div class="category-list asset-sidebar-list" role="tablist">
-          <button class="category asset-sidebar-item active" data-panel="general" type="button"><span class="asset-sidebar-copy"><b>通用</b><small>文件与默认导出位置</small></span></button>
-          <button class="category asset-sidebar-item" data-panel="shortcuts" type="button"><span class="asset-sidebar-copy"><b>快捷键</b><small>统一配置编辑操作</small></span></button>
+          <button class="category asset-sidebar-item active" data-panel="general" type="button"><span class="asset-sidebar-copy"><b>通用</b><small>基础、快捷键与运行资源</small></span></button>
           <button
             class="category asset-sidebar-item"
             data-panel="api"
@@ -74,9 +73,6 @@
           <button class="category asset-sidebar-item" data-panel="prompts" type="button">
             <span class="asset-sidebar-copy"><b>提示词</b><small>编辑模板与查看路由</small></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
           </button>
-          <button class="category asset-sidebar-item" data-panel="advanced" type="button">
-            <span class="asset-sidebar-copy"><b>高级</b><small>Worker、云端与运行资源</small></span>
-          </button>
           <button class="category asset-sidebar-item" data-panel="personalization" type="button">
             <span class="asset-sidebar-copy"><b>个性化</b><small>外观、颜色与动效</small></span>
           </button>
@@ -87,20 +83,34 @@
         <form id="settingsForm">
           <section class="settings-panel active" data-settings-panel="general">
             <div class="panel-heading"><div><small>GENERAL</small><h2>通用设置</h2><p>导出文件时会由 Windows“另存为”窗口选择文件名与保存位置。</p></div></div>
-          </section>
-          <section class="settings-panel" data-settings-panel="shortcuts">
-            <div class="panel-heading"><div><small>KEYBOARD</small><h2>快捷键</h2><p>点击输入框后直接按下新的组合键。</p></div></div>
-            <div class="card shortcut-settings-card">
-              <div class="shortcut-row"><div><strong>撤销</strong><small>返回上一个编辑器文档版本</small></div><input name="shortcut_undo" data-shortcut-input="undo" readonly aria-label="撤销快捷键"><button type="button" class="secondary" data-shortcut-reset="undo">恢复默认</button></div>
-              <div class="shortcut-row"><div><strong>重做</strong><small>重新应用刚刚撤销的文档版本</small></div><input name="shortcut_redo" data-shortcut-input="redo" readonly aria-label="重做快捷键"><button type="button" class="secondary" data-shortcut-reset="redo">恢复默认</button></div>
-              <p id="shortcutMessage" class="shortcut-message wide">默认：撤销 Ctrl+Z，重做 Ctrl+Y。</p>
+            <div class="general-settings-stack">
+              <section class="settings-subsection" aria-labelledby="generalShortcutTitle">
+                <div class="subsection-heading"><small>KEYBOARD</small><h3 id="generalShortcutTitle">快捷键</h3><p>点击输入框后直接按下新的组合键。</p></div>
+                <div class="card shortcut-settings-card">
+                  <div class="shortcut-row"><div><strong>撤销</strong><small>返回上一个编辑器文档版本</small></div><input name="shortcut_undo" data-shortcut-input="undo" readonly aria-label="撤销快捷键"><button type="button" class="secondary" data-shortcut-reset="undo">恢复默认</button></div>
+                  <div class="shortcut-row"><div><strong>重做</strong><small>重新应用刚刚撤销的文档版本</small></div><input name="shortcut_redo" data-shortcut-input="redo" readonly aria-label="重做快捷键"><button type="button" class="secondary" data-shortcut-reset="redo">恢复默认</button></div>
+                  <p id="shortcutMessage" class="shortcut-message wide">默认：撤销 Ctrl+Z，重做 Ctrl+Y。</p>
+                </div>
+              </section>
+              <section class="settings-subsection" aria-labelledby="generalRuntimeTitle">
+                <div class="subsection-heading"><small>RUNTIME</small><h3 id="generalRuntimeTitle">高级运行设置</h3><p>控制后台 Worker 与共享资源。保存后在下次启动 Substar 时生效。</p></div>
+                <div class="card advanced-grid">
+                  <label class="field"><span>Worker 并发</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台 Worker 总数。</small></label>
+                  <label class="field"><span>云端任务并发</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>Qwen、AI 切分等云端调用共享，默认 4。</small></label>
+                  <label class="field"><span>媒体处理并发</span><input name="runtime_media_concurrency" type="number" min="1" max="8"><small>转码、抽取音轨与波形准备。</small></label>
+                  <label class="field"><span>本地 GPU 并发</span><input name="runtime_gpu_concurrency" type="number" min="1" max="4"><small>只约束本地模型；Qwen 云端不占用。</small></label>
+                  <label class="field"><span>下载并发</span><input name="runtime_download_concurrency" type="number" min="1" max="8"><small>模型与远端结果下载资源。</small></label>
+                  <div class="field"><span>Finalizer 提交</span><strong>按项目事务提交</strong><small>提交阶段只持有项目级短事务；同一项目保持串行与版本冲突保护。</small></div>
+                </div>
+              </section>
             </div>
           </section>
           <section class="settings-panel" data-settings-panel="api">
                         <div class="provider-workspace">
               <aside class="provider-rail" aria-label="模型服务提供商">
                 <div class="provider-rail-heading"><span>服务提供商</span></div>
-                <button class="provider-item active" type="button" data-model-provider="deepseek" data-base-url="https://api.deepseek.com"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>DeepSeek</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item active" type="button" data-model-provider="deepseek" data-base-url="https://api.deepseek.com" data-default-model="deepseek-v4-flash"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>DeepSeek</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
+                <button class="provider-item" type="button" data-model-provider="glm" data-base-url="https://open.bigmodel.cn/api/paas/v4" data-default-model="glm-5.3"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#model"></use></svg></span><span><b>GLM</b><small>智谱官方 API</small></span><span class="provider-item-state"></span></button>
                 <button class="provider-item" type="button" data-model-provider="openai" data-base-url="https://api.openai.com/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#model"></use></svg></span><span><b>OpenAI</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
                 <button class="provider-item" type="button" data-model-provider="siliconflow" data-base-url="https://api.siliconflow.cn/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#accelerate"></use></svg></span><span><b>硅基流动</b><small>OpenAI 兼容</small></span><span class="provider-item-state"></span></button>
                 <button class="provider-item" type="button" data-model-provider="aliyun" data-base-url="https://dashscope.aliyuncs.com/compatible-mode/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>阿里云百炼</b><small>兼容模式</small></span><span class="provider-item-state"></span></button>
@@ -509,20 +519,6 @@
             </div>
           </section>
 
-          <section class="settings-panel" data-settings-panel="advanced">
-            <div class="panel-heading">
-              <div><small>RUNTIME</small><h2>高级运行设置</h2><p>控制后台 Worker 与共享资源。保存后在下次启动 Substar 时生效。</p></div>
-            </div>
-            <div class="card advanced-grid">
-              <label class="field"><span>Worker 并发</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台 Worker 总数。</small></label>
-              <label class="field"><span>云端任务并发</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>Qwen、AI 切分等云端调用共享，默认 4。</small></label>
-              <label class="field"><span>媒体处理并发</span><input name="runtime_media_concurrency" type="number" min="1" max="8"><small>转码、抽取音轨与波形准备。</small></label>
-              <label class="field"><span>本地 GPU 并发</span><input name="runtime_gpu_concurrency" type="number" min="1" max="4"><small>只约束本地模型；Qwen 云端不占用。</small></label>
-              <label class="field"><span>下载并发</span><input name="runtime_download_concurrency" type="number" min="1" max="8"><small>模型与远端结果下载资源。</small></label>
-              <div class="field"><span>Finalizer 提交</span><strong>按项目事务提交</strong><small>提交阶段只持有项目级短事务；同一项目保持串行与版本冲突保护。</small></div>
-            </div>
-          </section>
-
           <section class="settings-panel" data-settings-panel="personalization">
             <div class="personalization-grid">
               <label class="field"><span>外观</span><select name="appearance_mode"><option value="dark">深色</option><option value="light">浅色</option></select><small>默认使用深色，可手动切换为浅色。</small></label>
@@ -615,6 +611,6 @@
         </form>
       </section>
     </main>
-  <script src="/assets/settings.js?v=20260826-hotfix-1"></script>
+  <script src="/assets/settings.js?v=20260827-general-merge-1"></script>
   </body>
 </html>

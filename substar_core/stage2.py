@@ -26,7 +26,7 @@ from .policy import (
     classify_language,
     track_lines,
 )
-from .reasoning_capabilities import resolve_reasoning_effort
+from .reasoning_capabilities import reasoning_effort_for_request
 from .segmentation.material import (
     display_normalize,
     illegal_lower_punctuation,
@@ -234,7 +234,7 @@ def call_translation_model(
     temperature: float = 0.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     requested_effort = str(reasoning_effort or "high")
-    effective_effort = resolve_reasoning_effort(base_url, model, requested_effort)
+    effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [

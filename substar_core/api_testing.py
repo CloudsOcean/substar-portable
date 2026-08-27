@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 import requests
 
 from .http_client import post
-from .reasoning_capabilities import resolve_reasoning_effort
+from .reasoning_capabilities import reasoning_effort_for_request
 
 
 class ApiTestError(RuntimeError):
@@ -68,8 +68,7 @@ def test_chat(
     reasoning_effort: str = "max",
     max_tokens: int = 32,
 ) -> dict[str, Any]:
-    requested_effort = reasoning_effort
-    effective_effort = resolve_reasoning_effort(base_url, model, reasoning_effort)
+    wire_effort = reasoning_effort_for_request(base_url, model, reasoning_effort)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -81,7 +80,7 @@ def test_chat(
         "thinking": {"type": thinking_mode},
     }
     if thinking_mode == "enabled":
-        payload["reasoning_effort"] = effective_effort
+        payload["reasoning_effort"] = wire_effort
     else:
         payload["temperature"] = 0
     try:
@@ -107,8 +106,8 @@ def test_chat(
         "message": f"连接成功，模型 {model} 已返回内容",
         "model": body.get("model", model),
         "usage": body.get("usage", {}),
-        "requested_reasoning_effort": requested_effort if thinking_mode == "enabled" else None,
-        "effective_reasoning_effort": effective_effort if thinking_mode == "enabled" else None,
+        "requested_reasoning_effort": reasoning_effort if thinking_mode == "enabled" else None,
+        "effective_reasoning_effort": wire_effort if thinking_mode == "enabled" else None,
     }
 
 

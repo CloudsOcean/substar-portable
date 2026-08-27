@@ -214,7 +214,13 @@ body {
   display: block;
 }
 .general-settings-card { grid-template-columns: 1fr; }
-.shortcut-settings-card { grid-template-columns: 1fr; gap: 0; padding-block: 8px; }
+.general-settings-stack { display: grid; gap: 30px; }
+.settings-subsection { display: grid; gap: 12px; }
+.subsection-heading { padding: 0 4px; }
+.subsection-heading small { color: var(--purple2); font-size: 10px; font-weight: 800; letter-spacing: .14em; }
+.subsection-heading h3 { margin: 4px 0; font-size: 18px; }
+.subsection-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.card.shortcut-settings-card { grid-template-columns: 1fr; gap: 0; padding-block: 8px; }
 .shortcut-row { display: grid; grid-template-columns: minmax(220px,1fr) 220px auto; align-items: center; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
 .shortcut-row > div { display: grid; gap: 4px; }
 .shortcut-row small, .shortcut-message { color: var(--muted); font-size: 11px; }

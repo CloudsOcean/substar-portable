@@ -61,11 +61,17 @@ def smart_forward_snap(
     *,
     search_window_ms: int = 1000,
     pre_roll_ms: int = 40,
+    sensitivity: int = 50,
 ) -> dict[str, Any]:
     """Return trustworthy local speech onsets with a small leading cushion."""
 
     search_seconds = max(0.1, min(1.0, int(search_window_ms) / 1000.0))
     pre_roll_seconds = max(0.0, min(0.1, int(pre_roll_ms) / 1000.0))
+    sensitivity_value = max(0, min(100, int(sensitivity)))
+    # Keep 50 exactly equivalent to the established detector.  Each 50-point
+    # move changes the energy threshold by one octave; confidence/contrast
+    # checks remain intact so higher sensitivity cannot accept steady noise.
+    sensitivity_factor = 2 ** ((50 - sensitivity_value) / 50)
     prepared = [
         {
             "cue_id": str(item.get("cue_id", "")),
@@ -100,14 +106,19 @@ def smart_forward_snap(
                 continue
             signal_level = _percentile(post, 0.75)
             noise_floor = _percentile(before, 0.25)
-            if signal_level < 0.002:
+            minimum_signal = 0.002 * sensitivity_factor
+            if signal_level < minimum_signal:
                 continue
-            threshold = max(
+            base_threshold = max(
                 0.002,
                 min(
                     signal_level * 0.45,
                     max(noise_floor * 2.2, signal_level * 0.12),
                 ),
+            )
+            threshold = min(
+                signal_level * 0.9,
+                max(minimum_signal, base_threshold * sensitivity_factor),
             )
             candidates: list[tuple[int, float]] = []
             for index in range(4, min(original_index + 1, len(rms) - 6)):
@@ -152,6 +163,7 @@ def smart_forward_snap(
         "schema_version": "substar.smart-forward-snap.v1",
         "search_window_ms": round(search_seconds * 1000),
         "pre_roll_ms": round(pre_roll_seconds * 1000),
+        "sensitivity": sensitivity_value,
         "analyzed": len(prepared),
         "changes": changes,
     }

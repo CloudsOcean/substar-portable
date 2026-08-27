@@ -27,8 +27,11 @@ test("reference break presets follow the selected source language", () => {
   assert.match(splitHtml, /按原文语言提供预设；可自定义/);
 });
 
-test("advanced settings expose real scheduler limits", () => {
-  assert.match(settingsHtml, /data-panel="advanced"/);
+test("general settings contain shortcuts and real scheduler limits", () => {
+  assert.match(settingsHtml, /data-settings-panel="general"/);
+  assert.match(settingsHtml, /name="shortcut_undo"/);
+  assert.match(settingsHtml, /name="shortcut_redo"/);
+  assert.doesNotMatch(settingsHtml, /data-panel="(?:shortcuts|advanced)"/);
   for (const name of [
     "runtime_worker_concurrency",
     "runtime_cloud_concurrency",

@@ -18,5 +18,5 @@ test("general settings use system save-as and retain editor shortcuts without du
 });
 
 test("hotfix fingerprints the changed settings stylesheet", () => {
-  assert.match(html, /settings\.css\?v=20260826-v101-hotfix-1/);
+  assert.match(html, /settings\.css\?v=20260827-general-merge-1/);
 });

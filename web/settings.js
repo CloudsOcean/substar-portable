@@ -14,6 +14,7 @@ let selectedModelProvider = "deepseek";
 let savedModelProvider = "deepseek";
 let preserveConnectedStateOnProviderSwitch = false;
 let reasoningCapabilityCache = new Map();
+let connectionModelCapability = null;
 let reasoningRefreshTimer = null;
 let promptCatalogData = null;
 let promptCatalogPromise = null;
@@ -105,6 +106,7 @@ function syncProviderItemStates() {
 
 const modelProviderNames = {
   deepseek: "DeepSeek",
+  glm: "GLM · 智谱",
   openai: "OpenAI",
   siliconflow: "硅基流动",
   aliyun: "阿里云百炼",
@@ -128,6 +130,7 @@ function escapeHtml(value) {
 function inferModelProvider(baseUrl) {
   const value = String(baseUrl || "").toLowerCase();
   if (value.includes("deepseek.com")) return "deepseek";
+  if (value.includes("bigmodel.cn")) return "glm";
   if (value.includes("openai.com")) return "openai";
   if (value.includes("siliconflow")) return "siliconflow";
   if (value.includes("dashscope") || value.includes("aliyuncs")) return "aliyun";
@@ -148,17 +151,17 @@ function syncModelProvider(provider = null) {
 const stageDefinitions = {
   segmentation: [
     ["segmentation", "语义切分", "结合上下文生成更自然的字幕切点"],
-    ["segmentation_repair", "Fallback · 切分坏块修复", "任一切分块验收失败后使用 Non-thinking 单块重跑"],
+    ["segmentation_repair", "Fallback · 切分坏块修复", "任一切分块验收失败后单块重跑；模型允许时关闭思考"],
   ],
   translation: [
     ["translation", "字幕翻译", "结合上下文生成最终 Cue 译文"],
-    ["translation_repair", "Fallback · 翻译坏块修复", "只重跑未返回或验收失败的意义组"],
+    ["translation_repair", "Fallback · 翻译坏块修复", "只重跑未返回或验收失败的意义组；模型允许时关闭思考"],
   ],
   audit: [
     // AI calibration now uses Flash Max to infer grammatical boundaries.
     ["calibration", "AI 校准", "自动应用大小写、标点与确定性文本修复；默认 Non-thinking"],
-    ["review", "AI 审阅", "输出专名、ASR、翻译、数字与一致性建议；默认 Non-thinking"],
-    ["audit_repair", "Fallback · 审校坏块修复", "任一三分钟块返回无效结果时使用 Non-thinking 单块重跑"],
+    ["review", "AI 审阅", "输出专名、ASR、翻译、数字与一致性建议；模型允许时关闭思考"],
+    ["audit_repair", "Fallback · 审校坏块修复", "任一三分钟块返回无效结果时单块重跑；模型允许时关闭思考"],
   ],
 };
 
@@ -234,13 +237,31 @@ async function fetchReasoningCapability(model) {
 
 function applyReasoningCapability(stage, capability) {
   const select = form.elements[`stage_${stage}_reasoning_effort`];
+  const thinkingSelect = form.elements[`stage_${stage}_thinking_mode`];
   const note = document.querySelector(`[data-stage="${stage}"] [data-reasoning-note]`);
   if (!select || !capability) return;
+  const declaredThinkingModes = Array.isArray(capability.supported_thinking_modes) && capability.supported_thinking_modes.length
+    ? capability.supported_thinking_modes.filter((value) => ["enabled", "disabled"].includes(value))
+    : ["disabled", "enabled"];
+  const thinkingModes = declaredThinkingModes.length ? declaredThinkingModes : ["disabled", "enabled"];
+  const requestedThinking = thinkingSelect?.value || "disabled";
+  if (thinkingSelect) {
+    thinkingSelect.innerHTML = thinkingModes.map((value) => {
+      const singleRequired = thinkingModes.length === 1;
+      const label = value === "enabled"
+        ? (singleRequired ? "思考（模型要求）" : "思考")
+        : (singleRequired ? "不思考（模型要求）" : "不思考");
+      return `<option value="${value}">${label}</option>`;
+    }).join("");
+    thinkingSelect.value = thinkingModes.includes(requestedThinking)
+      ? requestedThinking
+      : thinkingModes[0];
+  }
   const levels = Array.isArray(capability.supported_efforts) && capability.supported_efforts.length
     ? capability.supported_efforts
     : allReasoningEfforts;
   const current = select.value;
-  const mapped = capability.aliases?.[current] || current;
+  const mapped = capability.effort_selection_aliases?.[current] || current;
   select.innerHTML = levels
     .filter((value) => reasoningEffortLabels[value])
     .map((value) => `<option value="${value}">${reasoningEffortLabels[value]}</option>`)
@@ -263,13 +284,27 @@ async function refreshReasoningCapabilities() {
     }
   }));
   for (const [stage, capability] of entries) applyReasoningCapability(stage, capability);
-  const global = entries.find(([stage]) => stage === "segmentation")?.[1] || entries[0]?.[1];
+  try {
+    connectionModelCapability = await fetchReasoningCapability(
+      String(form.elements.translation_api_model?.value || "").trim(),
+    );
+  } catch (_) {
+    connectionModelCapability = null;
+  }
+  const global = connectionModelCapability
+    || entries.find(([stage]) => stage === "segmentation")?.[1]
+    || entries[0]?.[1];
   const summary = $("#reasoningCapabilitySummary");
   if (summary && global) {
     const names = (global.supported_efforts || allReasoningEfforts)
       .map((value) => reasoningEffortLabels[value] || value).join(" / ");
-    summary.textContent = `${global.verified ? "模型能力" : "模型能力未验证"}：${names}`;
+    const modes = global.supported_thinking_modes || ["disabled", "enabled"];
+    const thinkingLabel = modes.length === 1
+      ? ` · 仅${modes[0] === "enabled" ? "思考" : "不思考"}`
+      : "";
+    summary.textContent = `${global.verified ? "模型能力" : "模型能力未验证"}：${names}${thinkingLabel}`;
   }
+  syncStageControls();
 }
 
 function scheduleReasoningCapabilitiesRefresh() {
@@ -363,7 +398,7 @@ function syncStageControls() {
     form.elements[`stage_${stage}_reasoning_effort`].disabled = !enabled;
     form.elements[`stage_${stage}_temperature`].disabled = enabled;
     $(".stage-mode-pill", card).textContent = enabled
-      ? `思考 · ${form.elements[`stage_${stage}_reasoning_effort`].value}`
+      ? `思考 · ${reasoningEffortLabels[form.elements[`stage_${stage}_reasoning_effort`].value] || form.elements[`stage_${stage}_reasoning_effort`].value}`
       : "Non-thinking";
     card.classList.toggle("thinking-enabled", enabled);
   });
@@ -463,6 +498,7 @@ function setHeader(text, state = "") {
 
 function switchPanel(name) {
   if (name === "environment") name = "api";
+  if (["shortcuts", "advanced"].includes(name)) name = "general";
   $$(".category").forEach((button) =>
     button.classList.toggle("active", button.dataset.panel === name),
   );
@@ -688,7 +724,7 @@ function buildPayload() {
       payload[element.name] = Number(element.value);
     else payload[element.name] = element.value;
   }
-  // The current product uses one DeepSeek Flash endpoint for every LLM stage.
+  // Every LLM stage follows the active OpenAI-compatible model service.
   payload.alignment_api_provider = payload.translation_api_provider;
   payload.alignment_api_base_url = payload.translation_api_base_url;
   payload.alignment_api_model = payload.translation_api_model;
@@ -824,6 +860,10 @@ async function testConnection() {
   result.textContent = "正在请求模型，请稍候…";
   try {
     const f = form.elements;
+    const thinkingModes = connectionModelCapability?.supported_thinking_modes || ["disabled", "enabled"];
+    const thinkingMode = thinkingModes.includes("disabled") ? "disabled" : thinkingModes[0];
+    const efforts = connectionModelCapability?.supported_efforts || allReasoningEfforts;
+    const reasoningEffort = efforts.includes("high") ? "high" : efforts[0];
     const response = await api("/api/settings/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -836,8 +876,8 @@ async function testConnection() {
         auth_mode: f.translation_api_auth_mode.value,
         timeout_seconds: Number(f.translation_api_timeout_seconds.value),
         api_key: f.translation_api_key.value,
-        thinking_mode: "disabled",
-        reasoning_effort: "high",
+        thinking_mode: thinkingMode,
+        reasoning_effort: reasoningEffort,
       }),
     });
     result.textContent = response.message || "连接成功";
@@ -1015,9 +1055,22 @@ $$('[data-model-provider]').forEach((button) => {
   button.addEventListener("click", () => {
     const provider = button.dataset.modelProvider;
     const baseUrl = button.dataset.baseUrl;
+    const defaultModel = button.dataset.defaultModel;
+    const providerChanged = provider !== selectedModelProvider;
     selectedModelProvider = provider;
     if (provider !== "custom" || !form.elements.translation_api_base_url.value.trim()) {
       form.elements.translation_api_base_url.value = baseUrl;
+    }
+    if (providerChanged && defaultModel) {
+      form.elements.translation_api_model.value = defaultModel;
+      for (const definitions of Object.values(stageDefinitions)) {
+        for (const [stage] of definitions) {
+          const input = form.elements[`stage_${stage}_model`];
+          if (input) input.value = defaultModel;
+        }
+      }
+      reasoningCapabilityCache.clear();
+      scheduleReasoningCapabilitiesRefresh();
     }
     form.elements.translation_api_key.value = "";
     form.elements.clear_translation_api_key.checked = provider !== savedModelProvider;

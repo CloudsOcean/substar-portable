@@ -17,6 +17,7 @@ from .credential_store import (
     write_envelope,
 )
 from .recognition.registry import DEFAULT_RECOGNITION_PROFILE, get_recognition_profile
+from .reasoning_capabilities import resolve_reasoning_effort, resolve_thinking_mode
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -197,6 +198,34 @@ DEFAULTS: dict[str, Any] = {
 
 ALLOWED_KEYS = set(DEFAULTS)
 
+MODEL_STAGE_NAMES = (
+    "segmentation",
+    "segmentation_repair",
+    "translation",
+    "translation_repair",
+    "calibration",
+    "review",
+    "audit_repair",
+)
+
+
+def apply_declared_model_capabilities(settings: dict[str, Any]) -> dict[str, Any]:
+    """Normalize persisted stage choices against the model capability contract."""
+
+    base_url = str(settings.get("translation_api_base_url") or "")
+    fallback_model = str(settings.get("translation_api_model") or "")
+    for stage in MODEL_STAGE_NAMES:
+        model = str(settings.get(f"stage_{stage}_model") or fallback_model)
+        thinking_key = f"stage_{stage}_thinking_mode"
+        effort_key = f"stage_{stage}_reasoning_effort"
+        settings[thinking_key] = resolve_thinking_mode(
+            base_url, model, str(settings.get(thinking_key) or "disabled")
+        )
+        settings[effort_key] = resolve_reasoning_effort(
+            base_url, model, str(settings.get(effort_key) or "high")
+        )
+    return settings
+
 
 def _canonical_shortcut(value: Any) -> str | None:
     parts = [part.strip() for part in str(value or "").split("+")]
@@ -324,6 +353,7 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
         30,
         min(600, int(settings.get("translation_api_timeout_seconds", 300))),
     )
+    apply_declared_model_capabilities(settings)
 
     credentials = load_credentials()
     key = credentials.get(ASR_QWEN, "")
@@ -487,6 +517,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         merged[temperature_key] = max(
             0.0, min(2.0, float(merged[temperature_key]))
         )
+    apply_declared_model_capabilities(merged)
     for key in (
         "segmentation_enabled",
         "translation_enabled",

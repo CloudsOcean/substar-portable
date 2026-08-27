@@ -126,6 +126,16 @@
     };
     $("#undoDocument").title = `撤销（${state.shortcuts.undo}）`;
     $("#redoDocument").title = `重做（${state.shortcuts.redo}）`;
+    const preRollStored = localStorage.getItem("substar.editor.forward-snap-pre-roll-ms");
+    const preRoll = Math.max(0, Math.min(100,
+      preRollStored === null ? 40 : Number(preRollStored)
+    ));
+    const sensitivityStored = localStorage.getItem("substar.editor.forward-snap-sensitivity");
+    const sensitivity = Math.max(0, Math.min(100,
+      sensitivityStored === null ? 50 : Number(sensitivityStored)
+    ));
+    if ($("#forwardSnapPreRoll")) $("#forwardSnapPreRoll").value = String(preRoll);
+    if ($("#forwardSnapSensitivity")) $("#forwardSnapSensitivity").value = String(sensitivity);
   }
 
   async function loadEditorSettings() {
@@ -4054,6 +4064,12 @@
     const thresholdValue = Math.max(
       0, Math.min(2000, Number($("#snapThreshold").value) || 0)
     );
+    const forwardPreRollMs = Math.max(
+      0, Math.min(100, Number($("#forwardSnapPreRoll").value) || 0)
+    );
+    const forwardSensitivity = Math.max(
+      0, Math.min(100, Number($("#forwardSnapSensitivity").value) || 0)
+    );
     const status = $("#autoSnapStatus");
     $("#applyAutoSnap").disabled = true;
     try {
@@ -4064,7 +4080,11 @@
         const preview = await api(projectPath("/auto-snap/preview"), {
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({expected_revision_id:state.revision.revision_id})
+          body:JSON.stringify({
+            expected_revision_id:state.revision.revision_id,
+            pre_roll_ms:forwardPreRollMs,
+            sensitivity:forwardSensitivity
+          })
         });
         forwardStarts = Object.fromEntries((preview.changes || []).map(change => [
           String(change.cue_id), Number(change.snapped_start)
@@ -4104,6 +4124,18 @@
     );
     if (thresholdMode) thresholdMode.checked = true;
   };
+  const selectSmartForwardSnap = () => {
+    const smartMode = document.querySelector(
+      'input[name="forwardSnapMode"][value="smart"]'
+    );
+    if (smartMode) smartMode.checked = true;
+    const preRoll = Math.max(0, Math.min(100, Number($("#forwardSnapPreRoll").value) || 0));
+    const sensitivity = Math.max(0, Math.min(100, Number($("#forwardSnapSensitivity").value) || 0));
+    localStorage.setItem("substar.editor.forward-snap-pre-roll-ms", String(preRoll));
+    localStorage.setItem("substar.editor.forward-snap-sensitivity", String(sensitivity));
+  };
+  $("#forwardSnapPreRoll").oninput = selectSmartForwardSnap;
+  $("#forwardSnapSensitivity").oninput = selectSmartForwardSnap;
   $("#cueSplitView").onchange = event => {
     state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
     if (state.projectId) {

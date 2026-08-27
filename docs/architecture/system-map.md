@@ -1660,7 +1660,7 @@ Invariants:
 - Media path is project-contained
 - Media kind prefers frozen stream evidence over filename inference
 - Waveform request is bounded
-- Smart forward snapping searches up to one second for a local silence-to-speech transition, preserves bounded pre-roll, may move touching non-manual Cues as one shared boundary, and treats real gaps and manual Cues as hard barriers
+- Smart forward snapping searches only the available preceding gap up to one second, requires a local silence-to-speech transition, preserves a bounded pre-roll, and never crosses the previous Cue
 - Launching an advanced packaged tutorial repairs both canonical audio locations from the hash-verified example asset
 - HTTP Range semantics remain valid
 
