@@ -1407,7 +1407,9 @@ def delete_workbench_split_job(job_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="当前任务状态不能删除")
         job_dir = job.job_dir.resolve()
         JOBS.pop(job_id, None)
-    root = _relay_output_root()
+    # Keep containment checks stable when Windows expands an 8.3 TEMP path
+    # (for example RUNNER~1) while resolving the project directory.
+    root = _relay_output_root().resolve()
     if root not in job_dir.parents or not job_dir.is_dir():
         raise HTTPException(status_code=404, detail="切分任务目录不存在")
     trash_root = root / ".trash"
@@ -1756,7 +1758,9 @@ async def create_workbench_split_job(
     overrides = profile_settings(
         {**overrides, "recognition_profile_id": recognition_profile.id}
     )
-    output_root = _relay_output_root()
+    # Compare canonical paths. Test and portable callers may provide a relative
+    # relay root, while ``job_dir`` is resolved below.
+    output_root = _relay_output_root().resolve()
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_split_" + uuid.uuid4().hex[:6]
     job_dir = (output_root / job_id).resolve()
     if output_root not in job_dir.parents:
