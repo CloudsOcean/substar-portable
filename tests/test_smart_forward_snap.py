@@ -7,7 +7,7 @@ import unittest
 import wave
 
 from substar_core.editor.domain.cue_timing import smart_snap_search_minimum
-from substar_core.media.waveform_cache import smart_forward_snap
+from substar_core.media.waveform_cache import pcm_wave_frame_count, smart_forward_snap
 
 
 def _write_onset_fixture(
@@ -74,13 +74,28 @@ class SmartForwardSnapTests(unittest.TestCase):
             )
 
         self.assertEqual(result["search_window_ms"], 1000)
-        self.assertEqual(result["pre_roll_ms"], 40)
+        self.assertEqual(result["pre_roll_ms"], 20)
         self.assertEqual(result["sensitivity"], 50)
         self.assertEqual(len(result["changes"]), 1)
         change = result["changes"][0]
         self.assertGreaterEqual(change["snapped_start"], 0.42)
         self.assertLessEqual(change["snapped_start"], 0.49)
         self.assertGreater(change["offset_ms"], 200)
+
+    def test_placeholder_wave_sizes_use_physical_pcm_length(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            audio = Path(temporary) / "placeholder.wav"
+            _write_onset_fixture(audio, duration=1.2)
+            content = bytearray(audio.read_bytes())
+            content[4:8] = b"\xff\xff\xff\xff"
+            data_offset = content.index(b"data")
+            content[data_offset + 4 : data_offset + 8] = b"\xff\xff\xff\xff"
+            audio.write_bytes(content)
+            with wave.open(str(audio), "rb") as source:
+                self.assertGreater(source.getnframes(), 100_000_000)
+                frame_count = pcm_wave_frame_count(audio, source)
+
+        self.assertEqual(frame_count, 19_200)
 
     def test_adds_bounded_preroll_without_crossing_previous_cue(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -91,7 +106,7 @@ class SmartForwardSnapTests(unittest.TestCase):
                 [{"cue_id": "cue-1", "start": 0.72, "minimum_start": 0.48}],
             )
 
-        self.assertEqual(result["changes"][0]["snapped_start"], 0.48)
+        self.assertEqual(result["changes"][0]["snapped_start"], 0.5)
 
     def test_preroll_and_sensitivity_are_adjustable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

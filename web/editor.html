@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260827-auto-snap-tuning-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260828-ai-task-card-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
   <script src="/assets/theme/personalization.js?v=20260814-8"></script>
@@ -16,7 +16,7 @@
   <div class="editor-command-bar">
     <div class="command-project-zone">
       <details id="projectMenu" class="editor-command-menu"><summary>项目</summary><div class="editor-command-popover project-popover"><span class="project-list-heading">编辑项目</span><div id="projectList" class="project-list" role="listbox" aria-label="编辑项目"><span class="project-list-empty">读取项目…</span></div></div></details>
-      <button id="importProject" type="button">导入</button><input id="importProjectInput" type="file" accept=".zip,.json,application/zip,application/json" hidden>
+      <button id="importProject" type="button">导入</button><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
       <details id="taskInfoMenu" class="editor-command-menu task-info-menu disabled">
         <summary id="taskInfo" aria-disabled="true">任务信息</summary>
         <form id="taskInfoForm" class="editor-command-popover task-info-popover" aria-labelledby="taskInfoTitle">
@@ -57,8 +57,36 @@
           <button id="translateDocument" class="translation-command" type="button" disabled>执行</button>
         </div>
       </details>
-      <button id="aiCalibrate" type="button" disabled>AI 校准</button>
-      <button id="aiReview" type="button" disabled>AI 审阅</button>
+      <details id="aiCalibrationMenu" class="editor-command-menu calibration-menu disabled">
+        <summary id="aiCalibrate" aria-disabled="true">AI 校准</summary>
+        <div class="editor-command-popover calibration-popover">
+          <strong>AI 校准</strong>
+          <p>补充本次校准需要特别注意的专名、术语或简单要求；留空时沿用默认规则。</p>
+          <label for="aiCalibrationInstruction"><span>额外要求（可选）</span><textarea id="aiCalibrationInstruction" rows="4" maxlength="4000" placeholder="例如：Molly Tea 是品牌名，不要改写；重点核对人名和机构名"></textarea></label>
+          <button id="runAiCalibration" class="primary" type="button" disabled>执行校准</button>
+        </div>
+      </details>
+      <details id="aiReviewMenu" class="editor-command-menu external-review-menu disabled">
+        <summary id="aiReview" aria-disabled="true">外部 AI 审阅</summary>
+        <div class="editor-command-popover external-review-popover" aria-labelledby="externalReviewTitle">
+          <strong id="externalReviewTitle">外部 AI 审阅</strong>
+          <p>生成可粘贴到任意 Web AI 的审阅文本；当前与指定范围固定附带前后各 5 条 Cue。</p>
+          <fieldset class="external-review-scope">
+            <legend>审阅范围</legend>
+            <div class="external-review-scope-tabs" role="group" aria-label="审阅范围">
+              <button type="button" data-review-scope="full" aria-pressed="false">全部</button>
+              <button class="active" type="button" data-review-scope="current" aria-pressed="true">当前</button>
+              <button type="button" data-review-scope="range" aria-pressed="false">范围</button>
+            </div>
+            <label id="externalReviewRangeField" class="external-review-range-field hidden" for="externalReviewRange">
+              <span>输入 Cue 编号或区间</span>
+              <input id="externalReviewRange" type="text" inputmode="text" autocomplete="off" placeholder="例如：12-34 或 12，34，55">
+            </label>
+          </fieldset>
+          <label><span>自定义提示词</span><textarea id="externalReviewInstruction" rows="4" placeholder="可选，例如：重点核查专名、数字和上下文一致性"></textarea></label>
+          <div class="external-review-actions"><button id="copyExternalReview" class="primary" type="button">复制审阅内容</button><button id="downloadExternalReview" type="button">下载审阅内容（TXT）</button></div>
+        </div>
+      </details>
       <button id="referenceManuscript" type="button" disabled>参考文稿</button>
       <details class="editor-command-menu"><summary id="scriptProjectionSummary">繁简转换</summary><div class="editor-command-popover compact"><button id="convertOriginal" data-script-target="original" type="button" disabled>原文（不转换）</button><button id="convertSimplified" data-script-target="simplified" type="button" disabled>简体中文</button><button id="convertTraditional" data-script-target="traditional" type="button" disabled>繁体中文（通用）</button><button id="convertTaiwan" data-script-target="traditional_tw" type="button" disabled>繁体中文（台湾）</button><button id="convertHongKong" data-script-target="traditional_hk" type="button" disabled>繁体中文（香港）</button></div></details>
       <button id="detectSpeakers" type="button" disabled>说话人设置</button>
@@ -66,14 +94,11 @@
     <div class="command-actions command-right-zone">
       <button id="startEditorTutorial" class="hidden" type="button">启动教程</button>
       <details id="exportMenu" class="editor-command-menu export-menu"><summary id="exportDocument">导出</summary><div class="editor-command-popover export-popover">
-        <section aria-label="字幕成品"><strong>字幕成品</strong>
-          <button type="button" data-export-mode="source">仅 A 语言</button>
-          <button type="button" data-export-mode="target">仅 B 语言</button>
-          <button type="button" data-export-mode="ab-double">AB 双行</button>
-          <button type="button" data-export-mode="ab-single">AB 单行</button>
-        </section>
-        <section aria-label="外部工作流"><strong>外部工作流</strong>
-          <button type="button" data-exchange-export="external-ai-generation" title="包含原始材料、分块计划、正式提示词与预制代码；每阶段 JSON 可覆盖导回工程">外部 AI 生成</button>
+        <section aria-label="导出内容">
+          <button type="button" data-export-mode="source">上行字幕</button>
+          <button type="button" data-export-mode="target">下行字幕</button>
+          <button type="button" data-export-mode="ab-single">上下行单行字幕</button>
+          <button type="button" data-export-mode="ab-double">上下行双行字幕</button>
           <button type="button" data-exchange-export="subtitle-project" title="包含媒体和当前修订的完整可迁移工程">字幕工程</button>
         </section>
       </div></details>
@@ -99,7 +124,7 @@
         <strong>下行字幕</strong><input id="lowerPunctuationRemove" type="text" placeholder="消除符号" disabled><input id="lowerPunctuationSpace" type="text" placeholder="替换为空格" disabled><button id="applyPunctuation" type="button" disabled>应用标点规则</button>
       </div></details>
       <details id="autoSnapMenu" class="tool-accordion auto-snap-menu" data-tool-panel="auto-snap"><summary id="autoSnapMenuSummary" aria-disabled="true">自动吸附</summary><div class="tool-panel auto-snap-popover">
-        <fieldset><legend>向前吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="forwardSnapMode" value="none" checked><span>不吸附</span></label><div class="auto-snap-option auto-snap-smart-option"><label class="auto-snap-mode-label"><input type="radio" name="forwardSnapMode" value="smart"><span>智能吸附</span></label><label class="auto-snap-parameter"><span>前置静音余量</span><input id="forwardSnapPreRoll" type="number" min="0" max="100" step="5" value="40" aria-label="向前吸附前置静音余量"><span class="auto-snap-unit">ms</span></label><label class="auto-snap-parameter"><span>灵敏度</span><input id="forwardSnapSensitivity" type="number" min="0" max="100" step="5" value="50" aria-label="向前吸附灵敏度"><span class="auto-snap-unit">%</span></label></div></div></fieldset>
+        <fieldset><legend>向前吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="forwardSnapMode" value="none"><span>不吸附</span></label><div class="auto-snap-option auto-snap-smart-option"><label class="auto-snap-mode-label"><input type="radio" name="forwardSnapMode" value="smart" checked><span>智能吸附</span></label><label class="auto-snap-parameter"><span>前置静音余量</span><input id="forwardSnapPreRoll" type="number" min="0" max="100" step="5" value="20" aria-label="向前吸附前置静音余量"><span class="auto-snap-unit">ms</span></label><label class="auto-snap-parameter"><span>灵敏度</span><input id="forwardSnapSensitivity" type="number" min="0" max="100" step="5" value="50" aria-label="向前吸附灵敏度"><span class="auto-snap-unit">%</span></label></div></div></fieldset>
         <fieldset><legend>向后吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="backwardSnapMode" value="none"><span>不吸附</span></label><label class="auto-snap-option auto-snap-threshold"><input type="radio" name="backwardSnapMode" value="threshold" checked><span>阈值</span><input id="snapThreshold" type="number" min="0" max="2000" step="25" value="500"><span class="auto-snap-unit">ms</span></label></div></fieldset>
         <div class="auto-snap-actions"><button id="applyAutoSnap" type="button" disabled>执行</button><button id="undoAutoSnap" type="button" disabled>撤销</button></div><p id="autoSnapStatus" class="muted">智能向前只在检测到可信起音时移动。</p>
       </div></details>
@@ -202,43 +227,6 @@
     </section>
   </div>
 
-  <aside id="aiReviewFloat" class="ai-review-float hidden" aria-label="AI 审阅窗口">
-    <header id="aiReviewFloatHandle">
-      <div><strong>AI 审阅</strong><span id="aiReviewState">等待开始</span></div>
-      <button id="closeAiReview" type="button" title="关闭">×</button>
-    </header>
-    <div class="ai-review-controls">
-      <label><span>补充审阅重点</span><textarea id="aiReviewInstruction" rows="3" placeholder="例如专名、数字或译文一致性"></textarea></label>
-      <label class="ai-review-filter-row"><span>问题分类</span><select id="aiReviewFilter" aria-label="问题类型">
-        <option value="all">全部问题</option>
-        <optgroup label="源文">
-          <option value="source">全部源文问题</option>
-          <option value="suspected_misrecognition">疑似识别错误</option>
-          <option value="suspected_omission">疑似漏词</option>
-          <option value="suspected_repetition">疑似重复</option>
-          <option value="named_entity_or_term">专名或术语</option>
-          <option value="number_or_unit">数字或单位</option>
-          <option value="context_incoherence">上下文不连贯</option>
-          <option value="source_consistency">源文一致性</option>
-        </optgroup>
-        <optgroup label="译文">
-          <option value="translation">全部译文问题</option>
-          <option value="mistranslation">错译</option>
-          <option value="omission">漏译</option>
-          <option value="addition">增译</option>
-          <option value="factual_mismatch">事实不符</option>
-          <option value="polarity_or_logic">否定或逻辑</option>
-          <option value="reference_resolution">指代</option>
-          <option value="terminology_consistency">术语一致性</option>
-          <option value="grammar_or_fluency">语法或流畅度</option>
-          <option value="subtitle_flow">字幕衔接</option>
-        </optgroup>
-      </select></label>
-      <button id="startAiReview" class="primary" type="button">开始审阅</button>
-    </div>
-    <div id="aiReviewIssueList" class="ai-review-issue-list"><div class="ai-review-empty">尚未生成审阅建议</div></div>
-  </aside>
-
   <div id="textDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true">
     <form id="textDialogForm" class="text-dialog">
       <strong id="textDialogTitle">编辑文字</strong>
@@ -285,12 +273,12 @@
   <script src="/assets/editor_document_store.js?v=20260826-topology-stable-1"></script>
   <script src="/assets/editor_operation_queue.js?v=20260809-refactor-final-1"></script>
   <script src="/assets/editor_waveform_cache.js?v=20260809-refactor-final-1"></script>
-  <script src="/assets/editor_timeline.js?v=20260827-shared-boundary-snap-1"></script>
+  <script src="/assets/editor_timeline.js?v=20260828-shortcuts-1"></script>
   <script src="/assets/editor_cue_time_controller.js?v=20260809-cue-order-1"></script>
   <script src="/assets/editor_cue_list_view.js?v=20260827-keyed-cue-reconcile-1"></script>
-  <script src="/assets/editor_ai_review_state.js?v=20260826-review-state-2"></script>
+  <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260826-tutorial-target-1"></script>
-  <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
-  <script src="/assets/editor.js?v=20260827-auto-snap-tuning-1"></script>
+  <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
+  <script src="/assets/editor.js?v=20260828-advanced-tutorial-menus-1"></script>
 </body>
 </html>

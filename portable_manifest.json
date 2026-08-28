@@ -1,7 +1,7 @@
 {
   "schema_version": "substar.release-package.v1",
   "edition": "cloud",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "package_layout": "transparent-source-runtime",
   "source_commit": "build-time",
   "builtin_examples": [
@@ -20,8 +20,7 @@
     ],
     "editor_ai_tasks": [
       "translation",
-      "calibration",
-      "review"
+      "calibration"
     ]
   }
 }

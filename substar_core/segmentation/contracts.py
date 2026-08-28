@@ -265,12 +265,16 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         normalized_constraints["reference_break_symbols"] = symbols
 
     provider = value["provider"]
-    if not isinstance(provider, Mapping) or set(provider) != {
-        "base_url", "grouping", "repair"
-    }:
+    if not isinstance(provider, Mapping) or not set(provider).issubset({
+        "base_url", "auth_mode", "grouping", "repair"
+    }) or not {"base_url", "grouping", "repair"}.issubset(provider):
         raise InvalidTaskError("segmentation provider fields are invalid")
+    auth_mode = str(provider.get("auth_mode", "bearer")).strip().lower()
+    if auth_mode not in {"bearer", "api-key"}:
+        raise InvalidTaskError("provider.auth_mode is invalid")
     normalized_provider = {
         "base_url": _text(provider["base_url"], "provider.base_url", maximum=500).rstrip("/"),
+        "auth_mode": auth_mode,
         "grouping": _model_policy(provider["grouping"], "provider.grouping"),
         "repair": _model_policy(provider["repair"], "provider.repair"),
     }
@@ -317,10 +321,14 @@ def build_segmentation_request(
     default_model = str(settings.get("translation_api_model") or "deepseek-v4-flash")
 
     def policy(prefix: str, *, fallback: str = default_model) -> dict[str, Any]:
+        fallback_stage = prefix.endswith("_repair")
         return {
             "model": str(settings.get(f"{prefix}_model") or fallback),
-            "thinking_mode": str(settings.get(f"{prefix}_thinking_mode") or "disabled"),
-            "reasoning_effort": str(settings.get(f"{prefix}_reasoning_effort") or "high"),
+            "thinking_mode": str(
+                settings.get(f"{prefix}_thinking_mode")
+                or ("disabled" if fallback_stage else "enabled")
+            ),
+            "reasoning_effort": str(settings.get(f"{prefix}_reasoning_effort") or "low"),
             "max_tokens": int(settings.get(f"{prefix}_max_tokens") or 65536),
             "temperature": float(settings.get(f"{prefix}_temperature") or 0.0),
         }
@@ -368,6 +376,7 @@ def build_segmentation_request(
         },
         "provider": {
             "base_url": str(settings.get("translation_api_base_url") or "https://api.deepseek.com"),
+            "auth_mode": str(settings.get("translation_api_auth_mode") or "bearer"),
             "grouping": policy("stage_segmentation", fallback=default_model),
             "repair": policy("stage_segmentation_repair", fallback=default_model),
         },

@@ -32,7 +32,7 @@ class EditorAiTaskRepositoryTests(unittest.TestCase):
                 start_task(
                     root,
                     project_id="project-1",
-                    kind=EditorAiTaskKind.REVIEW,
+                    kind=EditorAiTaskKind.TRANSLATION,
                     based_on_revision_id="revision-1",
                 )
             with self.assertRaises(EditorAiTaskConflict):

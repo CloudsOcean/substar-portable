@@ -64,6 +64,7 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
         "display_name": display_name,
         "language": language,
         "target_language_mode": target,
+        "glossary_id": str(value.get("glossary_id") or "").strip()[:80],
         "source_hard_limit": source_limit,
         "target_hard_limit": target_limit,
         "updated_at": str(value.get("updated_at") or datetime.now(timezone.utc).isoformat()),
@@ -94,6 +95,7 @@ def load_task_info(job_dir: Path, project_id: str, *, materialize: bool = True) 
         "display_name": state.get("display_name") or state.get("filename") or project_id,
         "language": language,
         "target_language_mode": target,
+        "glossary_id": settings.get("glossary_id", ""),
         "source_hard_limit": preferences.get("source_hard_limit", _source_limit(settings, language)),
         "target_hard_limit": preferences.get("target_hard_limit", _source_limit(settings, target)),
     }, project_id)
@@ -115,6 +117,7 @@ def task_info_settings(info: Mapping[str, Any]) -> dict[str, Any]:
     result = {
         "language": source,
         "target_language_mode": target,
+        "glossary_id": str(info.get("glossary_id") or ""),
         "source_hard_limit": int(info["source_hard_limit"]),
         "target_hard_limit": int(info["target_hard_limit"]),
     }

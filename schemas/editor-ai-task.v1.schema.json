@@ -23,7 +23,7 @@
     "schema_version": {"const": "substar.editor-ai-task.v1"},
     "task_id": {"type": "string", "minLength": 1, "maxLength": 200},
     "project_id": {"type": "string", "minLength": 1, "maxLength": 200},
-    "kind": {"enum": ["calibration", "translation", "review"]},
+    "kind": {"enum": ["calibration", "translation"]},
     "state": {
       "enum": [
         "queued",

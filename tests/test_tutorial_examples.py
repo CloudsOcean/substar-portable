@@ -48,20 +48,9 @@ def test_advanced_tutorial_commits_packaged_stages_without_provider_calls(tmp_pa
     assert all(cue.target is not None for cue in translated_revision.document.cues)
     assert any(cue.mapping.get("mapping_type") == "N:M" for cue in translated_revision.document.cues)
 
-    review = http_api.apply_tutorial_stage(
-        project_id, "review",
-        http_api.TutorialStageRequest(expected_revision_id=translated["revision_id"]),
-    )
-    cue_ids = {cue.cue_id for cue in translated_revision.document.cues}
-    assert review["simulated"] is True
-    assert review["issues"]
-    assert all(set(issue["cue_ids"]) <= cue_ids for issue in review["issues"])
-    assert all(issue["cue_basis"] for issue in review["issues"])
-
     reset = http_api.reset_tutorial_project(project_id)
     reset_revision = store.load_revision(reset["revision_id"])
     assert all(cue.target is None for cue in reset_revision.document.cues)
-    assert not (tmp_path / project_id / "review" / "latest.json").exists()
     listed = http_api.list_projects()["projects"]
     assert listed[0]["display_name"] == "进阶教程"
     assert listed[0]["tutorial_case_id"] == "advanced-ai-v1"

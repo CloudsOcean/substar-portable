@@ -11,6 +11,7 @@ import requests
 
 from .http_client import post
 from .reasoning_capabilities import reasoning_effort_for_request
+from .openai_compat import auth_headers, endpoint_url
 
 
 class ApiTestError(RuntimeError):
@@ -18,16 +19,7 @@ class ApiTestError(RuntimeError):
 
 
 def endpoint(base_url: str, suffix: str) -> str:
-    base = base_url.rstrip("/")
-    if base.endswith(suffix):
-        return base
-    return base + suffix
-
-
-def auth_headers(api_key: str, auth_mode: str) -> dict[str, str]:
-    if auth_mode == "api-key":
-        return {"api-key": api_key}
-    return {"Authorization": f"Bearer {api_key}"}
+    return endpoint_url(base_url, suffix)
 
 
 def silence_wav() -> bytes:
@@ -65,8 +57,9 @@ def test_chat(
     auth_mode: str,
     timeout: int,
     thinking_mode: str = "disabled",
-    reasoning_effort: str = "max",
+    reasoning_effort: str = "low",
     max_tokens: int = 32,
+    strict_controls: bool = False,
 ) -> dict[str, Any]:
     wire_effort = reasoning_effort_for_request(base_url, model, reasoning_effort)
     payload: dict[str, Any] = {
@@ -77,11 +70,12 @@ def test_chat(
         "max_tokens": max(32, int(max_tokens)),
         "stream": False,
         "response_format": {"type": "json_object"},
-        "thinking": {"type": thinking_mode},
     }
     if thinking_mode == "enabled":
+        payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = wire_effort
-    else:
+    elif thinking_mode == "disabled":
+        payload["thinking"] = {"type": "disabled"}
         payload["temperature"] = 0
     try:
         response = post(
@@ -92,36 +86,62 @@ def test_chat(
         )
     except requests.RequestException as exc:
         raise ApiTestError(f"网络请求失败：{exc}") from exc
+    if not response.ok and not strict_controls and response.status_code in {400, 422}:
+        minimal_payload = {
+            key: value for key, value in payload.items()
+            if key not in {"response_format", "thinking", "reasoning_effort", "temperature"}
+        }
+        try:
+            response = post(
+                endpoint(base_url, "/chat/completions"),
+                headers={**auth_headers(api_key, auth_mode), "Content-Type": "application/json"},
+                json=minimal_payload,
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            raise ApiTestError(f"网络请求失败：{exc}") from exc
     if not response.ok:
         raise ApiTestError(safe_error(response))
     try:
         body = response.json()
-        content = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
+        if not isinstance(message, dict):
+            raise TypeError("message is not an object")
+        content = message.get("content")
+        reasoning_content = message.get("reasoning_content")
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ApiTestError("接口已响应，但返回格式不是 Chat Completions") from exc
-    if not str(content or "").strip():
-        raise ApiTestError("接口已响应，但模型返回空内容")
+    response_channel = (
+        "content" if str(content or "").strip()
+        else "reasoning_content" if str(reasoning_content or "").strip()
+        else "empty"
+    )
     return {
         "ok": True,
-        "message": f"连接成功，模型 {model} 已返回内容",
+        "message": (
+            f"连接成功，模型 {model} 已返回内容"
+            if response_channel != "empty"
+            else f"连接成功，模型 {model} 已接受请求（测试响应无正文）"
+        ),
         "model": body.get("model", model),
         "usage": body.get("usage", {}),
+        "response_channel": response_channel,
         "requested_reasoning_effort": reasoning_effort if thinking_mode == "enabled" else None,
         "effective_reasoning_effort": wire_effort if thinking_mode == "enabled" else None,
     }
 
 
-def probe_chat_reasoning_efforts(
+def probe_chat_thinking_modes(
     *,
     base_url: str,
     model: str,
     api_key: str,
     auth_mode: str,
     timeout: int,
-    efforts: list[str],
+    reasoning_effort: str = "high",
 ) -> dict[str, Any]:
-    results: dict[str, Any] = {}
-    for effort in dict.fromkeys(str(item).strip().lower() for item in efforts):
+    thinking_results: dict[str, Any] = {}
+    for mode in ("disabled", "enabled"):
         try:
             response = test_chat(
                 base_url=base_url,
@@ -129,19 +149,23 @@ def probe_chat_reasoning_efforts(
                 api_key=api_key,
                 auth_mode=auth_mode,
                 timeout=timeout,
-                thinking_mode="enabled",
-                reasoning_effort=effort,
+                thinking_mode=mode,
+                reasoning_effort=reasoning_effort,
                 max_tokens=256,
+                strict_controls=True,
             )
-            results[effort] = {
+            thinking_results[mode] = {
                 "accepted": True,
                 "effective": response.get("effective_reasoning_effort"),
             }
         except ApiTestError as exc:
-            results[effort] = {"accepted": False, "error": str(exc)}
+            thinking_results[mode] = {"accepted": False, "error": str(exc)}
     return {
-        "results": results,
-        "accepted_efforts": [effort for effort, value in results.items() if value["accepted"]],
+        "thinking_results": thinking_results,
+        "accepted_thinking_modes": [
+            mode for mode in ("disabled", "enabled")
+            if thinking_results.get(mode, {}).get("accepted")
+        ],
     }
 
 

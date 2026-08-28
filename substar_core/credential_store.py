@@ -13,6 +13,7 @@ ASR_GENERIC = "asr_generic"
 SEGMENT_DEEPSEEK = "segment_deepseek"
 TRANSLATE_DEEPSEEK = "translate_deepseek"
 ALIGN_DEEPSEEK = "align_deepseek"
+MODEL_PROVIDER_PREFIX = "model_provider:"
 
 CANONICAL_CREDENTIAL_ROLES = frozenset(
     {
@@ -42,9 +43,10 @@ def canonicalize_credentials(values: Mapping[str, Any]) -> dict[str, str]:
         if (value := clean_credential(raw))
     }
     return {
-        role: cleaned[role]
-        for role in CANONICAL_CREDENTIAL_ROLES
-        if role in cleaned
+        role: value
+        for role, value in cleaned.items()
+        if role in CANONICAL_CREDENTIAL_ROLES
+        or (role.startswith(MODEL_PROVIDER_PREFIX) and role[len(MODEL_PROVIDER_PREFIX):].replace("-", "_").isalnum())
     }
 
 

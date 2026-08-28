@@ -34,7 +34,7 @@ def subtitle_creation_projection(
         return {"status": "awaiting_edit", "progress": 1.0, "message": "项目已创建，可以进入编辑模式", "error": ""}
     progress = max(
         float(transcription.get("progress", 0.0)) * 0.35,
-        0.35 + float(segmentation.get("progress", 0.0)) * 0.6,
+        min(0.99, 0.35 + float(segmentation.get("progress", 0.0)) * 0.65),
     )
     if cancel_requested or "cancelling" in {transcription_state, segmentation_state}:
         finished = transcription_state in {"cancelled", "succeeded"} and segmentation_state in {"cancelled", "succeeded"}
@@ -60,7 +60,7 @@ def subtitle_creation_projection(
     if segmentation_state != "succeeded":
         return {
             "status": "queued" if segmentation_state == "queued" else "running",
-            "progress": 0.35 + float(segmentation.get("progress", 0.0)) * 0.6,
+            "progress": min(0.99, 0.35 + float(segmentation.get("progress", 0.0)) * 0.65),
             "message": str(segmentation.get("progress_message") or "正在生成可编辑字幕草稿"),
             "error": "",
         }

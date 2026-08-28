@@ -50,3 +50,11 @@ test("smart forward snap moves a touching pair as one shared boundary", () => {
     {cue_id:"right", edge:"start", time:1.45}
   ]);
 });
+
+test("waveform bars stop at the physical waveform window", () => {
+  assert.deepEqual(
+    timeline.waveformSampleRange(8.9, 9.1, 0, 9, 900),
+    {from:890, to:900}
+  );
+  assert.equal(timeline.waveformSampleRange(9.1, 9.3, 0, 9, 900), null);
+});

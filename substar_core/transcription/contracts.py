@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from substar_core.recognition.registry import get_recognition_profile
+from substar_core.qwen_enhancement import normalize_qwen_hotwords
 from substar_core.runtime.model import InvalidTaskError
 
 
@@ -176,23 +177,10 @@ def validate_transcription_request(payload: Mapping[str, Any]) -> dict[str, Any]
     language = _text(value["language"], "language", maximum=40)
     prompt = _text(value["prompt"], "prompt", maximum=20000, allow_empty=True)
 
-    raw_hotwords = value["hotwords"]
-    if not isinstance(raw_hotwords, list) or len(raw_hotwords) > 2000:
-        raise InvalidTaskError("hotwords must be an array with at most 2000 items")
-    hotwords: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for index, raw in enumerate(raw_hotwords):
-        item = _object(raw, f"hotwords[{index}]")
-        _exact_keys(item, {"text", "weight"}, f"hotwords[{index}]")
-        text = _text(item["text"], f"hotwords[{index}].text", maximum=300)
-        key = text.casefold()
-        if key in seen:
-            raise InvalidTaskError("hotwords must not contain duplicates")
-        seen.add(key)
-        weight = item["weight"]
-        if isinstance(weight, bool) or not isinstance(weight, int) or not 1 <= weight <= 5:
-            raise InvalidTaskError(f"hotwords[{index}].weight must be between 1 and 5")
-        hotwords.append({"text": text, "weight": weight})
+    try:
+        hotwords = normalize_qwen_hotwords(value["hotwords"])
+    except ValueError as exc:
+        raise InvalidTaskError(str(exc)) from exc
 
     raw_options = _object(value["options"], "options")
     unknown = set(raw_options) - TRANSCRIPTION_OPTION_KEYS

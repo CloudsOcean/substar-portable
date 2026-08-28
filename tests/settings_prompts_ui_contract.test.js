@@ -8,11 +8,10 @@ const html = fs.readFileSync(path.join(root, "web", "settings.html"), "utf8");
 const js = fs.readFileSync(path.join(root, "web", "settings.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "web", "settings.css"), "utf8");
 
-test("settings edit registered prompt components while keeping routes read-only", () => {
+test("settings edit registered prompt components without obsolete marketing chrome", () => {
   assert.match(html, /data-panel="prompts"/);
   assert.match(html, /data-settings-panel="prompts"/);
-  assert.match(html, /生产提示词/);
-  assert.match(html, /路由只读/);
+  assert.doesNotMatch(html, /PROMPT REGISTRY|prompt-readonly-pill|>路由只读</);
   assert.match(html, /id="promptSaveButton"/);
   assert.match(html, /textarea id="promptSourceView"/);
   assert.match(html, /创建项目时冻结快照/);

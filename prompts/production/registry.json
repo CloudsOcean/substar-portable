@@ -3,7 +3,7 @@
   "categories": [
     {"id": "segmentation", "title": "字幕切分", "description": "语义分组、句界证据与语言切分规则"},
     {"id": "translation", "title": "字幕翻译", "description": "上下文翻译、坏块修复与目标语言规则"},
-    {"id": "editor", "title": "编辑器 AI", "description": "源文校准与双轨质量审阅"},
+    {"id": "editor", "title": "编辑器 AI", "description": "源文校准"},
     {"id": "exchange", "title": "外部 AI", "description": "导出给 Web LLM 的分阶段工作流"}
   ],
   "prompts": {
@@ -113,18 +113,11 @@
         "default": ["exchange/external_ai_edit.md"]
       }
     },
-    "editor_review": {
-      "title": "AI 双轨审阅",
-      "category": "editor",
-      "description": "分别输出源文和译文问题，不自动修改文档。",
-      "version": "2026-08-19.1",
-      "variants": {"default": ["editor/review.md"]}
-    },
     "calibration": {
       "title": "源文 AI 校准",
       "category": "editor",
       "description": "应用大小写、标点、专名与确定性 ASR 修正。",
-      "version": "2026-08-19.1",
+      "version": "2026-08-28.1",
       "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
     }
   }

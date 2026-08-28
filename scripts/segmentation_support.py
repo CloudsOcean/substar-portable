@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from substar_core.openai_compat import auth_headers, endpoint_url
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -119,8 +120,7 @@ def chunk_material_for_model(chunk: SegmentationChunk) -> str:
 
 
 def endpoint(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+    return endpoint_url(base_url, "/chat/completions")
 
 
 def extract_json(text: str) -> dict[str, Any]:
@@ -177,6 +177,7 @@ def call_model(
     *,
     base_url: str,
     api_key: str,
+    auth_mode: str = "bearer",
     model: str,
     system_prompt: str,
     user_payload: str,
@@ -188,7 +189,7 @@ def call_model(
     temperature: float = 0.0,
     request_attempts: int = 2,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    requested_effort = str(reasoning_effort or "high")
+    requested_effort = str(reasoning_effort or "low")
     effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
         "model": model,
@@ -215,10 +216,7 @@ def call_model(
         try:
             response = requests.post(
                 endpoint(base_url),
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers={**auth_headers(api_key, auth_mode), "Content-Type": "application/json"},
                 json=payload,
                 timeout=timeout,
             )
@@ -355,7 +353,10 @@ def shared_context(task_text: str = "") -> str:
     return "\n\n".join(
         [
             punctuation_contract,
-            glossary_prompt(active_glossary(str(settings.get("project_name", "")))),
+            glossary_prompt(
+                active_glossary(str(settings.get("glossary_id", ""))),
+                include_target=False,
+            ),
             "# PRODUCT_SPEC\n" + read(SPEC),
             select_style_cases(task_text),
         ]
@@ -1925,7 +1926,7 @@ def command_api(args: argparse.Namespace) -> int:
         "glossary_sha256": text_sha256(
             json.dumps(
                 active_glossary(
-                    str(load_settings(include_secret=False).get("project_name", ""))
+                    str(load_settings(include_secret=False).get("glossary_id", ""))
                 ),
                 ensure_ascii=False,
                 sort_keys=True,

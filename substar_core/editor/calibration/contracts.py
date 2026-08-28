@@ -11,6 +11,7 @@ class CalibrationActionKind(str, Enum):
     SET_PUNCTUATION = "set_punctuation"
     REPLACE_TOKEN = "replace_token"
     REPLACE_SPAN = "replace_span"
+    MERGE_SPAN = "merge_span"
 
 
 class CalibrationDisposition(str, Enum):

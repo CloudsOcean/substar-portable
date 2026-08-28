@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260825-dual-tutorial-1">
+  <link rel="stylesheet" href="/assets/split.css?v=20260828-qwen-copy-upload-1">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
@@ -46,7 +46,7 @@
 
         <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
           <input id="videoInput" type="file" multiple accept="video/*,audio/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden>
-          <span class="drop-icon">↓</span>
+          <span class="drop-icon" aria-hidden="true"><svg class="ui-icon"><use href="/assets/ui-icons.svg?v=20260828-upload-media-1#upload-media"></use></svg></span>
           <strong id="dropTitle">拖入视频或音频</strong>
           <span id="dropHint">MP4 / MOV / MKV / WEBM / MP3 / WAV / M4A</span>
           <button class="secondary-button" type="button" id="chooseVideoButton">选择文件</button>
@@ -67,6 +67,7 @@
           <!-- Legacy wording retained for old static-contract readers only: 原文字符数上限 → 译文字符数上限 -->
           <div class="parameter-grid primary-parameters">
             <input id="recognitionProfileInput" type="hidden" value="qwen_cloud">
+            <input id="glossaryInput" type="hidden" value="">
             <label>
               <span>原文语言</span>
               <select id="languageInput">
@@ -102,6 +103,31 @@
               <small>按原文语言提供预设；可自定义，每个字符都会产生断点并保留在左侧字幕</small>
             </label>
           </div>
+
+          <details class="qwen-enhancement-settings">
+            <summary>Qwen 听写增强 <span>AI 填写 Prompt 与本次临时热词</span></summary>
+            <div class="qwen-enhancement-body">
+              <label class="qwen-field">
+                <span>节目内容与识别重点</span>
+                <textarea id="qwenAiBriefInput" rows="3" maxlength="4000" placeholder="描述本期节目内容、涉及领域，以及希望准确识别的人名、品牌、术语或外语词。&#10;直接点名的词语会作为超级热词。"></textarea>
+              </label>
+              <div class="qwen-assist-row">
+                <span id="qwenAssistStatus" aria-live="polite"></span>
+                <button id="qwenAssistButton" class="primary-button qwen-assist-button" type="button">AI 智能填写</button>
+              </div>
+              <div class="qwen-output-grid">
+                <label class="qwen-field">
+                  <span>Qwen Prompt <em id="qwenPromptCount">0 / 400</em></span>
+                  <textarea id="qwenPromptInput" rows="5" maxlength="400" placeholder="向 Qwen 说明节目领域、人物与主题，有助于结合上下文消歧，并提高专名识别准确率。&#10;使用所选原文语言组织，但不会限制音频中出现其他语言。"></textarea>
+                </label>
+                <label class="qwen-field">
+                  <span>临时热词 <em id="qwenHotwordCount">0 / 2000</em></span>
+                  <textarea id="qwenHotwordsInput" rows="5" placeholder="每行一个，可混合中英文或其他语言；可提高对应词语的识别准确率。&#10;无后缀默认权重 4；:5 是普通热词最高权重。&#10;:50 是必须重点命中的超级热词，最多 50 个。"></textarea>
+                </label>
+              </div>
+              <div class="qwen-glossary-placeholder"><b>词库热词</b><span>接口已预留，暂不自动注入本次听写。</span></div>
+            </div>
+          </details>
 
           <details class="language-limit-settings">
             <summary>字符数上限设置 <span>按原文与目标语言自动选用硬上限</span></summary>
@@ -153,18 +179,18 @@
             <button id="qwenQuickTest" class="quick-test-button" type="button">测试连接</button>
             <p id="qwenQuickResult" class="quick-test-result" aria-live="polite">使用 Qwen 云端文件听写默认配置</p>
           </article>
-          <article id="deepseekQuickCard" class="quick-provider-card" data-provider="deepseek">
+          <article id="glmQuickCard" class="quick-provider-card" data-provider="glm">
             <div class="quick-provider-heading">
               <span class="quick-provider-index">2</span>
-              <div><strong>DeepSeek LLM</strong><small>负责语义切分，以及后续翻译、校准和审阅</small></div>
-              <span id="deepseekQuickState" class="quick-provider-state">待配置</span>
+              <div><strong>智谱 GLM</strong><small>负责语义切分，以及后续翻译、校准和审阅</small></div>
+              <span id="glmQuickState" class="quick-provider-state">待配置</span>
             </div>
             <label class="quick-secret-field">
-              <span>DeepSeek API Key</span>
-              <div><input id="deepseekQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="deepseekQuickKey" aria-label="显示 DeepSeek 密钥">显示</button></div>
+              <span>智谱 API Key</span>
+              <div><input id="glmQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="glmQuickKey" aria-label="显示智谱密钥">显示</button></div>
             </label>
-            <button id="deepseekQuickTest" class="quick-test-button" type="button">测试连接</button>
-            <p id="deepseekQuickResult" class="quick-test-result" aria-live="polite">使用 DeepSeek 官方 API 与当前默认模型</p>
+            <button id="glmQuickTest" class="quick-test-button" type="button">测试连接</button>
+            <p id="glmQuickResult" class="quick-test-result" aria-live="polite">使用智谱官方 API 与 glm-5.3-flash</p>
           </article>
           <div class="quick-start-footer"><span id="quickStartProgress">完成 0 / 2</span><small>连接完成后，这里会自动变为流水线作业。</small></div>
         </section>
@@ -176,8 +202,9 @@
           </div>
           <div class="pipeline-jobs hidden" id="pipelineJobs" aria-live="polite"></div>
           <details class="runtime-log" id="runtimeLog" open>
-            <summary><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg> 任务进度（仅阶段与报错）</summary>
+            <summary>任务进度（仅阶段与报错）</summary>
             <div class="runtime-log-lines" id="runtimeLogLines"><p>暂无进度</p></div>
+            <div class="runtime-log-footer"><button id="copyRuntimeLog" type="button">复制全部</button></div>
           </details>
         </div>
       </aside>
@@ -204,6 +231,6 @@
       <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
     </form>
   </div>
-  <script src="/assets/split.js?v=20260825-tutorial-registration-1" defer></script>
+  <script src="/assets/split.js?v=20260828-qwen-copy-upload-1" defer></script>
 </body>
 </html>

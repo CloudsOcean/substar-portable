@@ -58,6 +58,7 @@
 - `set_punctuation`：只修改一个词元的轻量标点；
 - `replace_token`：替换一个词汇词元；
 - `replace_span`：替换连续词元，同时保持词元数量不变。
+- `merge_span`：把同一 Cue 内两个或更多连续词元合并为一个规范书写词元，例如 `u` + `s` → `U.S.`。
 
 证据类型只允许 `glossary`、`reference_document`、`document_consistency`、`context` 和 `user_instruction`。每条证据必须且只能包含 `kind` 和 `reference`。
 
@@ -68,7 +69,8 @@
 - `after_text` 必须保留本次不打算修改的标点。例如把词元 `T,` 替换为单词 `Tea` 时，必须使用 `before_text="T,"` 和 `after_text="Tea,"`。
 - `set_case`、`set_punctuation` 和 `replace_token` 必须只针对一个词元。
 - `replace_span` 必须针对连续词元，并保持空格分隔后的词元数量相同。
-- 不得插入或删除词元，不得返回空替换文本，不得加入首尾空白，也不得在单词元替换中加入空格。
+- `merge_span` 必须针对同一 Cue 内至少两个连续词元，`after_text` 必须是一个不含空白的非空词元。只有这些碎片明确构成同一个书写单位时才能使用；不得借此改写短语或跨 Cue 合并，并必须设置 `affects_translation=true`。
+- 除明确允许的同 Cue `merge_span` 外，不得插入或删除词元。不得返回空替换文本，不得加入首尾空白，也不得在单词元替换中加入空格。
 - `after_text` 与 `before_text` 相同的无效动作不得输出。
 - 每个 `action_id` 必须唯一；不得对同一词元输出相互竞争的多个 `apply` 动作。
 - 词汇替换以及任何可能改变语义的修正必须设置 `affects_translation=true`，否则设置为 `false`。

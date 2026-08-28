@@ -26,6 +26,7 @@ from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
 from substar_core.stage2 import call_translation_model
 from substar_core.storage import ProjectStore
+from substar_core.task_info import load_task_info
 
 
 def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -91,6 +92,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
             return call_translation_model(
                 base_url=str(settings["translation_api_base_url"]),
                 api_key=str(settings.get("translation_api_key") or ""),
+                auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
                 model=str(settings.get(f"stage_{stage_name}_model") or settings.get("translation_api_model") or "deepseek-v4-flash"),
                 system_prompt=system_prompt,
                 groups=prompt_groups,
@@ -421,7 +423,8 @@ def run_contextual_translation(
         "每个 meaning_units.target_text 必须是完整、唯一的目标语意义单元；"
         "你必须亲自决定 cue_assignments，程序只按引用原样显示，不生成或拆分文本。"
     )
-    glossary = glossary_prompt(active_glossary(work.name))
+    task_info = load_task_info(work, work.name)
+    glossary = glossary_prompt(active_glossary(str(task_info.get("glossary_id") or "")))
     if source_language == target_language:
         direction += " 本任务是同语种字幕校订：保留原意与语言，只做自然表达和 Cue 分配。"
     batches = execution_block_batches(revision.document, groups)

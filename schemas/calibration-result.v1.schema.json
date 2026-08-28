@@ -56,7 +56,7 @@
       "properties": {
         "action_id": {"type": "string", "minLength": 1, "maxLength": 200},
         "kind": {
-          "enum": ["set_case", "set_punctuation", "replace_token", "replace_span"]
+          "enum": ["set_case", "set_punctuation", "replace_token", "replace_span", "merge_span"]
         },
         "token_ids": {
           "type": "array",
@@ -83,6 +83,16 @@
         {
           "if": {"properties": {"kind": {"enum": ["set_case", "set_punctuation"]}}},
           "then": {"properties": {"token_ids": {"maxItems": 1}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "merge_span"}}},
+          "then": {
+            "properties": {
+              "token_ids": {"minItems": 2},
+              "after_text": {"pattern": "^\\S+$"},
+              "affects_translation": {"const": true}
+            }
+          }
         }
       ]
     }

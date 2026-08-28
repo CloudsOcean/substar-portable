@@ -111,6 +111,7 @@ def semantic_segmentation_arguments(
         "--output-dir", str(scratch),
         "--route", "semantic",
         "--base-url", provider["base_url"],
+        "--auth-mode", provider.get("auth_mode", "bearer"),
         "--grouping-model", grouping["model"],
         "--grouping-thinking-mode", grouping["thinking_mode"],
         "--grouping-reasoning-effort", grouping["reasoning_effort"],
@@ -603,6 +604,8 @@ def run(command: WorkerCommand) -> int:
     artifact_directory.mkdir(parents=True, exist_ok=True)
     work_directory.mkdir(parents=True, exist_ok=True)
     cancelled = threading.Event()
+    protocol_stdout = sys.stdout
+    emit_lock = threading.Lock()
     sequence = 0
 
     def emit(
@@ -613,20 +616,21 @@ def run(command: WorkerCommand) -> int:
         step: str | None = None,
     ) -> None:
         nonlocal sequence
-        sequence += 1
-        sys.stdout.write(
-            WorkerMessage(
-                task_id=command.task_id,
-                attempt=command.attempt,
-                sequence=sequence,
-                message_type=message_type,
-                occurred_at=utc_now(),
-                progress=progress,
-                step=step,
-                data=data or {},
-            ).to_json_line()
-        )
-        sys.stdout.flush()
+        with emit_lock:
+            sequence += 1
+            protocol_stdout.write(
+                WorkerMessage(
+                    task_id=command.task_id,
+                    attempt=command.attempt,
+                    sequence=sequence,
+                    message_type=message_type,
+                    occurred_at=utc_now(),
+                    progress=progress,
+                    step=step,
+                    data=data or {},
+                ).to_json_line()
+            )
+            protocol_stdout.flush()
 
     def read_controls() -> None:
         for line in sys.stdin:
@@ -735,6 +739,51 @@ def run(command: WorkerCommand) -> int:
 
             previous_key = os.environ.get("DEEPSEEK_API_KEY")
             previous_prompt_root = os.environ.get("SUBSTAR_PROMPT_ROOT")
+            last_semantic_report: tuple[int, int, int, int, int] | None = None
+
+            def report_semantic_progress(snapshot: dict[str, Any]) -> None:
+                nonlocal last_semantic_report
+                stages = snapshot.get("stages")
+                if not isinstance(stages, Mapping):
+                    return
+                row = stages.get("semantic_grouping")
+                if not isinstance(row, Mapping):
+                    return
+                planned = max(0, int(row.get("planned", 0)))
+                if planned <= 0:
+                    return
+                responses = min(planned, max(0, int(row.get("responses", 0))))
+                accepted = max(0, int(row.get("accepted", 0)))
+                failed = max(0, int(row.get("failed", 0)))
+                completed = min(planned, accepted + failed)
+                blocks = row.get("blocks")
+                repairing = sum(
+                    1
+                    for block in (blocks.values() if isinstance(blocks, Mapping) else [])
+                    if isinstance(block, Mapping) and block.get("status") == "repairing"
+                )
+                signature = (planned, responses, completed, repairing, failed)
+                if signature == last_semantic_report:
+                    return
+                last_semantic_report = signature
+                # In the project projection 0.230769 maps to 50%, while
+                # 0.923077 maps to 95%. Reserve the remainder for validation,
+                # document construction and atomic publication.
+                value = 0.230769 + 0.692308 * (completed / planned)
+                emit(
+                    WorkerMessageType.PROGRESS,
+                    {
+                        "message": "语义切分分块处理中",
+                        "planned": planned,
+                        "responses": responses,
+                        "completed": completed,
+                        "repairing": repairing,
+                        "failed": failed,
+                    },
+                    progress=value,
+                    step="segmentation.semantic_grouping",
+                )
+
             os.environ["DEEPSEEK_API_KEY"] = secret
             os.environ["SUBSTAR_PROMPT_ROOT"] = str(prompt_root)
             with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open(
@@ -742,14 +791,16 @@ def run(command: WorkerCommand) -> int:
             ) as stderr:
                 emit(
                     WorkerMessageType.PROGRESS,
-                    {"message": "Initializing semantic subtitle grouping"},
-                    progress=0.12,
+                    {"message": "正在初始化语义切分"},
+                    progress=0.230769,
                     step="segmentation.semantic_grouping",
                 )
                 try:
                     try:
                         with redirect_stdout(stdout), redirect_stderr(stderr):
-                            return_code = run_segmentation(argv)
+                            return_code = run_segmentation(
+                                argv, progress_callback=report_semantic_progress
+                            )
                     except SystemExit as exc:
                         return_code = exc.code if isinstance(exc.code, int) else 1
                     except Exception as exc:
@@ -798,7 +849,7 @@ def run(command: WorkerCommand) -> int:
         emit(
             WorkerMessageType.PROGRESS,
             {"message": "Validating editor document candidate"},
-            progress=0.86,
+            progress=0.95,
             step="segmentation.validation",
         )
         document.validate()

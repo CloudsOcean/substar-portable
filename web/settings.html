@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20260827-general-merge-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20260828-model-controls-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260814-8" />
@@ -68,7 +68,7 @@
             >
           </button>
           <button class="category asset-sidebar-item" data-panel="audit" type="button">
-            <span class="asset-sidebar-copy"><b>审校</b><small>AI 校准、审阅与 Fallback</small></span>
+            <span class="asset-sidebar-copy"><b>审校</b><small>AI 校准参数</small></span>
           </button>
           <button class="category asset-sidebar-item" data-panel="prompts" type="button">
             <span class="asset-sidebar-copy"><b>提示词</b><small>编辑模板与查看路由</small></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
@@ -82,18 +82,20 @@
       <section class="settings-content">
         <form id="settingsForm">
           <section class="settings-panel active" data-settings-panel="general">
-            <div class="panel-heading"><div><small>GENERAL</small><h2>通用设置</h2><p>导出文件时会由 Windows“另存为”窗口选择文件名与保存位置。</p></div></div>
             <div class="general-settings-stack">
               <section class="settings-subsection" aria-labelledby="generalShortcutTitle">
-                <div class="subsection-heading"><small>KEYBOARD</small><h3 id="generalShortcutTitle">快捷键</h3><p>点击输入框后直接按下新的组合键。</p></div>
+                <div class="subsection-heading"><h3 id="generalShortcutTitle">快捷键</h3></div>
                 <div class="card shortcut-settings-card">
                   <div class="shortcut-row"><div><strong>撤销</strong><small>返回上一个编辑器文档版本</small></div><input name="shortcut_undo" data-shortcut-input="undo" readonly aria-label="撤销快捷键"><button type="button" class="secondary" data-shortcut-reset="undo">恢复默认</button></div>
                   <div class="shortcut-row"><div><strong>重做</strong><small>重新应用刚刚撤销的文档版本</small></div><input name="shortcut_redo" data-shortcut-input="redo" readonly aria-label="重做快捷键"><button type="button" class="secondary" data-shortcut-reset="redo">恢复默认</button></div>
-                  <p id="shortcutMessage" class="shortcut-message wide">默认：撤销 Ctrl+Z，重做 Ctrl+Y。</p>
+                  <div class="shortcut-row"><div><strong>播放 / 暂停</strong><small>切换当前音视频播放状态</small></div><input name="shortcut_play_pause" data-shortcut-input="play_pause" readonly aria-label="播放暂停快捷键"><button type="button" class="secondary" data-shortcut-reset="play_pause">恢复默认</button></div>
+                  <div class="shortcut-row"><div><strong>隐藏 Cue</strong><small>隐藏当前 Cue 或时间轴选中的 Cue</small></div><input name="shortcut_hide_cue" data-shortcut-input="hide_cue" readonly aria-label="隐藏 Cue 快捷键"><button type="button" class="secondary" data-shortcut-reset="hide_cue">恢复默认</button></div>
+                  <div class="shortcut-row"><div><strong>时间轴缩放</strong><small>按住修饰键并滚动鼠标滚轮</small></div><select name="timeline_zoom_modifier" aria-label="时间轴缩放修饰键"><option value="Alt">Alt</option><option value="Ctrl">Ctrl</option><option value="Shift">Shift</option><option value="Meta">Meta</option></select><span class="shortcut-wheel-label">＋ 滚轮</span></div>
+                  <p id="shortcutMessage" class="shortcut-message wide">Space 与 Backspace 分别处理播放和 Cue，不冲突。</p>
                 </div>
               </section>
               <section class="settings-subsection" aria-labelledby="generalRuntimeTitle">
-                <div class="subsection-heading"><small>RUNTIME</small><h3 id="generalRuntimeTitle">高级运行设置</h3><p>控制后台 Worker 与共享资源。保存后在下次启动 Substar 时生效。</p></div>
+                <div class="subsection-heading"><h3 id="generalRuntimeTitle">高级</h3></div>
                 <div class="card advanced-grid">
                   <label class="field"><span>Worker 并发</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台 Worker 总数。</small></label>
                   <label class="field"><span>云端任务并发</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>Qwen、AI 切分等云端调用共享，默认 4。</small></label>
@@ -109,12 +111,7 @@
                         <div class="provider-workspace">
               <aside class="provider-rail" aria-label="模型服务提供商">
                 <div class="provider-rail-heading"><span>服务提供商</span></div>
-                <button class="provider-item active" type="button" data-model-provider="deepseek" data-base-url="https://api.deepseek.com" data-default-model="deepseek-v4-flash"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>DeepSeek</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
-                <button class="provider-item" type="button" data-model-provider="glm" data-base-url="https://open.bigmodel.cn/api/paas/v4" data-default-model="glm-5.3"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#model"></use></svg></span><span><b>GLM</b><small>智谱官方 API</small></span><span class="provider-item-state"></span></button>
-                <button class="provider-item" type="button" data-model-provider="openai" data-base-url="https://api.openai.com/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#model"></use></svg></span><span><b>OpenAI</b><small>官方 API</small></span><span class="provider-item-state"></span></button>
-                <button class="provider-item" type="button" data-model-provider="siliconflow" data-base-url="https://api.siliconflow.cn/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#accelerate"></use></svg></span><span><b>硅基流动</b><small>OpenAI 兼容</small></span><span class="provider-item-state"></span></button>
-                <button class="provider-item" type="button" data-model-provider="aliyun" data-base-url="https://dashscope.aliyuncs.com/compatible-mode/v1"><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><span><b>阿里云百炼</b><small>兼容模式</small></span><span class="provider-item-state"></span></button>
-                <button class="provider-item" type="button" data-model-provider="custom" data-base-url=""><span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#local"></use></svg></span><span><b>自定义服务</b><small>兼容端点</small></span><span class="provider-item-state"></span></button>
+                <div id="modelProviderList" class="provider-list" aria-live="polite"></div>
               </aside>
               <div class="provider-detail">
                 <header class="detail-heading">
@@ -128,7 +125,7 @@
                   name="translation_api_base_url"
                   value="https://api.deepseek.com"
                   autocomplete="off"
-                /><small>兼容 OpenAI Chat Completions 的服务地址</small>
+                /><small id="baseUrlHint">兼容 OpenAI Chat Completions 的服务地址</small>
               </div>
               <div class="field wide">
                 <label for="translation_api_key">API Key</label>
@@ -156,11 +153,10 @@
                   name="translation_api_model"
                   value="deepseek-v4-flash"
                   list="officialModelIds"
-                  autocomplete="off"
+                 autocomplete="off"
                 /><datalist id="officialModelIds"></datalist>
-                <div class="reasoning-capability-row"><small id="reasoningCapabilitySummary">正在读取模型能力…</small><button id="probeReasoning" class="secondary" type="button">探测推理档位</button></div>
-                <div id="reasoningProbeResult" class="test-result wide" aria-live="polite"></div>
-                <small>模型、思考与输出参数在「切分」「翻译」中按 Stage 设置。</small>
+                <select id="officialModelSelect" class="model-catalog-select" aria-label="可用模型"><option value="">正在读取可用模型…</option></select>
+                <div class="reasoning-capability-row"><small id="modelDiscoveryStatus">正在读取当前服务商的模型列表…</small><button id="refreshModelCatalog" class="secondary" type="button">刷新模型列表</button></div>
               </div>
               <div
                 id="testResult"
@@ -479,10 +475,6 @@
           </section>
 
           <section class="settings-panel prompt-settings-panel" data-settings-panel="prompts">
-            <div class="panel-heading prompt-panel-heading">
-              <div><small>PROMPT REGISTRY</small><h2>生产提示词</h2><p>可修改模型实际加载的模板、语言规则与构造案例；任务和语言的路由及组合顺序保持只读。</p></div>
-              <span class="prompt-readonly-pill"><i></i>路由只读</span>
-            </div>
             <div class="prompt-metrics" id="promptMetrics" aria-label="提示词规模">
               <article><small>提示词族</small><strong>—</strong><span>注册任务</span></article>
               <article><small>路由组合</small><strong>—</strong><span>语言与策略变体</span></article>
@@ -496,7 +488,7 @@
               <i class="prompt-flow-arrow">→</i>
               <div class="prompt-flow-branches">
                 <div><b>字幕切分</b><span>创建项目时冻结快照</span></div>
-                <div><b>翻译 / 审校 / 外部 AI</b><span>执行时读取当前注册表</span></div>
+                <div><b>翻译 / 校准</b><span>执行时读取当前注册表</span></div>
               </div>
             </section>
             <div class="prompt-category-tabs" id="promptCategoryTabs" role="tablist" aria-label="提示词分类"></div>
@@ -611,6 +603,6 @@
         </form>
       </section>
     </main>
-  <script src="/assets/settings.js?v=20260827-general-merge-1"></script>
+  <script src="/assets/settings.js?v=20260828-reasoning-defaults-1"></script>
   </body>
 </html>

@@ -52,6 +52,23 @@
     );
   }
 
+  function waveformSampleRange(start, end, windowStart, windowEnd, sampleCount) {
+    const count = Math.max(0, Number(sampleCount) || 0);
+    const clippedStart = Math.max(number(start), number(windowStart));
+    const clippedEnd = Math.min(number(end), number(windowEnd));
+    const span = number(windowEnd) - number(windowStart);
+    if (!count || span <= 0 || clippedEnd <= clippedStart) return null;
+    const indexAt = time => clamp(
+      Math.floor((time - windowStart) / span * count),
+      0,
+      count - 1
+    );
+    return {
+      from:indexAt(clippedStart),
+      to:Math.min(count, indexAt(clippedEnd) + 1)
+    };
+  }
+
   function cueAtTime(cues, time) {
     let low = 0;
     let high = cues.length - 1;
@@ -401,13 +418,16 @@
       const statsKey = `${waveformStart}:${waveformEnd}:${viewStart.toFixed(3)}:${viewEnd.toFixed(3)}:${width}`;
       const visibleValues = [];
       const waveformSpan = Math.max(.001, waveformEnd - waveformStart);
+      const visibleWaveformStart = Math.max(viewStart, waveformStart);
+      const visibleWaveformEnd = Math.min(viewEnd, waveformEnd);
+      if (visibleWaveformEnd <= visibleWaveformStart) return;
       const indexAt = time => clamp(
         Math.floor((time - waveformStart) / waveformSpan * waveform.length),
         0,
         waveform.length - 1
       );
-      const startIndex = indexAt(viewStart);
-      const endIndex = Math.min(waveform.length, indexAt(viewEnd) + 1);
+      const startIndex = indexAt(visibleWaveformStart);
+      const endIndex = Math.min(waveform.length, indexAt(visibleWaveformEnd) + 1);
       const sampleStep = Math.max(1, Math.floor((endIndex - startIndex) / Math.max(200, width)));
       for (let index = startIndex; index < endIndex; index += sampleStep) {
         visibleValues.push(clamp(Math.abs(number(waveform[index])), 0, 1));
@@ -424,8 +444,15 @@
       context.lineCap = "round";
       context.beginPath();
       for (let x = 2; x < width; x += WAVEFORM_BAR_STEP) {
-        const from = indexAt(timeAt(x - WAVEFORM_BAR_STEP / 2, width));
-        const to = Math.min(waveform.length, indexAt(timeAt(x + WAVEFORM_BAR_STEP / 2, width)) + 1);
+        const range = waveformSampleRange(
+          timeAt(x - WAVEFORM_BAR_STEP / 2, width),
+          timeAt(x + WAVEFORM_BAR_STEP / 2, width),
+          waveformStart,
+          waveformEnd,
+          waveform.length
+        );
+        if (!range) continue;
+        const {from, to} = range;
         let raw = 0;
         for (let index = from; index < to; index += 1) {
           raw = Math.max(raw, clamp(Math.abs(number(waveform[index])), 0, 1));
@@ -816,7 +843,10 @@
     }
 
     function handleWheel(event) {
-      if (!event.altKey || !view) return;
+      const modifier = String(typeof options.zoomModifier === "function"
+        ? options.zoomModifier() : options.zoomModifier || "Alt").toLowerCase();
+      const pressed = ({alt:event.altKey, ctrl:event.ctrlKey, shift:event.shiftKey, meta:event.metaKey})[modifier];
+      if (!pressed || !view) return;
       event.preventDefault();
       const pointer = pointerPosition(event);
       const oldSpan = visibleSpan();
@@ -840,7 +870,10 @@
     }
 
     function handleKeyDown(event) {
-      if (event.key !== "Backspace" || !selectedCueId) return;
+      const expected = String(typeof options.hideCueShortcut === "function"
+        ? options.hideCueShortcut() : options.hideCueShortcut || "Backspace").toLowerCase();
+      const actual = event.key === " " ? "space" : String(event.key || "").toLowerCase();
+      if (actual !== expected.toLowerCase() || !selectedCueId) return;
       const target = event.target;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       event.preventDefault();
@@ -1023,6 +1056,7 @@
     SHARED_EPSILON,
     activeCues,
     cueAtTime,
+    waveformSampleRange,
     rangesTouch,
     boundaryMode,
     previewBoundaryChange,

@@ -7,12 +7,18 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 class StageProgress:
-    def __init__(self, path: Path | None) -> None:
+    def __init__(
+        self,
+        path: Path | None,
+        *,
+        on_update: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.path = path
+        self.on_update = on_update
         self.lock = threading.Lock()
         self.data: dict[str, Any] = {
             "schema_version": "substar.stage-progress.v1",
@@ -47,6 +53,7 @@ class StageProgress:
                 for block_id in block_ids or []:
                     self._block(row, block_id)
                 self._write()
+        self._notify()
 
     def event(
         self,
@@ -94,6 +101,7 @@ class StageProgress:
                     if detail:
                         block["detail"] = detail
                 self._write()
+        self._notify()
 
     def finish(
         self,
@@ -116,6 +124,7 @@ class StageProgress:
                     else ("completed_with_review" if with_review else "completed")
                 )
                 self._write()
+        self._notify()
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -222,3 +231,16 @@ class StageProgress:
                     return
                 time.sleep(delay)
                 delay = min(delay * 2, 0.25)
+
+    def _notify(self) -> None:
+        """Project an auxiliary ledger update without making it task authority."""
+        if self.on_update is None:
+            return
+        with self.lock:
+            snapshot = json.loads(json.dumps(self.data))
+        try:
+            self.on_update(snapshot)
+        except Exception:
+            # Progress presentation is auxiliary and must never abort accepted
+            # semantic work or invalidate the durable file ledger.
+            return

@@ -10,7 +10,7 @@ import sys
 import threading
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -96,6 +96,23 @@ def last_word(text: str) -> str:
 
 def display_text(units: list[Any], left: int, right: int) -> str:
     return layout_tokens([unit_text(unit) for unit in units[left : right + 1]])
+
+
+def finalize_display_cuts(
+    local_cuts: set[int], execution_seams: list[int], *, final_alignment_index: int
+) -> set[int]:
+    """Keep every independent model-call seam as a final Cue boundary.
+
+    Semantic grouping validates each execution block in isolation, so neither
+    adjacent call has authorized a Cue that crosses their shared seam.  Losing
+    that seam can re-join two individually valid Cue fragments and create a
+    post-validation hard-limit violation.
+    """
+    return {
+        int(value)
+        for value in [*local_cuts, *execution_seams]
+        if int(value) < int(final_alignment_index)
+    }
 
 
 def frozen_layout_kwargs(args: Any) -> dict[str, Any]:
@@ -294,8 +311,9 @@ def planning_skip_reason(units: list[Any], target_seconds: int) -> str:
 
 def model_json(
     *, model: str, base_url: str, api_key: str, system: str, user: Any, timeout: int,
+    auth_mode: str = "bearer",
     telemetry: list[dict[str, Any]] | None = None, stage: str = "", block_id: str = "",
-    thinking_mode: str = "enabled", reasoning_effort: str = "max",
+    thinking_mode: str = "enabled", reasoning_effort: str = "low",
     max_tokens: int = 131072, temperature: float = 0.0,
 ) -> dict[str, Any]:
     value: dict[str, Any] | None = None
@@ -315,6 +333,7 @@ def model_json(
             value, call_info = call_model(
                 base_url=base_url,
                 api_key=api_key,
+                auth_mode=auth_mode,
                 model=model,
                 system_prompt=system,
                 user_payload=json.dumps(user, ensure_ascii=False),
@@ -640,6 +659,7 @@ def request_semantic_grouping_block(
             model=args.grouping_model,
             base_url=args.base_url,
             api_key=args.api_key,
+            auth_mode=args.auth_mode,
             system=system_prompt + "\n\n" + glossary_prompt(glossary or []),
             user=request,
             timeout=args.timeout,
@@ -721,6 +741,7 @@ def request_semantic_grouping_block(
                     model=getattr(args, "repair_model", "") or args.grouping_model,
                     base_url=args.base_url,
                     api_key=args.api_key,
+                    auth_mode=args.auth_mode,
                     system=(repair_prompt or system_prompt) + "\n\n" + glossary_prompt(glossary or []),
                     user={
                         **request,
@@ -734,7 +755,7 @@ def request_semantic_grouping_block(
                     stage="semantic_grouping_repair",
                     block_id=block_id,
                     thinking_mode=getattr(args, "repair_thinking_mode", "disabled"),
-                    reasoning_effort=getattr(args, "repair_reasoning_effort", "high"),
+                    reasoning_effort=getattr(args, "repair_reasoning_effort", "low"),
                     max_tokens=getattr(args, "repair_max_tokens", 65536),
                     temperature=getattr(args, "repair_temperature", 0.0),
                 )
@@ -830,12 +851,17 @@ def request_semantic_grouping_block(
     return chunk_number, [], groups, [], cuts, exceptions
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(description="Substar deterministic planning and semantic grouping")
     parser.add_argument("material", type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--route", required=True, choices=sorted(ROUTES))
     parser.add_argument("--base-url", default="")
+    parser.add_argument("--auth-mode", choices=["bearer", "api-key"], default="bearer")
     parser.add_argument("--grouping-model", required=True)
     parser.add_argument(
         "--grouping-thinking-mode", choices=["enabled", "disabled"], default="disabled"
@@ -843,14 +869,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--grouping-reasoning-effort",
         choices=["low", "medium", "high", "max", "xhigh"],
-        default="high",
+        default="low",
     )
     parser.add_argument("--grouping-max-tokens", type=int, default=131072)
     parser.add_argument("--grouping-temperature", type=float, default=0.0)
     parser.add_argument("--repair-attempts", type=int, default=1)
     parser.add_argument("--repair-model", default="")
     parser.add_argument("--repair-thinking-mode", choices=["enabled", "disabled"], default="disabled")
-    parser.add_argument("--repair-reasoning-effort", choices=["low", "medium", "high", "max", "xhigh"], default="high")
+    parser.add_argument("--repair-reasoning-effort", choices=["low", "medium", "high", "max", "xhigh"], default="low")
     parser.add_argument("--repair-max-tokens", type=int, default=65536)
     parser.add_argument("--repair-temperature", type=float, default=0.0)
     parser.add_argument("--resume-response-log", type=Path)
@@ -906,7 +932,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    progress = StageProgress(args.progress_file)
+    progress = StageProgress(args.progress_file, on_update=progress_callback)
     source_language = normalize_source_language(args.source_language, units)
     prompt_variant = {
         "zh-CN": "zh",
@@ -1088,7 +1114,11 @@ def main(argv: list[str] | None = None) -> int:
         basis="accepted_semantic_groups",
     )
     atomic_write_json(args.output_dir / "execution_block_plan.json", downstream_plan)
-    cuts = set(merged_cuts)
+    cuts = finalize_display_cuts(
+        merged_cuts,
+        seams,
+        final_alignment_index=int(units[-1].index),
+    )
     layout_exceptions: list[dict[str, Any]] = []
     protection = {
         "schema_version": "substar.segmentation-protection.v1",

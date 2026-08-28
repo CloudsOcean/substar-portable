@@ -13,28 +13,41 @@
     "subtitle-project":"字幕工程"
   };
 
+  const subtitleNames = {
+    source:"原文字幕",
+    target:"译文字幕",
+    "ab-single":"双语单行字幕",
+    "ab-double":"双语双行字幕"
+  };
+
   function safeFilename(value) {
     return String(value || "export")
       .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_")
       .replace(/[. ]+$/g, "") || "export";
   }
 
-  function subtitleSpec(projectId, mode, url) {
+  function versionLabel(sequence) {
+    return `v${String(Math.max(1, Number(sequence) || 1)).padStart(2, "0")}`;
+  }
+
+  function subtitleSpec(taskName, mode, sequence, url) {
+    const label = subtitleNames[mode];
+    if (!label) throw new Error(`未知字幕类型：${mode}`);
     return {
       url,
-      suggestedName:`${safeFilename(projectId)}_${safeFilename(mode)}.srt`,
+      suggestedName:`${safeFilename(taskName)}_${label}_${versionLabel(sequence)}.srt`,
       description:"SubRip 字幕",
       mimeType:"application/x-subrip",
       extension:".srt"
     };
   }
 
-  function exchangeSpec(projectId, kind, url) {
+  function exchangeSpec(taskName, kind, sequence, url) {
     const label = exchangeNames[kind];
     if (!label) throw new Error(`未知导出类型：${kind}`);
     return {
       url,
-      suggestedName:`${safeFilename(projectId)}_${label}.zip`,
+      suggestedName:`${safeFilename(taskName)}_${label}_${versionLabel(sequence)}.zip`,
       description:"ZIP 压缩包",
       mimeType:"application/zip",
       extension:".zip"

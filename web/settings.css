@@ -225,6 +225,8 @@ body {
 .shortcut-row > div { display: grid; gap: 4px; }
 .shortcut-row small, .shortcut-message { color: var(--muted); font-size: 11px; }
 .shortcut-row input { cursor: pointer; text-align: center; font-weight: 700; }
+.shortcut-row select { text-align: center; font-weight: 700; }
+.shortcut-wheel-label { color: var(--muted); white-space: nowrap; font-size: 11px; }
 .shortcut-row input.is-recording { border-color: var(--purple); box-shadow: 0 0 0 3px color-mix(in srgb, var(--purple) 20%, transparent); }
 .shortcut-message { margin: 14px 0; }
 .shortcut-message.error { color: var(--red); }
@@ -361,6 +363,7 @@ html[data-surface="glass"] .save-bar {
 }
 .provider-rail-heading span { font-size: 12px; font-weight: 720; letter-spacing: .04em; }
 .provider-rail-heading small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+.provider-list { display: grid; gap: 3px; }
 .provider-item {
   width: 100%;
   min-height: 58px;
@@ -524,6 +527,7 @@ textarea {
   padding: 5px 10px;
   white-space: nowrap;
 }
+.model-catalog-select { margin-top: 7px; }
 .secret-field input {
   padding-right: 50px;
 }
@@ -1162,6 +1166,7 @@ details[open].advanced summary i {
     border-bottom: 1px solid var(--line);
   }
   .provider-rail-heading { display: none; }
+  .provider-list { display: flex; gap: 7px; }
   .provider-item { min-width: 150px; }
   .provider-detail { padding: 14px; }
 }

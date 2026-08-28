@@ -34,7 +34,9 @@ from substar_core.config import (
     load_credentials,
     load_settings,
     save_settings,
+    infer_model_provider,
 )
+from substar_core.model_providers import canonical_provider_id, provider_catalog
 from substar_core.runtime_instance import (
     APP_MARKER,
     TASK_SCHEDULER_SHUTDOWN_TIMEOUT,
@@ -47,18 +49,20 @@ from substar_core.runtime_instance import (
     startup_port,
     write_runtime_record,
 )
+from substar_core.runtime.launch_surface import require_visible_backend
 from substar_core.edition import capabilities as edition_capabilities, current_edition, is_slim
 from substar_core.api_testing import (
     ApiTestError,
-    probe_chat_reasoning_efforts,
+    probe_chat_thinking_modes,
     test_chat,
 )
 from substar_core.qwen_cloud_asr import QwenCloudAsrError, test_connection as test_qwen_cloud_connection
 from substar_core.glossary import (
     active_glossary,
-    glossary_hotwords,
+    glossary_collection_exists,
     load_glossary,
-    save_glossary,
+    load_glossary_library,
+    save_glossary_library,
 )
 from substar_core.glossary_xlsx import XLSX_MEDIA_TYPE, glossary_xlsx_bytes, parse_glossary_xlsx
 from substar_core.storage import (
@@ -67,6 +71,13 @@ from substar_core.storage import (
 from substar_core.export import SubtitleExportMode, render_document_srt
 from substar_core.model_catalog import ModelCatalogError, discover_models
 from substar_core.reasoning_capabilities import reasoning_capabilities
+from substar_core.qwen_enhancement import (
+    QWEN_PROMPT_MAX_CHARACTERS,
+    normalize_qwen_hotwords,
+    prioritize_generated_qwen_hotwords,
+    qwen_hotword_mapping,
+)
+from substar_core.stage2 import Stage2Error, call_translation_model
 from substar_core.prompt_registry import (
     PromptRegistryError,
     prompt_catalog,
@@ -119,6 +130,7 @@ from substar_core.credential_store import (
     ASR_GENERIC,
     ASR_QWEN,
     SEGMENT_DEEPSEEK,
+    MODEL_PROVIDER_PREFIX,
 )
 
 
@@ -182,6 +194,7 @@ def _claim_backend_instance() -> None:
     """Make every Uvicorn/FastAPI entry point obey the backend singleton."""
 
     global _BACKEND_MUTEX_HANDLE, _OWNS_RUNTIME_RECORD
+    launch_surface = require_visible_backend()
     port = startup_port()
     existing = probe_identity(port)
     if existing and int(existing.get("pid", 0) or 0) != os.getpid():
@@ -213,6 +226,7 @@ def _claim_backend_instance() -> None:
                     "install_root": str(INSTALL_ROOT),
                     "data_root": str(DATA_ROOT),
                     "started_at": APP_STARTED_AT,
+                    "launch_surface": launch_surface,
                 }
             )
             _OWNS_RUNTIME_RECORD = True
@@ -286,7 +300,6 @@ class SettingsPayload(BaseModel):
     segmentation_enabled: bool = True
     translation_enabled: bool = False
     calibration_enabled: bool = False
-    review_enabled: bool = False
     project_name: str = "默认项目"
     recognition_profile_id: str = "qwen_cloud"
     transcript_source: str = "qwen_cloud"
@@ -312,39 +325,37 @@ class SettingsPayload(BaseModel):
     translation_api_provider: str = "openai_chat"
     translation_api_base_url: str = "https://api.deepseek.com"
     translation_api_model: str = "deepseek-v4-flash"
+    active_model_provider: str = "deepseek"
+    model_provider_profiles: dict[str, Any] = Field(default_factory=dict)
+    model_reasoning_capabilities: dict[str, Any] = Field(default_factory=dict)
     stage_segmentation_model: str = ""
     stage_translation_model: str = ""
     stage_translation_repair_model: str = ""
     stage_calibration_model: str = ""
-    stage_review_model: str = ""
     stage_audit_repair_model: str = ""
     stage_segmentation_thinking_mode: str = "enabled"
-    stage_segmentation_reasoning_effort: str = Field(default="max", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_segmentation_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_segmentation_max_tokens: int = 131072
     stage_segmentation_temperature: float = 0.0
     stage_segmentation_repair_model: str = ""
     stage_segmentation_repair_thinking_mode: str = "disabled"
-    stage_segmentation_repair_reasoning_effort: str = Field(default="high", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_segmentation_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_segmentation_repair_max_tokens: int = 65536
     stage_segmentation_repair_temperature: float = 0.0
     stage_translation_thinking_mode: str = "enabled"
-    stage_translation_reasoning_effort: str = Field(default="max", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_translation_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_translation_max_tokens: int = 131072
     stage_translation_temperature: float = 0.0
     stage_translation_repair_thinking_mode: str = "disabled"
-    stage_translation_repair_reasoning_effort: str = Field(default="high", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_translation_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_translation_repair_max_tokens: int = 65536
     stage_translation_repair_temperature: float = 0.0
     stage_calibration_thinking_mode: str = "enabled"
-    stage_calibration_reasoning_effort: str = Field(default="max", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_calibration_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_calibration_max_tokens: int = 65536
     stage_calibration_temperature: float = 0.0
-    stage_review_thinking_mode: str = "disabled"
-    stage_review_reasoning_effort: str = Field(default="high", pattern=r"^(low|medium|high|max|xhigh)$")
-    stage_review_max_tokens: int = 65536
-    stage_review_temperature: float = 0.0
     stage_audit_repair_thinking_mode: str = "disabled"
-    stage_audit_repair_reasoning_effort: str = Field(default="high", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_audit_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_audit_repair_max_tokens: int = 65536
     stage_audit_repair_temperature: float = 0.0
     startup_port: int = Field(default=8769, ge=1024, le=65535)
@@ -352,7 +363,7 @@ class SettingsPayload(BaseModel):
     translation_api_timeout_seconds: int = 300
     translation_thinking_mode: str = "enabled"
     translation_reasoning_effort: str = Field(
-        default="max", pattern=r"^(low|medium|high|max|xhigh)$"
+        default="low", pattern=r"^(low|medium|high|max|xhigh)$"
     )
     translation_style: str = "corporate_broadcast"
     target_language_mode: str = "auto_opposite"
@@ -391,9 +402,15 @@ class SettingsPayload(BaseModel):
     segmentation_repair_attempts: int = 1
     translation_repair_attempts: int = 0
     stage_timeout_seconds: int = 3600
+    shortcut_undo: str = "Ctrl+Z"
+    shortcut_redo: str = "Ctrl+Y"
+    shortcut_play_pause: str = "Space"
+    shortcut_hide_cue: str = "Backspace"
+    timeline_zoom_modifier: str = "Alt"
 
 
 class GlossaryPayload(BaseModel):
+    collections: list[dict[str, Any]] = Field(default_factory=list)
     entries: list[dict[str, Any]]
 
 
@@ -426,6 +443,8 @@ class JobRenamePayload(BaseModel):
 class ModelDiscoveryPayload(BaseModel):
     base_url: str
     auth_mode: str = "bearer"
+    provider_id: str = ""
+    api_key: str = ""
 
 
 class ReasoningCapabilitiesPayload(BaseModel):
@@ -437,6 +456,7 @@ class ReasoningProbePayload(ReasoningCapabilitiesPayload):
     auth_mode: str = "bearer"
     timeout_seconds: int = Field(default=60, ge=10, le=300)
     api_key: str = ""
+    provider_id: str = ""
 
 
 class PromptComponentUpdatePayload(BaseModel):
@@ -448,6 +468,7 @@ class ApiConnectionTestPayload(BaseModel):
     role: str
     source: str = "api"
     provider: str = "openai_chat"
+    provider_id: str = ""
     base_url: str = ""
     model: str = ""
     auth_mode: str = "bearer"
@@ -457,6 +478,11 @@ class ApiConnectionTestPayload(BaseModel):
     reasoning_effort: str = Field(
         default="max", pattern=r"^(low|medium|high|max|xhigh)$"
     )
+
+
+class QwenAssistPayload(BaseModel):
+    source_language: str = Field(default="Auto", max_length=40)
+    user_prompt: str = Field(min_length=1, max_length=4000)
 
 
 PROJECT_CREATION_MODES = {"subtitle_creation"}
@@ -679,6 +705,14 @@ BATCH_SUBMISSION_LOCK = threading.Lock()
 # the worker releases its model and audio memory.
 
 
+def _has_durable_job_identity(job_dir: Path) -> bool:
+    """Reject orphan state files left after a project directory was removed."""
+
+    return (job_dir / "project_creation.json").is_file() or (
+        job_dir / "tutorial_project.json"
+    ).is_file()
+
+
 def _prune_missing_jobs() -> None:
     """Drop in-memory task records whose durable directory is gone."""
 
@@ -695,6 +729,7 @@ def _prune_missing_jobs() -> None:
                 root not in job_dir.parents
                 or not job_dir.is_dir()
                 or not (job_dir / "creation_state.json").is_file()
+                or not _has_durable_job_identity(job_dir)
             ):
                 stale.append(job_id)
         for job_id in stale:
@@ -1044,10 +1079,10 @@ def _project_reference_path(job: Job) -> Path | None:
 def _workbench_transcription_request(
     job: Job, settings: dict[str, Any]
 ) -> dict[str, Any]:
-    # Project-scoped terminology is frozen against the stable source stem at
-    # task creation. A later display-name edit must not silently change ASR.
-    project_name = Path(job.filename).stem.strip()
-    hotwords = glossary_hotwords(active_glossary(project_name))
+    try:
+        hotwords = qwen_hotword_mapping(settings.get("qwen_temporary_hotwords", []))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return build_transcription_request(
         media_path=job.input_path,
         project_directory=job.job_dir,
@@ -1070,7 +1105,7 @@ def _create_workbench_subtitle_tasks(
     reference_snapshot = reference_document_snapshot(
         job.job_dir, _project_reference_path(job)
     )
-    glossary_snapshot = active_glossary(Path(job.filename).stem.strip())
+    glossary_snapshot = active_glossary(str(settings.get("glossary_id") or ""))
     transcription, segmentation = create_subtitle_creation_graph(
         service=service,
         project_id=job.id,
@@ -1119,7 +1154,7 @@ def _automatic_settings_from_payload(
     stage_names = (
         "segmentation", "segmentation_repair",
         "translation", "translation_repair",
-        "calibration", "review", "audit_repair",
+        "calibration", "audit_repair",
     )
     stage_keys = {
         f"stage_{stage}_{suffix}"
@@ -1139,7 +1174,6 @@ def _automatic_settings_from_payload(
         "stage_translation_model",
         "stage_translation_repair_model",
         "stage_calibration_model",
-        "stage_review_model",
         "stage_audit_repair_model",
         "translation_thinking_mode",
         "translation_reasoning_effort",
@@ -1152,7 +1186,6 @@ def _automatic_settings_from_payload(
         "reference_break_symbols",
         "translation_enabled",
         "calibration_enabled",
-        "review_enabled",
         "target_language_mode",
         "segmentation_chunk_seconds",
         "translation_workers",
@@ -1172,6 +1205,9 @@ def _automatic_settings_from_payload(
         "qwen_cloud_task_timeout_seconds",
         "qwen_cloud_poll_interval_seconds",
         "qwen_cloud_temporary_upload",
+        "context",
+        "qwen_temporary_hotwords",
+        "glossary_id",
     } | stage_keys
     # Settings snapshots can outlive the UI/backend build that created them.
     # Consume only the explicit task contract and ignore unrelated/newer
@@ -1248,17 +1284,27 @@ def _automatic_settings_from_payload(
         "korean_hard_limit", int(saved["korean_hard_limit"]), 1, 120
     )
     reference_script_mode = bool(raw.get("reference_script_mode", False))
+    glossary_id = str(raw.get("glossary_id") or "").strip()
+    if not glossary_collection_exists(glossary_id):
+        raise HTTPException(status_code=400, detail="所选项目词库不存在，请刷新后重试")
     try:
         reference_break_symbols = normalize_break_symbols(
             str(raw.get("reference_break_symbols") or "，。？")
         )
     except ManuscriptMatchError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        temporary_hotwords = normalize_qwen_hotwords(
+            raw.get("qwen_temporary_hotwords", [])
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     overrides = {
         "workflow_mode": "subtitle_creation",
         "translation_api_base_url": base_url.rstrip("/"),
         "translation_api_model": model,
+        "glossary_id": glossary_id,
         **{
             key: raw.get(key, saved.get(key))
             for key in (
@@ -1268,7 +1314,6 @@ def _automatic_settings_from_payload(
                 "segmentation_enabled",
                 "translation_enabled",
                 "calibration_enabled",
-                "review_enabled",
             )
         },
         **stage_config,
@@ -1317,6 +1362,8 @@ def _automatic_settings_from_payload(
         "maximum_cps_cjk": profile["maximum_cps_cjk"],
         "audio_denoise_mode": profile["audio_denoise_mode"],
         "text_cleanup_mode": profile["text_cleanup_mode"],
+        "context": str(raw.get("context", ""))[:QWEN_PROMPT_MAX_CHARACTERS],
+        "qwen_temporary_hotwords": temporary_hotwords,
     }
     return overrides, profile
 
@@ -1407,9 +1454,7 @@ def delete_workbench_split_job(job_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="当前任务状态不能删除")
         job_dir = job.job_dir.resolve()
         JOBS.pop(job_id, None)
-    # Keep containment checks stable when Windows expands an 8.3 TEMP path
-    # (for example RUNNER~1) while resolving the project directory.
-    root = _relay_output_root().resolve()
+    root = _relay_output_root()
     if root not in job_dir.parents or not job_dir.is_dir():
         raise HTTPException(status_code=404, detail="切分任务目录不存在")
     trash_root = root / ".trash"
@@ -1529,6 +1574,7 @@ def put_prompt_component(
 
 @app.get("/api/runtime/identity")
 def runtime_identity() -> dict[str, Any]:
+    launch_surface = require_visible_backend()
     return {
         "app": "substar-workbench",
         "api_version": 1,
@@ -1541,6 +1587,8 @@ def runtime_identity() -> dict[str, Any]:
         "data_root": str(DATA_ROOT),
         "started_at": APP_STARTED_AT,
         "edition": current_edition(),
+        "launch_surface": launch_surface,
+        "user_visible": True,
     }
 
 
@@ -1562,13 +1610,13 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
 
 @app.get("/api/glossary")
 def get_glossary() -> dict[str, Any]:
-    return {"entries": load_glossary()}
+    return load_glossary_library()
 
 
 @app.put("/api/glossary")
 def put_glossary(payload: GlossaryPayload) -> dict[str, Any]:
     try:
-        return {"entries": save_glossary(payload.entries)}
+        return save_glossary_library(payload.collections, payload.entries)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1583,7 +1631,16 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
         "alignment": "alignment_api_key",
         "translation": "translation_api_key",
     }[payload.role]
-    api_key = payload.api_key.strip() or str(saved.get(saved_key_name, "")).strip()
+    api_key = payload.api_key.strip()
+    if not api_key and payload.role in {"alignment", "translation"}:
+        provider_id = canonical_provider_id(
+            payload.provider_id.strip() or infer_model_provider(payload.base_url)
+        )
+        api_key = str(
+            load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+        ).strip()
+    if not api_key and not payload.provider_id.strip():
+        api_key = str(saved.get(saved_key_name, "")).strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="请先输入 API Key，或保存已有密钥")
     if not payload.base_url.strip() or not payload.model.strip():
@@ -1611,10 +1668,117 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/qwen-assist")
+def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]:
+    settings = load_settings(include_secret=True)
+    provider_id = canonical_provider_id(
+        settings.get("active_model_provider")
+        or infer_model_provider(settings.get("translation_api_base_url"))
+    )
+    api_key = str(
+        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+        or settings.get("translation_api_key", "")
+    ).strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请先配置并测试当前 AI 服务")
+    language_names = {
+        "zh": "中文", "en": "英文", "ja": "日文", "ko": "韩文",
+        "mixed": "中英混合", "Auto": "用户说明所使用的语言",
+    }
+    source_language = language_names.get(
+        payload.source_language, payload.source_language or "用户说明所使用的语言"
+    )
+    qwen_model = str(settings.get("qwen_cloud_model", ""))
+    supports_hotwords = not qwen_model.startswith("qwen3-asr-flash-filetrans")
+    base_url = str(settings["translation_api_base_url"])
+    assist_model = str(
+        settings.get("stage_segmentation_model")
+        or settings["translation_api_model"]
+    )
+    capability = reasoning_capabilities(base_url, assist_model)
+    cache_key = "\n".join((base_url.strip().lower(), assist_model.strip().lower()))
+    cached_capability = settings.get("model_reasoning_capabilities", {}).get(
+        cache_key, {}
+    )
+    if isinstance(cached_capability, dict) and isinstance(
+        cached_capability.get("supported_thinking_modes"), list
+    ):
+        supported_modes = cached_capability["supported_thinking_modes"]
+    else:
+        supported_modes = capability.get("supported_thinking_modes", [])
+    normalized_modes = {
+        str(mode) for mode in supported_modes if str(mode) in {"disabled", "enabled"}
+    }
+    if normalized_modes == {"enabled"}:
+        assist_thinking_modes = ("enabled",)
+    elif normalized_modes == {"disabled"}:
+        assist_thinking_modes = ("disabled",)
+    else:
+        # Unknown or dual-mode models try the cheaper non-thinking request first.
+        assist_thinking_modes = ("disabled", "enabled")
+    system_prompt = f"""你负责为 Qwen 文件听写准备两个可编辑输入框。
+字幕切分语言配置为：{source_language}。
+根据用户说明输出且只输出 JSON 对象：
+{{"prompt":"...","hotwords":[{{"text":"...","weight":50}}]}}
+规则：
+1. prompt 使用字幕切分语言组织，最多 400 个字符，用于描述节目领域、人物和主题。
+2. hotwords 可以混合任意语言；人名、品牌、产品、缩写必须保留原始拼写，绝不翻译。
+3. 用户直接点名的人名、品牌、产品和术语必须全部列入 hotwords，权重使用 50；根据节目内容推导出的相关专名权重使用 5，不得编造。
+4. 每个热词应是真实词语；中文等非 ASCII 热词不超过 15 字，纯拉丁热词不超过 7 个单词。
+5. {"当前 Qwen 模型不支持即时热词，hotwords 必须输出空数组。" if not supports_hotwords else "当前 Qwen 模型支持即时热词。"}
+6. 不要输出解释、Markdown 或额外字段。"""
+    try:
+        result: dict[str, Any] | None = None
+        last_stage_error: Stage2Error | None = None
+        for thinking_mode in assist_thinking_modes:
+            try:
+                result, _metadata = call_translation_model(
+                    base_url=base_url,
+                    api_key=api_key,
+                    auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
+                    model=assist_model,
+                    system_prompt=system_prompt,
+                    groups=[{"user_prompt": payload.user_prompt.strip()}],
+                    timeout=min(300, int(settings.get("translation_api_timeout_seconds", 300))),
+                    thinking_mode=thinking_mode,
+                    reasoning_effort="low",
+                    request_attempts=max(1, int(settings.get("http_retry_attempts", 2)) + 1),
+                    max_tokens=4096,
+                    temperature=0.0,
+                )
+                break
+            except Stage2Error as exc:
+                last_stage_error = exc
+        if result is None:
+            assert last_stage_error is not None
+            raise last_stage_error
+        prompt = str(result.get("prompt", "")).strip()[:QWEN_PROMPT_MAX_CHARACTERS]
+        if not prompt:
+            raise ValueError("AI 没有生成 Qwen Prompt")
+        hotwords = prioritize_generated_qwen_hotwords(
+            result.get("hotwords", []),
+            user_prompt=payload.user_prompt,
+        )
+        if not supports_hotwords:
+            hotwords = []
+    except (Stage2Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"prompt": prompt, "hotwords": hotwords}
+
+
+@app.get("/api/models/providers")
+def list_model_providers() -> dict[str, Any]:
+    return {"providers": provider_catalog()}
+
+
 @app.post("/api/models/discover")
 def discover_provider_models(payload: ModelDiscoveryPayload) -> dict[str, Any]:
-    saved = load_settings(include_secret=True)
-    api_key = str(saved.get("translation_api_key", "")).strip()
+    provider_id = canonical_provider_id(
+        payload.provider_id.strip() or infer_model_provider(payload.base_url)
+    )
+    api_key = payload.api_key.strip() or str(
+        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+    ).strip()
     try:
         return discover_models(
             base_url=payload.base_url,
@@ -1651,38 +1815,70 @@ async def import_glossary_xlsx(file: UploadFile = File(...)) -> dict[str, Any]:
 def get_reasoning_capabilities(payload: ReasoningCapabilitiesPayload) -> dict[str, Any]:
     if not payload.base_url.strip() or not payload.model.strip():
         raise HTTPException(status_code=400, detail="Base URL 和模型 ID 不能为空")
-    return reasoning_capabilities(payload.base_url, payload.model)
+    capability = reasoning_capabilities(payload.base_url, payload.model)
+    cache_key = "\n".join((payload.base_url.strip().lower(), payload.model.strip().lower()))
+    cached = load_settings().get("model_reasoning_capabilities", {}).get(cache_key, {})
+    if isinstance(cached, dict) and isinstance(cached.get("supported_thinking_modes"), list):
+        capability = {
+            **capability,
+            "supported_thinking_modes": list(
+                cached.get("supported_thinking_modes", capability.get("supported_thinking_modes", []))
+            ),
+            "verified": True,
+            "source": "persisted-live-probe",
+        }
+    return capability
 
 
 @app.post("/api/models/reasoning-probe")
 def probe_reasoning_capabilities(payload: ReasoningProbePayload) -> dict[str, Any]:
     saved = load_settings(include_secret=True)
-    api_key = payload.api_key.strip() or str(saved.get("translation_api_key", "")).strip()
+    provider_id = canonical_provider_id(
+        payload.provider_id.strip() or infer_model_provider(payload.base_url)
+    )
+    api_key = payload.api_key.strip() or str(
+        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+    ).strip()
+    if not api_key and provider_id == canonical_provider_id(
+        saved.get("active_model_provider")
+        or infer_model_provider(saved.get("translation_api_base_url"))
+    ):
+        api_key = str(saved.get("translation_api_key", "")).strip()
     if not api_key:
         raise HTTPException(status_code=400, detail="请先输入 API Key，或保存已有密钥")
     if not payload.base_url.strip() or not payload.model.strip():
         raise HTTPException(status_code=400, detail="Base URL 和模型 ID 不能为空")
     capability = reasoning_capabilities(payload.base_url, payload.model)
     try:
-        probe = probe_chat_reasoning_efforts(
+        probe = probe_chat_thinking_modes(
             base_url=payload.base_url,
             model=payload.model,
             api_key=api_key,
             auth_mode=payload.auth_mode,
             timeout=payload.timeout_seconds,
-            efforts=list(capability.get("probe_efforts", [])),
+            reasoning_effort="high",
         )
     except ApiTestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    accepted = probe.get("accepted_efforts") or []
-    if accepted:
+    accepted_thinking_modes = probe.get("accepted_thinking_modes") or []
+    if accepted_thinking_modes:
         capability = {
             **capability,
             "verified": True,
             "source": "live-probe",
-            "verified_efforts": accepted,
-            "note": "已完成实际请求验证；可选档位仍以模型能力声明为准。",
+            "supported_thinking_modes": accepted_thinking_modes,
+            "note": "连通性测试已验证接口接受的思考模式；五档推理强度由服务商映射。",
         }
+        cache_key = "\n".join((payload.base_url.strip().lower(), payload.model.strip().lower()))
+        saved = load_settings()
+        cache = dict(saved.get("model_reasoning_capabilities", {}))
+        cache[cache_key] = {
+            "base_url": payload.base_url.strip(),
+            "model": payload.model.strip(),
+            "supported_thinking_modes": list(accepted_thinking_modes),
+            "verified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        save_settings({"model_reasoning_capabilities": cache})
     return {**capability, "probe": probe}
 
 
@@ -1758,9 +1954,7 @@ async def create_workbench_split_job(
     overrides = profile_settings(
         {**overrides, "recognition_profile_id": recognition_profile.id}
     )
-    # Compare canonical paths. Test and portable callers may provide a relative
-    # relay root, while ``job_dir`` is resolved below.
-    output_root = _relay_output_root().resolve()
+    output_root = _relay_output_root()
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_split_" + uuid.uuid4().hex[:6]
     job_dir = (output_root / job_id).resolve()
     if output_root not in job_dir.parents:
@@ -2206,6 +2400,8 @@ def runtime_health() -> dict[str, Any]:
         "status": "ready",
         "instance_id": APP_INSTANCE_ID,
         "build_id": APP_BUILD_ID,
+        "launch_surface": require_visible_backend(),
+        "user_visible": True,
         "task_runtime": bool(getattr(app.state, "task_service", None)),
         "task_scheduler": (
             getattr(app.state, "task_scheduler", None).snapshot()
@@ -2458,6 +2654,8 @@ def _restore_persisted_jobs(wanted_id: str = "") -> None:
     for job_dir in job_dirs:
         status_path = job_dir / "creation_state.json"
         tutorial_path = job_dir / "tutorial_project.json"
+        if not _has_durable_job_identity(job_dir):
+            continue
         register_packaged_tutorial = not status_path.is_file() and tutorial_path.is_file()
         if not status_path.is_file() and not tutorial_path.is_file():
             continue

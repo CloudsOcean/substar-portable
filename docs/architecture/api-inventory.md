@@ -40,8 +40,6 @@ The API is currently split by implementation location rather than by one explici
 | POST | `/api/v2/projects/{project_id}/reference-manuscript` | Upload and match a reference manuscript |
 | POST | `/api/v2/projects/{project_id}/ai-correct` | Legacy AI correction operation |
 | POST | `/api/v2/projects/{project_id}/ai-calibrate` | Run AI calibration and commit accepted changes |
-| POST | `/api/v2/projects/{project_id}/ai-review` | Run AI review |
-| GET | `/api/v2/projects/{project_id}/ai-review/latest` | Read the latest review result |
 | POST | `/api/v2/projects/{project_id}/complete` | Change project completion state |
 | POST | `/api/v2/projects/{project_id}/validate` | Validate the current document |
 | POST | `/api/v2/projects/{project_id}/translation` | Start translation for a source revision |

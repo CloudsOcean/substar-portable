@@ -3,7 +3,7 @@
 
   const contract = window.EditorDocument;
   const languageLayout = window.SubstarLanguageLayout;
-  const aiReviewState = window.EditorAiReviewState;
+  const externalReview = window.SubstarExternalReview;
   const tutorialResolver = window.EditorTutorial;
   const systemSaveAs = window.SubstarSystemSaveAs;
   const $ = selector => document.querySelector(selector);
@@ -48,11 +48,10 @@
     searchScope:"source",
     aiChangeIndex:-1,
     referenceChangeIndex:-1,
-    aiReview:null,
-    aiReviewRunning:false,
-    aiReviewDrag:null,
     fontSize:14,
-    shortcuts:{undo:"Ctrl+Z", redo:"Ctrl+Y"},
+    shortcuts:{
+      undo:"Ctrl+Z", redo:"Ctrl+Y", playPause:"Space", hideCue:"Backspace", zoomModifier:"Alt"
+    },
     revisions:[],
     revisionHistoryLoaded:false,
     revisionHistoryLoading:false,
@@ -122,13 +121,16 @@
   function applyEditorSettings(settings = {}) {
     state.shortcuts = {
       undo:String(settings.shortcut_undo || "Ctrl+Z"),
-      redo:String(settings.shortcut_redo || "Ctrl+Y")
+      redo:String(settings.shortcut_redo || "Ctrl+Y"),
+      playPause:String(settings.shortcut_play_pause || "Space"),
+      hideCue:String(settings.shortcut_hide_cue || "Backspace"),
+      zoomModifier:String(settings.timeline_zoom_modifier || "Alt"),
     };
     $("#undoDocument").title = `撤销（${state.shortcuts.undo}）`;
     $("#redoDocument").title = `重做（${state.shortcuts.redo}）`;
     const preRollStored = localStorage.getItem("substar.editor.forward-snap-pre-roll-ms");
     const preRoll = Math.max(0, Math.min(100,
-      preRollStored === null ? 40 : Number(preRollStored)
+      preRollStored === null ? 20 : Number(preRollStored)
     ));
     const sensitivityStored = localStorage.getItem("substar.editor.forward-snap-sensitivity");
     const sensitivity = Math.max(0, Math.min(100,
@@ -160,8 +162,19 @@
     const locked = editorAiTaskLocksEditor();
     document.body.classList.toggle("editor-ai-task-locked", locked);
     renderHeader();
+    if (locked && state.editorAiTask) {
+      const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
+        state.editorAiTask.kind
+      ] || "AI 任务";
+      renderWorkbenchTask(
+        title,
+        Math.max(0, Math.min(100, Number(state.editorAiTask.progress || 0) * 100)),
+        state.editorAiTask.error || state.editorAiTask.message || "任务运行中",
+        state.editorAiTask.state
+      );
+    }
     if (state.editorAiTask?.state === "cancelled") {
-      const title = ({calibration:"AI 校准", translation:"字幕翻译", review:"AI 审阅"})[
+      const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
       renderWorkbenchTask(title, 0, "任务已取消", "cancelled");
@@ -184,9 +197,10 @@
     }, 800);
   }
 
-  function ordinaryError(message = "") {
+  function ordinaryError(message = "", tone = "error") {
     const node = $("#ordinaryError");
     $("#ordinaryErrorMessage").textContent = message;
+    node.classList.toggle("notice", Boolean(message) && ["notice", "completed", "success"].includes(tone));
     node.classList.toggle("hidden", !message);
   }
 
@@ -348,11 +362,40 @@
     state.playbackFrameHandle = requestAnimationFrame(tick);
   }
 
-  function toggleMediaPlayback() {
+  async function toggleMediaPlayback() {
     const media = activeMedia();
-    if (!media) return;
-    if (media.paused || media.ended) media.play().catch(() => {});
-    else media.pause();
+    if (!media) {
+      ordinaryError("媒体尚未就绪，暂时无法播放");
+      return;
+    }
+    if (!media.paused && !media.ended) {
+      media.pause();
+      return;
+    }
+    try {
+      await media.play();
+    } catch (error) {
+      ordinaryError(`播放失败：${error?.message || "浏览器拒绝了播放请求"}`);
+    }
+  }
+
+  function isTextEditingContext(event) {
+    if (event.isComposing) return true;
+    const editableSelector = [
+      "textarea",
+      "[role='textbox']",
+      "[contenteditable]:not([contenteditable='false'])",
+      "input:not([type])",
+      "input[type='text']",
+      "input[type='search']",
+      "input[type='number']",
+      "input[type='email']",
+      "input[type='url']",
+      "input[type='password']"
+    ].join(",");
+    return event.composedPath().some(node =>
+      node instanceof Element && node.matches(editableSelector)
+    );
   }
 
   function syncPlaybackFollowAfterSeek() {
@@ -438,6 +481,16 @@
 
   function projectPath(suffix = "") {
     return `/api/projects/${encodeURIComponent(state.projectId)}${suffix}`;
+  }
+
+  function nextExportSequence() {
+    const key = `substar.editor.export-sequence:${state.projectId}`;
+    const current = Math.max(0, Number.parseInt(localStorage.getItem(key) || "0", 10) || 0);
+    return {key, value:current + 1};
+  }
+
+  function commitExportSequence(sequence) {
+    localStorage.setItem(sequence.key, String(sequence.value));
   }
 
   function sourceTextForToken(tokenView) {
@@ -685,13 +738,11 @@
     rebuildViewIndexes();
     try {
       render({deferTimeline, preserveCueViewport});
-      renderAiReview();
     } catch (error) {
       // A structural edit may shrink or reorder the Cue collection while a
       // virtualized list still holds the previous viewport window.  Retry a
       // clean render before allowing a successfully committed edit to fail.
       render({deferTimeline:false, preserveCueViewport});
-      renderAiReview();
       console.warn("Editor view recovered with a clean render", error);
     }
   }
@@ -1047,6 +1098,7 @@
           display_name:displayName,
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
+          glossary_id:String(state.taskInfo?.glossary_id || ""),
           source_hard_limit:sourceLimit,
           target_hard_limit:targetLimit
         })
@@ -1121,11 +1173,14 @@
     $("#translateDocument").disabled = !revision || locked
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
     $("#translationMenu").classList.toggle("disabled", !revision);
+    $("#aiCalibrationMenu")?.classList.toggle("disabled", !revision || locked);
+    $("#aiCalibrate")?.setAttribute("aria-disabled", String(!revision || locked));
+    if ((!revision || locked) && $("#aiCalibrationMenu")?.open) $("#aiCalibrationMenu").open = false;
     ["#saveCheckpoint", "#toolSearch", "#toolReplace",
       "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll",
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",
       "#lowerPunctuationRemove", "#lowerPunctuationSpace", "#applyPunctuation",
-      "#aiCalibrate", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
+      "#runAiCalibration", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
     ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked; });
     $("#autoSnapMenu")?.classList.toggle("disabled", !revision || locked);
     $("#autoSnapMenuSummary")?.setAttribute("aria-disabled", String(!revision || locked));
@@ -1160,15 +1215,17 @@
     if (searchInput) {
       searchInput.placeholder = state.searchScope === "target" ? "查找译文" : "查找源语词元或短语";
     }
-    ["#aiReview", "#referenceManuscript"].forEach(selector => {
-      const node = $(selector);
-      // The handlers already reject concurrent operations. Keep these two
-      // controls visually stable during fast editor commits instead of
-      // flashing their disabled opacity after every split/merge/text edit.
-      if (node) node.disabled = !revision || locked;
+    const referenceButton = $("#referenceManuscript");
+    if (referenceButton) referenceButton.disabled = !revision || locked;
+    const reviewMenu = $("#aiReviewMenu");
+    const reviewDisabled = !revision || locked;
+    reviewMenu?.classList.toggle("disabled", reviewDisabled);
+    if (reviewDisabled && reviewMenu?.open) reviewMenu.open = false;
+    $("#aiReview")?.setAttribute("aria-disabled", String(reviewDisabled));
+    ["#copyExternalReview", "#downloadExternalReview"].forEach(selector => {
+      const control = $(selector);
+      if (control) control.disabled = !revision || locked;
     });
-    const reviewStart = $("#startAiReview");
-    if (reviewStart) reviewStart.disabled = !revision || locked || state.aiReviewRunning;
   }
 
   function isReferenceToken(token) {
@@ -1357,7 +1414,7 @@
   async function cancelOrDismissTaskPanel() {
     const running = editorAiTaskLocksEditor()
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state)
-      || state.operationPending || state.aiReviewRunning;
+      || state.operationPending;
     if (!running || !state.projectId) {
       state.taskPanelDismissed = true;
       $("#translationTaskPanel").classList.add("hidden");
@@ -2597,61 +2654,6 @@
     return revision;
   }
 
-  function aiReviewStorageKey() {
-    return state.projectId ? `substar.editor.ai-review:${state.projectId}` : "";
-  }
-
-  function persistAiReview() {
-    const key = aiReviewStorageKey();
-    if (!key) return;
-    if (state.aiReview) localStorage.setItem(key, JSON.stringify(state.aiReview));
-    else localStorage.removeItem(key);
-  }
-
-  async function loadAiReview() {
-    state.aiReview = null;
-    const key = aiReviewStorageKey();
-    if (!key) return;
-    try {
-      const remote = await api(projectPath("/ai-review/latest"));
-      if (remote && Array.isArray(remote.issues) && remote.review_id) {
-        state.aiReview = {...remote, project_id:state.projectId};
-        persistAiReview();
-        return;
-      }
-    } catch (_) {}
-    try {
-      const value = JSON.parse(localStorage.getItem(key) || "null");
-      if (value && value.project_id === state.projectId && Array.isArray(value.issues)) {
-        state.aiReview = value;
-      }
-    } catch (_) {
-      localStorage.removeItem(key);
-    }
-  }
-
-  function aiReviewCueBasisMatches(snapshot, track) {
-    const cue = state.indexes?.cueById.get(String(snapshot?.cue_id || ""));
-    if (!cue || cue.state !== "active") return false;
-    const expectedTokens = Array.isArray(snapshot?.source_tokens)
-      ? snapshot.source_tokens : [];
-    const currentTokenIds = cue.active_display_token_ids || [];
-    if (expectedTokens.length !== currentTokenIds.length) return false;
-    const tokenById = state.indexes?.tokenById || new Map();
-    const sourceMatches = expectedTokens.every((expected, index) => {
-      const tokenId = currentTokenIds[index];
-      const current = tokenById.get(tokenId);
-      return String(expected?.token_id || "") === String(tokenId)
-        && String(expected?.text || "") === String(current?.text || "");
-    });
-    if (!sourceMatches) return false;
-    if (track === "translation") {
-      return String(snapshot?.target_text || "")
-        === String(cue.target?.target_text || "");
-    }
-    return true;
-  }
-
   function configureTranslationLanguageDefaults(projectSettings = {}) {
     const sourceAliases = {
       zh:"zh-CN", "zh-cn":"zh-CN", en:"en", mixed:"mixed",
@@ -2666,157 +2668,87 @@
         ? configuredTarget : "zh-CN";
   }
 
-  function aiReviewIssueModified(issue) {
-    const basis = Array.isArray(issue?.cue_basis) ? issue.cue_basis : [];
-    if (!basis.length) return true;
-    return !basis.every(snapshot => aiReviewCueBasisMatches(snapshot, issue.track));
-  }
-
-  function aiReviewCategoryLabel(category) {
-    return ({
-      suspected_misrecognition:"疑似识别错误", suspected_omission:"疑似漏词",
-      suspected_repetition:"疑似重复", named_entity_or_term:"专名或术语",
-      number_or_unit:"数字或单位", context_incoherence:"上下文不连贯",
-      source_consistency:"源文一致性", mistranslation:"错译", omission:"漏译",
-      addition:"增译", factual_mismatch:"事实不符", polarity_or_logic:"否定或逻辑",
-      reference_resolution:"指代", terminology_consistency:"术语一致性",
-      grammar_or_fluency:"语法或流畅度", subtitle_flow:"字幕衔接"
-    })[category] || category;
-  }
-
-  function renderAiReview() {
-    const list = $("#aiReviewIssueList");
-    const status = $("#aiReviewState");
-    if (!list || !status) return;
-    const summary = aiReviewState.summarize(
-      state.aiReview,
-      state.revision?.revision_id,
-      state.aiReviewRunning
-    );
-    status.textContent = summary.status;
-    const start = $("#startAiReview");
-    if (start) start.textContent = summary.buttonLabel;
-    if (state.aiReviewRunning) return;
-    const issues = state.aiReview?.issues || [];
-    const filter = $("#aiReviewFilter")?.value || "all";
-    const visible = issues.filter(issue =>
-      filter === "all" || issue.track === filter || issue.issue_type === filter
-    );
-    if (!visible.length) {
-      const empty = document.createElement("p");
-      empty.className = "muted";
-      empty.textContent = issues.length ? "当前分类没有疑似项" : summary.emptyMessage;
-      list.replaceChildren(empty);
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    visible.forEach(issue => {
-      const primaryCueId = issue.cue_ids?.[0] || "";
-      const cue = state.indexes?.cueById.get(primaryCueId);
-      const modified = aiReviewIssueModified(issue);
-      const card = document.createElement("article");
-      card.className = `ai-review-issue${modified ? " modified" : ""}`;
-      card.dataset.reviewIssueId = issue.issue_id;
-      const cueLabel = cue ? `Cue ${Number(cue.index) + 1}` : "Cue 已删除";
-      const head = document.createElement("span");
-      head.className = "review-issue-head";
-      const title = document.createElement("b");
-      title.textContent = `${cueLabel} · ${issue.track === "translation" ? "译文" : "源文"} · ${aiReviewCategoryLabel(issue.issue_type)}`;
-      const issueState = document.createElement("i");
-      issueState.textContent = modified ? "已过期" : ({
-        open:"待处理", dismissed:"已忽略", resolved:"已解决"
-      })[issue.status] || issue.status;
-      head.append(title, issueState);
-      const message = document.createElement("span");
-      message.textContent = issue.description || "疑似内容需要人工查看";
-      const evidence = document.createElement("span");
-      evidence.className = "review-evidence";
-      evidence.textContent = `${issue.impact} 影响 · ${issue.confidence} 置信 · ${issue.evidence}`;
-      card.append(head, message, evidence);
-      if (issue.suggested_text) {
-        const suggestion = document.createElement("span");
-        suggestion.className = "review-suggestion";
-        suggestion.textContent = `建议：${issue.suggested_text}`;
-        card.append(suggestion);
-      }
-      const controls = document.createElement("span");
-      controls.className = "review-issue-controls";
-      for (const [statusValue, label] of [["resolved", "标记已解决"], ["dismissed", "忽略"]]) {
-        const control = document.createElement("button");
-        control.type = "button";
-        control.dataset.reviewStatus = statusValue;
-        control.textContent = label;
-        control.disabled = modified || issue.status === statusValue;
-        controls.append(control);
-      }
-      card.append(controls);
-      fragment.append(card);
-    });
-    list.replaceChildren(fragment);
-  }
-
-  function clampAiReviewToViewport() {
-    const panel = $("#aiReviewFloat");
-    if (!panel || panel.classList.contains("hidden")) return;
-    const margin = 12;
-    const rect = panel.getBoundingClientRect();
-    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-    panel.style.left = `${Math.max(margin, Math.min(maxLeft, rect.left))}px`;
-    panel.style.top = `${Math.max(margin, Math.min(maxTop, rect.top))}px`;
-    panel.style.right = "auto";
-    panel.style.bottom = "auto";
-  }
-
   function openAiReview() {
-    $("#aiReviewFloat")?.classList.remove("hidden");
-    requestAnimationFrame(clampAiReviewToViewport);
-    renderAiReview();
+    const menu = $("#aiReviewMenu");
+    if (menu && !menu.classList.contains("disabled")) menu.open = true;
   }
 
-  function jumpToAiReviewIssue(issueId) {
-    const issue = state.aiReview?.issues?.find(item => item.issue_id === issueId);
-    const cueId = issue?.cue_ids?.[0] || "";
-    const tokenIds = issue?.token_ids || issue?.source_token_ids || [];
-    if (!issue || !state.indexes?.cueById.has(cueId)) return;
-    state.selectedTokenIds = new Set(tokenIds);
-    state.selectionAnchorTokenId = tokenIds[0] || null;
-    state.timelineSelectedCueId = cueId;
-    syncPlaybackFollowAfterSeek();
-    activateCue(cueId, {
-      seek:true, scroll:true, revealTimeline:true, centerTimeline:true
+  function selectedReviewCueIds() {
+    const cueIds = new Set();
+    state.selectedTokenIds.forEach(tokenId => {
+      const cueId = state.indexes?.tokenToCueId?.get(tokenId);
+      if (cueId) cueIds.add(cueId);
     });
-    refreshTokenSelectionUi();
+    return [...cueIds];
   }
 
-  async function updateAiReviewIssueStatus(issueId, status) {
-    const issue = state.aiReview?.issues?.find(item => item.issue_id === issueId);
-    if (!issue) return;
+  function buildExternalReviewContent() {
+    if (!state.revision || !state.view || !externalReview) {
+      throw new Error("请先打开字幕工程");
+    }
+    return externalReview.build({
+      cues:state.view.cue_views,
+      scope:$(".external-review-scope-tabs [aria-pressed='true']")?.dataset.reviewScope || "current",
+      rangeExpression:$("#externalReviewRange")?.value || "",
+      currentCueId:state.activeCueId,
+      selectedCueIds:selectedReviewCueIds(),
+      instruction:$("#externalReviewInstruction")?.value || "",
+      sourceText:cueSourceText,
+      targetText:cue => languageLayout.formatText(
+        cue.target?.target_text || "", state.trackLanguages?.target
+      )
+    });
+  }
+
+  async function copyExternalReviewContent() {
     try {
-      const updated = await api(projectPath(`/ai-review/issues/${encodeURIComponent(issueId)}`), {
-        method:"PATCH",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({status})
-      });
-      issue.status = updated.status;
-      persistAiReview();
-      renderAiReview();
+      const built = buildExternalReviewContent();
+      await navigator.clipboard.writeText(built.text);
+      ordinaryError("审阅内容已复制，可以粘贴到任意 Web AI。", "completed");
+      if (isAdvancedTutorial() && state.tutorial.active && state.tutorial.step === 6) {
+        advanceEditorTutorial(6);
+      }
     } catch (error) {
-      ordinaryError(`审阅状态保存失败：${error.message}`);
+      ordinaryError(`复制失败：${error.message}`);
+    }
+  }
+
+  async function downloadExternalReviewContent() {
+    try {
+      const built = buildExternalReviewContent();
+      const safeProjectId = systemSaveAs.safeFilename(state.projectId || "substar");
+      const result = await systemSaveAs.saveBlob({
+        suggestedName:`${safeProjectId}_外部AI审阅.txt`,
+        description:"TXT 文本文档",
+        mimeType:"text/plain",
+        extension:".txt"
+      }, new Blob([built.text], {type:"text/plain;charset=utf-8"}));
+      if (result.cancelled) return;
+      ordinaryError(`已保存：${result.filename}`, "completed");
+    } catch (error) {
+      ordinaryError(`下载失败：${error.message}`);
     }
   }
 
   async function runAiCalibration() {
     if (!state.revision || state.operationPending) return;
-    if (isAdvancedTutorial()) return runPackagedTutorialStage("calibration");
+    if (isAdvancedTutorial()) {
+      $("#aiCalibrationMenu").open = false;
+      return runPackagedTutorialStage("calibration");
+    }
     state.operationPending = true;
+    const instruction = $("#aiCalibrationInstruction")?.value.trim() || "";
+    $("#aiCalibrationMenu").open = false;
     renderHeader();
-    renderWorkbenchTask("AI 校准", 18, "正在校准英文大小写与轻量标点…");
+    renderWorkbenchTask("AI 校准", 2, "AI 校准准备中…");
     try {
       const result = await api(projectPath("/ai-calibrate"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({expected_revision_id:state.revision.revision_id})
+        body:JSON.stringify({
+          expected_revision_id:state.revision.revision_id,
+          instruction
+        })
       });
       if (result.revision?.revision_id !== state.revision.revision_id) {
         setRevision(result.revision);
@@ -2834,11 +2766,12 @@
       const sentences = Number(result.sentence_count || 0);
       const casing = Number(result.case_applied_count || 0);
       const punctuation = Number(result.punctuation_applied_count || 0);
+      const merges = Number(result.merge_applied_count || 0);
       const duration = Number(result.duration_seconds || 0);
       const problems = Number(result.problem_cue_ids?.length || 0);
       renderWorkbenchTask(
         "AI 校准", 100,
-        `已检查 ${checked} 条 Cue / ${groups} 个意义组 / ${blocks} 块 · 识别 ${sentences} 个句子 · 应用大小写 ${casing} 处 / 标点 ${punctuation} 处${problems ? ` · ${problems} 条放行至问题字幕` : ""}${filtered ? ` · 过滤 ${filtered} 项` : ""}${duration ? ` · ${duration.toFixed(1)} 秒` : ""}${failed ? ` · ${failed} 块接口失败` : ""}`,
+        `已检查 ${checked} 条 Cue / ${groups} 个意义组 / ${blocks} 块 · 识别 ${sentences} 个句子 · 应用大小写 ${casing} 处 / 标点 ${punctuation} 处${merges ? ` / 合并 ${merges} 处` : ""}${problems ? ` · ${problems} 条放行至问题字幕` : ""}${filtered ? ` · 过滤 ${filtered} 项` : ""}${duration ? ` · ${duration.toFixed(1)} 秒` : ""}${failed ? ` · ${failed} 块接口失败` : ""}`,
         "completed"
       );
     } catch (error) {
@@ -2878,39 +2811,6 @@
     } finally {
       state.operationPending = false;
       renderHeader();
-    }
-  }
-
-  async function runAiReview() {
-    if (!state.revision || state.aiReviewRunning) return;
-    if (isAdvancedTutorial()) return runPackagedTutorialStage("review");
-    openAiReview();
-    state.aiReviewRunning = true;
-    renderHeader();
-    renderAiReview();
-    try {
-      const result = await api(projectPath("/ai-review"), {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          expected_revision_id:state.revision.revision_id,
-          instruction:String($("#aiReviewInstruction")?.value || "").trim()
-        })
-      });
-      state.aiReview = {
-        ...result,
-        project_id:state.projectId,
-        created_at:new Date().toISOString()
-      };
-      persistAiReview();
-    } catch (error) {
-      if (error.code !== "editor_ai_task_cancelled") {
-        ordinaryError(`AI 审阅失败：${error.message}`);
-      }
-    } finally {
-      state.aiReviewRunning = false;
-      renderHeader();
-      renderAiReview();
     }
   }
 
@@ -3070,6 +2970,8 @@
       canvas,
       media:activeMedia(),
       keyboardTarget:document,
+      hideCueShortcut:() => state.shortcuts.hideCue,
+      zoomModifier:() => state.shortcuts.zoomModifier,
       onWaveformWindow({start, end, points}) {
         const query = new URLSearchParams({
           start:String(start), end:String(end), points:String(points)
@@ -3301,13 +3203,7 @@
       setRevision(revision, {preserveCueViewport:false});
       await refreshEditorAiTask();
       startEditorAiTaskPoll();
-      if (resetRevision) {
-        localStorage.removeItem(`substar.editor.ai-review:${projectId}`);
-        state.aiReview = null;
-        $("#aiReviewFloat")?.classList.add("hidden");
-      }
-      await loadAiReview();
-      renderAiReview();
+      if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
       loadRevisionHistory().catch(() => {});
       ensureOperationQueue();
@@ -3397,18 +3293,18 @@
     {title:"查找字幕", description:"查找“控制”，然后点击查找下一个。", focus:() => document.querySelector('[data-tool-panel="search"]')},
     {title:"标点处理", description:"在上行字幕的“消除符号”中填写“，。”，然后应用规则。", focus:() => document.querySelector('[data-tool-panel="punctuation"]')},
     {title:"自动吸附", description:"选择智能吸附，把阈值从 400 改为 500，然后点击执行。", focus:() => $("#autoSnapMenu")},
-    {title:"导出字幕", description:"点击“导出”，选择一种字幕格式。", focus:() => [$("#exportDocument"), $("#exportMenu[open] .export-popover")]}
+    {title:"导出字幕", description:"点击“导出...”，选择一种字幕格式。", focus:() => [$("#exportDocument"), $("#exportMenu[open] .export-popover")]}
   ];
 
   const ADVANCED_EDITOR_TUTORIAL_STEPS = [
     {title:"AI 切分结果已载入", description:"切分页刚才载入的 34 条 Cue 已按正式文档契约注册。进阶教程从这里开始，不再重复选择、播放和基础编辑操作。", focus:() => $("#cueList"), continue:true},
-    {title:"执行 AI 校准", description:"点击“AI 校准”。教程会模拟任务进度，并载入预存的真实校准结果；运行时不会请求 DeepSeek。", focus:() => $("#aiCalibrate")},
+    {title:"执行 AI 校准", description:"打开“AI 校准”，可以填写本次额外要求，再点击“执行校准”。教程会载入预存的真实校准结果，不会请求云端模型。", focus:() => [$("#aiCalibrate"), $("#aiCalibrationMenu[open] .calibration-popover")]},
     {title:"查看校准痕迹", description:"浅蓝色背景标出 AI 实际改动过的词元。校准结果保留原 Cue 身份与可追溯 provenance。", focus:() => $("#cueList"), continue:true},
     {title:"执行 AI 翻译", description:"打开“AI 翻译”，确认英文到简体中文后点击“执行”。载入的翻译快照包含一对一和多对多意义组映射。", focus:() => [$("#translationMenuSummary"), $("#translationMenu[open] .translation-popover")]},
     {title:"查看多对多译文", description:"译文已经进入 B 语言轨道。相邻 Cue 可以共享一个意义单元，映射信息保存在 Cue，而不是靠逐行硬译。", focus:() => $("#cueList"), continue:true},
-    {title:"打开 AI 审阅", description:"点击“AI 审阅”，打开独立的审阅面板。审阅只给建议，不会直接改写稿件。", focus:() => $("#aiReview")},
-    {title:"执行 AI 审阅", description:"点击面板里的“开始审阅”。教程将载入预存的问题清单，并按当前 Cue 与词元身份完成绑定。", focus:() => [$("#aiReviewFloat"), $("#startAiReview")]},
-    {title:"进阶教程完成", description:"你已经走完 AI 切分、AI 校准、AI 翻译与 AI 审阅。所有阶段均为软件内置快照，展示的是正式载入、校验、提交和展示路径。", focus:() => $("#aiReviewFloat"), continue:true},
+    {title:"打开外部 AI 审阅", description:"点击“外部 AI 审阅”，打开可拖动吸附面板；它不会调用工程内模型，也不会改写稿件。", focus:() => $("#aiReview")},
+    {title:"复制审阅内容", description:"选择审阅范围并点击“复制审阅内容”。内容会带上固定的前后各 5 条上下文，可粘贴到任意 Web AI。", focus:() => [$("#aiReviewMenu[open] .external-review-popover"), $("#copyExternalReview")]},
+    {title:"进阶教程完成", description:"你已经走完 AI 切分、AI 校准、AI 翻译，并生成了可交给外部 Web AI 的审阅内容。", focus:() => $("#aiReviewMenu[open] .external-review-popover"), continue:true},
   ];
 
   function tutorialProject() {
@@ -3424,15 +3320,10 @@
   }
 
   async function runPackagedTutorialStage(stage) {
-    if (!state.revision || state.operationPending || state.aiReviewRunning) return;
-    const title = ({calibration:"AI 校准", translation:"AI 翻译", review:"AI 审阅"})[stage];
-    const expectedStep = ({calibration:1, translation:3, review:6})[stage];
-    if (stage === "review") {
-      openAiReview();
-      state.aiReviewRunning = true;
-    } else {
-      state.operationPending = true;
-    }
+    if (!state.revision || state.operationPending) return;
+    const title = ({calibration:"AI 校准", translation:"AI 翻译"})[stage];
+    const expectedStep = ({calibration:1, translation:3})[stage];
+    state.operationPending = true;
     renderHeader();
     renderWorkbenchTask(title, 18, "正在读取内置阶段快照…");
     try {
@@ -3443,25 +3334,17 @@
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({expected_revision_id:state.revision.revision_id})
       });
-      if (stage === "review") {
-        state.aiReview = {...result, project_id:state.projectId, created_at:new Date().toISOString()};
-        persistAiReview();
-        renderAiReview();
-      } else {
-        setRevision(result);
-        recordCommittedRevision(state.revision, {
-          kind:"ai", operation:`tutorial_snapshot_${stage}`, metadata:{simulated:true}
-        });
-      }
+      setRevision(result);
+      recordCommittedRevision(state.revision, {
+        kind:"ai", operation:`tutorial_snapshot_${stage}`, metadata:{simulated:true}
+      });
       renderWorkbenchTask(title, 100, "内置结果已通过校验并载入", "completed");
       if (state.tutorial.active && state.tutorial.step === expectedStep) advanceEditorTutorial(expectedStep);
     } catch (error) {
       renderWorkbenchTask(title, 100, error.message, "failed");
     } finally {
       state.operationPending = false;
-      state.aiReviewRunning = false;
       renderHeader();
-      renderAiReview();
     }
   }
 
@@ -3664,6 +3547,7 @@
         const cue = state.view?.cue_views.find(item => item.state === "active");
         if (cue) selectCue(cue.cue_id, true);
       }
+      if (state.tutorial.step === 3) $("#aiCalibrationMenu").open = false;
       if ([2,4].includes(state.tutorial.step)) $("#cueList").scrollTop = 0;
       if ([6,7].includes(state.tutorial.step)) openAiReview();
       scheduleEditorTutorialPosition();
@@ -3991,14 +3875,18 @@
     if (exchange && state.projectId && state.revision) {
       $("#exportMenu").open = false;
       try {
+        const sequence = nextExportSequence();
+        const query = new URLSearchParams({export_sequence:String(sequence.value)});
         const spec = systemSaveAs.exchangeSpec(
-          state.projectId,
+          state.taskInfo?.display_name || state.projectId,
           exchange.dataset.exchangeExport,
-          projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}`)
+          sequence.value,
+          projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`)
         );
         const result = await systemSaveAs.saveUrl(spec);
         if (result.cancelled) return;
-        ordinaryError(`已保存：${result.filename}`);
+        commitExportSequence(sequence);
+        ordinaryError(`已保存：${result.filename}`, "completed");
       } catch (error) {
         ordinaryError(`导出失败：${error.message}`);
       }
@@ -4008,14 +3896,18 @@
     if (!button || !state.projectId || !state.revision) return;
     $("#exportMenu").open = false;
     try {
+      const sequence = nextExportSequence();
+      const query = new URLSearchParams({export_sequence:String(sequence.value)});
       const spec = systemSaveAs.subtitleSpec(
-        state.projectId,
+        state.taskInfo?.display_name || state.projectId,
         button.dataset.exportMode,
-        projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}`)
+        sequence.value,
+        projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`)
       );
       const result = await systemSaveAs.saveUrl(spec);
       if (result.cancelled) return;
-      ordinaryError(`已保存：${result.filename}`);
+      commitExportSequence(sequence);
+      ordinaryError(`已保存：${result.filename}`, "completed");
       observeEditorTutorialEvent("export", {mode:button.dataset.exportMode});
     } catch (error) {
       ordinaryError(`导出失败：${error.message}`);
@@ -4146,7 +4038,17 @@
   };
   $("#undoAutoSnap").onclick = undoAutoSnap;
   $("#applyPunctuation").onclick = applyPresentationSettings;
-  $("#aiCalibrate").onclick = () => { state.taskPanelDismissed = false; runAiCalibration(); };
+  function calibrationInstructionKey() {
+    return `substar.editor.ai-calibration-instruction:${state.projectId || "unselected"}`;
+  }
+  $("#aiCalibrationMenu").addEventListener("toggle", () => {
+    if (!$("#aiCalibrationMenu").open) return;
+    $("#aiCalibrationInstruction").value = localStorage.getItem(calibrationInstructionKey()) || "";
+  });
+  $("#aiCalibrationInstruction").addEventListener("input", event => {
+    localStorage.setItem(calibrationInstructionKey(), event.target.value);
+  });
+  $("#runAiCalibration").onclick = () => { state.taskPanelDismissed = false; runAiCalibration(); };
   ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"].forEach(selector => {
     $(selector).onclick = event => convertScript(event.currentTarget.dataset.scriptTarget);
   });
@@ -4158,64 +4060,30 @@
     try {
       const form = new FormData();
       form.append("file", file);
-      if (/\.json$/i.test(file.name)) {
-        if (!state.projectId) throw new Error("请先打开要导入外部 AI 结果的项目");
-        const payload = JSON.parse(await file.text());
-        const schema = String(payload?.schema_version || "");
-        const route = ({
-          "substar.external-ai-prooftranslation.v1": "/external-ai-prooftranslation",
-          "substar.external-ai-split.v1": "/external-ai-split",
-          "substar.external-ai-generation-checkpoint.prototype.v2": "/external-ai-generation",
-          "substar.external-ai-generation-checkpoint.prototype.v3": "/external-ai-generation",
-          "substar.external-ai-generation-checkpoint.v1": "/external-ai-generation",
-        })[schema];
-        if (!route) throw new Error(`不支持的外部 AI 结果版本：${schema || "缺失"}`);
-        form.append("apply", "false");
-        const preview = await api(projectPath(route), {method:"POST", body:form});
-        const summary = preview.summary || {};
-        const isSplit = schema === "substar.external-ai-split.v1";
-        const isGeneration = schema.startsWith("substar.external-ai-generation-checkpoint.");
-        const message = isGeneration
-          ? `外部 AI 生成校验完成\n阶段：${preview.checkpoint || "未知"}\n当前 Cue：${summary.current_cues || 0}\n导入后 Cue：${summary.proposed_cues || 0}\n源文修改：${summary.source_replacements || 0}\n译文：${summary.translations || 0}${summary.overwrite_current ? "\n\n这份累计快照将覆盖当前编辑版本。" : ""}\n\n应用这个累计结果？`
-          : isSplit
-          ? `外部 AI 切分校验完成\n当前 Cue：${summary.current_cues || 0}\n建议 Cue：${summary.proposed_cues || 0}\n边界变化：${summary.boundary_changes || 0}\n\n应用这套切分？`
-          : `外部 AI 校译校验完成\n可以应用：${summary.applicable || 0}\n内容已变化：${summary.content_changed || 0}\n格式无效：${summary.invalid || 0}\n\n应用可以安全写入的结果？`;
-        const applicable = (isSplit || isGeneration) ? Boolean(summary.applicable) : summary.applicable > 0;
-        const accepted = window.confirm(message);
-        if (!accepted || !applicable) return;
-        const applyForm = new FormData();
-        applyForm.append("file", file);
-        applyForm.append("apply", "true");
-        await api(projectPath(route), {method:"POST", body:applyForm});
-        await loadProject(state.projectId);
-        ordinaryError(isGeneration ? "已应用外部 AI 生成结果" : isSplit ? "已应用外部 AI 切分" : "已应用外部 AI 校译；冲突项未改动");
-      } else {
-        const result = await api("/api/project-imports/subtitle-project", {method:"POST", body:form});
-        await loadProject(result.project_id);
-      }
+      const result = await api("/api/project-imports/subtitle-project", {method:"POST", body:form});
+      await loadProject(result.project_id);
     } catch (error) {
       ordinaryError(`导入失败：${error.message}`);
     }
   };
-  $("#aiReview").onclick = () => {
-    openAiReview();
+  $("#aiReviewMenu").addEventListener("toggle", () => {
+    if (!$("#aiReviewMenu").open) return;
     if (isAdvancedTutorial() && state.tutorial.active && state.tutorial.step === 5) advanceEditorTutorial(5);
+  });
+  $(".external-review-scope-tabs").onclick = event => {
+    const button = event.target.closest("[data-review-scope]");
+    if (!button) return;
+    const scope = button.dataset.reviewScope;
+    document.querySelectorAll("[data-review-scope]").forEach(control => {
+      const active = control === button;
+      control.classList.toggle("active", active);
+      control.setAttribute("aria-pressed", String(active));
+    });
+    $("#externalReviewRangeField").classList.toggle("hidden", scope !== "range");
+    if (scope === "range") $("#externalReviewRange").focus();
   };
-  $("#startAiReview").onclick = runAiReview;
-  $("#closeAiReview").onclick = () => $("#aiReviewFloat").classList.add("hidden");
-  $("#aiReviewFilter").onchange = renderAiReview;
-  $("#aiReviewIssueList").onclick = event => {
-    const statusControl = event.target.closest("[data-review-status]");
-    if (statusControl) {
-      const issue = statusControl.closest("[data-review-issue-id]");
-      if (issue) updateAiReviewIssueStatus(
-        issue.dataset.reviewIssueId, statusControl.dataset.reviewStatus
-      );
-      return;
-    }
-    const issue = event.target.closest("[data-review-issue-id]");
-    if (issue) jumpToAiReviewIssue(issue.dataset.reviewIssueId);
-  };
+  $("#copyExternalReview").onclick = copyExternalReviewContent;
+  $("#downloadExternalReview").onclick = downloadExternalReviewContent;
   $("#referenceManuscript").onclick = () => { state.taskPanelDismissed = false; runReferenceManuscript(); };
   $("#referenceKeepAsr").onclick = () => chooseReferenceVersion(false);
   $("#referenceApply").onclick = () => chooseReferenceVersion(true);
@@ -4465,60 +4333,22 @@
   });
 
   document.addEventListener("keydown", event => {
-    if ((event.code !== "Space" && event.key !== " ") || event.repeat
-      || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]')) return;
+    if (event.repeat || shortcutFromEvent(event).toLowerCase() !== state.shortcuts.playPause.toLowerCase()) return;
+    if (isTextEditingContext(event)) return;
     event.preventDefault();
+    event.stopPropagation();
     toggleMediaPlayback();
-  });
+  }, true);
 
   document.addEventListener("keydown", event => {
     if (state.timelineController) return;
-    if (event.key !== "Backspace" || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
+    if (shortcutFromEvent(event).toLowerCase() !== state.shortcuts.hideCue.toLowerCase()
+      || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
     const cue = currentCue();
     if (!cue || cue.state === "deleted") return;
     event.preventDefault();
     cueAction(cue.cue_id, "hide");
   });
-
-  $("#aiReviewFloatHandle").addEventListener("pointerdown", event => {
-    if (event.target.closest("button")) return;
-    const panel = $("#aiReviewFloat");
-    const rect = panel.getBoundingClientRect();
-    state.aiReviewDrag = {dx:event.clientX - rect.left, dy:event.clientY - rect.top};
-    panel.setPointerCapture?.(event.pointerId);
-  });
-  window.addEventListener("pointermove", event => {
-    if (!state.aiReviewDrag) return;
-    const panel = $("#aiReviewFloat");
-    const margin = 12;
-    const maxLeft = Math.max(margin, window.innerWidth - panel.offsetWidth - margin);
-    const maxTop = Math.max(margin, window.innerHeight - panel.offsetHeight - margin);
-    panel.style.left = `${Math.max(margin, Math.min(maxLeft, event.clientX - state.aiReviewDrag.dx))}px`;
-    panel.style.top = `${Math.max(margin, Math.min(maxTop, event.clientY - state.aiReviewDrag.dy))}px`;
-    panel.style.right = "auto";
-    panel.style.bottom = "auto";
-  });
-  window.addEventListener("pointerup", () => {
-    if (!state.aiReviewDrag) return;
-    state.aiReviewDrag = null;
-    const panel = $("#aiReviewFloat");
-    localStorage.setItem("substar.editor.ai-review-position", JSON.stringify({
-      left:panel.style.left, top:panel.style.top
-    }));
-  });
-  try {
-    const position = JSON.parse(localStorage.getItem("substar.editor.ai-review-position") || "null");
-    if (position?.left && position?.top) {
-      const panel = $("#aiReviewFloat");
-      panel.style.left = position.left;
-      panel.style.top = position.top;
-      panel.style.right = "auto";
-      panel.style.bottom = "auto";
-    }
-  } catch (_) {}
-  window.addEventListener("resize", clampAiReviewToViewport);
 
   document.querySelectorAll("#editorTools > .tool-accordion").forEach(panel => {
     panel.addEventListener("toggle", () => {

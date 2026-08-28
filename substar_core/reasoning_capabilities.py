@@ -3,7 +3,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 
-REASONING_EFFORTS = ("low", "medium", "high", "max", "xhigh")
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _provider(base_url: str, model: str) -> str:
@@ -36,6 +36,7 @@ def reasoning_capabilities(base_url: str, model: str) -> dict[str, object]:
             "effort_selection_aliases": {"medium": "high", "xhigh": "high"},
             "effort_wire_map": {"low": "low", "high": "high", "max": "max"},
             "probe_efforts": ["low", "high", "max"],
+            "supported_thinking_modes": ["disabled", "enabled"],
             "verified": True,
             "source": "deepseek-v4-contract",
             "note": "DeepSeek 的 Medium 和 XHigh 会映射为 High。",
@@ -86,7 +87,7 @@ def reasoning_capabilities(base_url: str, model: str) -> dict[str, object]:
             "probe_efforts": ["low", "medium", "high"],
             "verified": True,
             "source": "openai-model-contract",
-            "note": "具体支持范围仍以该模型接口响应为准。",
+            "note": "五档由服务商适配器映射到模型实际支持的推理强度。",
         }
     return {
         "provider": provider,
@@ -95,9 +96,10 @@ def reasoning_capabilities(base_url: str, model: str) -> dict[str, object]:
         "effort_selection_aliases": {},
         "effort_wire_map": {value: value for value in REASONING_EFFORTS},
         "probe_efforts": list(REASONING_EFFORTS),
+        "supported_thinking_modes": [],
         "verified": False,
         "source": "unverified-openai-compatible",
-        "note": "兼容接口未声明能力；可点击探测来验证。",
+        "note": "五档会按兼容接口能力映射；连通性测试同时验证思考模式。",
     }
 
 

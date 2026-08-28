@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>词库 · Substar</title>
-    <link rel="stylesheet" href="/assets/glossary.css?v=20260802-1" />
+    <link rel="stylesheet" href="/assets/glossary.css?v=20260828-project-library-3" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260815-surface-opacity-1" />
@@ -42,49 +42,37 @@
           ><input id="searchInput" placeholder="搜索原词、译文或别名"
         /></label>
         <div class="filter-tabs asset-sidebar-list">
-          <button
-            class="active asset-sidebar-item"
-            data-filter="all"
-            type="button"
-          >
+          <button class="active asset-sidebar-item" data-glossary="all" type="button">
             <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#glossary"></use></svg></span
             ><span class="asset-sidebar-copy"
               ><b>全部词条</b><small>所有作用域</small></span
             ><i class="asset-sidebar-meta" id="allCount">0</i></button
-          ><button
-            class="asset-sidebar-item"
-            data-filter="global"
-            type="button"
-          >
+          ><button class="asset-sidebar-item" data-glossary="global" type="button">
             <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#search"></use></svg></span
             ><span class="asset-sidebar-copy"
               ><b>全局词库</b><small>用于所有项目</small></span
-            ></button
-          ><button
-            class="asset-sidebar-item"
-            data-filter="project"
-            type="button"
-          >
-            <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg></span
-            ><span class="asset-sidebar-copy"
-              ><b>项目词库</b><small>匹配指定项目</small></span
-            >
-          </button>
+            ></button>
         </div>
+        <div class="collection-heading"><span>项目词库</span></div>
+        <div id="collectionList" class="collection-list asset-sidebar-list"></div>
+        <button id="addCollection" class="collection-create" type="button">
+          <span class="collection-create-icon">＋</span>
+          <span><b>新建项目词库</b><small>按节目或客户分别管理</small></span>
+        </button>
         <div class="library-summary">
           <div><strong id="enabledCount">0</strong><span>已启用</span></div>
-          <div><strong id="projectCount">0</strong><span>项目词</span></div>
+          <div><strong id="projectCount">0</strong><span>项目词库</span></div>
         </div>
         <p class="library-note">
-          切分、翻译和 AI 纠错都会读取已启用词条。项目词优先于全局词。
+          ASR、翻译、切分与保守校准读取同一份项目词库；项目词优先于全局词。
         </p>
       </aside>
 
       <section class="glossary-content">
         <div class="content-heading">
           <div>
-            <h2>术语与专有名词</h2>
-            <p>锁定标准原文和译法，也可以标记不翻译或大小写敏感。</p>
+            <h2 id="contentTitle">全部术语</h2>
+            <p>填写热词和指定译文；系统按项目语言方向使用对应关系。</p>
           </div>
           <div class="toolbar">
             <button id="importButton" class="secondary" type="button">
@@ -127,21 +115,14 @@
           <label class="enable-toggle" title="启用词条"
             ><input data-field="enabled" type="checkbox" checked /><span></span
           ></label>
-          <div class="entry-title">
+          <div class="entry-title simple-entry-title">
             <input
               data-field="source"
-              placeholder="原词或错误识别"
-              maxlength="300"
-            /><input
-              data-field="standard_source"
-              placeholder="标准原文（可选）"
+              placeholder="热词／标准写法"
               maxlength="300"
             />
           </div>
-          <span class="type-chip">其他</span>
-          <button class="expand-entry" type="button" aria-label="展开详情">
-            <svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg>
-          </button>
+          <select data-field="glossary_id" aria-label="保存到词库"></select>
           <button class="delete-entry" type="button" aria-label="删除术语">
             ⌫
           </button>
@@ -150,67 +131,36 @@
           <span>→</span
           ><input
             data-field="target"
-            placeholder="指定译文；不翻译时可以留空"
+            placeholder="指定译文（留空则只作为 ASR 热词）"
             maxlength="300"
           />
         </div>
-        <div class="entry-details">
-          <div class="field">
-            <label>别名／常见误识别</label
-            ><input data-field="aliases" placeholder="多个别名用逗号分隔" />
-          </div>
-          <div class="field">
-            <label>类型</label
-            ><select data-field="type">
-              <option value="person">人名</option>
-              <option value="organization">机构</option>
-              <option value="place">地名</option>
-              <option value="program">节目</option>
-              <option value="product">产品／品牌</option>
-              <option value="technical">专业术语</option>
-              <option value="other">其他</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>作用域</label
-            ><select data-field="scope">
-              <option value="global">全局</option>
-              <option value="project">指定项目</option>
-            </select>
-          </div>
-          <div class="field project-field">
-            <label>项目名</label
-            ><input data-field="project" placeholder="项目名称" />
-          </div>
-          <div class="field">
-            <label>热词权重</label
-            ><input data-field="hotword_weight" type="number" min="1" max="5" step="1" value="4" />
-          </div>
-          <div class="field wide">
-            <label>备注</label
-            ><textarea
-              data-field="notes"
-              rows="2"
-              maxlength="1000"
-              placeholder="补充用法或上下文"
-            ></textarea>
-          </div>
-          <label class="check"
-            ><input
-              data-field="case_sensitive"
-              type="checkbox"
-            />区分大小写</label
-          >
-          <label class="check"
-            ><input
-              data-field="do_not_translate"
-              type="checkbox"
-            />保持原文，不翻译</label
-          >
-        </div>
       </article>
     </template>
+    <dialog id="collectionDialog" class="collection-modal">
+      <form method="dialog" class="collection-dialog-card">
+        <div class="dialog-heading">
+          <span class="dialog-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#glossary"></use></svg></span>
+          <div><h3>新建项目词库</h3><p>集中管理某个节目、客户或系列的固定译法。</p></div>
+          <button class="dialog-close" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <label class="dialog-field"><span>词库名称</span><input id="collectionName" maxlength="100" placeholder="例如：科技访谈 · 第三季" autocomplete="off" /><small id="collectionNameError"></small></label>
+        <div class="dialog-note"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg><span>创建项目时可以直接选择；全局词库仍会同时生效。</span></div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirmCollection" value="default" class="primary">创建词库</button></div>
+      </form>
+    </dialog>
+    <dialog id="deleteCollectionDialog" class="collection-modal danger-modal">
+      <form method="dialog" class="collection-dialog-card">
+        <div class="dialog-heading">
+          <span class="dialog-icon danger"><svg class="ui-icon"><use href="/assets/ui-icons.svg#trash"></use></svg></span>
+          <div><h3>删除项目词库？</h3><p id="deleteCollectionDescription"></p></div>
+          <button class="dialog-close" value="cancel" type="submit" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-note danger-note">删除后，该词库中的术语也会移除。点击“保存词库”前可以刷新页面撤销。</div>
+        <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirmDeleteCollection" value="default" class="danger-button">删除词库</button></div>
+      </form>
+    </dialog>
     <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
-    <script src="/assets/glossary.js?v=20260826-system-save-as-1"></script>
+    <script src="/assets/glossary.js?v=20260828-project-library-2"></script>
   </body>
 </html>

@@ -28,8 +28,6 @@ confirmed cancellation must pass through `cancelling`.
 | Semantic grouping | `substar.semantic-grouping-result.v1` | Meaning groups, display boundaries, structural exceptions only |
 | Calibration | `substar.calibration-result.v1` | Exact source-projection corrections and their policy disposition |
 | Translation | `substar.translation-result.v1` | Target text bound to a hash of each source Cue |
-| Source review | `substar.source-review-result.v1` | Source-specific advisory issues |
-| Translation review | `substar.translation-review-result.v1` | Translation-specific advisory issues |
 | Editor AI task | `substar.editor-ai-task.v1` | Exclusive project lock and AI task lifecycle |
 
 The historical `substar.editor-operation.v1` describes user document editing

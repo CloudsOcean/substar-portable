@@ -32,6 +32,8 @@
     runtimeEvents: new Map(),
     runtimeSnapshots: new Map(),
     activeQueueCount: 0,
+    runtimeConnected: true,
+    runtimeFailureCount: 0,
     quickTesting: "",
     tutorial: {
       active: false,
@@ -40,7 +42,7 @@
       submitted: false,
       projectId: "",
       snapshot: null,
-      tests: { qwen: false, deepseek: false },
+      tests: { qwen: false, glm: false },
     },
   };
 
@@ -70,11 +72,11 @@
     if (!state.settings) return false;
     return kind === "qwen"
       ? Boolean(state.settings.api_key_set)
-      : Boolean(state.settings.translation_api_key_set);
+      : Boolean(state.settings.model_provider_key_set?.glm);
   }
 
   function quickStartConfigured() {
-    return quickProviderConfigured("qwen") && quickProviderConfigured("deepseek");
+    return quickProviderConfigured("qwen") && quickProviderConfigured("glm");
   }
 
   function quickProviderComplete(kind) {
@@ -85,9 +87,9 @@
   function renderQuickProvider(kind) {
     const complete = quickProviderComplete(kind);
     const configured = quickProviderConfigured(kind);
-    const card = kind === "qwen" ? $("#qwenQuickCard") : $("#deepseekQuickCard");
-    const status = kind === "qwen" ? $("#qwenQuickState") : $("#deepseekQuickState");
-    const input = kind === "qwen" ? $("#qwenQuickKey") : $("#deepseekQuickKey");
+    const card = kind === "qwen" ? $("#qwenQuickCard") : $("#glmQuickCard");
+    const status = kind === "qwen" ? $("#qwenQuickState") : $("#glmQuickState");
+    const input = kind === "qwen" ? $("#qwenQuickKey") : $("#glmQuickKey");
     card.classList.toggle("complete", complete);
     status.textContent = complete ? "连接成功" : configured ? "已保存 · 待测试" : "待配置";
     input.placeholder = configured ? "密钥已保存；留空可直接复测" : "输入 API Key";
@@ -104,13 +106,13 @@
     $("#pipelineTitle").textContent = showQuickStart ? "快速开始" : "流水线作业";
     const statusPill = $("#statusPill");
     if (showQuickStart) {
-      const completeCount = Number(quickProviderComplete("qwen")) + Number(quickProviderComplete("deepseek"));
+      const completeCount = Number(quickProviderComplete("qwen")) + Number(quickProviderComplete("glm"));
       statusPill.className = `status-pill ${completeCount === 2 ? "completed" : "idle"}`;
       statusPill.textContent = completeCount === 2 ? "配置完成" : `${2 - completeCount} 项待完成`;
       $("#quickStartProgress").textContent = `完成 ${completeCount} / 2`;
     }
     renderQuickProvider("qwen");
-    renderQuickProvider("deepseek");
+    renderQuickProvider("glm");
   }
 
   function quickSettingsPayload(kind, key) {
@@ -129,8 +131,19 @@
     if (kind === "qwen") payload.api_key = key;
     else {
       payload.translation_api_provider = "openai_chat";
-      payload.translation_api_base_url = "https://api.deepseek.com";
-      payload.translation_api_model = payload.translation_api_model || "deepseek-v4-flash";
+      payload.active_model_provider = "glm";
+      payload.translation_api_base_url = "https://open.bigmodel.cn/api/paas/v4";
+      payload.translation_api_model = "glm-5.3-flash";
+      payload.translation_api_auth_mode = "bearer";
+      payload.model_provider_profiles = {
+        ...(payload.model_provider_profiles || {}),
+        glm: {
+          base_url: payload.translation_api_base_url,
+          model: payload.translation_api_model,
+          auth_mode: "bearer",
+          timeout_seconds: Number(payload.translation_api_timeout_seconds || 300),
+        },
+      };
       payload.alignment_api_provider = payload.translation_api_provider;
       payload.alignment_api_base_url = payload.translation_api_base_url;
       payload.alignment_api_model = payload.translation_api_model;
@@ -144,9 +157,9 @@
   async function testQuickProvider(kind) {
     if (!state.settings || state.quickTesting) return;
     const qwen = kind === "qwen";
-    const input = qwen ? $("#qwenQuickKey") : $("#deepseekQuickKey");
-    const button = qwen ? $("#qwenQuickTest") : $("#deepseekQuickTest");
-    const result = qwen ? $("#qwenQuickResult") : $("#deepseekQuickResult");
+    const input = qwen ? $("#qwenQuickKey") : $("#glmQuickKey");
+    const button = qwen ? $("#qwenQuickTest") : $("#glmQuickTest");
+    const result = qwen ? $("#qwenQuickResult") : $("#glmQuickResult");
     const key = input.value.trim();
     if (!key && !quickProviderConfigured(kind)) {
       result.className = "quick-test-result bad";
@@ -176,8 +189,9 @@
         role: "translation",
         source: "api",
         provider: "openai_chat",
-        base_url: "https://api.deepseek.com",
-        model: state.settings.translation_api_model || "deepseek-v4-flash",
+        provider_id: "glm",
+        base_url: "https://open.bigmodel.cn/api/paas/v4",
+        model: "glm-5.3-flash",
         auth_mode: "bearer",
         timeout_seconds: Number(state.settings.translation_api_timeout_seconds || 300),
         api_key: key,
@@ -189,6 +203,22 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(testPayload),
       });
+      let thinkingModes = [];
+      if (!qwen) {
+        const capability = await api("/api/models/reasoning-probe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            base_url:testPayload.base_url,
+            model:testPayload.model,
+            auth_mode:testPayload.auth_mode,
+            timeout_seconds:testPayload.timeout_seconds,
+            api_key:key,
+            provider_id:"glm",
+          }),
+        });
+        thinkingModes = capability.probe?.accepted_thinking_modes || [];
+      }
       state.settings = await api("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -197,8 +227,11 @@
       state.tutorial.tests[kind] = true;
       input.value = "";
       result.className = "quick-test-result good";
-      result.textContent = `${response.message || "连接成功"}，密钥已自动保存`;
-      toast(`${qwen ? "Qwen ASR" : "DeepSeek LLM"} 已连接并保存`);
+      const thinkingSummary = thinkingModes.length
+        ? `；接口接受：${thinkingModes.map((mode) => mode === "enabled" ? "思考" : "非思考").join(" / ")}`
+        : "";
+      result.textContent = `${response.message || "连接成功"}${thinkingSummary}，密钥已自动保存`;
+      toast(`${qwen ? "Qwen ASR" : "智谱 GLM"} 已连接并保存`);
       syncPrimaryPanel();
       maybeAdvanceTutorial();
     } catch (error) {
@@ -232,12 +265,108 @@
     maybeAdvanceTutorial();
   }
 
+  function parseTemporaryHotwords(text = $("#qwenHotwordsInput").value) {
+    const result = [];
+    const seen = new Set();
+    let superCount = 0;
+    for (const [index, raw] of String(text || "").split(/\r?\n/).entries()) {
+      const line = raw.trim();
+      if (!line) continue;
+      const weighted = line.match(/^(.*):(\d+)$/);
+      const word = String(weighted?.[1] ?? line).trim();
+      const weight = Number(weighted?.[2] ?? 4);
+      if (!word) throw new Error(`第 ${index + 1} 行热词不能为空`);
+      if (weighted && /:\d+$/.test(word)) {
+        throw new Error(`第 ${index + 1} 行只能指定一个热词权重`);
+      }
+      if (![1, 2, 3, 4, 5, 50].includes(weight)) {
+        throw new Error(`第 ${index + 1} 行热词权重必须为 1–5 或 50`);
+      }
+      const key = word.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (weight === 50 && ++superCount > 50) throw new Error("权重 50 的超级热词最多 50 个");
+      result.push({text:word, weight});
+      if (result.length > 2000) throw new Error("临时热词最多 2000 个");
+    }
+    return result;
+  }
+
+  function formatTemporaryHotwords(rows) {
+    return rows.map((item) => `${item.text}:${Number(item.weight || 4)}`).join("\n");
+  }
+
+  function syncQwenEnhancementCounts() {
+    $("#qwenPromptCount").textContent = `${$("#qwenPromptInput").value.length} / 400`;
+    try {
+      const rows = parseTemporaryHotwords();
+      const supers = rows.filter((item) => item.weight === 50).length;
+      $("#qwenHotwordCount").textContent = `${rows.length} / 2000${supers ? ` · 超级 ${supers} / 50` : ""}`;
+      $("#qwenHotwordCount").classList.remove("bad");
+    } catch (error) {
+      $("#qwenHotwordCount").textContent = errorMessage(error);
+      $("#qwenHotwordCount").classList.add("bad");
+    }
+  }
+
+  function syncQwenEnhancementModel() {
+    const model = String(state.settings?.qwen_cloud_model || "");
+    const supported = !model.startsWith("qwen3-asr-flash-filetrans");
+    $("#qwenHotwordsInput").disabled = !supported;
+    if (!supported) {
+      $("#qwenHotwordsInput").value = "";
+      $("#qwenAssistStatus").textContent = `${model} 仅填写 Prompt；当前模型不支持即时热词。`;
+    }
+    syncQwenEnhancementCounts();
+  }
+
+  async function fillQwenEnhancement() {
+    const brief = $("#qwenAiBriefInput").value.trim();
+    const button = $("#qwenAssistButton");
+    const status = $("#qwenAssistStatus");
+    status.className = "";
+    if (!brief) {
+      status.textContent = "请先填写给 AI 的补充说明。";
+      status.classList.add("bad");
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "正在填写…";
+    status.textContent = "AI 正在生成 Qwen Prompt 和多语言临时热词…";
+    try {
+      const generated = await api("/api/qwen-assist", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({source_language:$("#languageInput").value, user_prompt:brief}),
+      });
+      const existing = parseTemporaryHotwords();
+      const merged = new Map(existing.map((item) => [item.text.toLocaleLowerCase(), item]));
+      for (const item of generated.hotwords || []) {
+        const key = String(item.text || "").toLocaleLowerCase();
+        if (key && !merged.has(key)) merged.set(key, item);
+      }
+      $("#qwenPromptInput").value = String(generated.prompt || "").slice(0, 400);
+      $("#qwenHotwordsInput").value = formatTemporaryHotwords([...merged.values()]);
+      syncQwenEnhancementCounts();
+      markSettingsDirty();
+      status.textContent = `已填写 Prompt，并合并 ${generated.hotwords?.length || 0} 个 AI 热词。`;
+      status.classList.add("good");
+    } catch (error) {
+      status.textContent = errorMessage(error);
+      status.classList.add("bad");
+    } finally {
+      button.disabled = false;
+      button.textContent = "AI 智能填写";
+    }
+  }
+
   function taskConfigFromControls() {
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     return {
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
+      glossary_id: $("#glossaryInput").value,
       segmentation_enabled: segmentationEnabled,
       reference_script_mode: workflow === "reference_script",
       reference_break_symbols: $("#referenceBreakSymbolsInput").value,
@@ -248,6 +377,9 @@
       mixed_hard_limit: Number($("#mixedLimitInput").value),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
+      qwen_ai_brief: $("#qwenAiBriefInput").value,
+      context: $("#qwenPromptInput").value,
+      qwen_temporary_hotwords: parseTemporaryHotwords(),
     };
   }
 
@@ -306,7 +438,7 @@
   }
 
   const TUTORIAL_CONTROL_IDS = [
-    "languageInput", "targetLanguageInput", "splitWorkflowInput", "referenceBreakSymbolsInput",
+    "languageInput", "targetLanguageInput", "glossaryInput", "splitWorkflowInput", "referenceBreakSymbolsInput",
     "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "japaneseLimitInput", "koreanLimitInput",
   ];
 
@@ -314,12 +446,12 @@
     {
       target: "#qwenQuickCard", title: "连接 QWEN 听写服务",
       description: "听写模块负责将音视频转换成文字信息。输入百炼 API Key，然后点击“测试连接”。",
-      link: { label: "百炼平台注册点此", href: "https://bailian.console.aliyun.com/cn-beijing#/home" },
+      link: { label: "点击注册并获取 API Key", href: "https://bailian.console.aliyun.com/cn-beijing#/home" },
     },
     {
-      target: "#deepseekQuickCard", title: "连接 DeepSeek 文本服务",
-      description: "文本模块负责语义切分，以及后续翻译、校准和审阅。输入 DeepSeek API Key，然后点击“测试连接”。",
-      link: { label: "DeepSeek 平台注册点此", href: "https://platform.deepseek.com/sign_in" },
+      target: "#glmQuickCard", title: "连接智谱 GLM 文本服务",
+      description: "文本模块负责语义切分，以及后续翻译、校准和审阅。输入智谱 API Key，然后点击“测试连接”。",
+      link: { label: "点击注册并获取 API Key", href: "https://bigmodel.cn/" },
     },
     {
       target: "#videoDropZone", title: "载入教程音频",
@@ -423,7 +555,7 @@
     state.tutorial.active = false;
     state.tutorial.kind = "beginner";
     state.tutorial.step = 0;
-    state.tutorial.tests = { qwen: false, deepseek: false };
+    state.tutorial.tests = { qwen: false, glm: false };
     state.tutorial.snapshot = null;
     clearTutorialTarget();
     $("#splitTutorialLayer").classList.add("hidden");
@@ -440,7 +572,7 @@
     state.tutorial.kind = "beginner";
     state.tutorial.step = 0;
     state.tutorial.submitted = false;
-    state.tutorial.tests = { qwen: false, deepseek: false };
+    state.tutorial.tests = { qwen: false, glm: false };
     state.videos = [];
     state.references = [];
     $("#videoFileChip").textContent = "";
@@ -605,7 +737,7 @@
     const step = state.tutorial.step;
     const complete = [
       state.tutorial.tests.qwen,
-      state.tutorial.tests.deepseek,
+      state.tutorial.tests.glm,
       state.videos.some((file) => file.name === "教程音频.mp3"),
       $("#languageInput").value === "zh",
       $("#targetLanguageInput").value === "en",
@@ -654,11 +786,19 @@
     $("#targetLanguageInput").value = ["zh-CN", "en", "ja", "ko"].includes(configuredTarget)
       ? configuredTarget
       : "zh-CN";
+    // The split page currently uses the global glossary only. Keep the hidden
+    // field blank so older saved task settings cannot silently restore a
+    // project glossary after the selector has been removed from the UI.
+    $("#glossaryInput").value = "";
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
     $("#chineseLimitInput").value = effective.chinese_hard_limit || 25;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
     $("#japaneseLimitInput").value = effective.japanese_hard_limit || 25;
     $("#koreanLimitInput").value = effective.korean_hard_limit || 32;
+    $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
+    $("#qwenPromptInput").value = effective.context || "";
+    $("#qwenHotwordsInput").value = formatTemporaryHotwords(effective.qwen_temporary_hotwords || []);
+    syncQwenEnhancementModel();
     $("#splitWorkflowInput").value = effective.reference_script_mode
       ? "reference_script"
       : effective.segmentation_enabled === false ? "disabled" : "one_step";
@@ -771,6 +911,50 @@
     return "切分完成";
   }
 
+  const TASK_STEP_LABELS = Object.freeze({
+    "transcription.media_probe":"正在读取媒体信息",
+    "transcription.audio_prepare":"正在准备听写音频",
+    "transcription.provider_audio_encode":"正在编码上传音频",
+    "transcription.provider_upload":"正在上传音频",
+    "transcription.provider_run":"云端正在听写",
+    "transcription.evidence_normalize":"正在整理词级听写证据",
+    "transcription.artifact_finalize":"正在保存听写结果",
+    "segmentation.input_prepare":"正在准备切分输入",
+    "segmentation.semantic_grouping":"正在进行语义切分",
+    "segmentation.cue_layout":"正在生成 Cue 布局",
+    "segmentation.validation":"正在校验字幕",
+    "segmentation.document_build":"正在生成可编辑文档",
+  });
+
+  function taskPhase(job) {
+    return TASK_STEP_LABELS[String(job.step || "")] || humanStatus(job);
+  }
+
+  function taskError(job) {
+    const raw = job?.error;
+    if (!raw) return "";
+    if (typeof raw === "string") return raw;
+    try { return JSON.stringify(raw, null, 2); } catch (_) { return String(raw); }
+  }
+
+  async function copyText(value, successMessage = "已复制") {
+    const text = String(value || "");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (_) {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    toast(successMessage);
+  }
+
   function chooseVideo(files) {
     const selected = [...(files || [])];
     if (!selected.length) return;
@@ -846,17 +1030,19 @@
       language: $("#languageInput").value,
       alignment_language: alignmentLanguage($("#languageInput").value),
       target_language_mode: $("#targetLanguageInput").value,
+      glossary_id: $("#glossaryInput").value,
       segmentation_enabled: segmentationEnabled,
       reference_script_mode: workflow === "reference_script",
       reference_break_symbols: $("#referenceBreakSymbolsInput").value,
       translation_enabled: false,
       calibration_enabled: false,
-      review_enabled: false,
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
+      context: $("#qwenPromptInput").value,
+      qwen_temporary_hotwords: parseTemporaryHotwords(),
       split_workflow_mode: "one_step",
       split_branch: MAIN_SPLIT_BRANCH,
       segmentation_strategy: "semantic",
@@ -873,7 +1059,7 @@
       "parakeet_device", "parakeet_dtype", "whisperx_alignment_model",
       "whisperx_alignment_model_path", "whisperx_batch_size", "model_cache_dir",
     ]) result[key] = current[key];
-    for (const stage of ["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "review", "audit_repair"]) {
+    for (const stage of ["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "audit_repair"]) {
       for (const suffix of ["model", "thinking_mode", "reasoning_effort", "max_tokens", "temperature"]) {
         const key = `stage_${stage}_${suffix}`;
         result[key] = current[key];
@@ -975,19 +1161,19 @@
   }
 
   function displayTaskMessage(job) {
-    return String(job.error || job.message || humanStatus(job));
+    return taskPhase(job);
   }
 
   function renderTaskProgress(job) {
     if (job.workflow_mode === "project_pipeline") {
       const phaseRows = (job.pipeline_items || []).map(item => {
         const label = item.workflow_mode === "editor_task" ? editorTaskLabel(item.task_kind) : "切分";
-        return `${label} · ${humanStatus(item)} · ${normalizedProgress(item)}%`;
+        return `${label} · ${taskPhase(item)} · ${normalizedProgress(item)}%`;
       });
       state.runtimeLogText = [
         `${jobLabel(job)} · 当前阶段 ${job.current_phase_label}`,
         ...phaseRows,
-        ...(job.error ? [`错误：${job.error}`] : []),
+        ...(taskError(job) ? [`错误：${taskError(job)}`] : []),
       ].join("\n");
       renderRuntimeLog();
       return;
@@ -996,7 +1182,7 @@
       state.runtimeLogText = [
         `${jobLabel(job)} · ${routeLabel(job)} · ${normalizedProgress(job)}%`,
         displayTaskMessage(job),
-        ...(job.error ? [`错误：${job.error}`] : []),
+        ...(taskError(job) ? [`错误：${taskError(job)}`] : []),
       ].join("\n");
       renderRuntimeLog();
       return;
@@ -1005,7 +1191,7 @@
       `${jobLabel(job)} · ${normalizedProgress(job)}%`,
       displayTaskMessage(job),
     ];
-    if (job.error) summary.push(`错误：${job.error}`);
+    if (taskError(job)) summary.push(`错误：${taskError(job)}`);
     state.runtimeLogText = summary.join("\n");
     renderRuntimeLog();
   }
@@ -1034,14 +1220,17 @@
     state.activeQueueCount = active.length;
     $("#emptyPipeline").classList.toggle("hidden", active.length > 0);
     container.classList.toggle("hidden", active.length === 0);
-    $("#statusPill").className = `status-pill ${active.length ? "running" : "idle"}`;
-    $("#statusPill").textContent = active.length ? `${active.length} 个任务` : "等待任务";
+    $("#statusPill").className = `status-pill ${!state.runtimeConnected ? "failed" : active.length ? "running" : "idle"}`;
+    $("#statusPill").textContent = !state.runtimeConnected
+      ? "后端已断开"
+      : active.length ? `${active.length} 个任务` : "等待任务";
     syncPrimaryPanel();
     updateRuntimeLog(active);
     container.replaceChildren(...active.map((job) => {
       const percent = normalizedProgress(job);
       const card = document.createElement("article");
-      card.className = `queue-job ${job.status}`;
+      const disconnectedActive = !state.runtimeConnected && ["queued", "running"].includes(job.status);
+      card.className = `queue-job ${disconnectedActive ? "interrupted" : job.status}`;
       card.classList.toggle("log-selected", job.id === state.runtimeJobId);
       card.title = "点击查看此任务的阶段进度";
       card.addEventListener("click", () => {
@@ -1063,14 +1252,31 @@
       const pct = document.createElement("b");
       pct.textContent = `${percent}%`;
       head.append(identity, pct);
+      const errorText = taskError(job);
+      const errorBlock = document.createElement("div");
+      errorBlock.className = "queue-job-error";
+      if (errorText) {
+        const errorValue = document.createElement("pre");
+        errorValue.textContent = errorText;
+        const copyError = document.createElement("button");
+        copyError.type = "button";
+        copyError.textContent = "复制报错";
+        copyError.addEventListener("click", (event) => {
+          event.stopPropagation();
+          copyText(errorText, "报错已复制");
+        });
+        errorBlock.append(errorValue, copyError);
+      }
       const detail = document.createElement("div");
       detail.className = "queue-job-detail";
       const message = document.createElement("span");
-      message.textContent = job.error || humanStatus(job);
+      message.textContent = disconnectedActive
+        ? "后端连接已断开；正在等待正式后端恢复并核对任务状态"
+        : taskPhase(job);
       detail.append(message);
       const actions = document.createElement("div");
       actions.className = "queue-job-actions";
-      if (["failed", "interrupted"].includes(job.status)) {
+      if (!disconnectedActive && ["failed", "interrupted"].includes(job.status)) {
         if (!["editor_task", "project_pipeline"].includes(job.workflow_mode)) {
           const retry = document.createElement("button");
           retry.type = "button";
@@ -1080,7 +1286,7 @@
         }
       }
       const removableJob = job.workflow_mode === "project_pipeline" ? job.split_job : job;
-      if (removableJob && removableJob.workflow_mode !== "editor_task") {
+      if (!disconnectedActive && removableJob && removableJob.workflow_mode !== "editor_task") {
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "queue-delete";
@@ -1089,7 +1295,9 @@
         actions.append(remove);
       }
       detail.append(actions);
-      card.append(head, makeProgressBar(percent), detail);
+      card.append(head);
+      if (errorText) card.append(errorBlock);
+      card.append(makeProgressBar(percent), detail);
       return card;
     }));
   }
@@ -1264,6 +1472,15 @@
         api("/api/editor-tasks").catch(() => ({tasks:[]})),
         api("/api/projects").catch(() => ({projects:[]})),
       ]);
+      state.runtimeConnected = true;
+      state.runtimeFailureCount = 0;
+      const systemNode = $("#systemState");
+      if (systemNode?.dataset.runtimeDisconnected === "true") {
+        delete systemNode.dataset.runtimeDisconnected;
+        systemNode.classList.remove("error");
+        systemNode.classList.add("ready");
+        systemNode.querySelector("span").textContent = "就绪";
+      }
       const completeProjects = new Set((projects.projects || [])
         .filter(project => !state.removedProjectIds.has(project.project_id))
         .filter(project => project.complete === true)
@@ -1305,6 +1522,18 @@
       renderRecent([...tutorialProjectRows, ...state.jobs]
         .sort((left, right) => Number(right.created_at || 0) - Number(left.created_at || 0)));
     } catch (error) {
+      state.runtimeFailureCount += 1;
+      state.runtimeConnected = false;
+      const systemNode = $("#systemState");
+      if (systemNode) {
+        systemNode.dataset.runtimeDisconnected = "true";
+        systemNode.classList.remove("ready");
+        systemNode.classList.add("error");
+        systemNode.querySelector("span").textContent = "后端已断开";
+      }
+      renderQueue(state.jobs);
+      state.runtimeLogText = "后端连接已断开。页面已停止把缓存状态显示为正在运行；请从任务栏中的 Substar 后端窗口确认并重新启动。";
+      renderRuntimeLog();
       if (!state.jobs.length) $("#recentJobs").innerHTML = `<p class="recent-empty">${errorMessage(error)}</p>`;
     } finally {
       state.refreshing = false;
@@ -1373,13 +1602,17 @@
   });
   $("#languageInput").addEventListener("change", syncReferenceBreakPreset);
   for (const selector of [
-    "#languageInput", "#targetLanguageInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
+    "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
     "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
     "#chunkSecondsInput", "#workersInput", "#retryInput", "#repairInput",
+    "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {
     $(selector).addEventListener("input", markSettingsDirty);
     $(selector).addEventListener("change", markSettingsDirty);
   }
+  $("#qwenPromptInput").addEventListener("input", syncQwenEnhancementCounts);
+  $("#qwenHotwordsInput").addEventListener("input", syncQwenEnhancementCounts);
+  $("#qwenAssistButton").addEventListener("click", fillQwenEnhancement);
   $("#startButton").addEventListener("click", runPipeline);
   $("#refreshJobsButton").addEventListener("click", refreshJobs);
   $("#importProjectButton").addEventListener("click", () => $("#importProjectInput").click());
@@ -1407,7 +1640,8 @@
   $("#quickStartTutorial").addEventListener("click", startSplitTutorial);
   $("#quickStartAdvancedTutorial").addEventListener("click", startAdvancedSplitTutorial);
   $("#qwenQuickTest").addEventListener("click", () => testQuickProvider("qwen"));
-  $("#deepseekQuickTest").addEventListener("click", () => testQuickProvider("deepseek"));
+  $("#glmQuickTest").addEventListener("click", () => testQuickProvider("glm"));
+  $("#copyRuntimeLog")?.addEventListener("click", () => copyText(state.runtimeLogText, "任务进度已复制"));
   document.querySelectorAll(".quick-reveal").forEach((button) => button.addEventListener("click", () => {
     const input = $(`#${button.dataset.reveal}`);
     const reveal = input.type === "password";

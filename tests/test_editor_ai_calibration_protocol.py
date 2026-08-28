@@ -32,24 +32,25 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             "t3": SimpleNamespace(text="said"),
         }
         self.owned = list(self.token_map)
+        self.token_to_cue = {token_id: "cue-1" for token_id in self.owned}
 
     def test_empty_actions_are_a_valid_noop(self) -> None:
         actions, rejected = _validated_calibration_contract_actions(
-            {"actions": []}, self.owned, self.token_map
+            {"actions": []}, self.owned, self.token_map, self.token_to_cue
         )
         self.assertEqual(actions, [])
         self.assertEqual(rejected, [])
 
     def test_high_confidence_evidenced_case_action_is_valid(self) -> None:
         actions, rejected = _validated_calibration_contract_actions(
-            {"actions": [action()]}, self.owned, self.token_map
+            {"actions": [action()]}, self.owned, self.token_map, self.token_to_cue
         )
         self.assertEqual(actions[0]["after_text"], "Russia")
         self.assertEqual(rejected, [])
 
     def test_model_apply_disposition_is_authoritative_at_medium_confidence(self) -> None:
         actions, rejected = _validated_calibration_contract_actions(
-            {"actions": [action(confidence="medium")]}, self.owned, self.token_map
+            {"actions": [action(confidence="medium")]}, self.owned, self.token_map, self.token_to_cue
         )
         self.assertEqual(actions[0]["after_text"], "Russia")
         self.assertEqual(rejected, [])
@@ -65,6 +66,7 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             )]},
             self.owned,
             self.token_map,
+            self.token_to_cue,
         )
         self.assertEqual(len(actions), 1)
         self.assertEqual(rejected, [])
@@ -93,6 +95,7 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             )]},
             ["t1"],
             token_map,
+            {"t1": "cue-1"},
         )
 
         self.assertEqual(actions[0]["after_text"], "Tea,")
@@ -109,6 +112,7 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             )]},
             ["t1"],
             token_map,
+            {"t1": "cue-1"},
         )
 
         self.assertEqual(actions[0]["after_text"], "结束。")
@@ -119,6 +123,7 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             {"actions": [action(after_text="Russia,")]},
             self.owned,
             self.token_map,
+            self.token_to_cue,
         )
 
         self.assertEqual(actions, [])
@@ -133,6 +138,7 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
             )]},
             self.owned,
             self.token_map,
+            self.token_to_cue,
         )
 
         self.assertEqual(actions, [])

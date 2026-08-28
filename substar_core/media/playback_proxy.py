@@ -7,6 +7,8 @@ import subprocess
 import threading
 from typing import Any
 
+from substar_core.environment_doctor import _find_tool
+
 
 PACKET_SEPARATION_LIMIT = 16 * 1024 * 1024
 _PROXY_LOCK = threading.Lock()
@@ -53,7 +55,7 @@ def needs_interleaved_proxy(source: Path) -> bool:
         return False
     metadata = _run_json(
         [
-            "ffprobe",
+            _find_tool("ffprobe") or "ffprobe",
             "-v",
             "error",
             "-show_entries",
@@ -78,7 +80,7 @@ def needs_interleaved_proxy(source: Path) -> bool:
         start = max(0.0, min(duration - 2.0, duration * fraction))
         packets = _run_json(
             [
-                "ffprobe",
+                _find_tool("ffprobe") or "ffprobe",
                 "-v",
                 "error",
                 "-read_intervals",
@@ -103,7 +105,7 @@ def _remux(source: Path, destination: Path) -> None:
     try:
         subprocess.run(
             [
-                "ffmpeg",
+                _find_tool("ffmpeg") or "ffmpeg",
                 "-y",
                 "-v",
                 "error",

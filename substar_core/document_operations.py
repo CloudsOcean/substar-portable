@@ -286,7 +286,7 @@ def _batch_replace(
 def _set_ai_calibration(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
-    """Toggle a recorded AI calibration without changing token topology."""
+    """Toggle text-only calibrations and reversible same-Cue merge spans."""
     payload = operation["payload"]
     action = str(payload.get("action", "")).strip().lower()
     if action not in {"cancel", "restore"}:
@@ -304,6 +304,7 @@ def _set_ai_calibration(
         raise DocumentOperationError("expected_texts must be an object")
     updated_by_id: dict[str, DisplayToken] = {}
     base_provenance = _provenance(operation, "set_ai_calibration")
+    topology_records: dict[str, tuple[DisplayToken, dict[str, Any]]] = {}
 
     for token_id in token_ids:
         token = tokens.get(token_id)
@@ -318,6 +319,9 @@ def _set_ai_calibration(
         metadata = dict(token.provenance.metadata)
         raw_record = metadata.get("ai_calibration")
         record = dict(raw_record) if isinstance(raw_record, Mapping) else {}
+        if record.get("topology") == "merge_span":
+            topology_records[token_id] = (token, record)
+            continue
         if action == "cancel":
             if token.provenance.kind is not ChangeKind.AI:
                 raise DocumentOperationError(f"display token is not AI-calibrated: {token_id}")
@@ -352,14 +356,115 @@ def _set_ai_calibration(
             )
         updated_by_id[token_id] = replace(token, text=next_text, provenance=next_provenance)
 
-    display_tokens = tuple(
-        updated_by_id.get(token.token_id, token) for token in document.display_tokens
-    )
-    return replace(
+    result = replace(
         document,
-        display_tokens=display_tokens,
-        changes=(*document.changes, base_provenance),
+        display_tokens=tuple(
+            updated_by_id.get(token.token_id, token)
+            for token in document.display_tokens
+        ),
     )
+
+    if action == "cancel":
+        for token_id, (merged_token, record) in topology_records.items():
+            if (
+                merged_token.provenance.kind is not ChangeKind.AI
+                or record.get("applied") is not True
+            ):
+                raise DocumentOperationError(
+                    f"AI calibration merge is not applied: {token_id}"
+                )
+            raw_before_tokens = record.get("before_tokens")
+            if not isinstance(raw_before_tokens, list) or len(raw_before_tokens) < 2:
+                raise DocumentOperationError(f"AI calibration merge has no source snapshot: {token_id}")
+            try:
+                before_tokens = [DisplayToken.from_dict(row) for row in raw_before_tokens]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise DocumentOperationError(
+                    f"AI calibration merge source snapshot is invalid: {token_id}"
+                ) from exc
+            cue_id = str(record.get("cue_id", ""))
+            cue = _find_cue(result, cue_id)
+            if token_id not in cue.display_token_ids:
+                raise DocumentOperationError(
+                    f"AI calibration merge is no longer in its Cue: {token_id}"
+                )
+            restored_record = {
+                **record,
+                "applied": False,
+                "after_token_id": token_id,
+            }
+            restored_tokens = [
+                replace(
+                    token,
+                    provenance=replace(
+                        base_provenance,
+                        kind=ChangeKind.SOURCE,
+                        operation="ai_calibration_cancel",
+                        metadata={"ai_calibration": restored_record},
+                    ),
+                )
+                for token in before_tokens
+            ]
+            display_position = next(
+                index for index, token in enumerate(result.display_tokens)
+                if token.token_id == token_id
+            )
+            display_tokens = list(result.display_tokens)
+            display_tokens[display_position : display_position + 1] = restored_tokens
+            cue_ids = list(cue.display_token_ids)
+            cue_position = cue_ids.index(token_id)
+            cue_ids[cue_position : cue_position + 1] = [
+                token.token_id for token in restored_tokens
+            ]
+            result = replace(
+                result,
+                display_tokens=tuple(display_tokens),
+                cues=_replace_cue(
+                    result.cues, cue_id, replace(cue, display_token_ids=tuple(cue_ids))
+                ),
+            )
+    else:
+        grouped: dict[str, list[tuple[DisplayToken, dict[str, Any]]]] = {}
+        for token, record in topology_records.values():
+            if token.provenance.kind is ChangeKind.AI or record.get("applied") is not False:
+                raise DocumentOperationError(
+                    f"AI calibration merge cannot be restored: {token.token_id}"
+                )
+            group_key = str(record.get("action_id", "")).strip()
+            if not group_key:
+                raise DocumentOperationError("AI calibration merge has no action ID")
+            grouped.setdefault(group_key, []).append((token, record))
+        for group_index, (_group_key, members) in enumerate(grouped.items(), start=1):
+            record = members[0][1]
+            raw_before_tokens = record.get("before_tokens")
+            if not isinstance(raw_before_tokens, list) or len(raw_before_tokens) < 2:
+                raise DocumentOperationError("AI calibration merge has no source snapshot")
+            required_ids = [str(row.get("token_id", "")) for row in raw_before_tokens]
+            member_ids = {token.token_id for token, _ in members}
+            if not all(required_ids) or member_ids != set(required_ids):
+                raise DocumentOperationError(
+                    "restore requires every original token from the AI calibration merge"
+                )
+            cue_id = str(record.get("cue_id", ""))
+            restored_record = {**record, "applied": True}
+            restore_provenance = replace(
+                base_provenance,
+                kind=ChangeKind.AI,
+                operation="ai_calibration_restore",
+                metadata={"ai_calibration": restored_record},
+            )
+            result = _merge(result, {
+                "operation_id": f"{operation.get('operation_id', '')}_merge_{group_index}",
+                "type": "merge",
+                "payload": {
+                    "cue_id": cue_id,
+                    "token_ids": required_ids,
+                    "text": str(record.get("after_text", "")),
+                    "provenance": restore_provenance.to_dict(),
+                },
+            })
+
+    return replace(result, changes=(*result.changes, base_provenance))
 
 
 def _set_presentation(

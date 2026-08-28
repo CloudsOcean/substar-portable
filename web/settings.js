@@ -12,17 +12,27 @@ let runtimeIdentity = null;
 let edition = "standard";
 let selectedModelProvider = "deepseek";
 let savedModelProvider = "deepseek";
+let modelProviderCatalog = [];
+let modelProviderDrafts = {};
 let preserveConnectedStateOnProviderSwitch = false;
 let reasoningCapabilityCache = new Map();
 let connectionModelCapability = null;
 let reasoningRefreshTimer = null;
+let connectionModelValue = "";
+const inheritedModelStages = new Set();
+const explicitlyConfiguredThinkingStages = new Set();
+const explicitlyConfiguredEffortStages = new Set();
 let promptCatalogData = null;
 let promptCatalogPromise = null;
 let selectedPromptCategory = "segmentation";
 let selectedPromptComponent = null;
 let loadedPromptText = "";
 const connectionStateKey = "substar.settings.connected-providers.v1";
-const shortcutDefaults = { undo: "Ctrl+Z", redo: "Ctrl+Y" };
+const shortcutDefaults = {
+  undo: "Ctrl+Z", redo: "Ctrl+Y", play_pause: "Space", hide_cue: "Backspace",
+};
+const singleKeyShortcutCommands = new Set(["play_pause", "hide_cue"]);
+const providerModelCatalogs = new Map();
 let connectedProviders = (() => {
   try {
     const value = JSON.parse(localStorage.getItem(connectionStateKey) || "{}");
@@ -40,9 +50,9 @@ function saveConnectedProviders() {
   }
 }
 
-function shortcutFromEvent(event) {
+function shortcutFromEvent(event, { allowSingleKey = false } = {}) {
   if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return "";
-  if (!event.ctrlKey && !event.altKey && !event.metaKey) return "";
+  if (!event.ctrlKey && !event.altKey && !event.metaKey && !allowSingleKey) return "";
   const parts = [];
   if (event.ctrlKey) parts.push("Ctrl");
   if (event.altKey) parts.push("Alt");
@@ -61,8 +71,10 @@ function setShortcutMessage(text, error = false) {
 }
 
 function assignShortcut(input, value) {
-  const otherName = input.name === "shortcut_undo" ? "shortcut_redo" : "shortcut_undo";
-  if (String(form.elements[otherName]?.value || "").toLowerCase() === value.toLowerCase()) {
+  const collision = $$('[data-shortcut-input]').find((other) =>
+    other !== input && String(other.value || "").toLowerCase() === value.toLowerCase()
+  );
+  if (collision) {
     setShortcutMessage(`快捷键 ${value} 已分配给另一个命令。`, true);
     return;
   }
@@ -80,16 +92,14 @@ function setProviderConnected(provider, connected) {
 function syncProviderItemStates() {
   $$('[data-model-provider]').forEach((button) => {
     const provider = button.dataset.modelProvider;
-    const configured = Boolean(connectedProviders[`model:${provider}`]) || (
-      provider === savedModelProvider &&
-      Boolean(settings?.translation_api_key_set) &&
-      !form.elements.translation_api_key.value.trim() &&
-      !form.elements.clear_translation_api_key.checked
-    );
+    const verified = Boolean(connectedProviders[`model:${provider}`]);
+    const configured = Boolean(settings?.model_provider_key_set?.[provider]);
     const active = provider === selectedModelProvider;
     button.classList.toggle("configured", configured);
     const state = $(".provider-item-state", button);
-    if (state) state.textContent = configured ? (active ? "正在使用" : "已配置") : "待配置";
+    if (state) state.textContent = configured
+      ? (active ? "正在使用" : "已配置")
+      : (verified ? "已验证" : "待配置");
   });
   $$('[data-engine-profile]').forEach((button) => {
     const active = button.classList.contains("active");
@@ -104,20 +114,9 @@ function syncProviderItemStates() {
   });
 }
 
-const modelProviderNames = {
-  deepseek: "DeepSeek",
-  glm: "GLM · 智谱",
-  openai: "OpenAI",
-  siliconflow: "硅基流动",
-  aliyun: "阿里云百炼",
-  custom: "自定义服务",
-};
+const modelProviderNames = {};
 
 const engineProviderNames = {
-  faster_whisper_native: "Whisper · Faster-Whisper",
-  whisperx_forced: "WhisperX · CTC 精对齐",
-  parakeet_tdt_native: "NVIDIA · Parakeet TDT",
-  qwen3_full: "Qwen · ASR + 精对齐",
   qwen_cloud: "Qwen 云端 · 文件听写",
 };
 
@@ -131,10 +130,59 @@ function inferModelProvider(baseUrl) {
   const value = String(baseUrl || "").toLowerCase();
   if (value.includes("deepseek.com")) return "deepseek";
   if (value.includes("bigmodel.cn")) return "glm";
-  if (value.includes("openai.com")) return "openai";
+  if (value.includes("openai.azure.com") || value.includes("/deployments/")) return "azure_openai";
+  if (value.includes("api.openai.com")) return "openai";
+  if (value.includes("deerapi.com")) return "deerapi";
+  if (value.includes("generativelanguage.googleapis.com")) return "gemini";
   if (value.includes("siliconflow")) return "siliconflow";
-  if (value.includes("dashscope") || value.includes("aliyuncs")) return "aliyun";
+  if (value.includes("dashscope") || value.includes("aliyuncs")) return "qwen";
   return "custom";
+}
+
+function providerDefinition(providerId) {
+  return modelProviderCatalog.find((item) => item.id === providerId) || null;
+}
+
+function renderModelProviderRail() {
+  const container = $("#modelProviderList");
+  if (!container) return;
+  container.innerHTML = modelProviderCatalog.map((provider) => `
+    <button class="provider-item" type="button" data-model-provider="${escapeHtml(provider.id)}"
+      data-base-url="${escapeHtml(provider.base_url || "")}" data-default-model="${escapeHtml(provider.default_model || "")}">
+      <span class="provider-mark"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span>
+      <span><b>${escapeHtml(provider.label)}</b><small>${escapeHtml(provider.description)}</small></span>
+      <span class="provider-item-state"></span>
+    </button>`).join("");
+  for (const provider of modelProviderCatalog) modelProviderNames[provider.id] = provider.label;
+}
+
+async function loadModelProviderCatalog() {
+  const response = await api("/api/models/providers");
+  modelProviderCatalog = Array.isArray(response.providers) ? response.providers : [];
+  renderModelProviderRail();
+}
+
+function captureModelProviderDraft(providerId = selectedModelProvider) {
+  if (!providerId || !form.elements.translation_api_base_url) return;
+  modelProviderDrafts[providerId] = {
+    base_url: String(form.elements.translation_api_base_url.value || "").trim(),
+    model: String(form.elements.translation_api_model.value || "").trim(),
+    auth_mode: String(form.elements.translation_api_auth_mode.value || "bearer"),
+    timeout_seconds: Number(form.elements.translation_api_timeout_seconds.value || 300),
+  };
+}
+
+function loadModelProviderDraft(providerId) {
+  const definition = providerDefinition(providerId) || {};
+  const profile = modelProviderDrafts[providerId] || {};
+  form.elements.translation_api_base_url.value = profile.base_url ?? definition.base_url ?? "";
+  const model = profile.model ?? definition.default_model ?? "";
+  form.elements.translation_api_model.value = model;
+  form.elements.translation_api_auth_mode.value = profile.auth_mode || definition.auth_mode || "bearer";
+  form.elements.translation_api_timeout_seconds.value = profile.timeout_seconds || 300;
+  const baseHint = $("#baseUrlHint");
+  if (baseHint) baseHint.textContent = definition.base_url_hint || "兼容 OpenAI Chat Completions 的服务地址";
+  setConnectionModel(model);
 }
 
 function syncModelProvider(provider = null) {
@@ -146,6 +194,11 @@ function syncModelProvider(provider = null) {
   });
   syncProviderItemStates();
   $("#modelProviderTitle").textContent = modelProviderNames[selectedModelProvider] || "自定义服务";
+  const configured = Boolean(settings?.model_provider_key_set?.[selectedModelProvider]);
+  $("#apiBadge").textContent = configured ? "已配置" : "未配置";
+  $("#keyHint").textContent = configured
+    ? "当前服务商 API Key 已安全保存；留空不会覆盖"
+    : "当前服务商尚未保存 API Key";
 }
 
 const stageDefinitions = {
@@ -158,10 +211,7 @@ const stageDefinitions = {
     ["translation_repair", "Fallback · 翻译坏块修复", "只重跑未返回或验收失败的意义组；模型允许时关闭思考"],
   ],
   audit: [
-    // AI calibration now uses Flash Max to infer grammatical boundaries.
-    ["calibration", "AI 校准", "自动应用大小写、标点与确定性文本修复；默认 Non-thinking"],
-    ["review", "AI 审阅", "输出专名、ASR、翻译、数字与一致性建议；模型允许时关闭思考"],
-    ["audit_repair", "Fallback · 审校坏块修复", "任一三分钟块返回无效结果时单块重跑；模型允许时关闭思考"],
+    ["calibration", "AI 校准", "自动应用大小写、标点与确定性文本修复；默认思考 Low"],
   ],
 };
 
@@ -169,18 +219,25 @@ const reasoningEffortLabels = {
   low: "Low",
   medium: "Medium",
   high: "High",
-  max: "Max",
   xhigh: "XHigh",
+  max: "Max",
 };
 const allReasoningEfforts = Object.keys(reasoningEffortLabels);
-
-// Keep the calibration card aligned with the production protocol even when
-// older localized copy remains in a portable bundle.
-stageDefinitions.audit[0] = [
-  "calibration",
-  "AI 校准",
-  "Flash Max 判断真实句界，自动应用大小写与轻量标点",
-];
+const nonThinkingPreferredStages = new Set([
+  "segmentation_repair", "translation_repair", "audit_repair",
+]);
+const modelSettingsFields = new Set([
+  "translation_api_provider", "translation_api_base_url", "translation_api_model",
+  "translation_api_auth_mode", "translation_api_timeout_seconds",
+  "translation_api_key", "clear_translation_api_key",
+  ...Object.values(stageDefinitions).flatMap((definitions) =>
+    definitions.flatMap(([stage]) => [
+      `stage_${stage}_model`, `stage_${stage}_thinking_mode`,
+      `stage_${stage}_reasoning_effort`, `stage_${stage}_max_tokens`,
+      `stage_${stage}_temperature`,
+    ]),
+  ),
+]);
 
 function renderStageSettings(containerId, definitions) {
   const container = document.getElementById(containerId);
@@ -191,7 +248,7 @@ function renderStageSettings(containerId, definitions) {
     <article class="stage-config-card" data-stage="${stage}">
       <header><div><b>${title}</b><small>${description}</small></div><span class="stage-mode-pill"></span></header>
       <div class="stage-config-grid">
-        <label class="field wide">模型<input name="stage_${stage}_model" list="officialModelIds" placeholder="跟随连接测试模型" /></label>
+        <label class="field wide">模型<input name="stage_${stage}_model" list="officialModelIds" placeholder="跟随连接测试模型" /><select class="model-catalog-select" data-stage-model-select="${stage}" aria-label="${title}可用模型"><option value="">选择可用模型</option></select></label>
         <label class="field">思考<select name="stage_${stage}_thinking_mode"><option value="disabled">不思考</option><option value="enabled">思考</option></select></label>
         <label class="field reasoning-field">推理强度<select name="stage_${stage}_reasoning_effort">${options}</select><small data-reasoning-note>正在读取模型能力…</small></label>
         <label class="field">输出上限<input name="stage_${stage}_max_tokens" type="number" min="256" max="393216" step="256" /></label>
@@ -235,15 +292,15 @@ async function fetchReasoningCapability(model) {
   return reasoningCapabilityCache.get(key);
 }
 
-function applyReasoningCapability(stage, capability) {
+function applyReasoningCapability(stage, capability, { modelChanged = false } = {}) {
   const select = form.elements[`stage_${stage}_reasoning_effort`];
   const thinkingSelect = form.elements[`stage_${stage}_thinking_mode`];
   const note = document.querySelector(`[data-stage="${stage}"] [data-reasoning-note]`);
   if (!select || !capability) return;
   const declaredThinkingModes = Array.isArray(capability.supported_thinking_modes) && capability.supported_thinking_modes.length
     ? capability.supported_thinking_modes.filter((value) => ["enabled", "disabled"].includes(value))
-    : ["disabled", "enabled"];
-  const thinkingModes = declaredThinkingModes.length ? declaredThinkingModes : ["disabled", "enabled"];
+    : [];
+  const thinkingModes = declaredThinkingModes.length ? declaredThinkingModes : ["enabled"];
   const requestedThinking = thinkingSelect?.value || "disabled";
   if (thinkingSelect) {
     thinkingSelect.innerHTML = thinkingModes.map((value) => {
@@ -253,28 +310,34 @@ function applyReasoningCapability(stage, capability) {
         : (singleRequired ? "不思考（模型要求）" : "不思考");
       return `<option value="${value}">${label}</option>`;
     }).join("");
-    thinkingSelect.value = thinkingModes.includes(requestedThinking)
+    const preferredThinking = nonThinkingPreferredStages.has(stage) && thinkingModes.includes("disabled")
+      ? "disabled"
+      : (thinkingModes.includes("enabled") ? "enabled" : thinkingModes[0]);
+    const preserveThinking = explicitlyConfiguredThinkingStages.has(stage) || !modelChanged;
+    thinkingSelect.value = preserveThinking && thinkingModes.includes(requestedThinking)
       ? requestedThinking
-      : thinkingModes[0];
+      : preferredThinking;
   }
-  const levels = Array.isArray(capability.supported_efforts) && capability.supported_efforts.length
-    ? capability.supported_efforts
-    : allReasoningEfforts;
+  const levels = allReasoningEfforts;
   const current = select.value;
   const mapped = capability.effort_selection_aliases?.[current] || current;
   select.innerHTML = levels
     .filter((value) => reasoningEffortLabels[value])
     .map((value) => `<option value="${value}">${reasoningEffortLabels[value]}</option>`)
     .join("");
-  select.value = levels.includes(mapped) ? mapped : (levels.includes("high") ? "high" : levels[0]);
+  select.disabled = thinkingSelect?.value !== "enabled";
+  const preserveEffort = explicitlyConfiguredEffortStages.has(stage) || !modelChanged;
+  select.value = preserveEffort && levels.includes(current) ? current : "low";
   if (note) {
-    const names = levels.map((value) => reasoningEffortLabels[value] || value).join(" / ");
-    note.textContent = capability.note || `${capability.verified ? "已验证" : "未验证"}：${names}`;
+    const mapping = Object.entries(capability.effort_selection_aliases || {})
+      .map(([from, to]) => `${reasoningEffortLabels[from] || from}→${reasoningEffortLabels[to] || to}`)
+      .join("，");
+    note.textContent = mapping ? `五档可选；当前服务商映射：${mapping}` : "五档可选；由当前服务商映射到实际档位";
     note.title = capability.source || "";
   }
 }
 
-async function refreshReasoningCapabilities() {
+async function refreshReasoningCapabilities({ changedStages = new Set() } = {}) {
   const stages = [...new Set(Object.values(stageDefinitions).flatMap((items) => items.map(([stage]) => stage)))];
   const entries = await Promise.all(stages.map(async (stage) => {
     try {
@@ -283,7 +346,9 @@ async function refreshReasoningCapabilities() {
       return [stage, null];
     }
   }));
-  for (const [stage, capability] of entries) applyReasoningCapability(stage, capability);
+  for (const [stage, capability] of entries) {
+    applyReasoningCapability(stage, capability, { modelChanged: changedStages.has(stage) });
+  }
   try {
     connectionModelCapability = await fetchReasoningCapability(
       String(form.elements.translation_api_model?.value || "").trim(),
@@ -296,13 +361,10 @@ async function refreshReasoningCapabilities() {
     || entries[0]?.[1];
   const summary = $("#reasoningCapabilitySummary");
   if (summary && global) {
-    const names = (global.supported_efforts || allReasoningEfforts)
-      .map((value) => reasoningEffortLabels[value] || value).join(" / ");
-    const modes = global.supported_thinking_modes || ["disabled", "enabled"];
-    const thinkingLabel = modes.length === 1
-      ? ` · 仅${modes[0] === "enabled" ? "思考" : "不思考"}`
-      : "";
-    summary.textContent = `${global.verified ? "模型能力" : "模型能力未验证"}：${names}${thinkingLabel}`;
+    const modes = global.supported_thinking_modes || [];
+    summary.textContent = modes.length
+      ? `接口接受：${modes.map((mode) => mode === "enabled" ? "思考" : "非思考").join(" / ")}；推理强度固定显示五档并自动映射。`
+      : "测试连通性时会同时验证思考与非思考模式；推理强度固定显示五档并自动映射。";
   }
   syncStageControls();
 }
@@ -312,42 +374,24 @@ function scheduleReasoningCapabilitiesRefresh() {
   reasoningRefreshTimer = setTimeout(() => { refreshReasoningCapabilities(); }, 180);
 }
 
-async function probeReasoning() {
-  const button = $("#probeReasoning");
-  const result = $("#reasoningProbeResult");
-  const f = form.elements;
-  button.disabled = true;
-  result.className = "test-result wide";
-  result.textContent = "正在用最小请求探测推理档位…";
-  try {
-    const model = String(f.translation_api_model.value || "").trim();
-    const response = await api("/api/models/reasoning-probe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        base_url: f.translation_api_base_url.value,
-        model,
-        auth_mode: f.translation_api_auth_mode.value,
-        timeout_seconds: Number(f.translation_api_timeout_seconds.value),
-        api_key: f.translation_api_key.value,
-      }),
-    });
-    const key = reasoningCapabilityKey(
-      f.translation_api_base_url.value,
-      f.translation_api_auth_mode.value,
-      model,
-    );
-    reasoningCapabilityCache.set(key, Promise.resolve(response));
-    await refreshReasoningCapabilities();
-    const accepted = response.probe?.accepted_efforts || response.supported_efforts || [];
-    result.classList.add("good");
-    result.textContent = `已验证：${accepted.map((value) => reasoningEffortLabels[value] || value).join(" / ")}`;
-  } catch (error) {
-    result.classList.add("bad");
-    result.textContent = error.message;
-  } finally {
-    button.disabled = false;
+function setConnectionModel(value) {
+  const next = String(value || "").trim();
+  const changedStages = new Set();
+  for (const definitions of Object.values(stageDefinitions)) {
+    for (const [stage] of definitions) {
+      const input = form.elements[`stage_${stage}_model`];
+      if (!input) continue;
+      if (inheritedModelStages.has(stage) || !input.value.trim() || input.value.trim() === connectionModelValue) {
+        inheritedModelStages.add(stage);
+        input.value = next;
+        changedStages.add(stage);
+      }
+    }
   }
+  connectionModelValue = next;
+  reasoningCapabilityCache.clear();
+  clearTimeout(reasoningRefreshTimer);
+  reasoningRefreshTimer = setTimeout(() => refreshReasoningCapabilities({ changedStages }), 180);
 }
 
 const numericFields = new Set([
@@ -395,7 +439,8 @@ function syncStageControls() {
     const stage = card.dataset.stage;
     const thinking = form.elements[`stage_${stage}_thinking_mode`].value;
     const enabled = thinking === "enabled";
-    form.elements[`stage_${stage}_reasoning_effort`].disabled = !enabled;
+    const effort = form.elements[`stage_${stage}_reasoning_effort`];
+    effort.disabled = !enabled || effort.options.length === 0;
     form.elements[`stage_${stage}_temperature`].disabled = enabled;
     $(".stage-mode-pill", card).textContent = enabled
       ? `思考 · ${reasoningEffortLabels[form.elements[`stage_${stage}_reasoning_effort`].value] || form.elements[`stage_${stage}_reasoning_effort`].value}`
@@ -468,7 +513,7 @@ async function loadRecognitionProfiles() {
       button.classList.toggle("hidden", button.dataset.engineProfile !== "qwen_cloud");
     });
     $$(".stage-config-card[data-stage]").forEach((card) => {
-      const keep = new Set(["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "review", "audit_repair"]);
+      const keep = new Set(["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration"]);
       card.classList.toggle("hidden", !keep.has(card.dataset.stage));
     });
     const localAssets = $("#environmentAssets")?.closest(".environment-section");
@@ -673,12 +718,31 @@ async function loadPromptCatalog() {
 
 function populate(value) {
   settings = value;
-  savedModelProvider = inferModelProvider(value.translation_api_base_url);
+  selectedModelProvider = value.active_model_provider || inferModelProvider(value.translation_api_base_url);
+  savedModelProvider = selectedModelProvider;
+  modelProviderDrafts = { ...(value.model_provider_profiles || {}) };
+  modelProviderDrafts[selectedModelProvider] = {
+    ...(modelProviderDrafts[selectedModelProvider] || {}),
+    base_url: value.translation_api_base_url,
+    model: value.translation_api_model,
+    auth_mode: value.translation_api_auth_mode,
+    timeout_seconds: value.translation_api_timeout_seconds,
+  };
   for (const [name, current] of Object.entries(value)) {
     const input = form.elements[name];
     if (!input || name.endsWith("_key_set")) continue;
     if (input.type === "checkbox") input.checked = Boolean(current);
     else input.value = current ?? "";
+  }
+  connectionModelValue = String(form.elements.translation_api_model?.value || "").trim();
+  inheritedModelStages.clear();
+  explicitlyConfiguredThinkingStages.clear();
+  explicitlyConfiguredEffortStages.clear();
+  for (const definitions of Object.values(stageDefinitions)) {
+    for (const [stage] of definitions) {
+      const stageValue = String(form.elements[`stage_${stage}_model`]?.value || "").trim();
+      if (!stageValue || stageValue === connectionModelValue) inheritedModelStages.add(stage);
+    }
   }
   const localPersonalization = window.SubstarTheme?.read();
   if (localPersonalization) {
@@ -699,7 +763,7 @@ function populate(value) {
   $("#qwenCloudKeyHint").textContent = value.api_key_set
     ? "Qwen 云端听写密钥已安全保存在本机；输入新密钥并保存会覆盖，留空则继续使用。"
     : "Qwen 云端听写密钥尚未保存；输入后保存即可配置。";
-  syncModelProvider();
+  syncModelProvider(selectedModelProvider);
   syncStageControls();
   syncRecognitionProfile();
   syncDownloadControls();
@@ -709,6 +773,7 @@ function populate(value) {
 }
 
 function buildPayload() {
+  captureModelProviderDraft();
   const payload = { ...settings };
   delete payload.api_key_set;
   delete payload.alignment_api_key_set;
@@ -724,6 +789,8 @@ function buildPayload() {
       payload[element.name] = Number(element.value);
     else payload[element.name] = element.value;
   }
+  payload.active_model_provider = selectedModelProvider;
+  payload.model_provider_profiles = { ...modelProviderDrafts };
   // Every LLM stage follows the active OpenAI-compatible model service.
   payload.alignment_api_provider = payload.translation_api_provider;
   payload.alignment_api_base_url = payload.translation_api_base_url;
@@ -738,7 +805,7 @@ function buildPayload() {
 
 async function loadSettings() {
   try {
-    await loadRecognitionProfiles();
+    await Promise.all([loadRecognitionProfiles(), loadModelProviderCatalog()]);
     try {
       runtimeIdentity = await api("/api/runtime/identity");
     } catch (_) {
@@ -754,7 +821,35 @@ async function loadSettings() {
   }
 }
 
+function renderModelCatalogOptions(models) {
+  const list = $("#officialModelIds");
+  list.replaceChildren(...models.map((item) => {
+    const option = document.createElement("option");
+    option.value = String(typeof item === "string" ? item : item.id || "");
+    return option;
+  }).filter((option) => option.value));
+  const values = models.map((item) => String(typeof item === "string" ? item : item.id || "")).filter(Boolean);
+  $$(".model-catalog-select").forEach((select) => {
+    const selected = select.value;
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = values.length ? `选择可用模型（${values.length}）` : "暂无模型列表，可手动输入";
+    select.replaceChildren(placeholder, ...values.map((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      return option;
+    }));
+    select.value = values.includes(selected) ? selected : "";
+  });
+}
+
 async function discoverModels() {
+  const status = $("#modelDiscoveryStatus");
+  const button = $("#refreshModelCatalog");
+  $("#officialModelIds").replaceChildren();
+  status.textContent = "正在读取当前服务商的模型列表…";
+  if (button) button.disabled = true;
   try {
     const f = form.elements;
     const catalog = await api("/api/models/discover", {
@@ -763,14 +858,24 @@ async function discoverModels() {
       body: JSON.stringify({
         base_url: f.translation_api_base_url.value,
         auth_mode: f.translation_api_auth_mode.value,
+        provider_id: selectedModelProvider,
+        api_key: f.translation_api_key.value,
       }),
     });
     const models = catalog.models || catalog.data || [];
-    $("#officialModelIds").innerHTML = models
-      .map((item) => `<option value="${typeof item === "string" ? item : item.id}"></option>`)
-      .join("");
-  } catch (_) {
-    // The saved model remains editable when model discovery is unavailable.
+    providerModelCatalogs.set(selectedModelProvider, models);
+    renderModelCatalogOptions(models);
+    status.textContent = models.length
+      ? `已载入 ${models.length} 个可用模型；连接测试与所有 Stage 共用此列表。`
+      : "服务商未返回模型列表，仍可手动输入模型 ID。";
+  } catch (error) {
+    const cached = providerModelCatalogs.get(selectedModelProvider) || [];
+    renderModelCatalogOptions(cached);
+    status.textContent = cached.length
+      ? `刷新失败，继续使用已载入的 ${cached.length} 个模型：${error.message}`
+      : `无法读取模型列表，可手动输入模型 ID：${error.message}`;
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -798,6 +903,16 @@ async function persistSettings({ manual = false, revision = editRevision } = {})
   }
   $("#formMessage").className = "";
   try {
+    if (!form.elements.translation_api_base_url.value.trim() || !form.elements.translation_api_model.value.trim()) {
+      throw new Error("当前 LLM 服务商的 Base URL 和模型 ID 不能为空");
+    }
+    if (
+      !settings?.model_provider_key_set?.[selectedModelProvider]
+      && !form.elements.translation_api_key.value.trim()
+      && !form.elements.clear_translation_api_key.checked
+    ) {
+      throw new Error("切换服务商时必须输入该服务商的 API Key；原服务商密钥不会被自动清除或借用");
+    }
     const saved = await api("/api/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -805,14 +920,10 @@ async function persistSettings({ manual = false, revision = editRevision } = {})
     });
     window.SubstarTheme?.save(personalization);
     settings = { ...saved, ...personalization };
-    savedModelProvider = inferModelProvider(settings.translation_api_base_url);
+    savedModelProvider = settings.active_model_provider || inferModelProvider(settings.translation_api_base_url);
     if (revision === editRevision) {
-      dirty = false;
-      for (const name of sensitiveAutoSaveFields) {
-        if (form.elements[name]) form.elements[name].value = "";
-      }
-      syncModelProvider();
-      syncRecognitionProfile();
+      populate(settings);
+      await refreshReasoningCapabilities();
       setHeader(manual ? "已保存" : "已自动保存", "saved");
       $("#formMessage").textContent = manual ? "已保存" : "已自动保存";
     }
@@ -860,10 +971,9 @@ async function testConnection() {
   result.textContent = "正在请求模型，请稍候…";
   try {
     const f = form.elements;
-    const thinkingModes = connectionModelCapability?.supported_thinking_modes || ["disabled", "enabled"];
-    const thinkingMode = thinkingModes.includes("disabled") ? "disabled" : thinkingModes[0];
-    const efforts = connectionModelCapability?.supported_efforts || allReasoningEfforts;
-    const reasoningEffort = efforts.includes("high") ? "high" : efforts[0];
+    if (!settings?.model_provider_key_set?.[selectedModelProvider] && !f.translation_api_key.value.trim()) {
+      throw new Error("请先输入当前服务商的 API Key；切换服务商不会借用或清除原服务商密钥");
+    }
     const response = await api("/api/settings/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -871,19 +981,39 @@ async function testConnection() {
         role: "translation",
         source: "api",
         provider: f.translation_api_provider.value,
+        provider_id: selectedModelProvider,
         base_url: f.translation_api_base_url.value,
         model: f.translation_api_model.value,
         auth_mode: f.translation_api_auth_mode.value,
         timeout_seconds: Number(f.translation_api_timeout_seconds.value),
         api_key: f.translation_api_key.value,
-        thinking_mode: thinkingMode,
-        reasoning_effort: reasoningEffort,
+        thinking_mode: "",
+        reasoning_effort: "high",
       }),
     });
-    result.textContent = response.message || "连接成功";
+    result.textContent = `${response.message || "连接成功"}；正在验证思考模式…`;
+    const model = String(f.translation_api_model.value || "").trim();
+    const capability = await api("/api/models/reasoning-probe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        base_url: f.translation_api_base_url.value,
+        model,
+        auth_mode: f.translation_api_auth_mode.value,
+        timeout_seconds: Number(f.translation_api_timeout_seconds.value),
+        api_key: f.translation_api_key.value,
+        provider_id: selectedModelProvider,
+      }),
+    });
+    const key = reasoningCapabilityKey(f.translation_api_base_url.value, f.translation_api_auth_mode.value, model);
+    reasoningCapabilityCache.set(key, Promise.resolve(capability));
+    connectionModelCapability = capability;
+    const modes = capability.probe?.accepted_thinking_modes || capability.supported_thinking_modes || [];
+    result.textContent = `${response.message || "连接成功"}；接口接受：${modes.length ? modes.map((mode) => mode === "enabled" ? "思考" : "非思考").join(" / ") : "未确认"}`;
     result.classList.add("good");
     setProviderConnected(`model:${selectedModelProvider}`, true);
     syncProviderItemStates();
+    await refreshReasoningCapabilities();
   } catch (error) {
     result.textContent = error.message;
     result.classList.add("bad");
@@ -1051,34 +1181,21 @@ function jumpToSettings(panel, anchor = "", engineTarget = "") {
   if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-$$('[data-model-provider]').forEach((button) => {
-  button.addEventListener("click", () => {
+$("#modelProviderList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-model-provider]");
+    if (!button) return;
     const provider = button.dataset.modelProvider;
-    const baseUrl = button.dataset.baseUrl;
-    const defaultModel = button.dataset.defaultModel;
     const providerChanged = provider !== selectedModelProvider;
+    if (providerChanged) captureModelProviderDraft(selectedModelProvider);
     selectedModelProvider = provider;
-    if (provider !== "custom" || !form.elements.translation_api_base_url.value.trim()) {
-      form.elements.translation_api_base_url.value = baseUrl;
-    }
-    if (providerChanged && defaultModel) {
-      form.elements.translation_api_model.value = defaultModel;
-      for (const definitions of Object.values(stageDefinitions)) {
-        for (const [stage] of definitions) {
-          const input = form.elements[`stage_${stage}_model`];
-          if (input) input.value = defaultModel;
-        }
-      }
-      reasoningCapabilityCache.clear();
-      scheduleReasoningCapabilitiesRefresh();
-    }
+    loadModelProviderDraft(provider);
     form.elements.translation_api_key.value = "";
-    form.elements.clear_translation_api_key.checked = provider !== savedModelProvider;
+    form.elements.clear_translation_api_key.checked = false;
     syncModelProvider(provider);
     preserveConnectedStateOnProviderSwitch = true;
     form.elements.translation_api_base_url.dispatchEvent(new Event("input", { bubbles: true }));
     preserveConnectedStateOnProviderSwitch = false;
-  });
+    discoverModels();
 });
 
 form.elements.translation_api_key.addEventListener("input", () => {
@@ -1094,13 +1211,29 @@ for (const name of ["translation_api_base_url", "translation_api_model"]) {
     if (preserveConnectedStateOnProviderSwitch) return;
     setProviderConnected(`model:${selectedModelProvider}`, false);
     syncProviderItemStates();
+    if (name === "translation_api_model") setConnectionModel(form.elements[name].value);
   });
   form.elements[name]?.addEventListener("change", scheduleReasoningCapabilitiesRefresh);
 }
 
 for (const definitions of Object.values(stageDefinitions)) {
   for (const [stage] of definitions) {
-    form.elements[`stage_${stage}_model`]?.addEventListener("change", scheduleReasoningCapabilitiesRefresh);
+    form.elements[`stage_${stage}_model`]?.addEventListener("input", () => {
+      const input = form.elements[`stage_${stage}_model`];
+      if (!input.value.trim() || input.value.trim() === connectionModelValue) inheritedModelStages.add(stage);
+      else inheritedModelStages.delete(stage);
+    });
+    form.elements[`stage_${stage}_model`]?.addEventListener("change", () => {
+      reasoningCapabilityCache.clear();
+      refreshReasoningCapabilities({ changedStages: new Set([stage]) });
+    });
+    form.elements[`stage_${stage}_thinking_mode`]?.addEventListener("change", () => {
+      explicitlyConfiguredThinkingStages.add(stage);
+      syncStageControls();
+    });
+    form.elements[`stage_${stage}_reasoning_effort`]?.addEventListener("change", () => {
+      explicitlyConfiguredEffortStages.add(stage);
+    });
   }
 }
 
@@ -1128,13 +1261,20 @@ $("#promptCategoryTabs")?.addEventListener("click", (event) => {
   if (button) renderPromptCategory(button.dataset.promptCategory);
 });
 $$('[data-shortcut-input]').forEach((input) => {
-  input.addEventListener("focus", () => { input.classList.add("is-recording"); setShortcutMessage("请按下包含 Ctrl、Alt 或 Meta 的组合键；按 Esc 取消。"); });
+  input.addEventListener("focus", () => {
+    input.classList.add("is-recording");
+    const single = singleKeyShortcutCommands.has(input.dataset.shortcutInput);
+    setShortcutMessage(single ? "请按 Space 或 Backspace；按 Esc 取消。" : "请按下包含 Ctrl、Alt 或 Meta 的组合键；按 Esc 取消。");
+  });
   input.addEventListener("blur", () => input.classList.remove("is-recording"));
   input.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (event.key === "Escape") return input.blur();
-    const shortcut = shortcutFromEvent(event);
-    if (!shortcut) return setShortcutMessage("快捷键必须包含 Ctrl、Alt 或 Meta。", true);
+    const single = singleKeyShortcutCommands.has(input.dataset.shortcutInput);
+    const shortcut = shortcutFromEvent(event, {allowSingleKey:single});
+    if (!shortcut || (single && !["Space", "Backspace"].includes(shortcut))) {
+      return setShortcutMessage(single ? "此命令只能设置为 Space 或 Backspace。" : "快捷键必须包含 Ctrl、Alt 或 Meta。", true);
+    }
     assignShortcut(input, shortcut);
     input.blur();
   });
@@ -1165,7 +1305,20 @@ window.addEventListener("beforeunload", (event) => {
   event.returnValue = "";
 });
 $(".test-api").addEventListener("click", testConnection);
-$("#probeReasoning")?.addEventListener("click", probeReasoning);
+$("#refreshModelCatalog")?.addEventListener("click", discoverModels);
+$("#officialModelSelect")?.addEventListener("change", (event) => {
+  if (!event.target.value) return;
+  form.elements.translation_api_model.value = event.target.value;
+  form.elements.translation_api_model.dispatchEvent(new Event("input", {bubbles:true}));
+  form.elements.translation_api_model.dispatchEvent(new Event("change", {bubbles:true}));
+});
+$$('[data-stage-model-select]').forEach((select) => select.addEventListener("change", () => {
+  if (!select.value) return;
+  const input = form.elements[`stage_${select.dataset.stageModelSelect}_model`];
+  input.value = select.value;
+  input.dispatchEvent(new Event("input", {bubbles:true}));
+  input.dispatchEvent(new Event("change", {bubbles:true}));
+}));
 $(".test-qwen-cloud").addEventListener("click", testQwenCloudConnection);
 $("#detectEnvironment").addEventListener("click", detectEnvironment);
 $("#configureEnvironment").addEventListener("click", configureEnvironment);
@@ -1204,19 +1357,21 @@ form.addEventListener("input", (event) => {
   syncStageControls();
   syncRecognitionProfile();
   syncDownloadControls();
-  syncModelProvider(
-    document.activeElement === form.elements.translation_api_base_url ? null : selectedModelProvider,
-  );
+  syncModelProvider(selectedModelProvider);
   syncRuntimePortHint();
   if (!dirty) {
     setHeader("有未保存修改");
     $("#formMessage").textContent = "修改尚未保存";
   }
   dirty = true;
-  if (!sensitiveAutoSaveFields.has(event.target?.name)) scheduleAutoSave();
+  if (!sensitiveAutoSaveFields.has(event.target?.name) && !modelSettingsFields.has(event.target?.name)) {
+    scheduleAutoSave();
+  }
 });
 form.addEventListener("change", (event) => {
-  if (sensitiveAutoSaveFields.has(event.target?.name)) scheduleAutoSave(150);
+  if (sensitiveAutoSaveFields.has(event.target?.name) && !modelSettingsFields.has(event.target?.name)) {
+    scheduleAutoSave(150);
+  }
 });
 form.addEventListener("submit", saveSettings);
 const backgroundPreviewUrls = new Map();

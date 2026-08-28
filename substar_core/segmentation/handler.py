@@ -45,13 +45,13 @@ from .contracts import (
 
 
 _PROGRESS_MESSAGES = {
-    "segmentation.input_prepare": "Preparing transcription evidence",
-    "segmentation.semantic_grouping": "Building semantic subtitle groups",
-    "segmentation.cue_layout": "Building subtitle cue layout",
-    "segmentation.validation": "Validating subtitle structure",
-    "segmentation.repair": "Repairing invalid subtitle structure",
-    "segmentation.document_build": "Building the initial editor document",
-    "segmentation.project_finalize": "Publishing the editable project",
+    "segmentation.input_prepare": "正在准备听写证据",
+    "segmentation.semantic_grouping": "正在进行语义切分",
+    "segmentation.cue_layout": "正在生成字幕 Cue",
+    "segmentation.validation": "正在校验字幕结构",
+    "segmentation.repair": "正在修复无效字幕结构",
+    "segmentation.document_build": "正在生成初始编辑文档",
+    "segmentation.project_finalize": "正在发布可编辑项目",
 }
 _ARTIFACT_CONTRACTS = {
     "segmentation_request.json": (
@@ -286,9 +286,19 @@ def build_segmentation_handler(
         step = str(message.step or "")
         if step not in _PROGRESS_MESSAGES:
             raise InvalidTaskError("segmentation worker progress step is unsupported")
+        display_message = _PROGRESS_MESSAGES[step]
+        if step == "segmentation.semantic_grouping":
+            planned = int(message.data.get("planned", 0) or 0)
+            if planned > 0:
+                responses = min(planned, int(message.data.get("responses", 0) or 0))
+                completed = min(planned, int(message.data.get("completed", 0) or 0))
+                repairing = max(0, int(message.data.get("repairing", 0) or 0))
+                display_message = f"语义切分：已返回 {responses}/{planned}，已完成 {completed}/{planned}"
+                if repairing:
+                    display_message += f"，修复中 {repairing}"
         return {
             "progress": float(message.progress or 0.0),
-            "message": _PROGRESS_MESSAGES[step],
+            "message": display_message,
             "step": step,
             "wait_reason": None,
         }

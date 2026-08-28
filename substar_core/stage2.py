@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from .openai_compat import auth_headers, endpoint_url
 
 from substar_core.editor.tasks.repository import (
     EditorAiTaskCancelled,
@@ -111,8 +112,7 @@ def _numeric_expression_only(text: str) -> bool:
 
 
 def _endpoint(base_url: str) -> str:
-    base = base_url.rstrip("/")
-    return base if base.endswith("/chat/completions") else base + "/chat/completions"
+    return endpoint_url(base_url, "/chat/completions")
 
 
 def _cancellable_editor_post(
@@ -223,6 +223,7 @@ def call_translation_model(
     *,
     base_url: str,
     api_key: str,
+    auth_mode: str = "bearer",
     model: str,
     system_prompt: str,
     groups: list[dict[str, Any]],
@@ -233,7 +234,7 @@ def call_translation_model(
     max_tokens: int = 32768,
     temperature: float = 0.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    requested_effort = str(reasoning_effort or "high")
+    requested_effort = str(reasoning_effort or "low")
     effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
         "model": model,
@@ -271,10 +272,7 @@ def call_translation_model(
         body = None
         for attempt in range(1, total_attempts + 1):
             try:
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                }
+                headers = {**auth_headers(api_key, auth_mode), "Content-Type": "application/json"}
                 if current_task_id():
                     body = _cancellable_editor_post(
                         url=_endpoint(base_url),

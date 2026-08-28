@@ -434,7 +434,7 @@ html[data-theme="light"] :is(
   .entry-card, .content-card, .glossary-main, .term-card,
   .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel,
   .cue-row, .tool-locator-row, .v2-command-popover, .cue-task-island,
-  .text-dialog, .validation-dialog, .debug-float, .ai-review-float
+  .text-dialog, .validation-dialog, .debug-float
 ) {
   color: var(--theme-text) !important;
   background-color: var(--theme-panel) !important;
@@ -451,7 +451,7 @@ html[data-theme="light"] :is(.provider-rail, .provider-detail, .v2-cue-pane, .v2
 html[data-theme="light"] :is(.provider-card, .provider-workspace details.advanced, .stage-config-card,
   .recognition-adapters div, .download-policy, .model-asset-row, .asset-root code,
   .environment-overview article, .environment-section, .entry-details,
-  .runtime-log, .debug-tab details, .ai-review-issue) {
+  .runtime-log, .debug-tab details) {
   color: var(--theme-text) !important;
   background: var(--theme-panel-2) !important;
   border-color: var(--theme-line) !important;
@@ -500,12 +500,12 @@ html[data-theme="light"] :is(.primary:disabled, .primary-button:disabled) {
 }
 html[data-theme="light"] :is(.field, .field label, .parameter-grid label > span,
   .fixed-model > span, .stage-models h3, .mini-grid label, .tool-section label,
-  .debug-tab label, .ai-review-controls > label) { color: var(--theme-text) !important; }
+  .debug-tab label) { color: var(--theme-text) !important; }
 html[data-theme="light"] :is(.muted, .hint, .settings-note, .field small, .parameter-grid label > small,
   .panel-heading p, .sidebar-title p, .stage-models p, .provider-item small,
   .asset-section-heading p, .background-settings-heading p, .hero p,
   .recent-item span, .queue-job-detail span, .runtime-log-lines pre,
-  .preview-heading, .timeline-heading span, .tool-status, .ai-review-empty) { color: var(--theme-muted) !important; }
+  .preview-heading, .timeline-heading span, .tool-status) { color: var(--theme-muted) !important; }
 
 /* Settings rail, provider list and stage cards. */
 html[data-theme="light"] :is(.category:hover, .provider-item:hover, .asset-sidebar-item:hover) { background: var(--theme-hover) !important; }
@@ -562,8 +562,7 @@ html[data-theme="light"] .glossary-table th { color: var(--theme-muted) !importa
 /* Editor document, token controls, task panels and tool rail. */
 html[data-theme="light"] :is(.cue-row, .tool-locator-row, .translation-track, .display-token,
   .token-selection-menu button, .cue-page-control, .debug-stage-summary,
-  .debug-tab textarea, .ai-review-controls textarea, .ai-review-controls select,
-  .ai-review-issue, .review-suggestion) {
+  .debug-tab textarea) {
   color: var(--theme-text) !important;
   background: var(--theme-panel-2) !important;
   border-color: var(--theme-line) !important;
@@ -588,7 +587,7 @@ html[data-theme="light"] :is(.cue-meta, .cue-meta .cue-count, .cue-count-line,
   .revision-label, .pane-live-controls label, .pane-live-controls output,
   .media-controls span, .media-speed-control, .timeline-heading span) { color: var(--theme-muted) !important; }
 html[data-theme="light"] :is(.token-selection-menu, .cue-task-island, .translation-task-panel,
-  .cue-history-row, .debug-float, .ai-review-float) {
+  .cue-history-row, .debug-float) {
   background: color-mix(in srgb, var(--theme-panel) 96%, transparent) !important;
   border-color: var(--theme-line-strong) !important;
 }

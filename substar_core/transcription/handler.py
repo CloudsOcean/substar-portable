@@ -50,13 +50,13 @@ _OPTIONAL_ARTIFACTS = {
 }
 _PRIVATE_ARTIFACTS = {"provider_response.json"}
 _PROGRESS_MESSAGES = {
-    "transcription.media_probe": "Reading media metadata.",
-    "transcription.audio_prepare": "Preparing transcription audio.",
-    "transcription.provider_audio_encode": "Encoding transcription audio.",
-    "transcription.provider_upload": "Uploading transcription audio.",
-    "transcription.provider_run": "The recognition provider is transcribing.",
-    "transcription.evidence_normalize": "Normalizing word-level recognition evidence.",
-    "transcription.artifact_finalize": "Validating transcription artifacts.",
+    "transcription.media_probe": "正在读取媒体信息",
+    "transcription.audio_prepare": "正在准备听写音频",
+    "transcription.provider_audio_encode": "正在编码听写音频",
+    "transcription.provider_upload": "正在上传听写音频",
+    "transcription.provider_run": "云端正在进行词级听写",
+    "transcription.evidence_normalize": "正在整理词级听写证据",
+    "transcription.artifact_finalize": "正在校验听写产物",
 }
 
 

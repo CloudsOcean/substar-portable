@@ -10,7 +10,6 @@ EDITOR_AI_TASK_SCHEMA = "substar.editor-ai-task.v1"
 class EditorAiTaskKind(str, Enum):
     CALIBRATION = "calibration"
     TRANSLATION = "translation"
-    REVIEW = "review"
 
 
 class EditorAiTaskState(str, Enum):

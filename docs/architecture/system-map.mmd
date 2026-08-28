@@ -12,7 +12,7 @@ flowchart LR
     settings_service["Configuration and edition service"]
   end
   subgraph layer_application_service["application_service"]
-    project_exchange_service["External AI and subtitle project exchange"]
+    project_exchange_service["Portable subtitle project exchange"]
     task_info_service["Canonical project task information service"]
   end
   subgraph layer_contract["contract"]
@@ -60,7 +60,6 @@ flowchart LR
   end
   subgraph layer_model_orchestration["model_orchestration"]
     calibration_service["AI calibration service"]
-    review_service["Advisory AI review service"]
     semantic_segmentation_algorithm["Semantic grouping algorithm"]
     translation_service["Editor translation service"]
   end
@@ -137,7 +136,6 @@ flowchart LR
   editor_api --> reference_manuscript_service
   editor_api --> translation_service
   editor_api --> calibration_service
-  editor_api --> review_service
   editor_api --> media_service
   editor_api --> project_exchange_service
   task_info_service --> settings_service
@@ -145,7 +143,6 @@ flowchart LR
   translation_service --> project_store
   calibration_service --> editor_task_repository
   calibration_service --> project_store
-  review_service --> editor_task_repository
   editor_ui --> editor_api
   editor_api_client --> editor_api
   editor_api_client --> composition_root

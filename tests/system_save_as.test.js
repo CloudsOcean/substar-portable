@@ -3,18 +3,18 @@ const saveAs = require("../web/system_save_as.js");
 
 async function run() {
   assert.deepStrictEqual(
-    saveAs.subtitleSpec("project:one", "ab-double", "/export"),
+    saveAs.subtitleSpec("project:one", "ab-double", 3, "/export"),
     {
       url:"/export",
-      suggestedName:"project_one_ab-double.srt",
+      suggestedName:"project_one_双语双行字幕_v03.srt",
       description:"SubRip 字幕",
       mimeType:"application/x-subrip",
       extension:".srt"
     }
   );
   assert.strictEqual(
-    saveAs.exchangeSpec("demo", "subtitle-project", "/exchange").suggestedName,
-    "demo_字幕工程.zip"
+    saveAs.exchangeSpec("demo", "subtitle-project", 12, "/exchange").suggestedName,
+    "demo_字幕工程_v12.zip"
   );
 
   const calls = [];
@@ -28,7 +28,7 @@ async function run() {
     }
   };
   const result = await saveAs.saveUrl(
-    saveAs.subtitleSpec("demo", "source", "/export"),
+    saveAs.subtitleSpec("demo", "source", 1, "/export"),
     {
       picker:async options => { calls.push(["picker", options.suggestedName]); return handle; },
       fetch:async url => {
@@ -39,7 +39,7 @@ async function run() {
   );
   assert.deepStrictEqual(result, {cancelled:false, filename:"chosen.srt"});
   assert.deepStrictEqual(calls, [
-    ["picker", "demo_source.srt"],
+    ["picker", "demo_原文字幕_v01.srt"],
     ["fetch", "/export"],
     ["write", "subtitle"],
     ["close"]
@@ -51,7 +51,7 @@ async function run() {
     async createWritable() { streamCalls.push("writable"); return {kind:"file-stream"}; }
   };
   const streamed = await saveAs.saveUrl(
-    saveAs.exchangeSpec("demo", "subtitle-project", "/package"),
+    saveAs.exchangeSpec("demo", "subtitle-project", 2, "/package"),
     {
       picker:async () => streamHandle,
       fetch:async () => ({
@@ -64,7 +64,7 @@ async function run() {
   assert.deepStrictEqual(streamCalls, ["writable", ["pipeTo", "file-stream"]]);
 
   const cancelled = await saveAs.saveUrl(
-    saveAs.subtitleSpec("demo", "source", "/export"),
+    saveAs.subtitleSpec("demo", "source", 1, "/export"),
     {picker:async () => { const error = new Error("cancel"); error.name = "AbortError"; throw error; }}
   );
   assert.deepStrictEqual(cancelled, {cancelled:true});

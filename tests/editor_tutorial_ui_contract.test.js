@@ -69,12 +69,13 @@ test("tutorial keeps the whole task area bright and advances from verified actio
   }
 });
 
-test("advanced tutorial demonstrates packaged AI stages without model calls", () => {
-  for (const text of ["AI 切分结果已载入", "执行 AI 校准", "查看校准痕迹", "执行 AI 翻译", "查看多对多译文", "执行 AI 审阅"]) {
+test("advanced tutorial demonstrates packaged AI stages and external review without model calls", () => {
+  for (const text of ["AI 切分结果已载入", "执行 AI 校准", "查看校准痕迹", "执行 AI 翻译", "查看多对多译文", "打开外部 AI 审阅", "复制审阅内容"]) {
     assert.match(js, new RegExp(text));
   }
   assert.match(js, /isAdvancedTutorial\(\)/);
   assert.match(js, /tutorial\/stages\/\$\{stage\}/);
   assert.match(js, /正在读取内置阶段快照/);
-  assert.match(js, /不会请求 DeepSeek/);
+  assert.match(js, /不会请求云端模型/);
+  assert.match(js, /state\.tutorial\.step === 3\) \$\("#aiCalibrationMenu"\)\.open = false/);
 });

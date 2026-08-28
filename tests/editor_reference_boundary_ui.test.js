@@ -79,15 +79,11 @@ test("AI and manuscript commands follow the requested editor order", () => {
   assert.match(editorJs, /translationMenuSummary"\)\.textContent = running \? "AI 翻译中…" : "AI 翻译"/);
 });
 
-test("external AI exchange exposes the generation work package", () => {
-  assert.match(editorHtml, /data-exchange-export="external-ai-generation"[^>]*>外部 AI 生成/);
-  assert.match(editorJs, /substar\.external-ai-prooftranslation\.v1/);
-  assert.match(editorJs, /substar\.external-ai-split\.v1/);
-  assert.match(editorJs, /substar\.external-ai-generation-checkpoint\.prototype\.v2/);
-  assert.match(editorJs, /substar\.external-ai-generation-checkpoint\.prototype\.v3/);
-  assert.match(editorJs, /substar\.external-ai-generation-checkpoint\.v1/);
-  assert.match(editorJs, /\/external-ai-prooftranslation/);
-  assert.match(editorJs, /\/external-ai-split/);
-  assert.match(editorJs, /\/external-ai-generation/);
-  assert.match(editorCss, /external-ai-prooftranslation/);
+test("external AI review is read-only and the retired generation exchange is absent", () => {
+  assert.match(editorHtml, /id="aiReviewMenu"/);
+  assert.match(editorHtml, /id="copyExternalReview"/);
+  assert.match(editorHtml, /id="downloadExternalReview"/);
+  assert.match(editorJs, /externalReview\.build/);
+  assert.doesNotMatch(editorHtml, /data-exchange-export="external-ai-generation"/);
+  assert.doesNotMatch(editorJs, /external-ai-generation-checkpoint|\/external-ai-generation/);
 });

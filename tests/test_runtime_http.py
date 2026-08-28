@@ -62,7 +62,8 @@ class RuntimeHttpTests(unittest.TestCase):
         original = getattr(backend.app.state, "task_service", None)
         try:
             backend.app.state.task_service = object()
-            response = backend.runtime_health()
+            with patch.object(backend, "require_visible_backend", return_value="visible_console"):
+                response = backend.runtime_health()
         finally:
             backend.app.state.task_service = original
         self.assertEqual(response["status"], "ready")

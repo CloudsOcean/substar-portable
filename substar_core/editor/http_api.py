@@ -34,7 +34,12 @@ from substar_core.manuscript_matching import (
     editor_reference_operations,
     extract_reference_text,
 )
-from substar_core.media import WAVEFORM_WINDOW_CACHE, prepare_playback_media, smart_forward_snap
+from substar_core.media import (
+    WAVEFORM_WINDOW_CACHE,
+    pcm_wave_frame_count,
+    prepare_playback_media,
+    smart_forward_snap,
+)
 from substar_core.stage2 import Stage2Error, call_translation_model
 from substar_core.domain import (
     ChangeKind,
@@ -130,6 +135,7 @@ class ProjectTaskInfoRequest(BaseModel):
     target_language_mode: Literal["zh-CN", "en", "ja", "ko"]
     source_hard_limit: int = Field(ge=1, le=500)
     target_hard_limit: int = Field(ge=1, le=500)
+    glossary_id: str = Field(default="", max_length=80)
 
 
 class TranslationStartRequest(BaseModel):
@@ -168,7 +174,7 @@ class RestoreRevisionRequest(BaseModel):
 
 class SmartForwardSnapRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
-    pre_roll_ms: int = Field(default=40, ge=0, le=100)
+    pre_roll_ms: int = Field(default=20, ge=0, le=100)
     sensitivity: int = Field(default=50, ge=0, le=100)
 
 
@@ -191,15 +197,7 @@ class ScriptConversionRequest(BaseModel):
 
 class AiCalibrationRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
-
-
-class AiReviewRequest(BaseModel):
-    expected_revision_id: str = Field(min_length=1)
     instruction: str = Field(default="", max_length=4000)
-
-
-class ReviewIssueStatusRequest(BaseModel):
-    status: Literal["open", "dismissed", "resolved"]
 
 
 class TutorialStageRequest(BaseModel):
@@ -324,36 +322,26 @@ def _load_tutorial_document(root: Path, manifest: Mapping[str, Any], stage: str)
         }) from exc
 
 
-def _project_name_for_hotwords(project_id: str) -> str:
-    job_dir = project_job_path(project_id)
+def _project_glossary_id(project_id: str) -> str:
     try:
-        manifest = json.loads((job_dir / "run_manifest.json").read_text(encoding="utf-8"))
-        configuration = manifest.get("configuration")
-        if isinstance(configuration, dict) and str(configuration.get("project_name", "")).strip():
-            return str(configuration["project_name"]).strip()
-    except (OSError, json.JSONDecodeError, UnicodeError, AttributeError):
-        pass
-    try:
-        status = json.loads((job_dir / "creation_state.json").read_text(encoding="utf-8"))
-        return str(status.get("display_name") or project_id).strip()
-    except (OSError, json.JSONDecodeError, UnicodeError, AttributeError):
-        return project_id
+        return str(load_task_info(project_job_path(project_id), project_id).get("glossary_id") or "")
+    except (OSError, ValueError):
+        return ""
 
 
-def _collect_generated_hotwords(project_id: str, project_name: str) -> list[dict[str, Any]]:
+def _collect_generated_hotwords(project_id: str, glossary_id: str) -> list[dict[str, Any]]:
     path = project_job_path(project_id) / "asr_enhancement.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError):
-        return active_glossary(project_name)
+        return active_glossary(glossary_id)
     generated = payload.get("hotwords") if isinstance(payload, dict) else None
     if not isinstance(generated, list):
-        return active_glossary(project_name)
+        return active_glossary(glossary_id)
     existing = load_glossary()
     by_key = {
         (
-            str(item.get("scope", "global")),
-            str(item.get("project", "")).casefold(),
+            str(item.get("glossary_id", "global")),
             str(item.get("source", "")).casefold(),
         ): item
         for item in existing
@@ -363,7 +351,8 @@ def _collect_generated_hotwords(project_id: str, project_name: str) -> list[dict
         if not isinstance(item, dict) or not str(item.get("text") or item.get("source") or "").strip():
             continue
         text = str(item.get("text") or item.get("source")).strip()
-        key = ("project", project_name.casefold(), text.casefold())
+        destination_id = glossary_id or "global"
+        key = (destination_id, text.casefold())
         previous = by_key.get(key)
         candidate = normalize_entry(
             {
@@ -373,8 +362,7 @@ def _collect_generated_hotwords(project_id: str, project_name: str) -> list[dict
                 "target": item.get("target", ""),
                 "aliases": item.get("aliases", []),
                 "type": item.get("type", "other"),
-                "scope": "project",
-                "project": project_name,
+                "glossary_id": destination_id,
                 "enabled": True,
                 "hotword_weight": item.get("weight", item.get("hotword_weight", 4)),
                 "notes": item.get("notes", "ASR 增强候选热词"),
@@ -385,7 +373,7 @@ def _collect_generated_hotwords(project_id: str, project_name: str) -> list[dict
             changed = True
     if changed:
         save_glossary(list(by_key.values()))
-    return active_glossary(project_name)
+    return active_glossary(glossary_id)
 
 
 def _editor_task_path(project_id: str, kind: str) -> Path:
@@ -732,12 +720,7 @@ def reset_tutorial_project(project_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail={
             "code": "tutorial_baseline_missing", "message": str(exc)
         }) from exc
-    for path in (
-        project_job_path(project_id) / "review" / "latest.json",
-        project_job_path(project_id) / "review" / "source_latest.json",
-        project_job_path(project_id) / "review" / "translation_latest.json",
-        project_job_path(project_id) / "tutorial_progress.json",
-    ):
+    for path in (project_job_path(project_id) / "tutorial_progress.json",):
         path.unlink(missing_ok=True)
     if latest.document.content_hash() == baseline.document.content_hash() and not latest.document.complete:
         return revision_payload(latest)
@@ -855,7 +838,7 @@ def launch_tutorial_example(case_id: str) -> dict[str, Any]:
             "display_name": "进阶教程",
             "baseline_revision_id": baseline.revision_id,
             "baseline_document_hash": baseline.document_hash,
-            "available_stages": ["segmentation", "calibration", "translation", "review"],
+            "available_stages": ["segmentation", "calibration", "translation"],
             "simulated": True,
         })
     except Exception:
@@ -887,7 +870,7 @@ def get_tutorial_example_asset(case_id: str, asset_name: Literal["media", "refer
 @router.post("/projects/{project_id}/tutorial/stages/{stage}")
 def apply_tutorial_stage(
     project_id: str,
-    stage: Literal["calibration", "translation", "review"],
+    stage: Literal["calibration", "translation"],
     payload: TutorialStageRequest,
 ) -> dict[str, Any]:
     """Validate and commit a packaged stage without contacting a provider."""
@@ -905,37 +888,6 @@ def apply_tutorial_stage(
         raise HTTPException(status_code=409, detail={
             "code": "revision_conflict", "message": "教程阶段所依据的版本已经变化"
         })
-    if stage == "review":
-        try:
-            snapshot = json.loads((root / str(manifest["assets"]["review"])).read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=500, detail={
-                "code": "tutorial_example_invalid", "message": str(exc)
-            }) from exc
-        snapshot["based_on_revision_id"] = latest.revision_id
-        snapshot["schema_version"] = "substar.tutorial-review-result.v1"
-        _token_map, cue_rows = _editor_ai_cues(latest)
-        cues_by_id = {str(cue["cue_id"]): cue for cue in cue_rows}
-        for issue in snapshot.get("issues", []):
-            issue["cue_basis"] = _review_issue_cue_basis(
-                issue, track=str(issue.get("track", "source")), cues_by_id=cues_by_id
-            )
-        by_issue_id = {str(issue["issue_id"]): issue for issue in snapshot.get("issues", [])}
-        snapshot["source_issues"] = [
-            by_issue_id.get(str(issue.get("issue_id")), issue)
-            for issue in snapshot.get("source_issues", [])
-        ]
-        snapshot["translation_issues"] = [
-            by_issue_id.get(str(issue.get("issue_id")), issue)
-            for issue in snapshot.get("translation_issues", [])
-        ]
-        review_dir = project_job_path(project_id) / "review"
-        review_dir.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(review_dir / "latest.json", snapshot)
-        atomic_write_json(project_job_path(project_id) / "tutorial_progress.json", {
-            "schema_version": "substar.tutorial-progress.v1", "stage": "review"
-        })
-        return {**snapshot, "simulated": True}
     document = _load_tutorial_document(root, manifest, stage)
     if document.document_id != latest.document.document_id:
         raise HTTPException(status_code=500, detail={
@@ -1107,23 +1059,26 @@ def _pcm_peak_buckets(samples: array, bucket: int) -> list[float]:
 
 
 def _waveform_overview(audio: Path, cache: Path) -> dict[str, Any]:
-    if cache.is_file() and cache.stat().st_mtime >= audio.stat().st_mtime:
-        try:
-            cached = json.loads(cache.read_text(encoding="utf-8"))
-            if cached.get("schema_version") == "substar.waveform.v1":
-                return cached
-        except (OSError, json.JSONDecodeError):
-            pass
     with wave.open(str(audio), "rb") as source:
         channels = source.getnchannels()
         width = source.getsampwidth()
         rate = source.getframerate()
-        frame_count = source.getnframes()
+        frame_count = pcm_wave_frame_count(audio, source)
         if width != 2:
             raise HTTPException(
                 status_code=415,
                 detail={"code": "waveform_format_unsupported", "message": "波形预览只支持 16-bit PCM"},
             )
+        if cache.is_file() and cache.stat().st_mtime >= audio.stat().st_mtime:
+            try:
+                cached = json.loads(cache.read_text(encoding="utf-8"))
+                if (
+                    cached.get("schema_version") == "substar.waveform.v2"
+                    and abs(float(cached.get("duration", -1)) - frame_count / rate) < 0.001
+                ):
+                    return cached
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
         raw = source.readframes(frame_count)
     samples = array("h")
     samples.frombytes(raw)
@@ -1139,7 +1094,7 @@ def _waveform_overview(audio: Path, cache: Path) -> dict[str, Any]:
         )
     bucket = max(1, len(samples) // 12000)
     result = {
-        "schema_version": "substar.waveform.v1",
+        "schema_version": "substar.waveform.v2",
         "duration": frame_count / rate,
         "sample_rate": rate,
         "peaks": _pcm_peak_buckets(samples, bucket),
@@ -1174,7 +1129,7 @@ def get_project_waveform(
         channels = source.getnchannels()
         width = source.getsampwidth()
         rate = source.getframerate()
-        frame_count = source.getnframes()
+        frame_count = pcm_wave_frame_count(audio, source)
         if width != 2:
             raise HTTPException(
                 status_code=415,
@@ -1334,8 +1289,31 @@ def _commit_binary_export(
     )
 
 
+_SUBTITLE_EXPORT_LABELS = {
+    SubtitleExportMode.SOURCE: "原文字幕",
+    SubtitleExportMode.TARGET: "译文字幕",
+    SubtitleExportMode.AB_SINGLE: "双语单行字幕",
+    SubtitleExportMode.AB_DOUBLE: "双语双行字幕",
+}
+
+
+def _safe_export_name(value: Any) -> str:
+    cleaned = "".join("_" if character in '\\/:*?\"<>|' or ord(character) < 32 else character for character in str(value or ""))
+    return cleaned.rstrip(". ") or "未命名任务"
+
+
+def _named_export(project_id: str, label: str, sequence: int, suffix: str) -> str:
+    task_info = get_project_task_info(project_id)
+    task_name = _safe_export_name(task_info.get("display_name") or project_id)
+    return f"{task_name}_{label}_v{sequence:02d}.{suffix}"
+
+
 @router.get("/projects/{project_id}/export/{mode}")
-def export_project(project_id: str, mode: SubtitleExportMode) -> Response:
+def export_project(
+    project_id: str,
+    mode: SubtitleExportMode,
+    export_sequence: int = Query(default=1, ge=1, le=999999),
+) -> Response:
     revision = open_project_store(project_id).load_latest()
     if revision is None:
         raise HTTPException(
@@ -1343,12 +1321,12 @@ def export_project(project_id: str, mode: SubtitleExportMode) -> Response:
             detail={"code": "empty_project", "message": "项目还没有文档版本"},
         )
     content = render_document_srt(revision.document, mode)
-    filename = f"{project_id}_{mode.value}.srt"
+    filename = _named_export(project_id, _SUBTITLE_EXPORT_LABELS[mode], export_sequence, "srt")
     return Response(
         content=("\ufeff" + content).encode("utf-8"),
         media_type="application/x-subrip",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
             "X-Substar-Artifact-Type": "subtitle",
         },
     )
@@ -1356,8 +1334,8 @@ def export_project(project_id: str, mode: SubtitleExportMode) -> Response:
 
 @router.get("/projects/{project_id}/hotwords/export")
 def export_project_hotwords(project_id: str) -> Response:
-    project_name = _project_name_for_hotwords(project_id)
-    entries = _collect_generated_hotwords(project_id, project_name)
+    glossary_id = _project_glossary_id(project_id)
+    entries = _collect_generated_hotwords(project_id, glossary_id)
     content = glossary_xlsx_bytes(entries)
     filename = f"{project_id}_hotwords.xlsx"
     return Response(
@@ -1869,6 +1847,12 @@ def _editor_ai_cues(revision: Any) -> tuple[dict[str, Any], list[dict[str, Any]]
             continue
         token_ids = [token_id for token_id in cue.display_token_ids if token_id in token_map]
         group = group_map.get(cue.group_id or "")
+        mapping = cue.mapping if isinstance(cue.mapping, Mapping) else {}
+        target_metadata = (
+            cue.target.provenance.metadata
+            if cue.target is not None and isinstance(cue.target.provenance.metadata, Mapping)
+            else {}
+        )
         cues.append({
             "cue_id": cue.cue_id,
             "start": cue.start,
@@ -1883,6 +1867,20 @@ def _editor_ai_cues(revision: Any) -> tuple[dict[str, Any], list[dict[str, Any]]
                 for token_id in token_ids
             ],
             "target_text": cue.target.target_text if cue.target else "",
+            "translation_mapping": {
+                "mapping_type": mapping.get("mapping_type"),
+                "group_mapping_type": mapping.get("group_mapping_type"),
+                "source_cue_ids": list(mapping.get("source_cue_ids", [])),
+                "source_evidence_cue_ids": list(
+                    mapping.get(
+                        "source_evidence_cue_ids",
+                        target_metadata.get("source_evidence_cue_ids", []),
+                    )
+                ),
+                "meaning_unit_id": mapping.get(
+                    "meaning_unit_id", target_metadata.get("meaning_unit_id")
+                ),
+            } if cue.target else None,
         })
     return token_map, cues
 
@@ -1978,16 +1976,21 @@ def _run_editor_ai_blocks(
         attempt_count = 2 if retry_stage else 1
         for attempt in range(1, attempt_count + 1):
             active_stage = stage_name if attempt == 1 else str(retry_stage)
+            fallback_stage = active_stage.endswith("_repair")
             try:
                 value, request_metadata = call_translation_model(
                     base_url=str(settings.get("translation_api_base_url", "https://api.deepseek.com")),
                     api_key=api_key,
+                    auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
                     model=str(settings.get(f"stage_{active_stage}_model") or settings.get("translation_api_model", "deepseek-v4-flash")),
                     system_prompt=system_prompt,
                     groups=[{"block_id": block_id, "cues": block_cues}],
                     timeout=min(600, int(settings.get("translation_api_timeout_seconds", 300))),
-                    thinking_mode=str(settings.get(f"stage_{active_stage}_thinking_mode", "disabled")),
-                    reasoning_effort=str(settings.get(f"stage_{active_stage}_reasoning_effort", "high")),
+                    thinking_mode=str(settings.get(
+                        f"stage_{active_stage}_thinking_mode",
+                        "disabled" if fallback_stage else "enabled",
+                    )),
+                    reasoning_effort=str(settings.get(f"stage_{active_stage}_reasoning_effort", "low")),
                     request_attempts=(
                         max(1, int(settings.get("http_retry_attempts", 2)) + 1)
                         if retry_stage else 1
@@ -2056,11 +2059,15 @@ def _calibration_capitalize(text: str) -> str:
 def _calibration_model_blocks(
     blocks: Mapping[str, list[dict[str, Any]]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Preserve the exact current token text used by action preconditions."""
+    """Send source-only context while preserving exact action preconditions."""
     return {
         block_id: [
             {
-                **cue,
+                **{
+                    key: value
+                    for key, value in cue.items()
+                    if key not in {"target_text", "translation_mapping"}
+                },
                 "tokens": [dict(token) for token in cue["tokens"]],
             }
             for cue in block_cues
@@ -2083,6 +2090,7 @@ def _validated_calibration_contract_actions(
     value: Any,
     owned_token_ids: list[str],
     token_map: Mapping[str, Any],
+    token_to_cue_id: Mapping[str, str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
@@ -2109,7 +2117,10 @@ def _validated_calibration_contract_actions(
         evidence = action.get("evidence")
         if not reason and (
             not action_id or action_id in seen_action_ids
-            or kind not in {"set_case", "set_punctuation", "replace_token", "replace_span"}
+            or kind not in {
+                "set_case", "set_punctuation", "replace_token", "replace_span",
+                "merge_span",
+            }
             or confidence not in {"high", "medium", "low"}
             or disposition not in {"apply", "review"}
             or not isinstance(action.get("affects_translation"), bool)
@@ -2148,6 +2159,16 @@ def _validated_calibration_contract_actions(
             reason = "set_punctuation may change only light punctuation"
         if not reason and kind == "replace_span" and len(after_text.split()) != len(normalized_ids):
             reason = "replace_span must preserve token count"
+        if not reason and kind == "merge_span" and (
+            len(normalized_ids) < 2
+            or len({token_to_cue_id.get(token_id) for token_id in normalized_ids}) != 1
+            or None in {token_to_cue_id.get(token_id) for token_id in normalized_ids}
+            or after_text.strip() != after_text
+            or not after_text
+            or any(char.isspace() for char in after_text)
+            or action.get("affects_translation") is not True
+        ):
+            reason = "merge_span must merge contiguous tokens in one Cue into one token"
         if not reason and (
             not isinstance(evidence, list) or not evidence
             or any(
@@ -2258,7 +2279,7 @@ def _exchange_prompt_options(project_id: str) -> dict[str, Any]:
         "target_language": target_language,
         "source_hard_limit": source_limit,
         "target_hard_limit": target_limit,
-        "glossary": active_glossary(project_id),
+        "glossary": active_glossary(_project_glossary_id(project_id)),
     }
 
 
@@ -2337,13 +2358,16 @@ def export_external_ai_generation(project_id: str) -> FileResponse:
 
 
 @router.get("/projects/{project_id}/exchange/subtitle-project")
-def export_subtitle_project_package(project_id: str) -> FileResponse:
+def export_subtitle_project_package(
+    project_id: str,
+    export_sequence: int = Query(default=1, ge=1, le=999999),
+) -> FileResponse:
     revision = open_project_store(project_id).load_latest()
     if revision is None:
         raise HTTPException(status_code=404, detail="项目还没有文档版本")
     get_project_task_info(project_id)
     return _commit_binary_export(
-        f"{project_id}_字幕工程.zip",
+        _named_export(project_id, "字幕工程", export_sequence, "zip"),
         "subtitle-project",
         lambda path: export_subtitle_project(
             path,
@@ -2552,6 +2576,77 @@ async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[
     return {"schema_version": "substar.subtitle-project-import.v1", "project_id": project_id}
 
 
+def _apply_ai_calibration_operations(
+    document: EditorDocument,
+    *,
+    replacements: list[BatchReplacement],
+    merge_actions: list[Mapping[str, Any]],
+    calibration_metadata: Mapping[str, Any],
+    operation_id: str,
+) -> EditorDocument:
+    """Apply text edits and same-Cue topology merges as one in-memory change."""
+    result = document
+    if replacements:
+        replacement_provenance = ChangeProvenance(
+            kind=ChangeKind.AI,
+            operation="ai_calibration_apply",
+            actor="ai-calibration",
+            metadata={
+                **dict(calibration_metadata),
+                "replacement_count": len(replacements),
+                "merge_count": len(merge_actions),
+            },
+        )
+        result = apply_document_operation(result, {
+            "operation_id": f"{operation_id}_replace",
+            "type": "batch_replace",
+            "payload": {
+                "replacements": [item.model_dump() for item in replacements],
+                "provenance": replacement_provenance.to_dict(),
+            },
+        })
+
+    for index, action in enumerate(merge_actions, start=1):
+        token_ids = [str(token_id) for token_id in action["token_ids"]]
+        current_tokens = {token.token_id: token for token in result.display_tokens}
+        before_tokens = [current_tokens[token_id].to_dict() for token_id in token_ids]
+        calibration_record = {
+            "topology": "merge_span",
+            "action_id": str(action["action_id"]),
+            "applied": True,
+            "cue_id": str(action["cue_id"]),
+            "before_text": str(action["before_text"]),
+            "after_text": str(action["after_text"]),
+            "before_tokens": before_tokens,
+            "affects_translation": True,
+            "evidence": list(action.get("evidence", [])),
+            "confidence": str(action.get("confidence", "")),
+        }
+        merge_provenance = ChangeProvenance(
+            kind=ChangeKind.AI,
+            operation="ai_calibration_merge",
+            actor="ai-calibration",
+            metadata={
+                **dict(calibration_metadata),
+                "ai_calibration": calibration_record,
+                "affects_translation": True,
+                "evidence": list(action.get("evidence", [])),
+                "confidence": str(action.get("confidence", "")),
+            },
+        )
+        result = apply_document_operation(result, {
+            "operation_id": f"{operation_id}_merge_{index}",
+            "type": "merge",
+            "payload": {
+                "cue_id": str(action["cue_id"]),
+                "token_ids": token_ids,
+                "text": str(action["after_text"]),
+                "provenance": merge_provenance.to_dict(),
+            },
+        })
+    return result
+
+
 def _ai_calibrate_project(
     project_id: str, payload: AiCalibrationRequest, task_id: str
 ) -> dict[str, Any]:
@@ -2576,7 +2671,7 @@ def _ai_calibrate_project(
             "standard_source": row.get("standard_source"),
             "aliases": row.get("aliases", []),
         }
-        for row in active_glossary(project_id)
+        for row in active_glossary(_project_glossary_id(project_id))
     ]
     calibration_prompt = render_prompt(
         "calibration",
@@ -2596,6 +2691,12 @@ def _ai_calibrate_project(
         calibration_prompt += (
             "\n\nAuthoritative glossary snapshot:\n"
             + json.dumps(calibration_glossary, ensure_ascii=False, separators=(",", ":"))
+        )
+    if payload.instruction.strip():
+        calibration_prompt += (
+            "\n\n用户本次补充校准要求：\n"
+            + payload.instruction.strip()
+            + "\n补充要求只能在既有校准动作契约允许的范围内执行；不得改变 Cue 时间或结构。"
         )
     results = _run_editor_ai_blocks(
         settings=settings,
@@ -2622,6 +2723,7 @@ def _ai_calibrate_project(
     calibration_audit_blocks: list[dict[str, Any]] = []
     accepted_contract_actions: list[dict[str, Any]] = []
     review_actions: list[dict[str, Any]] = []
+    merge_actions: list[dict[str, Any]] = []
     token_to_cue_id = {
         str(token["token_id"]): str(cue["cue_id"])
         for cue in cues
@@ -2645,7 +2747,7 @@ def _ai_calibrate_project(
             failed_blocks.append(block_id)
         else:
             actions, validation_rejections = _validated_calibration_contract_actions(
-                value, token_ids, token_map
+                value, token_ids, token_map, token_to_cue_id
             )
         accepted_contract_actions.extend(actions)
         filtered_count += len(validation_rejections)
@@ -2688,6 +2790,13 @@ def _ai_calibrate_project(
                     for token_id in action["token_ids"]
                     if token_to_cue_id.get(token_id)
                 )
+                continue
+            if kind == "merge_span":
+                merge_actions.append({
+                    **action,
+                    "cue_id": token_to_cue_id[action["token_ids"][0]],
+                })
+                lexical_count += 1
                 continue
             replacement_parts = (
                 str(action["after_text"]).split()
@@ -2746,6 +2855,7 @@ def _ai_calibrate_project(
         "sentence_count": sentence_count,
         "filtered_count": filtered_count,
         "lexical_replacement_count": lexical_count,
+        "merge_count": len(merge_actions),
         "translation_stale_cue_ids": translation_stale_cue_ids,
         "semantic_group_count": len({str(cue.get("group_id")) for cue in cues}),
         "single_attempt_delivery": True,
@@ -2778,6 +2888,7 @@ def _ai_calibrate_project(
                     "failed_blocks": failed_blocks,
                     "filtered_count": filtered_count,
                     "replacement_count": 0,
+                    "merge_count": 0,
                     "sentence_count": sentence_count,
                     "case_applied_count": 0,
                     "punctuation_applied_count": 0,
@@ -2789,20 +2900,45 @@ def _ai_calibrate_project(
         raise RuntimeError(
             f"AI 校准所有执行块均失败：{detail}"
         )
-    if replacements:
-        revision = batch_replace_project(project_id, BatchReplaceRequest(
+    if replacements or merge_actions:
+        calibration_operation_id = f"op_calibration_{latest.revision_id}"
+        try:
+            document = _apply_ai_calibration_operations(
+                latest.document,
+                replacements=replacements,
+                merge_actions=merge_actions,
+                calibration_metadata=calibration_metadata,
+                operation_id=calibration_operation_id,
+            )
+        except (KeyError, TypeError, ValueError, DocumentOperationError) as exc:
+            raise RuntimeError(f"AI 校准结果无法应用：{exc}") from exc
+        provenance = ChangeProvenance(
+            kind=ChangeKind.AI,
+            operation="ai_calibration_apply",
+            actor="ai-calibration",
+            metadata={
+                **calibration_metadata,
+                "replacement_count": len(replacements),
+                "merge_count": len(merge_actions),
+            },
+        )
+        revision = _save_document(
+            project_id,
             expected_revision_id=latest.revision_id,
-            operation_id=f"op_calibration_{latest.revision_id}",
-            replacements=replacements,
-            origin="ai_calibration",
-            metadata=calibration_metadata,
-        ))
+            document=document,
+            operation="ai_calibration_apply",
+            provenance=provenance,
+        )
     else:
         provenance = ChangeProvenance(
             kind=ChangeKind.AI,
             operation="ai_calibration_apply",
             actor="ai-calibration",
-            metadata={**calibration_metadata, "replacement_count": 0},
+            metadata={
+                **calibration_metadata,
+                "replacement_count": 0,
+                "merge_count": 0,
+            },
         )
         document = replace(latest.document, changes=(*latest.document.changes, provenance))
         revision = _save_document(
@@ -2832,6 +2968,7 @@ def _ai_calibrate_project(
                     "failed_blocks": failed_blocks,
                     "filtered_count": filtered_count,
                     "replacement_count": len(replacements),
+                    "merge_count": len(merge_actions),
                     "sentence_count": sentence_count,
                     "case_applied_count": applied_case_count,
                     "punctuation_applied_count": applied_punctuation_count,
@@ -2854,6 +2991,15 @@ def _ai_calibrate_project(
     result = {
         "revision": revision,
         "corrections": [item.model_dump() for item in replacements],
+        "merges": [
+            {
+                "action_id": action["action_id"],
+                "cue_id": action["cue_id"],
+                "token_ids": action["token_ids"],
+                "text": action["after_text"],
+            }
+            for action in merge_actions
+        ],
         "failed_blocks": failed_blocks,
         "problem_cue_ids": list(dict.fromkeys(problem_cue_ids)),
         "checked_cues": len(cues),
@@ -2865,6 +3011,7 @@ def _ai_calibrate_project(
         "case_applied_count": applied_case_count,
         "punctuation_applied_count": applied_punctuation_count,
         "lexical_replacement_count": lexical_count,
+        "merge_applied_count": len(merge_actions),
         "review_actions": review_actions,
         "translation_stale_cue_ids": translation_stale_cue_ids,
         "calibration_result_path": str(result_path.relative_to(project_job_path(project_id))),
@@ -2878,445 +3025,11 @@ def _ai_calibrate_project(
         result["calibration_audit_error"] = audit_error
     _write_editor_task(project_id, "calibration", status="completed", progress=1.0,
                        message=(
-                           f"AI 校准完成：应用 {len(replacements)} 项，过滤 {filtered_count} 项"
+                           f"AI 校准完成：替换 {len(replacements)} 项，合并 {len(merge_actions)} 项，过滤 {filtered_count} 项"
                        ), task_id=task_id)
     return result
 
 
-
-
-_SOURCE_REVIEW_TYPES = {
-    "suspected_misrecognition", "suspected_omission", "suspected_repetition",
-    "named_entity_or_term", "number_or_unit", "context_incoherence",
-    "source_consistency",
-}
-_TRANSLATION_REVIEW_TYPES = {
-    "mistranslation", "omission", "addition", "factual_mismatch",
-    "polarity_or_logic", "reference_resolution", "terminology_consistency",
-    "grammar_or_fluency", "subtitle_flow",
-}
-_SOURCE_REVIEW_ACTIONS = {
-    "inspect_audio", "replace_source", "verify_entity", "verify_number",
-    "normalize_source_occurrences", "manual_edit",
-}
-_TRANSLATION_REVIEW_ACTIONS = {
-    "replace_translation", "retranslate_cue", "verify_fact", "inspect_context",
-    "normalize_translation_occurrences", "manual_edit",
-}
-
-
-def _review_text_is_damaged(value: Any) -> bool:
-    if isinstance(value, str):
-        return "\ufffd" in value
-    if isinstance(value, Mapping):
-        return any(_review_text_is_damaged(child) for child in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_review_text_is_damaged(child) for child in value)
-    return False
-
-
-def _review_response_valid(value: Any) -> bool:
-    return (
-        isinstance(value, Mapping)
-        and any(
-            isinstance(value.get(key), list)
-            for key in ("source_issues", "translation_issues")
-        )
-        and not _review_text_is_damaged(value)
-    )
-
-
-def _validate_review_issue(
-    raw: Any,
-    *,
-    track: str,
-    owned_cue_ids: set[str],
-    token_ids_by_cue: Mapping[str, set[str]],
-) -> dict[str, Any] | None:
-    token_field = "token_ids" if track == "source" else "source_token_ids"
-    expected = {
-        "issue_type", "cue_ids", token_field, "impact", "confidence",
-        "description", "evidence", "suggested_text", "recommended_action",
-    }
-    if not isinstance(raw, Mapping) or set(raw) != expected:
-        return None
-    issue_types = _SOURCE_REVIEW_TYPES if track == "source" else _TRANSLATION_REVIEW_TYPES
-    actions = _SOURCE_REVIEW_ACTIONS if track == "source" else _TRANSLATION_REVIEW_ACTIONS
-    cue_ids = [str(value) for value in raw.get("cue_ids", [])]
-    token_ids = [str(value) for value in raw.get(token_field, [])]
-    allowed_tokens = {
-        token_id for cue_id in cue_ids for token_id in token_ids_by_cue.get(cue_id, set())
-    }
-    suggested = raw.get("suggested_text")
-    if (
-        not cue_ids or len(set(cue_ids)) != len(cue_ids)
-        or any(cue_id not in owned_cue_ids for cue_id in cue_ids)
-        or len(set(token_ids)) != len(token_ids)
-        or any(token_id not in allowed_tokens for token_id in token_ids)
-        or str(raw.get("issue_type")) not in issue_types
-        or str(raw.get("recommended_action")) not in actions
-        or str(raw.get("impact")) not in {"major", "moderate", "minor"}
-        or str(raw.get("confidence")) not in {"high", "medium", "low"}
-        or not str(raw.get("description", "")).strip()
-        or not str(raw.get("evidence", "")).strip()
-        or (suggested is not None and not isinstance(suggested, str))
-    ):
-        return None
-    return {
-        "issue_type": str(raw["issue_type"]),
-        "cue_ids": cue_ids,
-        token_field: token_ids,
-        "impact": str(raw["impact"]),
-        "confidence": str(raw["confidence"]),
-        "description": str(raw["description"]).strip(),
-        "evidence": str(raw["evidence"]).strip(),
-        "suggested_text": suggested.strip() if isinstance(suggested, str) else None,
-        "recommended_action": str(raw["recommended_action"]),
-        "status": "open",
-    }
-
-
-def _review_issue_cue_basis(
-    issue: Mapping[str, Any],
-    *,
-    track: str,
-    cues_by_id: Mapping[str, Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """Freeze only the Cue content on which one advisory issue depends."""
-    basis: list[dict[str, Any]] = []
-    for cue_id in issue.get("cue_ids", []):
-        cue = cues_by_id.get(str(cue_id))
-        if cue is None:
-            continue
-        snapshot: dict[str, Any] = {
-            "cue_id": str(cue_id),
-            "source_tokens": [
-                {
-                    "token_id": str(token.get("token_id", "")),
-                    "text": str(token.get("text", "")),
-                }
-                for token in cue.get("tokens", [])
-            ],
-        }
-        if track == "translation":
-            snapshot["target_text"] = str(cue.get("target_text", ""))
-        basis.append(snapshot)
-    return basis
-
-
-@router.post("/projects/{project_id}/ai-review")
-def ai_review_project(project_id: str, payload: AiReviewRequest) -> dict[str, Any]:
-    """Return advisory review issues without mutating the document."""
-    latest = open_project_store(project_id).load_latest()
-    if latest is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "empty_project", "message": "项目还没有文稿版本"
-        })
-    if payload.expected_revision_id != latest.revision_id:
-        raise HTTPException(status_code=409, detail={
-            "code": "revision_conflict", "message": "AI 审阅基于旧版本，请刷新后重试"
-        })
-    try:
-        exclusive_task = start_editor_ai_task(
-            project_job_path(project_id),
-            project_id=project_id,
-            kind=EditorAiTaskKind.REVIEW,
-            based_on_revision_id=latest.revision_id,
-        )
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(status_code=423, detail={
-            "code": "editor_ai_task_locked", "message": str(exc)
-        }) from exc
-    task = _write_editor_task(
-        project_id, "review", status="running", progress=0.02,
-        message="AI 审阅准备中", task_id=exclusive_task["task_id"],
-    )
-    try:
-        with editor_ai_task_context(task["task_id"]):
-            result = _ai_review_project(project_id, payload, task["task_id"])
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            EditorAiTaskState.SUCCEEDED,
-        )
-        return result
-    except EditorAiTaskCancelled as exc:
-        _write_editor_task(
-            project_id, "review", status="cancelled", progress=0.0,
-            message="AI 审阅已取消", task_id=task["task_id"],
-        )
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            EditorAiTaskState.CANCELLED,
-        )
-        raise HTTPException(status_code=409, detail={
-            "code": "editor_ai_task_cancelled", "message": str(exc)
-        }) from exc
-    except Exception as exc:
-        _write_editor_task(
-            project_id, "review", status="failed", progress=0.0,
-            message="AI 审阅失败", error=str(exc), task_id=task["task_id"],
-        )
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            EditorAiTaskState.FAILED,
-            error={"code": "review_failed", "message": str(exc)[:2000]},
-        )
-        raise
-
-
-def _ai_review_project(
-    project_id: str, payload: AiReviewRequest, task_id: str
-) -> dict[str, Any]:
-
-    store = open_project_store(project_id)
-    latest = store.load_latest()
-    if latest is None:
-        raise HTTPException(status_code=404, detail={"code": "empty_project", "message": "项目还没有文档版本"})
-    if payload.expected_revision_id != latest.revision_id:
-        raise HTTPException(status_code=409, detail={"code": "revision_conflict", "message": "AI 审阅基于旧版本，请刷新后重试"})
-    _token_map, cues = _editor_ai_cues(latest)
-    blocks = _editor_ai_blocks(cues)
-    prompt = render_prompt("editor_review").text
-    review_glossary = [
-        {
-            "source": row.get("source"),
-            "standard_source": row.get("standard_source"),
-            "aliases": row.get("aliases", []),
-        }
-        for row in active_glossary(project_id)
-    ]
-    if review_glossary:
-        prompt += (
-            "\n\nAuthoritative glossary snapshot:\n"
-            + json.dumps(review_glossary, ensure_ascii=False, separators=(",", ":"))
-        )
-    if payload.instruction.strip():
-        prompt += "\n\n用户本次补充审阅重点：\n" + payload.instruction.strip()
-    settings = load_settings(include_secret=True)
-    results = _run_editor_ai_blocks(
-        settings=settings, system_prompt=prompt, blocks=blocks,
-        failure_key="issues", stage_name="review",
-        retry_stage=None,
-        response_validator=_review_response_valid,
-        progress_callback=lambda done, total: _write_editor_task(
-            project_id, "review", status="running",
-            progress=0.08 + 0.82 * done / max(1, total),
-            message=f"AI 审阅 {done}/{total} 块", task_id=task_id,
-        ),
-    )
-    result_by_block = {block_id: (value, metadata) for block_id, value, metadata in results}
-    repair_blocks: dict[str, list[dict[str, Any]]] = {}
-    repair_tracks: dict[str, list[str]] = {}
-    for block_id, block_cues in blocks.items():
-        value, metadata = result_by_block.get(block_id, ({}, {"error": "missing response"}))
-        missing = [
-            track
-            for track, key in (("source", "source_issues"), ("translation", "translation_issues"))
-            if metadata.get("error")
-            or not isinstance(value, Mapping)
-            or not isinstance(value.get(key), list)
-        ]
-        if missing:
-            repair_tracks[block_id] = missing
-            repair_blocks[block_id] = block_cues
-    if repair_blocks:
-        repaired = _run_editor_ai_blocks(
-            settings=settings,
-            system_prompt=(
-                prompt
-                + "\n\n这是精确修复请求。只补齐 requested_tracks；"
-                  "不得改写已经验收成功的另一轨结果。\nrequested_tracks="
-                + json.dumps(repair_tracks, ensure_ascii=False, separators=(",", ":"))
-            ),
-            blocks=repair_blocks,
-            failure_key="issues",
-            stage_name="audit_repair",
-            retry_stage=None,
-            response_validator=_review_response_valid,
-        )
-        for block_id, repair_value, repair_metadata in repaired:
-            original, original_metadata = result_by_block.get(block_id, ({}, {}))
-            merged = dict(original) if isinstance(original, Mapping) else {}
-            if isinstance(repair_value, Mapping):
-                for track, key in (("source", "source_issues"), ("translation", "translation_issues")):
-                    if track in repair_tracks[block_id] and isinstance(repair_value.get(key), list):
-                        merged[key] = repair_value[key]
-            result_by_block[block_id] = (merged, {**original_metadata, "repair": repair_metadata})
-        results = [(block_id, *result_by_block[block_id]) for block_id in blocks]
-    owned_cues = {
-        block_id: {cue["cue_id"] for cue in block_cues if cue["editable"]}
-        for block_id, block_cues in blocks.items()
-    }
-    token_ids_by_cue = {
-        str(cue["cue_id"]): {str(token["token_id"]) for token in cue["tokens"]}
-        for cue in cues
-    }
-    cues_by_id = {str(cue["cue_id"]): cue for cue in cues}
-    source_issues: list[dict[str, Any]] = []
-    translation_issues: list[dict[str, Any]] = []
-    rejected_issue_count = 0
-    failed_blocks: list[str] = []
-    for block_id, value, metadata in sorted(results):
-        if metadata.get("error"):
-            failed_blocks.append(block_id)
-        if not isinstance(value, Mapping):
-            rejected_issue_count += 1
-            continue
-        for track, key, destination in (
-            ("source", "source_issues", source_issues),
-            ("translation", "translation_issues", translation_issues),
-        ):
-            raw_rows = value.get(key)
-            if not isinstance(raw_rows, list):
-                rejected_issue_count += 1
-                continue
-            for raw in raw_rows:
-                issue = _validate_review_issue(
-                    raw,
-                    track=track,
-                    owned_cue_ids=owned_cues.get(block_id, set()),
-                    token_ids_by_cue=token_ids_by_cue,
-                )
-                if issue is None:
-                    rejected_issue_count += 1
-                    continue
-                issue["issue_id"] = (
-                    f"review_{track}_{block_id}_{len(destination) + 1:04d}"
-                )
-                destination.append(issue)
-    review_id = f"review_{latest.revision_id}_{task_id[-8:]}"
-    source_result = {
-        "schema_version": "substar.source-review-result.v1",
-        "review_id": review_id,
-        "project_id": project_id,
-        "based_on_revision_id": latest.revision_id,
-        "issues": source_issues,
-    }
-    translation_result = {
-        "schema_version": "substar.translation-review-result.v1",
-        "review_id": review_id,
-        "project_id": project_id,
-        "based_on_revision_id": latest.revision_id,
-        "issues": translation_issues,
-    }
-    result = {
-        "review_id": review_id,
-        "based_on_revision_id": latest.revision_id,
-        "source_issues": source_issues,
-        "translation_issues": translation_issues,
-        "issues": [
-            *(
-                {
-                    **row,
-                    "track": "source",
-                    "cue_basis": _review_issue_cue_basis(
-                        row, track="source", cues_by_id=cues_by_id
-                    ),
-                }
-                for row in source_issues
-            ),
-            *(
-                {
-                    **row,
-                    "track": "translation",
-                    "cue_basis": _review_issue_cue_basis(
-                        row, track="translation", cues_by_id=cues_by_id
-                    ),
-                }
-                for row in translation_issues
-            ),
-        ],
-        "failed_blocks": failed_blocks,
-        "rejected_issue_count": rejected_issue_count,
-        "execution_blocks": [
-            {"block_id": block_id, "request_metadata": metadata}
-            for block_id, _value, metadata in sorted(results)
-        ],
-        "provider_seconds": round(sum(
-            float(metadata.get("duration_seconds", 0) or 0)
-            for _block_id, _value, metadata in results
-        ), 3),
-        "failed_block_errors": {
-            block_id: str(metadata.get("error", ""))
-            for block_id, _value, metadata in results
-            if metadata.get("error")
-        },
-    }
-    raise_if_task_cancelled(task_id)
-    review_dir = store.root.parent / "review"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(review_dir / "source_latest.json", source_result)
-    atomic_write_json(review_dir / "translation_latest.json", translation_result)
-    atomic_write_json(review_dir / "latest.json", result)
-    if blocks and len(failed_blocks) == len(blocks):
-        raise RuntimeError("AI 审阅所有执行块均失败，请检查发行文件或模型连接")
-    _write_editor_task(project_id, "review", status="completed", progress=1.0,
-                       message="AI 审阅完成", task_id=task_id)
-    return result
-
-
-@router.get("/projects/{project_id}/ai-review/latest")
-def latest_ai_review_project(project_id: str) -> dict[str, Any]:
-    path = project_job_path(project_id) / "review" / "latest.json"
-    if not path.is_file():
-        return {"review_id": "", "based_on_revision_id": "", "issues": [], "failed_blocks": []}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail={"code": "review_artifact_invalid", "message": str(exc)}) from exc
-    if _review_text_is_damaged(value):
-        return {
-            "review_id": str(value.get("review_id", "")),
-            "based_on_revision_id": str(value.get("based_on_revision_id", "")),
-            "issues": [],
-            "failed_blocks": list(value.get("failed_blocks", [])),
-            "encoding_error": True,
-        }
-    return value
-
-
-@router.patch("/projects/{project_id}/ai-review/issues/{issue_id}")
-def set_ai_review_issue_status(
-    project_id: str, issue_id: str, payload: ReviewIssueStatusRequest
-) -> dict[str, Any]:
-    review_dir = project_job_path(project_id) / "review"
-    combined_path = review_dir / "latest.json"
-    try:
-        combined = json.loads(combined_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=404, detail={
-            "code": "review_not_found", "message": "项目还没有可更新的审阅结果"
-        }) from exc
-    selected: dict[str, Any] | None = None
-    for issue in combined.get("issues", []):
-        if isinstance(issue, dict) and issue.get("issue_id") == issue_id:
-            issue["status"] = payload.status
-            selected = issue
-            break
-    if selected is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "review_issue_not_found", "message": "审阅问题不存在"
-        })
-    track = str(selected.get("track"))
-    track_path = review_dir / (
-        "source_latest.json" if track == "source" else "translation_latest.json"
-    )
-    try:
-        track_result = json.loads(track_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail={
-            "code": "review_artifact_invalid", "message": str(exc)
-        }) from exc
-    for issue in track_result.get("issues", []):
-        if isinstance(issue, dict) and issue.get("issue_id") == issue_id:
-            issue["status"] = payload.status
-            break
-    atomic_write_json(track_path, track_result)
-    atomic_write_json(combined_path, combined)
-    return selected
 
 
 @router.post("/projects/{project_id}/complete")

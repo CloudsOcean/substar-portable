@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .artifacts import atomic_write_json
 from .credential_store import (
@@ -12,12 +13,18 @@ from .credential_store import (
     ASR_QWEN,
     SEGMENT_DEEPSEEK,
     TRANSLATE_DEEPSEEK,
+    MODEL_PROVIDER_PREFIX,
     clean_credential,
     load_store,
     write_envelope,
 )
 from .recognition.registry import DEFAULT_RECOGNITION_PROFILE, get_recognition_profile
-from .reasoning_capabilities import resolve_reasoning_effort, resolve_thinking_mode
+from .model_providers import (
+    MODEL_PROVIDER_IDS,
+    canonical_provider_id,
+    infer_model_provider,
+    normalize_provider_profiles,
+)
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -76,7 +83,6 @@ DEFAULTS: dict[str, Any] = {
     "segmentation_enabled": True,
     "translation_enabled": False,
     "calibration_enabled": False,
-    "review_enabled": False,
     "appearance_mode": "dark",
     "accent_color": "purple",
     "surface_style": "standard",
@@ -103,12 +109,14 @@ DEFAULTS: dict[str, Any] = {
     "translation_api_provider": "openai_chat",
     "translation_api_base_url": "https://api.deepseek.com",
     "translation_api_model": "deepseek-v4-flash",
+    "active_model_provider": "deepseek",
+    "model_provider_profiles": {},
+    "model_reasoning_capabilities": {},
     "stage_segmentation_model": "deepseek-v4-flash",
     "stage_translation_model": "deepseek-v4-flash",
     "stage_translation_repair_model": "deepseek-v4-flash",
     "stage_calibration_model": "deepseek-v4-flash",
     "calibration_protocol_version": 2,
-    "stage_review_model": "deepseek-v4-flash",
     "stage_audit_repair_model": "deepseek-v4-flash",
     "stage_segmentation_thinking_mode": "enabled",
     "stage_segmentation_reasoning_effort": "low",
@@ -127,16 +135,13 @@ DEFAULTS: dict[str, Any] = {
     "stage_translation_repair_reasoning_effort": "low",
     "stage_translation_repair_max_tokens": 65536,
     "stage_translation_repair_temperature": 0.0,
-    # Semantic stages use Flash Low. Advisory review and exact rejected-unit
-    # repair use the same Flash model with thinking disabled.
+    # Normal stages default to thinking at Low. Fallback repair stages prefer
+    # non-thinking and are promoted to thinking at Low only when required by
+    # the selected model.
     "stage_calibration_thinking_mode": "enabled",
     "stage_calibration_reasoning_effort": "low",
     "stage_calibration_max_tokens": 65536,
     "stage_calibration_temperature": 0.0,
-    "stage_review_thinking_mode": "disabled",
-    "stage_review_reasoning_effort": "low",
-    "stage_review_max_tokens": 65536,
-    "stage_review_temperature": 0.0,
     "stage_audit_repair_thinking_mode": "disabled",
     "stage_audit_repair_reasoning_effort": "low",
     "stage_audit_repair_max_tokens": 65536,
@@ -194,36 +199,15 @@ DEFAULTS: dict[str, Any] = {
     "output_dir": str(DATA_ROOT / "projects"),
     "shortcut_undo": "Ctrl+Z",
     "shortcut_redo": "Ctrl+Y",
+    "shortcut_play_pause": "Space",
+    "shortcut_hide_cue": "Backspace",
+    "timeline_zoom_modifier": "Alt",
 }
 
 ALLOWED_KEYS = set(DEFAULTS)
 
-MODEL_STAGE_NAMES = (
-    "segmentation",
-    "segmentation_repair",
-    "translation",
-    "translation_repair",
-    "calibration",
-    "review",
-    "audit_repair",
-)
-
-
 def apply_declared_model_capabilities(settings: dict[str, Any]) -> dict[str, Any]:
-    """Normalize persisted stage choices against the model capability contract."""
-
-    base_url = str(settings.get("translation_api_base_url") or "")
-    fallback_model = str(settings.get("translation_api_model") or "")
-    for stage in MODEL_STAGE_NAMES:
-        model = str(settings.get(f"stage_{stage}_model") or fallback_model)
-        thinking_key = f"stage_{stage}_thinking_mode"
-        effort_key = f"stage_{stage}_reasoning_effort"
-        settings[thinking_key] = resolve_thinking_mode(
-            base_url, model, str(settings.get(thinking_key) or "disabled")
-        )
-        settings[effort_key] = resolve_reasoning_effort(
-            base_url, model, str(settings.get(effort_key) or "high")
-        )
+    """Keep user-facing canonical choices; provider adapters map them at request time."""
     return settings
 
 
@@ -242,6 +226,18 @@ def _canonical_shortcut(value: Any) -> str | None:
         return None
     key = parts[-1].upper() if len(parts[-1]) == 1 else parts[-1]
     return "+".join([name for name in ("Ctrl", "Alt", "Shift", "Meta") if name in modifiers] + [key])
+
+
+def _canonical_single_key(value: Any) -> str | None:
+    key = str(value or "").strip()
+    aliases = {" ": "Space", "spacebar": "Space", "space": "Space", "backspace": "Backspace"}
+    return aliases.get(key.casefold())
+
+
+def _canonical_modifier(value: Any) -> str | None:
+    return {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "meta": "Meta"}.get(
+        str(value or "").strip().casefold()
+    )
 
 
 def _unique_paths(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
@@ -291,14 +287,36 @@ def save_credentials_from_settings(payload: dict[str, Any]) -> dict[str, str]:
         alignment_key = clean_credential(payload.get("alignment_api_key"))
         if alignment_key:
             values[ALIGN_DEEPSEEK] = alignment_key
-    if payload.get("clear_translation_api_key"):
-        values.pop(SEGMENT_DEEPSEEK, None)
-        values.pop(TRANSLATE_DEEPSEEK, None)
-    else:
-        translation_key = clean_credential(payload.get("translation_api_key"))
-        if translation_key:
-            values[SEGMENT_DEEPSEEK] = translation_key
-            values[TRANSLATE_DEEPSEEK] = translation_key
+    if any(
+        key in payload
+        for key in ("translation_api_base_url", "translation_api_key", "clear_translation_api_key")
+    ):
+        provider = canonical_provider_id(
+            payload.get("active_model_provider")
+            or infer_model_provider(payload.get("translation_api_base_url"))
+        )
+        provider_role = f"{MODEL_PROVIDER_PREFIX}{provider}"
+        if payload.get("clear_translation_api_key"):
+            values.pop(provider_role, None)
+            values.pop(SEGMENT_DEEPSEEK, None)
+            values.pop(TRANSLATE_DEEPSEEK, None)
+        else:
+            translation_key = clean_credential(payload.get("translation_api_key"))
+            if translation_key:
+                values[provider_role] = translation_key
+                values[SEGMENT_DEEPSEEK] = translation_key
+                values[TRANSLATE_DEEPSEEK] = translation_key
+            else:
+                existing_provider_key = values.get(provider_role)
+                if not existing_provider_key and provider == "qwen":
+                    existing_provider_key = values.get(f"{MODEL_PROVIDER_PREFIX}aliyun")
+                if existing_provider_key:
+                    values[provider_role] = existing_provider_key
+                    values[SEGMENT_DEEPSEEK] = existing_provider_key
+                    values[TRANSLATE_DEEPSEEK] = existing_provider_key
+                elif provider != "deepseek":
+                    values.pop(SEGMENT_DEEPSEEK, None)
+                    values.pop(TRANSLATE_DEEPSEEK, None)
     _write_credential_envelope(values)
     return values
 
@@ -321,6 +339,7 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
         ),
         SETTINGS_FILE,
     )
+    stored: dict[str, Any] = {}
     if settings_path.exists():
         try:
             stored = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -338,6 +357,11 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     settings["output_dir"] = str(DATA_ROOT / "projects")
     for name in ("shortcut_undo", "shortcut_redo"):
         settings[name] = _canonical_shortcut(settings.get(name)) or DEFAULTS[name]
+    for name in ("shortcut_play_pause", "shortcut_hide_cue"):
+        settings[name] = _canonical_single_key(settings.get(name)) or DEFAULTS[name]
+    settings["timeline_zoom_modifier"] = (
+        _canonical_modifier(settings.get("timeline_zoom_modifier")) or DEFAULTS["timeline_zoom_modifier"]
+    )
     # v3 execution blocks are capped at about three minutes. Clamp persisted
     # 300-second defaults from earlier builds as soon as settings are loaded,
     # including non-UI callers that do not save settings again.
@@ -358,10 +382,26 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     credentials = load_credentials()
     key = credentials.get(ASR_QWEN, "")
     alignment_key = credentials.get(ALIGN_DEEPSEEK, "")
-    translation_key = credentials.get(TRANSLATE_DEEPSEEK, "")
+    provider = canonical_provider_id(
+        stored.get("active_model_provider")
+        or infer_model_provider(settings.get("translation_api_base_url"))
+    )
+    settings["active_model_provider"] = provider
+    provider_role = f"{MODEL_PROVIDER_PREFIX}{provider}"
+    translation_key = credentials.get(provider_role, "")
+    if not translation_key and provider == "qwen":
+        translation_key = credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun", "")
+    if not translation_key and provider == "deepseek":
+        translation_key = credentials.get(TRANSLATE_DEEPSEEK, "")
     settings["api_key_set"] = bool(key)
     settings["alignment_api_key_set"] = bool(alignment_key)
     settings["translation_api_key_set"] = bool(translation_key)
+    settings["model_provider_key_set"] = {
+        name: bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}{name}"))
+        or (name == "qwen" and bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun")))
+        or (name == "deepseek" and bool(credentials.get(TRANSLATE_DEEPSEEK)))
+        for name in MODEL_PROVIDER_IDS
+    }
     if include_secret:
         settings["api_key"] = key
         settings["alignment_api_key"] = alignment_key
@@ -379,6 +419,40 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     from .edition import constrain_settings
 
     merged = constrain_settings(merged)
+    raw_profiles = normalize_provider_profiles(merged.get("model_provider_profiles", {}))
+    provider = canonical_provider_id(
+        merged.get("active_model_provider")
+        or infer_model_provider(merged.get("translation_api_base_url"))
+    )
+    merged["active_model_provider"] = provider
+    base_url = str(merged.get("translation_api_base_url", "")).strip()
+    parsed_base_url = urlparse(base_url)
+    if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:
+        raise ValueError("translation_api_base_url 必须是有效的 HTTP(S) 地址")
+    model_id = str(merged.get("translation_api_model", "")).strip()
+    if not model_id:
+        raise ValueError("translation_api_model 不能为空")
+    auth_mode = str(merged.get("translation_api_auth_mode", "bearer")).strip().lower()
+    if auth_mode not in {"bearer", "api-key"}:
+        raise ValueError("translation_api_auth_mode 无效")
+    merged["translation_api_base_url"] = base_url
+    merged["translation_api_model"] = model_id
+    merged["translation_api_auth_mode"] = auth_mode
+    raw_profiles[provider] = {
+        "base_url": base_url,
+        "model": model_id,
+        "auth_mode": auth_mode,
+        "timeout_seconds": int(merged.get("translation_api_timeout_seconds", 300)),
+    }
+    merged["model_provider_profiles"] = raw_profiles
+    raw_capabilities = merged.get("model_reasoning_capabilities", {})
+    if not isinstance(raw_capabilities, dict):
+        raw_capabilities = {}
+    merged["model_reasoning_capabilities"] = {
+        str(key)[:1000]: value
+        for key, value in list(raw_capabilities.items())[-100:]
+        if isinstance(value, dict)
+    }
     merged["output_dir"] = str(DATA_ROOT / "projects")
     merged["startup_port"] = max(1024, min(65535, int(merged["startup_port"])))
     choices = {
@@ -502,7 +576,6 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         "translation",
         "translation_repair",
         "calibration",
-        "review",
         "audit_repair",
     ):
         thinking_key = f"stage_{stage}_thinking_mode"
@@ -522,7 +595,6 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         "segmentation_enabled",
         "translation_enabled",
         "calibration_enabled",
-        "review_enabled",
     ):
         merged[key] = bool(merged[key])
     merged["segmentation_strategy"] = "semantic"
@@ -571,8 +643,21 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         if value is None:
             raise ValueError(f"{name} 不是有效的组合快捷键")
         merged[name] = value
-    if merged["shortcut_undo"].casefold() == merged["shortcut_redo"].casefold():
-        raise ValueError("撤销和重做不能使用相同快捷键")
+    for name in ("shortcut_play_pause", "shortcut_hide_cue"):
+        value = _canonical_single_key(merged.get(name))
+        if value is None:
+            raise ValueError(f"{name} 只能使用 Space 或 Backspace")
+        merged[name] = value
+    modifier = _canonical_modifier(merged.get("timeline_zoom_modifier"))
+    if modifier is None:
+        raise ValueError("时间轴缩放修饰键只能使用 Ctrl、Alt、Shift 或 Meta")
+    merged["timeline_zoom_modifier"] = modifier
+    shortcut_values = {
+        name: str(merged[name]).casefold()
+        for name in ("shortcut_undo", "shortcut_redo", "shortcut_play_pause", "shortcut_hide_cue")
+    }
+    if len(set(shortcut_values.values())) != len(shortcut_values):
+        raise ValueError("快捷键不能分配给多个命令")
     atomic_write_json(SETTINGS_FILE, merged)
 
     save_credentials_from_settings(payload)

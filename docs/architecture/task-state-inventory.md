@@ -10,7 +10,6 @@ The application currently contains at least seven task/lifecycle mechanisms. The
 | Split batch | `app.py` | request creates child jobs; batch itself has no worker | `.workbench_batches/<id>.json` | status calculated by reading child jobs; no independent cancellation |
 | Translation | `translation_service_v2.py` | daemon thread plus production child process | `translation_v2/status.json` and run artifacts | no public cancellation endpoint; completion can be inferred from final artifacts; otherwise active state may remain stale |
 | Calibration | `editor_api_v2.py` | synchronous API request with internal thread pool | `editor_tasks_v2/calibration.json`, audit file, committed revision | no task cancellation; client/network lifetime is coupled to request |
-| Review | `editor_api_v2.py` | synchronous API request with internal thread pool | `editor_tasks_v2/review.json`, `ai_review_v2/latest.json` | no task cancellation; partial block failures recorded |
 | Debug jobs | `experimental/merged_max_debug.py` | module-level `ThreadPoolExecutor` | memory plus per-task artifact/status files | separate cancel/apply protocol; production router still imports it |
 | Model download | `model_assets.py` | daemon thread | module-level `_DOWNLOAD_JOBS` only | lost from API on restart; no cancel operation |
 | Remote cloud ASR | `qwen_cloud_asr.py` | provider task polled by ingest worker | `qwen_cloud_state.json` | can reuse remote task ID; parent cancellation semantics are indirect |
@@ -64,7 +63,7 @@ Creation checks and status writes are not protected by one transaction/lock, so 
 
 ## Editor AI status behavior
 
-Calibration and review write task-looking JSON states, but execute within the request handler. Their files are useful UI projections, not an independently supervised job record. There is no owner heartbeat, process ID, lease, attempt ledger or restart reconciliation.
+Calibration writes task-looking JSON state, but executes within the request handler. Its file is a useful UI projection, not an independently supervised job record. There is no owner heartbeat, process ID, lease, attempt ledger or restart reconciliation.
 
 ## State-store overlap
 
@@ -80,7 +79,6 @@ project_v2/project.sqlite3
 editor_tasks_v2/*.json
 translation_v2/status.json
 translation_v2/runs/*/stage_progress.json
-ai_review_v2/latest.json
 ```
 
 Each file has a legitimate artifact purpose, but several are treated as authoritative lifecycle state. This is the main backend consistency problem.

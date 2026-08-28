@@ -169,7 +169,7 @@ class LauncherInstancePolicyTests(unittest.TestCase):
         popen_kwargs = popen.call_args.kwargs
         self.assertEqual(popen_kwargs["stdin"], launcher.subprocess.DEVNULL)
         self.assertIs(popen_kwargs["stderr"], launcher.subprocess.STDOUT)
-        self.assertGreater(int(popen_kwargs["creationflags"]), 0)
+        self.assertEqual(int(popen_kwargs["creationflags"]), 0)
 
     def test_open_existing_reports_build_conflict_without_opening_browser(self) -> None:
         different = {**self.identity, "build_id": "build-b"}

@@ -50,7 +50,6 @@ def test_every_exposed_model_stage_has_a_complete_default_policy() -> None:
         "translation",
         "translation_repair",
         "calibration",
-        "review",
         "audit_repair",
     )
     for stage in stages:
@@ -65,42 +64,3 @@ def test_every_exposed_model_stage_has_a_complete_default_policy() -> None:
     assert DEFAULTS["stage_translation_repair_thinking_mode"] == "disabled"
     assert DEFAULTS["stage_segmentation_repair_thinking_mode"] == "disabled"
     assert DEFAULTS["stage_audit_repair_thinking_mode"] == "disabled"
-
-
-def test_editor_audit_fallback_uses_configured_non_thinking_policy(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-
-    def fake_call_translation_model(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise Stage2Error("main stage failed")
-        return {"issues": []}, {"provider": "fake"}
-
-    monkeypatch.setattr(editor_http_api, "call_translation_model", fake_call_translation_model)
-    settings = {
-        "translation_api_key": "secret",
-        "translation_api_base_url": "https://example.invalid",
-        "translation_api_model": "global-model",
-        "stage_review_model": "review-model",
-        "stage_review_thinking_mode": "enabled",
-        "stage_review_reasoning_effort": "max",
-        "stage_review_max_tokens": 10000,
-        "stage_review_temperature": 0.0,
-        "stage_audit_repair_model": "fallback-model",
-        "stage_audit_repair_thinking_mode": "disabled",
-        "stage_audit_repair_reasoning_effort": "high",
-        "stage_audit_repair_max_tokens": 5000,
-        "stage_audit_repair_temperature": 0.0,
-    }
-    results = editor_http_api._run_editor_ai_blocks(
-        settings=settings,
-        system_prompt="p",
-        blocks={"block-1": []},
-        failure_key="issues",
-        stage_name="review",
-        response_validator=lambda value: isinstance(value.get("issues"), list),
-    )
-    assert not results[0][2].get("error")
-    assert calls[0]["model"] == "review-model"
-    assert calls[1]["model"] == "fallback-model"
-    assert calls[1]["thinking_mode"] == "disabled"

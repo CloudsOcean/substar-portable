@@ -216,7 +216,7 @@ class ProductionTranscriptionHandlerTests(unittest.TestCase):
         )
         self.assertEqual(completed["step"], "transcription.artifact_finalize")
         self.assertEqual(
-            completed["progress_message"], "Validating transcription artifacts."
+            completed["progress_message"], "正在校验听写产物"
         )
         validate_schema(completed["result"], "transcription-result.schema.json")
         self.assertEqual(completed["task_type"], "transcription")

@@ -3,11 +3,43 @@ from __future__ import annotations
 from array import array
 import math
 from pathlib import Path
+import struct
 import sys
 import threading
 import wave
 from collections import OrderedDict
 from typing import Any, Hashable, Iterable, Mapping
+
+
+def pcm_wave_frame_count(audio: Path, source: wave.Wave_read) -> int:
+    """Return the physically available PCM frames, even with FFmpeg placeholder sizes."""
+
+    declared_frames = max(0, int(source.getnframes()))
+    block_align = max(1, source.getnchannels() * source.getsampwidth())
+    try:
+        file_size = audio.stat().st_size
+        with audio.open("rb") as stream:
+            header = stream.read(12)
+            if len(header) != 12 or header[:4] not in {b"RIFF", b"RF64"} or header[8:] != b"WAVE":
+                return declared_frames
+            while stream.tell() + 8 <= file_size:
+                chunk_header = stream.read(8)
+                if len(chunk_header) != 8:
+                    break
+                chunk_name, chunk_size = struct.unpack("<4sI", chunk_header)
+                payload_start = stream.tell()
+                available = max(0, file_size - payload_start)
+                if chunk_name == b"data":
+                    data_size = available if chunk_size == 0xFFFFFFFF else min(chunk_size, available)
+                    physical_frames = data_size // block_align
+                    return min(declared_frames, physical_frames)
+                next_chunk = payload_start + chunk_size + (chunk_size & 1)
+                if next_chunk <= payload_start or next_chunk > file_size:
+                    break
+                stream.seek(next_chunk)
+    except OSError:
+        pass
+    return declared_frames
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -26,6 +58,7 @@ def _percentile(values: list[float], fraction: float) -> float:
 def _window_rms(
     source: wave.Wave_read,
     *,
+    frame_count: int,
     start: float,
     end: float,
     frame_seconds: float = 0.01,
@@ -33,7 +66,7 @@ def _window_rms(
     rate = source.getframerate()
     channels = source.getnchannels()
     first_frame = max(0, int(math.floor(start * rate)))
-    last_frame = min(source.getnframes(), int(math.ceil(end * rate)))
+    last_frame = min(frame_count, int(math.ceil(end * rate)))
     source.setpos(first_frame)
     samples = array("h")
     samples.frombytes(source.readframes(max(0, last_frame - first_frame)))
@@ -60,7 +93,7 @@ def smart_forward_snap(
     cue_starts: Iterable[Mapping[str, Any]],
     *,
     search_window_ms: int = 1000,
-    pre_roll_ms: int = 40,
+    pre_roll_ms: int = 20,
     sensitivity: int = 50,
 ) -> dict[str, Any]:
     """Return trustworthy local speech onsets with a small leading cushion."""
@@ -85,7 +118,8 @@ def smart_forward_snap(
     with wave.open(str(audio), "rb") as source:
         if source.getsampwidth() != 2:
             raise ValueError("smart forward snap requires 16-bit PCM")
-        duration = source.getnframes() / source.getframerate()
+        frame_count = pcm_wave_frame_count(audio, source)
+        duration = frame_count / source.getframerate()
         for item in prepared:
             original = min(duration, max(0.0, item["start"]))
             minimum = min(original, item["minimum_start"])
@@ -94,6 +128,7 @@ def smart_forward_snap(
                 continue
             rms, actual_start = _window_rms(
                 source,
+                frame_count=frame_count,
                 start=window_start,
                 end=min(duration, original + 0.3),
             )

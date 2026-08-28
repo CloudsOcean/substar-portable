@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .glossary import active_glossary
+from .task_info import load_task_info
 
 
 def build_translation_context(
@@ -18,7 +19,8 @@ def build_translation_context(
     master_path = job_dir / "master_transcript.txt"
     master = master_path.read_text(encoding="utf-8") if master_path.exists() else ""
     folded = master.casefold()
-    glossary = active_glossary(project_name)
+    glossary_id = str(load_task_info(job_dir, job_dir.name).get("glossary_id") or "")
+    glossary = active_glossary(glossary_id)
     matched: list[dict[str, Any]] = []
     unmatched: list[dict[str, Any]] = []
     for item in glossary:

@@ -92,5 +92,15 @@ assert.doesNotMatch(
   /loadProject\((?:state\.projectId|button\.dataset\.projectId), \{resetTutorial:true\}\)/,
   "opening, switching, and refreshing projects must preserve tutorial revisions"
 );
+assert.match(
+  editorSource,
+  /if \(isAdvancedTutorial\(\)\) \{[\s\S]*?#aiCalibrationMenu"\)\.open = false;[\s\S]*?runPackagedTutorialStage\("calibration"\)/,
+  "running packaged calibration must close its menu before advancing"
+);
+assert.match(
+  editorSource,
+  /state\.tutorial\.step === 3\) \$\("#aiCalibrationMenu"\)\.open = false/,
+  "the advanced translation step must defensively close the calibration menu"
+);
 
 console.log("editor_tutorial: ok");

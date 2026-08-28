@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from substar_core.artifacts import atomic_write_json, atomic_write_text
-from substar_core.config import INSTALL_ROOT
+from substar_core.environment_doctor import _find_tool
 from substar_core.qwen_cloud_asr import DEFAULT_MODEL, run_qwen_cloud_asr
 from substar_core.recognition.registry import profile_settings
 
@@ -20,36 +18,25 @@ from .artifacts import alignment_tsv, segmentation_material
 Progress = Callable[[str, float], None]
 
 
-def _media_tool(name: str) -> str:
-    suffix = ".exe" if os.name == "nt" else ""
-    for candidate in (
-        INSTALL_ROOT / "runtime" / "ffmpeg" / "bin" / f"{name}{suffix}",
-        INSTALL_ROOT / "ffmpeg" / "bin" / f"{name}{suffix}",
-        INSTALL_ROOT / "tools" / "ffmpeg" / "bin" / f"{name}{suffix}",
-    ):
-        if candidate.is_file():
-            return str(candidate)
-    resolved = shutil.which(name)
-    if resolved:
-        return resolved
-    raise FileNotFoundError(f"{name} is unavailable")
-
-
-def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
+def _run(
+    command: list[str], *, timeout_seconds: float | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         check=True,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        timeout=timeout_seconds,
     )
 
 
 def _probe_media(path: Path) -> dict[str, Any]:
     result = _run(
         [
-            _media_tool("ffprobe"),
+            _find_tool("ffprobe") or "ffprobe",
             "-v",
             "error",
             "-show_entries",
@@ -79,18 +66,34 @@ def _probe_media(path: Path) -> dict[str, Any]:
     }
 
 
-def _extract_audio(media_path: Path, wav_path: Path, denoise_mode: str) -> None:
+def _extract_audio(
+    media_path: Path,
+    wav_path: Path,
+    denoise_mode: str,
+    *,
+    media_duration_seconds: float,
+) -> None:
     wav_path.parent.mkdir(parents=True, exist_ok=True)
     if wav_path.is_file() and wav_path.stat().st_size > 44:
         return
     command = [
-        _media_tool("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y", "-i", str(media_path),
+        _find_tool("ffmpeg") or "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(media_path),
         "-vn", "-ac", "1", "-ar", "16000",
     ]
     if denoise_mode == "light":
         command.extend(["-af", "afftdn=nr=8:nf=-35"])
     command.extend(["-c:a", "pcm_s16le", str(wav_path)])
-    _run(command)
+    timeout_seconds = max(300.0, min(3600.0, media_duration_seconds * 2.0 + 120.0))
+    try:
+        _run(command, timeout_seconds=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            wav_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise RuntimeError(
+            f"FFmpeg audio extraction exceeded {int(timeout_seconds)} seconds"
+        ) from exc
 
 
 def _sha256(path: Path) -> str:
@@ -114,7 +117,12 @@ def run_cloud_pipeline(
     media = _probe_media(media_path)
     wav_path = artifact_directory / "audio_16k_mono.wav"
     progress("提取 16kHz 单声道音频", 0.12)
-    _extract_audio(media_path, wav_path, str(settings.get("audio_denoise_mode", "off")))
+    _extract_audio(
+        media_path,
+        wav_path,
+        str(settings.get("audio_denoise_mode", "off")),
+        media_duration_seconds=float(media.get("duration_seconds", 0.0)),
+    )
 
     resolved = profile_settings(settings)
     resolved["_checkpoint_dir"] = str(artifact_directory / "ingest_chunks")

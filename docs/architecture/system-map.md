@@ -32,7 +32,7 @@ flowchart LR
     settings_service["Configuration and edition service"]
   end
   subgraph layer_application_service["application_service"]
-    project_exchange_service["External AI and subtitle project exchange"]
+    project_exchange_service["Portable subtitle project exchange"]
     task_info_service["Canonical project task information service"]
   end
   subgraph layer_contract["contract"]
@@ -80,7 +80,6 @@ flowchart LR
   end
   subgraph layer_model_orchestration["model_orchestration"]
     calibration_service["AI calibration service"]
-    review_service["Advisory AI review service"]
     semantic_segmentation_algorithm["Semantic grouping algorithm"]
     translation_service["Editor translation service"]
   end
@@ -157,7 +156,6 @@ flowchart LR
   editor_api --> reference_manuscript_service
   editor_api --> translation_service
   editor_api --> calibration_service
-  editor_api --> review_service
   editor_api --> media_service
   editor_api --> project_exchange_service
   task_info_service --> settings_service
@@ -165,7 +163,6 @@ flowchart LR
   translation_service --> project_store
   calibration_service --> editor_task_repository
   calibration_service --> project_store
-  review_service --> editor_task_repository
   editor_ui --> editor_api
   editor_api_client --> editor_api
   editor_api_client --> composition_root
@@ -222,38 +219,37 @@ flowchart LR
 | `transcription_handler` | `handler` | Validate immutable transcription input, resolve media/safe retry material and prepare the transcription Worker. | `substar_core/transcription/handler.py` | `transcription_request`<br>`task_record`<br>`credential_reference` | `worker_command` | `transcription_worker`<br>`transcription_finalizer` |
 | `transcription_worker` | `worker` | Prepare media, call the configured recognition pipeline, materialize evidence artifacts and emit registered results. | `substar_core/transcription/worker.py`<br>`scripts/run_transcription_worker.py` | `worker_command`<br>`transcription_request`<br>`credential_reference` | `worker_message`<br>`transcription_result`<br>`recognition_evidence`<br>`provider_submission_audit` | `cloud_transcription_pipeline`<br>`worker_protocol` |
 | `cloud_transcription_pipeline` | `domain_service` | Probe media, extract canonical audio, invoke Qwen ASR and materialize provider-independent evidence files. | `substar_core/transcription/cloud_pipeline.py` | `transcription_request`<br>`credential_reference` | `recognition_evidence`<br>`provider_submission_audit` | `qwen_connector` |
-| `qwen_connector` | `provider_connector` | Upload audio, submit asynchronous Qwen transcription, poll, download and parse sentence/word/speaker evidence. | `substar_core/qwen_cloud_asr.py`<br>`substar_core/http_client.py` | `transcription_request`<br>`credential_reference` | `provider_submission_audit`<br>`recognition_evidence` | — |
+| `qwen_connector` | `provider_connector` | Upload audio, submit asynchronous Qwen transcription, poll, download and parse sentence/word/speaker evidence. | `substar_core/qwen_cloud_asr.py`<br>`substar_core/qwen_enhancement.py`<br>`substar_core/http_client.py` | `transcription_request`<br>`credential_reference` | `provider_submission_audit`<br>`recognition_evidence` | — |
 | `transcription_finalizer` | `finalizer` | Revalidate registered evidence artifacts and atomically publish immutable transcription evidence into the project. | `substar_core/transcription/handler.py` | `transcription_request`<br>`transcription_result`<br>`recognition_evidence`<br>`provider_submission_audit`<br>`worker_completion` | `transcription_result`<br>`recognition_evidence`<br>`task_record` | — |
 | `segmentation_handler` | `handler` | Validate immutable segmentation input, resolve evidence/prompts/reference and prepare a normal or artifact-recovery Worker. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`recognition_evidence`<br>`credential_reference`<br>`task_record` | `worker_command` | `segmentation_worker`<br>`segmentation_finalizer` |
 | `segmentation_input_contract` | `contract` | Derive one unpunctuated, reindexed editor timeline from immutable recognition evidence, expanding CJK blocks by character and retaining alphabetic words. | `substar_core/segmentation/input_contract.py` | `recognition_evidence` | `segmentation_material` | — |
 | `segmentation_worker` | `worker` | Build canonical material, run semantic grouping, deterministic reference-script alignment, or artifact recovery, validate candidates and emit every artifact before result. | `substar_core/segmentation/worker.py`<br>`scripts/run_segmentation_worker.py` | `worker_command`<br>`segmentation_request`<br>`recognition_evidence`<br>`segmentation_material`<br>`credential_reference` | `worker_message`<br>`semantic_grouping_result`<br>`segmentation_candidate`<br>`segmentation_result`<br>`editor_document` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`worker_protocol` |
 | `execution_planner` | `domain_service` | Choose deterministic approximately 90-second processing seams bounded to 75--100 seconds; bootstrap split uses observable timing evidence, while downstream stages replan only at accepted AI meaning-group boundaries. | `substar_core/segmentation/execution_planner.py` | `segmentation_material` | `segmentation_candidate` | — |
 | `semantic_segmentation_algorithm` | `model_orchestration` | Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan. | `scripts/run_semantic_segmentation.py`<br>`scripts/run_flash_map_pro_editor.py`<br>`scripts/run_global_planner_ab.py` | `segmentation_material`<br>`segmentation_request` | `semantic_grouping_result`<br>`editor_document` | `segmentation_model_connector` |
-| `segmentation_model_connector` | `provider_connector` | Render versioned prompts, apply stage-specific model scheduling and call the OpenAI-compatible DeepSeek endpoint. | `scripts/segmentation_support.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result` | — |
+| `segmentation_model_connector` | `provider_connector` | Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint. | `scripts/segmentation_support.py`<br>`substar_core/openai_compat.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result` | — |
 | `segmentation_finalizer` | `finalizer` | Revalidate registered segmentation artifacts against the same canonical projection, commit Revision 1 and publish the project atomically. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`segmentation_result`<br>`segmentation_candidate`<br>`recognition_evidence`<br>`editor_document`<br>`worker_completion` | `editor_revision`<br>`task_record` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`project_store` |
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
-| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration, review and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`editor_task_repository`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`media_service`<br>`project_exchange_service` |
+| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`editor_task_repository`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
 | `task_info_service` | `application_service` | Load, validate, atomically save and one-time migrate the five project task-information fields. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
 | `editor_task_repository` | `persistence` | Persist one translation, calibration or review operation, enforce the editing lock while it runs, and publish a process-local cancellation signal for owned provider work. | `substar_core/editor/tasks/repository.py`<br>`substar_core/editor/tasks/contracts.py` | `editor_operation_state`<br>`editor_revision` | `editor_operation_state` | — |
 | `translation_service` | `model_orchestration` | Translate meaning units with full group context, materialize one authoritative final text for each Cue, and terminate the owned translation process when cancellation is requested. | `substar_core/editor/translation/service.py`<br>`substar_core/editor/translation/contextual.py`<br>`scripts/run_production_translation.py` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference`<br>`translation_request` | `translation_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
 | `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference` | `calibration_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
-| `review_service` | `model_orchestration` | Produce independent source and translation issue tracks without mutating the document. | `substar_core/editor/http_api.py`<br>`substar_core/editor/review/contracts.py`<br>`prompts/production/editor/review.md` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference` | `source_review_result`<br>`translation_review_result` | `editor_task_repository` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
-| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_ai_review_state.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`editor_operation_state`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info`<br>`external_ai_exchange` | `editor_operation`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_api` |
-| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`editor_operation_state`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
+| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`editor_operation_state`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
+| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`editor_operation_state`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
 | `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py` | `editor_operation`<br>`editor_revision` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Parse TXT/DOCX/SRT with a Unicode script-aware tokenizer, apply aligned reference spelling, casing, punctuation and boundaries over ASR timing, preserve ASR-only wording with retained-source markers, and produce reversible corrections, insertions and audit records. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
 | `export_service` | `domain_service` | Render verified source, target and bilingual SRT outputs from the current revision and presentation rules. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
-| `project_exchange_service` | `application_service` | Build revision-bound language-routed external-AI prooftranslation and segmentation packages, validate their returned JSON, and export or atomically import portable subtitle projects with media. | `substar_core/project_exchange.py` | `editor_revision`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `editor_operation`<br>`editor_revision`<br>`project_creation_projection`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `export_service`<br>`editor_domain`<br>`project_store`<br>`task_info_service`<br>`creation_projection`<br>`model_stage_scheduler` |
-| `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
-| `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
-| `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
+| `project_exchange_service` | `application_service` | Export or atomically import portable subtitle projects with media; historical external-AI exchange APIs remain backend-compatible but are not exposed by the editor. | `substar_core/project_exchange.py` | `editor_revision`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `editor_operation`<br>`editor_revision`<br>`project_creation_projection`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `export_service`<br>`editor_domain`<br>`project_store`<br>`task_info_service`<br>`creation_projection`<br>`model_stage_scheduler` |
+| `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
+| `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
+| `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
 | `model_stage_scheduler` | `application` | Resolve versioned prompts, atomically persist registered component bodies, apply the configured primary/repair model policy for segmentation, translation, calibration and review, and isolate editor-owned provider requests in killable child processes. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/stage2.py`<br>`scripts/run_editor_model_request.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
-| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
+| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
 | `local_environment_service` | `optional_capability` | Diagnose source-install local runtimes and manage optional local model paths/assets outside the cloud-only beta path. | `substar_core/environment_doctor.py`<br>`substar_core/model_assets.py`<br>`substar_core/model_paths.py`<br>`substar_core/asr_longform.py` | `settings_snapshot`<br>`release_manifest` | `settings_snapshot` | — |
 | `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
 | `recognition_contracts` | `contract` | Register supported recognition profiles and validate provider-independent transcription artifacts. | `substar_core/recognition/registry.py`<br>`substar_core/recognition/contracts.py`<br>`substar_core/transcription/contracts.py`<br>`substar_core/transcription/artifacts.py`<br>`substar_core/artifacts.py` | `transcription_request`<br>`recognition_evidence` | `recognition_evidence`<br>`transcription_result` | — |
@@ -273,7 +269,7 @@ flowchart LR
 | `worker_command` | `substar_core/runtime/worker_protocol.py::WorkerCommand` | `docs/architecture/target/contracts/worker-command.schema.json` | `handler_registry`<br>`scheduler`<br>`worker_protocol`<br>`transcription_handler`<br>`segmentation_handler` | `worker_supervisor`<br>`worker_protocol`<br>`transcription_worker`<br>`segmentation_worker` |
 | `worker_message` | `substar_core/runtime/worker_protocol.py::WorkerMessage` | `docs/architecture/target/contracts/worker-message.schema.json` | `worker_supervisor`<br>`worker_protocol`<br>`transcription_worker`<br>`segmentation_worker` | `handler_registry`<br>`scheduler`<br>`worker_supervisor`<br>`worker_protocol` |
 | `worker_completion` | `substar_core/runtime/supervisor.py::WorkerCompletion` | domain validation | `worker_supervisor` | `handler_registry`<br>`scheduler`<br>`transcription_finalizer`<br>`segmentation_finalizer` |
-| `credential_reference` | `substar_core/credential_store.py` | domain validation | `credential_store`<br>`settings_ui` | `composition_root`<br>`worker_protocol`<br>`credential_store`<br>`transcription_handler`<br>`transcription_worker`<br>`cloud_transcription_pipeline`<br>`qwen_connector`<br>`segmentation_handler`<br>`segmentation_worker`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`settings_service`<br>`provider_test_service` |
+| `credential_reference` | `substar_core/credential_store.py` | domain validation | `credential_store`<br>`settings_ui` | `composition_root`<br>`worker_protocol`<br>`credential_store`<br>`transcription_handler`<br>`transcription_worker`<br>`cloud_transcription_pipeline`<br>`qwen_connector`<br>`segmentation_handler`<br>`segmentation_worker`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`<br>`settings_service`<br>`provider_test_service` |
 | `transcription_request` | `substar_core/transcription/contracts.py` | `docs/architecture/target/contracts/transcription-request.schema.json` | `composition_root`<br>`glossary_service` | `creation_graph`<br>`transcription_handler`<br>`transcription_worker`<br>`cloud_transcription_pipeline`<br>`qwen_connector`<br>`transcription_finalizer`<br>`recognition_contracts` |
 | `transcription_result` | `substar_core/transcription/handler.py::_validate_worker_result` | `docs/architecture/target/contracts/transcription-result.schema.json` | `transcription_worker`<br>`transcription_finalizer`<br>`recognition_contracts` | `transcription_finalizer` |
 | `provider_submission_audit` | `substar_core/qwen_cloud_asr.py::_submission_audit` | `docs/architecture/target/contracts/provider-submission-audit.schema.json` | `transcription_worker`<br>`cloud_transcription_pipeline`<br>`qwen_connector` | `transcription_finalizer` |
@@ -284,14 +280,12 @@ flowchart LR
 | `segmentation_candidate` | `substar_core/segmentation/contracts.py::validate_segmentation_candidate` | `docs/architecture/target/contracts/segmentation-candidate.schema.json` | `segmentation_worker`<br>`execution_planner`<br>`segmentation_domain` | `segmentation_finalizer`<br>`editor_domain` |
 | `segmentation_result` | `substar_core/segmentation/handler.py::_worker_result` | `docs/architecture/target/contracts/segmentation-result.schema.json` | `segmentation_worker` | `segmentation_finalizer` |
 | `editor_document` | `substar_core/domain/editor_document.py::EditorDocument` | domain validation | `segmentation_worker`<br>`semantic_segmentation_algorithm`<br>`editor_domain`<br>`presentation_service`<br>`segmentation_domain` | `segmentation_finalizer`<br>`project_store` |
-| `editor_revision` | `substar_core/storage/project_store.py::ProjectStore` | domain validation | `segmentation_finalizer`<br>`project_store`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`editor_api_client`<br>`editor_application`<br>`project_exchange_service` | `composition_root`<br>`creation_projection`<br>`editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`media_service`<br>`editor_ui`<br>`editor_application`<br>`reference_manuscript_service`<br>`presentation_service`<br>`export_service`<br>`project_exchange_service`<br>`translation_domain` |
+| `editor_revision` | `substar_core/storage/project_store.py::ProjectStore` | domain validation | `segmentation_finalizer`<br>`project_store`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`editor_api_client`<br>`editor_application`<br>`project_exchange_service` | `composition_root`<br>`creation_projection`<br>`editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`editor_ui`<br>`editor_application`<br>`reference_manuscript_service`<br>`presentation_service`<br>`export_service`<br>`project_exchange_service`<br>`translation_domain` |
 | `editor_operation` | `substar_core/editor/protocol/editor_protocol.schema.json` | `substar_core/editor/protocol/editor_protocol.schema.json` | `editor_ui`<br>`reference_manuscript_service`<br>`project_exchange_service` | `project_store`<br>`editor_api`<br>`editor_api_client`<br>`editor_domain`<br>`editor_application`<br>`presentation_service` |
-| `editor_operation_state` | `substar_core/editor/tasks/contracts.py` | `schemas/editor-ai-task.v1.schema.json` | `editor_task_repository`<br>`editor_api_client` | `editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`editor_ui` |
+| `editor_operation_state` | `substar_core/editor/tasks/contracts.py` | `schemas/editor-ai-task.v1.schema.json` | `editor_task_repository`<br>`editor_api_client` | `editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`editor_ui` |
 | `translation_request` | `substar_core/editor/http_api.py::TranslationStartRequest` | domain validation | `editor_ui`<br>`editor_api_client` | `editor_api`<br>`translation_service` |
 | `translation_result` | `substar_core/editor/translation/contracts.py` | `schemas/translation-result.v1.schema.json` | `editor_api`<br>`translation_service`<br>`editor_api_client`<br>`translation_domain` | `editor_ui` |
 | `calibration_result` | `substar_core/editor/calibration/contracts.py` | `schemas/calibration-result.v1.schema.json` | `editor_api`<br>`calibration_service`<br>`editor_api_client` | `editor_ui` |
-| `source_review_result` | `substar_core/editor/review/contracts.py` | `schemas/source-review-result.v1.schema.json` | `editor_api`<br>`review_service`<br>`editor_api_client` | `editor_ui` |
-| `translation_review_result` | `substar_core/editor/review/contracts.py` | `schemas/translation-review-result.v1.schema.json` | `editor_api`<br>`review_service`<br>`editor_api_client` | `editor_ui` |
 | `media_stream` | `substar_core/editor/http_api.py` | domain validation | `editor_api`<br>`media_service`<br>`editor_api_client` | `editor_ui` |
 | `media_info` | `substar_core/editor/http_api.py` | domain validation | `editor_api`<br>`media_service`<br>`editor_api_client` | `editor_ui` |
 | `settings_snapshot` | `substar_core/config.py` | domain validation | `settings_ui`<br>`settings_service`<br>`provider_test_service`<br>`local_environment_service` | `task_info_service`<br>`settings_ui`<br>`settings_service`<br>`model_stage_scheduler`<br>`launcher_runtime`<br>`local_environment_service`<br>`web_shell` |
@@ -301,7 +295,7 @@ flowchart LR
 | `glossary_snapshot` | `substar_core/glossary.py` | domain validation | `glossary_ui`<br>`glossary_service` | `glossary_ui`<br>`glossary_service` |
 | `reference_document` | `substar_core/manuscript_matching.py` | domain validation | `reference_manuscript_service` | `editor_api`<br>`reference_manuscript_service` |
 | `subtitle_export` | `substar_core/export.py` | domain validation | `export_service` | `editor_ui` |
-| `external_ai_exchange` | `substar_core/project_exchange.py` | domain validation | `editor_api`<br>`editor_ui`<br>`project_exchange_service` | `editor_api`<br>`editor_ui`<br>`project_exchange_service` |
+| `external_ai_exchange` | `substar_core/project_exchange.py` | domain validation | `editor_api`<br>`project_exchange_service` | `editor_api`<br>`project_exchange_service` |
 | `subtitle_project_exchange` | `substar_core/project_exchange.py` | domain validation | `project_exchange_service` | `project_exchange_service` |
 | `project_task_info` | `substar_core/task_info.py` | domain validation | `editor_api`<br>`task_info_service`<br>`editor_ui`<br>`project_exchange_service` | `editor_api`<br>`task_info_service`<br>`editor_ui`<br>`project_exchange_service` |
 | `runtime_identity` | `substar_core/runtime_instance.py` | domain validation | `launcher_runtime` | `settings_ui`<br>`launcher_runtime`<br>`packaging` |
@@ -341,13 +335,13 @@ Success condition: Validated model-authored source corrections are committed wit
 
 Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`
 
-### Revision-bound advisory review (`editor_review`)
+### External AI review text projection (`editor_review`)
 
-`editor_ui` → `editor_api` → `editor_task_repository` → `review_service`
+`editor_ui`
 
-Success condition: Independent source and translation issue tracks are persisted without document mutation.
+Success condition: The current, selected or full subtitle range is copied or saved as a read-only review prompt with fixed five-Cue context, timing, both subtitle lines and semantic mapping evidence.
 
-Tests: `tests/test_editor_review_protocol.py`
+Tests: `tests/editor_external_review.test.js`
 
 ### Settings, credentials and real provider probe (`settings_and_provider_test`)
 
@@ -373,11 +367,11 @@ Success condition: Aligned reference replacements and reference-only insertions 
 
 Tests: `tests/test_editor_ai_contracts.py`, `tests/test_project_creation_api.py`, `tests/test_reference_script_mode.py`, `tests/editor_reference_boundary_ui.test.js`
 
-### External AI prooftranslation, segmentation and portable project exchange (`external_ai_and_project_exchange`)
+### Portable subtitle project exchange (`external_ai_and_project_exchange`)
 
-`editor_ui` → `editor_api_client` → `editor_api` → `project_exchange_service` → `editor_domain` → `project_store` → `creation_projection` → `export_service` → `split_ui`
+`editor_ui` → `editor_api_client` → `editor_api` → `project_exchange_service` → `project_store` → `creation_projection` → `export_service` → `split_ui`
 
-Success condition: External prooftranslation uses one language-routed prompt, waits for source confirmation and previews a combined correction-plus-translation JSON before committing matching units; external segmentation previews exact token-boundary changes and commits validated Cue topology without changing evidence or accepted translations; a verified portable project import becomes one new project visible from both editor and split without overwriting existing data.
+Success condition: The editor exposes only portable subtitle-project import/export; a verified archive becomes one new project visible from both editor and split without overwriting existing data.
 
 Tests: `tests/test_project_exchange.py`, `tests/editor_timeline_manual_cue.test.js`
 
@@ -385,9 +379,9 @@ Tests: `tests/test_project_exchange.py`, `tests/editor_timeline_manual_cue.test.
 
 `packaging` → `launcher_runtime` → `composition_root` → `scheduler` → `worker_supervisor` → `web_shell`
 
-Success condition: One exact backend instance starts from the portable bundle and exits only after bounded Worker cleanup or strictly verified fallback termination.
+Success condition: One exact user-visible backend instance starts from the portable bundle, is reused for network/end-to-end verification, and exits only after bounded Worker cleanup or strictly verified fallback termination.
 
-Tests: `tests/test_packaging_contract.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`
+Tests: `tests/test_visible_backend_policy.py`, `tests/test_packaging_contract.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`
 
 ## Module details
 
@@ -406,11 +400,13 @@ Must not:
 - Infer task completion from upload completion
 - Use task_id as project_id
 - Invent backend lifecycle state
+- Keep cached running state visible after backend polling fails
 
 Invariants:
 
 - Editor link is exposed only when the project read model says awaiting_edit
 - One submitted identity survives polling and refresh
+- A polling failure immediately marks the runtime disconnected and never presents cached queued/running rows as live work
 - Reference upload and break-symbol controls are exposed and submitted only in reference-script mode
 - Reference-script mode requires a reference document and at least one literal break symbol
 - Untouched reference break symbols follow the selected source-language preset while explicit user symbols remain authoritative
@@ -529,6 +525,7 @@ Invariants:
 
 - awaiting_edit requires a readable revision
 - Structured errors are flattened only for the legacy-shaped UI field
+- Semantic grouping is projected from 50 to 95 percent using canonical Worker block completion, with validation and publication retaining the final range
 
 Failure modes:
 
@@ -540,7 +537,7 @@ Recovery: Recompute from durable sources on every read.
 
 Reuses: `task records`<br>`ProjectStore`; restarts: —; terminal behavior: Show interrupted or failed state.
 
-Tests: `tests/test_creation_projection.py`
+Tests: `tests/test_creation_projection.py`, `tests/test_live_progress_projection.py`
 
 Change impact modules: `composition_root`<br>`split_ui`<br>`segmentation_finalizer`
 
@@ -953,10 +950,12 @@ Must not:
 - Own task state
 - Apply semantic segmentation
 - Modify provider evidence after validation
+- Let FFmpeg inherit the Worker protocol stdin or run without a deadline
 
 Invariants:
 
 - Audio identity is hashed
+- FFmpeg audio preparation uses -nostdin, DEVNULL stdin and a media-duration-bounded timeout
 - Provider output is converted once into the recognition evidence contract
 
 Failure modes:
@@ -969,7 +968,7 @@ Recovery: Reuse canonical audio and provider state when their input fingerprint 
 
 Reuses: `audio_16k_mono.wav`<br>`provider state`; restarts: `missing transformation`; terminal behavior: Propagate provider-independent failure.
 
-Tests: `tests/test_transcription_runtime.py`, `tests/test_qwen_cloud_transcription.py`
+Tests: `tests/test_transcription_audio_prepare.py`, `tests/test_transcription_runtime.py`, `tests/test_qwen_cloud_transcription.py`
 
 Change impact modules: `transcription_worker`<br>`qwen_connector`<br>`transcription_finalizer`
 
@@ -984,6 +983,7 @@ Upload audio, submit asynchronous Qwen transcription, poll, download and parse s
 Code:
 
 - `substar_core/qwen_cloud_asr.py` — `get_upload_policy`, `upload_temporary_file`, `run_qwen_cloud_asr`, `_parse_result`
+- `substar_core/qwen_enhancement.py`
 - `substar_core/http_client.py`
 
 Must not:
@@ -1162,6 +1162,7 @@ Invariants:
 - Warning alignment applies only exact lexical-anchor presentation changes
 - Ambiguous phrase rewrites retain ASR and remain reversible editor suggestions
 - Accepted groups survive partial failure
+- Per-block response, completion, repair and failure counts cross the standard Worker progress protocol while algorithm diagnostics remain isolated from protocol stdout
 - Recovery emits all artifact events before result
 
 Failure modes:
@@ -1241,6 +1242,7 @@ Invariants:
 
 - Every response is fingerprint-bound
 - Initial model requests run concurrently over the bootstrap work plan
+- The file-backed block ledger may notify its owning Worker after each durable update but never writes RuntimeStore directly
 - Valid ranges are frozen before repair
 - The program materializes model-authored semantics but never authors fallback semantic content
 - Each unresolved range remains visible as a problem subtitle
@@ -1256,7 +1258,7 @@ Recovery: One repair request contains all rejected gaps while accepted groups re
 
 Reuses: `all accepted groups`; restarts: `rejected gaps only`; terminal behavior: Register remaining gaps as problem subtitles.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_execution_planner.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_execution_planner.py`, `tests/test_live_progress_projection.py`
 
 Change impact modules: `segmentation_worker`<br>`segmentation_model_connector`<br>`segmentation_finalizer`
 
@@ -1266,11 +1268,12 @@ Change impact contracts: `segmentation_material`<br>`semantic_grouping_result`<b
 
 Layer: `provider_connector`
 
-Render versioned prompts, apply stage-specific model scheduling and call the OpenAI-compatible DeepSeek endpoint.
+Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint.
 
 Code:
 
 - `scripts/segmentation_support.py` — `call_model`, `stage_system`, `resolve_api_key`
+- `substar_core/openai_compat.py` — `endpoint_url`, `auth_headers`
 - `prompts/production/segmentation/common/semantic_grouping.md`
 - `prompts/production/segmentation/common/semantic_grouping_repair.md`
 
@@ -1283,6 +1286,7 @@ Must not:
 Invariants:
 
 - Primary and repair stages use settings-selected models
+- Provider authentication mode and query-bearing deployment URL survive the immutable task snapshot
 - The production default is deepseek-v4-flash with low reasoning for segmentation and Flash non-thinking fallback for rejected units
 - Prompt snapshot hash is auditable
 - Provider JSON response mode is not forced; the local materializer validates the compact semantic response
@@ -1379,7 +1383,7 @@ Reuses: `verified revision chain`; restarts: —; terminal behavior: ProjectInte
 
 Tests: `tests/test_segmentation_runtime.py`, `tests/test_editor_translation_binding.py`, `tests/test_editor_completion_lifecycle.py`
 
-Change impact modules: `segmentation_finalizer`<br>`editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`<br>`review_service`
+Change impact modules: `segmentation_finalizer`<br>`editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`
 
 Change impact contracts: `editor_document`<br>`editor_revision`<br>`editor_operation`
 
@@ -1387,11 +1391,11 @@ Change impact contracts: `editor_document`<br>`editor_revision`<br>`editor_opera
 
 Layer: `api`
 
-Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration, review and external-AI exchange commands.
+Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands.
 
 Code:
 
-- `substar_core/editor/http_api.py` — `get_project`, `save_project_document`, `apply_project_operation`, `start_project_translation`, `ai_calibrate_project`, `ai_review_project`
+- `substar_core/editor/http_api.py` — `get_project`, `save_project_document`, `apply_project_operation`, `start_project_translation`, `ai_calibrate_project`
 
 Must not:
 
@@ -1421,11 +1425,11 @@ Recovery: Reload the latest revision and durable AI operation state.
 
 Reuses: `latest verified revision`<br>`completed AI result`; restarts: `failed AI operation when user requests`; terminal behavior: Return structured conflict or task error.
 
-Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_editor_review_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`
+Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`
 
-Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`media_service`<br>`project_exchange_service`
+Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
-Change impact contracts: `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`source_review_result`<br>`translation_review_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`
+Change impact contracts: `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`
 
 ### Canonical project task information service (`task_info_service`)
 
@@ -1503,7 +1507,7 @@ Reuses: `completed task result`; restarts: `operation only when explicitly reque
 
 Tests: `tests/test_editor_ai_task_repository.py`, `tests/test_editor_ai_contracts.py`
 
-Change impact modules: `editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`<br>`review_service`
+Change impact modules: `editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`
 
 Change impact contracts: `editor_operation_state`<br>`editor_revision`
 
@@ -1575,6 +1579,7 @@ Invariants:
 
 - Calibration inherits the accepted-split execution plan and runs independent blocks concurrently
 - Each block sees ordered source Cues with its required context
+- A bounded per-run user instruction may refine terminology and attention but cannot expand the frozen calibration action contract or change Cue timing/topology
 - Every action binds exact Cue/token text
 - Model disposition is authoritative
 
@@ -1589,53 +1594,11 @@ Recovery: Preserve valid block actions, repair all invalid blocks once, and expo
 
 Reuses: `valid calibration actions`; restarts: `invalid blocks only`; terminal behavior: Leave unresolved source text unchanged and flagged.
 
-Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`, `tests/test_editor_ai_prompt_policy.py`
+Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_ai_calibration_instruction.py`
 
-Change impact modules: `editor_api`<br>`editor_task_repository`<br>`project_store`<br>`review_service`<br>`editor_ui`
+Change impact modules: `editor_api`<br>`editor_task_repository`<br>`project_store`<br>`editor_ui`
 
 Change impact contracts: `editor_operation_state`<br>`editor_revision`<br>`calibration_result`
-
-### Advisory AI review service (`review_service`)
-
-Layer: `model_orchestration`
-
-Produce independent source and translation issue tracks without mutating the document.
-
-Code:
-
-- `substar_core/editor/http_api.py` — `ai_review_project`, `_ai_review_project`, `_validate_review_issue`, `_review_issue_cue_basis`
-- `substar_core/editor/review/contracts.py`
-- `prompts/production/editor/review.md`
-
-Must not:
-
-- Automatically edit the document
-- Expire unrelated issues when one Cue changes
-- Roll back a successful track because the other track failed
-
-Invariants:
-
-- Review inherits the accepted-split execution plan, uses Flash non-thinking mode and runs independent blocks concurrently
-- Issues explain themselves in Chinese
-- Each issue stores Cue-local basis hashes
-- Only an edited issue range becomes stale
-
-Failure modes:
-
-- Invalid issue category
-- Provider error
-- One track unavailable
-- Stale Cue basis
-
-Recovery: Persist every valid track/item, repair rejected items once, and leave remaining uncertainty advisory.
-
-Reuses: `valid source issues`<br>`valid translation issues`; restarts: `rejected items only`; terminal behavior: Expose unresolved advisory state without blocking editing.
-
-Tests: `tests/test_editor_review_protocol.py`, `tests/test_editor_ai_prompt_policy.py`
-
-Change impact modules: `editor_api`<br>`editor_task_repository`<br>`calibration_service`<br>`editor_ui`
-
-Change impact contracts: `editor_operation_state`<br>`editor_revision`<br>`source_review_result`<br>`translation_review_result`
 
 ### Editor media and waveform service (`media_service`)
 
@@ -1694,7 +1657,7 @@ Code:
 - `web/editor_operation_queue.js`
 - `web/editor_timeline.js`
 - `web/editor_cue_list_view.js`
-- `web/editor_ai_review_state.js`
+- `web/editor_external_review.js` — `build`, `resolveScope`
 - `web/editor_tutorial.js`
 - `web/system_save_as.js`
 - `web/editor_cue_ordering.js`
@@ -1714,13 +1677,19 @@ Invariants:
 - The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner
 - Large Cue lists are windowed
 - Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar
-- AI review distinguishes not started, completed with zero issues, partial failure and results based on an older revision
+- External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state
+- External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked
+- External review preserves Cue timing, upper/lower subtitle text and translation meaning-unit evidence, and explicitly permits one-to-many, many-to-one and many-to-many translation mappings
 - Every user-visible export opens the operating-system Save As picker before requesting or writing bytes
+- Space inserts text only in a real text-editing context; without modifiers it toggles media playback everywhere else through one capture-phase shortcut route
+- The editor export menu exposes exactly upper subtitle, lower subtitle, upper/lower single-line subtitle, upper/lower double-line subtitle and portable subtitle project
+- AI calibration uses a button-anchored compact menu whose project-scoped optional instruction affects one run only
+- Running editor AI tasks render their durable backend progress in the same title/progress/message hierarchy as split-page pipeline cards
+- Informational copy/export notices use the ordinary theme and only actual failures use the red error treatment
 - Document edits use the current revision basis
 - The task-information dialog edits exactly name, source language, target language and both track line lengths
 - Task information changes do not rewrite existing subtitle content
-- External AI import selects its endpoint from the returned schema and always previews before applying
-- External AI prooftranslation and segmentation are distinct commands; no non-round-trippable generation command is exposed
+- Editor import accepts portable subtitle projects only
 - Audio and video use the same currentTime authority for Cue, subtitle and timeline following
 - Playback UI never depends on the existence of video frames
 - Virtual CJK lines have character boundaries without word gaps
@@ -1743,9 +1712,9 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_ai_review_state.test.js`, `tests/editor_tutorial.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
+Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
 
-Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`review_service`<br>`media_service`<br>`project_exchange_service`
+Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
 Change impact contracts: `editor_document`<br>`editor_revision`<br>`editor_operation`<br>`editor_operation_state`<br>`translation_request`<br>`media_info`<br>`media_stream`<br>`project_task_info`
 
@@ -2007,11 +1976,11 @@ Change impact modules: `composition_root`<br>`editor_api`<br>`presentation_servi
 
 Change impact contracts: `editor_revision`<br>`subtitle_export`
 
-### External AI and subtitle project exchange (`project_exchange_service`)
+### Portable subtitle project exchange (`project_exchange_service`)
 
 Layer: `application_service`
 
-Build revision-bound language-routed external-AI prooftranslation and segmentation packages, validate their returned JSON, and export or atomically import portable subtitle projects with media.
+Export or atomically import portable subtitle projects with media; historical external-AI exchange APIs remain backend-compatible but are not exposed by the editor.
 
 Code:
 
@@ -2065,7 +2034,7 @@ Change impact contracts: `editor_revision`<br>`editor_operation`<br>`external_ai
 
 Layer: `frontend_connector`
 
-Edit non-secret configuration and registered production prompt components, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits.
+Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits.
 
 Code:
 
@@ -2081,7 +2050,12 @@ Must not:
 Invariants:
 
 - Credential fields are purpose/provider named
-- Saved-key presence and newly entered key are distinct states
+- Saved-key presence, verified connectivity and newly entered key are distinct states
+- The provider catalog contains only cloud/API LLM services and excludes local model installers and translation-only engines
+- Each provider keeps an independent endpoint/model/auth/timeout draft and switching never clears a credential
+- Connection tests are read-only probes and never save or activate a provider
+- Stage models inherit connection model changes unless explicitly overridden
+- Reasoning-effort choices come from persisted live probe results and thinking stages default to the lowest verified effort
 - Recognition category state reflects the selected profile credential readiness
 - Advanced resource settings map one-to-one to Scheduler named limits and take effect after restart
 - Every stage/fallback control maps to a real runtime setting
@@ -2114,6 +2088,7 @@ Validate, persist and expose non-secret settings, edition capabilities, data roo
 Code:
 
 - `substar_core/config.py` — `load_settings`, `save_settings`, `load_credentials`, `save_credentials_from_settings`
+- `substar_core/model_providers.py` — `provider_catalog`, `canonical_provider_id`, `infer_model_provider`
 - `substar_core/edition.py`
 - `substar_core/relay_profile.py`
 - `substar_core/policy.py`
@@ -2128,6 +2103,8 @@ Invariants:
 
 - One install/data-root policy is deterministic
 - Secrets and settings are persisted separately
+- The active provider is an explicit stable ID rather than a Base URL inference
+- Provider profiles persist independently while stage bindings consume only the active profile
 - Undo/redo shortcuts are canonicalized, collision-checked and persisted as ordinary non-secret settings
 - Obsolete persisted export-directory values are ignored
 - Worker and cloud resource defaults are four and every advanced limit is range-validated
@@ -2158,8 +2135,10 @@ Perform explicit connectivity probes, model discovery and reasoning-capability n
 
 Code:
 
-- `substar_core/api_testing.py` — `test_chat`, `test_transcription`, `probe_chat_reasoning_efforts`
+- `substar_core/api_testing.py` — `test_chat`, `test_transcription`, `probe_chat_thinking_modes`
 - `substar_core/model_catalog.py` — `discover_models`
+- `substar_core/model_providers.py` — `provider_catalog`
+- `substar_core/openai_compat.py` — `endpoint_url`, `auth_headers`
 - `substar_core/reasoning_capabilities.py` — `reasoning_capabilities`, `resolve_reasoning_effort`
 - `substar_core/http_client.py`
 - `substar_core/providers.py`
@@ -2172,7 +2151,9 @@ Must not:
 
 Invariants:
 
-- Tests run with the requested provider/base URL/model
+- Tests run with the requested provider ID/base URL/model and its own saved or draft key
+- Connectivity tests may retry without optional thinking or structured-output controls but capability probes remain strict
+- Tests never mutate provider profiles or active stage bindings
 - Errors are redacted
 - Reasoning capability claims distinguish verified from inferred
 
@@ -2236,7 +2217,7 @@ Reuses: `frozen prompt snapshot`<br>`saved stage policy`; restarts: —; termina
 
 Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_prompt_catalog.py`, `tests/test_stage2_editor_cancellation.py`
 
-Change impact modules: `settings_ui`<br>`settings_service`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`<br>`review_service`
+Change impact modules: `settings_ui`<br>`settings_service`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`
 
 Change impact contracts: `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component`
 
@@ -2327,6 +2308,7 @@ Code:
 
 - `launcher.py` — `main`, `_stop_running_instance`, `_request_graceful_shutdown`, `_target_matches_instance`
 - `substar_core/runtime_instance.py` — `write_runtime_record`, `probe_identity`, `clear_runtime_record`
+- `substar_core/runtime/launch_surface.py` — `require_visible_backend`, `visible_backend_creation_flags`
 - `substar_core/runtime/windows_process.py`
 - `substar_core/process_command.py`
 
@@ -2335,12 +2317,18 @@ Must not:
 - Kill a process without PID/start-time/install-root proof
 - Use socket disappearance as proof of process exit
 - Let launcher and backend own conflicting runtime records
+- Start the Windows backend without a user-visible taskbar console
+- Create a second backend for network or end-to-end testing
 
 Invariants:
 
 - Force-stop requires PID creation time and install-root match
 - Launcher shutdown deadline exceeds backend global shutdown budget
 - Runtime records are install-root scoped
+- Every Windows backend inherits one visible launcher console and headless ASGI startup fails closed
+- The start script exits with the launcher and never pauses an obsolete console after its backend has stopped
+- Network and end-to-end verification reuse the visible formal backend rather than spawning a test backend
+- Runtime identity reports the launch surface
 - Runtime identity uses the release version plus the exact source commit and never treats a build-time placeholder as an install identity
 
 Failure modes:
@@ -2355,7 +2343,7 @@ Recovery: Probe identity, wait for graceful shutdown, then use strictly verified
 
 Reuses: `runtime identity record`; restarts: `backend after confirmed exit`; terminal behavior: Refuse unsafe takeover or kill.
 
-Tests: `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`
+Tests: `tests/test_visible_backend_policy.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`
 
 Change impact modules: `composition_root`<br>`scheduler`<br>`worker_supervisor`<br>`settings_service`<br>`packaging`
 
@@ -2642,7 +2630,7 @@ Invariants:
 
 - Development and portable builds execute byte-identical source modules
 - Only explicit production Worker scripts are packaged
-- The editor model-request Worker used by built-in calibration and review is an explicit required portable file
+- The editor model-request Worker used by built-in calibration is an explicit required portable file
 - The build writes the exact source commit into the bundled release manifest before archive creation
 - Release contains generated system-map documents
 - Fixed runtime and test dependency versions are verified

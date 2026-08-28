@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 
 from substar_core.config import INSTALL_ROOT, PROJECT_ROOT, DATA_ROOT
 from substar_core.process_command import backend_command
+from substar_core.runtime.launch_surface import visible_backend_creation_flags
 from substar_core.runtime_instance import (
     INSTANCE_SHUTDOWN_TIMEOUT,
     INSTANCE_STARTUP_TIMEOUT,
@@ -743,6 +744,7 @@ def main() -> int:
     env["SUBSTAR_PORT"] = str(port)
     env["SUBSTAR_OPEN_BROWSER"] = "0"
     env["SUBSTAR_INSTANCE_ID"] = instance_id
+    env["SUBSTAR_LAUNCH_SURFACE"] = "visible_console"
     command = backend_command()
     _status(f"Substar 正在启动 · http://127.0.0.1:{port}")
     process: subprocess.Popen | None = None
@@ -765,7 +767,10 @@ def main() -> int:
             stdin=subprocess.DEVNULL,
             stdout=backend_log,
             stderr=subprocess.STDOUT,
-            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
+            # The backend inherits this launcher's visible taskbar console.
+            # The application lifespan independently rejects headless startup,
+            # so alternate ASGI entry points cannot bypass this ownership rule.
+            creationflags=visible_backend_creation_flags(),
         )
         job_name = f"Local\\Substar.Workbench.Job.{instance_id}"
         job_handle = _create_kill_on_close_job(process, job_name)
@@ -788,6 +793,7 @@ def main() -> int:
             "install_root": str(root),
             "data_root": str(DATA_ROOT),
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "launch_surface": "visible_console" if os.name == "nt" else "terminal",
         })
         startup_deadline = time.monotonic() + INSTANCE_STARTUP_TIMEOUT
         while time.monotonic() < startup_deadline:

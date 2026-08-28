@@ -5,10 +5,6 @@ import json
 import unittest
 from pathlib import Path
 
-from substar_core.editor.http_api import (
-    _review_response_valid,
-    _review_text_is_damaged,
-)
 from substar_core.stage2 import _response_json_utf8
 
 
@@ -43,14 +39,6 @@ class ProviderResponseEncodingTests(unittest.TestCase):
         wire = module._wire_json({"message": "管道中文不乱码"})
         wire.encode("ascii")
         self.assertEqual(json.loads(wire), {"message": "管道中文不乱码"})
-
-    def test_review_contract_rejects_replacement_characters(self) -> None:
-        valid = {"source_issues": [{"description": "正常中文"}]}
-        damaged = {"source_issues": [{"description": "��损坏"}]}
-        self.assertTrue(_review_response_valid(valid))
-        self.assertFalse(_review_response_valid(damaged))
-        self.assertTrue(_review_text_is_damaged(damaged))
-
 
 if __name__ == "__main__":
     unittest.main()
