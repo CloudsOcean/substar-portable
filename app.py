@@ -1454,7 +1454,7 @@ def delete_workbench_split_job(job_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=409, detail="当前任务状态不能删除")
         job_dir = job.job_dir.resolve()
         JOBS.pop(job_id, None)
-    root = _relay_output_root()
+    root = _relay_output_root().resolve()
     if root not in job_dir.parents or not job_dir.is_dir():
         raise HTTPException(status_code=404, detail="切分任务目录不存在")
     trash_root = root / ".trash"
