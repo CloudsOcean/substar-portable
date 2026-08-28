@@ -1954,7 +1954,11 @@ async def create_workbench_split_job(
     overrides = profile_settings(
         {**overrides, "recognition_profile_id": recognition_profile.id}
     )
-    output_root = _relay_output_root()
+    # Resolve the configured root before comparing it with the resolved job
+    # directory.  On Windows the temporary directory may be returned through
+    # an 8.3/case-normalized alias, which otherwise makes the containment check
+    # reject a directory that is actually inside the configured root.
+    output_root = _relay_output_root().resolve()
     job_id = time.strftime("%Y%m%d_%H%M%S") + "_split_" + uuid.uuid4().hex[:6]
     job_dir = (output_root / job_id).resolve()
     if output_root not in job_dir.parents:
