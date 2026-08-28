@@ -70,6 +70,7 @@ def main() -> int:
         "artifact_success",
         "artifact_bad_digest",
         "artifact_mutated",
+        "artifact_then_error",
         "artifact_result_without_event",
     }:
         artifact_directory = Path(command.paths.artifact_directory)
@@ -89,6 +90,15 @@ def main() -> int:
         if mode == "artifact_mutated":
             time.sleep(0.2)
             artifact_path.write_bytes(b'{"value":"changed-after-registration"}\n')
+        if mode == "artifact_then_error":
+            emit(
+                WorkerMessageType.ERROR,
+                {
+                    "code": "fixture_failure_after_artifact",
+                    "message": "fixture failed after publishing a valid artifact",
+                },
+            )
+            return 1
         emit(
             WorkerMessageType.RESULT,
             (

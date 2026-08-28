@@ -444,7 +444,7 @@ class TaskSchedulerTests(unittest.TestCase):
                     cwd=ROOT,
                     worker_input={
                         "mode": (
-                            "artifact_mutated"
+                            "artifact_then_error"
                             if int(context.task["attempt"]) == 1
                             else "artifact_success"
                         )
