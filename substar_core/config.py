@@ -14,6 +14,8 @@ from .credential_store import (
     SEGMENT_DEEPSEEK,
     TRANSLATE_DEEPSEEK,
     MODEL_PROVIDER_PREFIX,
+    model_provider_credential_ref,
+    resolve_model_provider_credential,
     clean_credential,
     load_store,
     write_envelope,
@@ -295,7 +297,7 @@ def save_credentials_from_settings(payload: dict[str, Any]) -> dict[str, str]:
             payload.get("active_model_provider")
             or infer_model_provider(payload.get("translation_api_base_url"))
         )
-        provider_role = f"{MODEL_PROVIDER_PREFIX}{provider}"
+        provider_role = model_provider_credential_ref(provider)
         if payload.get("clear_translation_api_key"):
             values.pop(provider_role, None)
             # Legacy callers had no provider field and meant the historical
@@ -393,29 +395,12 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
         or infer_model_provider(settings.get("translation_api_base_url"))
     )
     settings["active_model_provider"] = provider
-    provider_role = f"{MODEL_PROVIDER_PREFIX}{provider}"
-    translation_key = credentials.get(provider_role, "")
-    if not translation_key and provider == "qwen":
-        translation_key = credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun", "")
-    legacy_deepseek_key = credentials.get(TRANSLATE_DEEPSEEK, "")
-    legacy_owned_by_other_provider = bool(legacy_deepseek_key) and any(
-        name != "deepseek"
-        and credentials.get(f"{MODEL_PROVIDER_PREFIX}{name}") == legacy_deepseek_key
-        for name in MODEL_PROVIDER_IDS
-    )
-    if not translation_key and provider == "deepseek" and not legacy_owned_by_other_provider:
-        translation_key = legacy_deepseek_key
+    translation_key = resolve_model_provider_credential(credentials, provider)
     settings["api_key_set"] = bool(key)
     settings["alignment_api_key_set"] = bool(alignment_key)
     settings["translation_api_key_set"] = bool(translation_key)
     settings["model_provider_key_set"] = {
-        name: bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}{name}"))
-        or (name == "qwen" and bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun")))
-        or (
-            name == "deepseek"
-            and bool(legacy_deepseek_key)
-            and not legacy_owned_by_other_provider
-        )
+        name: bool(resolve_model_provider_credential(credentials, name))
         for name in MODEL_PROVIDER_IDS
     }
     if include_secret:

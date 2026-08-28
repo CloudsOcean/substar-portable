@@ -984,9 +984,13 @@ def main(
     args.api_telemetry = []
     args.api_key = ""
     emit_runtime_event("segmentation initialization", {"step": "resolve_credential"})
-    args.api_key, key_source = resolve_api_key("DEEPSEEK_API_KEY")
+    args.api_key, key_source = resolve_api_key("SUBSTAR_MODEL_API_KEY")
     if not args.api_key:
-        raise SegmentationError("语义切分缺少 Segment_DeepSeek 密钥")
+        # Direct invocations from pre-provider builds may still carry the old
+        # variable. The supervised worker never writes this legacy slot.
+        args.api_key, key_source = resolve_api_key("DEEPSEEK_API_KEY")
+    if not args.api_key:
+        raise SegmentationError("语义切分缺少当前模型服务密钥")
 
     emit_runtime_event(
         "segmentation initialization",

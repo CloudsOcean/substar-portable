@@ -19,6 +19,11 @@ test("split page exposes direct Qwen prompt and multilingual temporary hotwords"
   assert.match(source, /qwen_temporary_hotwords: parseTemporaryHotwords\(\)/);
 });
 
+test("split tasks freeze the active provider and authentication mode", () => {
+  assert.match(source, /active_model_provider:\s*current\.active_model_provider/);
+  assert.match(source, /translation_api_auth_mode:\s*current\.translation_api_auth_mode/);
+});
+
 test("AI replaces prompt and merges generated hotwords without erasing user terms", () => {
   assert.match(source, /new Map\(existing\.map/);
   assert.match(source, /if \(key && !merged\.has\(key\)\)/);

@@ -1032,8 +1032,10 @@
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     const result = {
+      active_model_provider: current.active_model_provider,
       translation_api_base_url: current.translation_api_base_url,
       translation_api_model: current.translation_api_model,
+      translation_api_auth_mode: current.translation_api_auth_mode,
       recognition_profile_id: $("#recognitionProfileInput").value,
       language: $("#languageInput").value,
       alignment_language: alignmentLanguage($("#languageInput").value),

@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from substar_core.model_providers import MODEL_PROVIDER_CATALOG
+
+
+_PROVIDER_CREDENTIAL_LABELS = {
+    f"model_provider:{provider['id']}": str(provider["label"])
+    for provider in MODEL_PROVIDER_CATALOG
+}
+
 
 def _error_message(task: Mapping[str, Any]) -> str:
     error = task.get("error")
@@ -16,6 +24,7 @@ def _error_message(task: Mapping[str, Any]) -> str:
             "asr_qwen": "ASR_Qwen",
             "asr_generic": "ASR_Generic",
             "segment_deepseek": "Segment_DeepSeek",
+            **_PROVIDER_CREDENTIAL_LABELS,
         }
         return f"{labels.get(reference, reference or '所需服务')} 密钥不可用，请在设置中保存密钥后重试。"
     return str(error.get("message") or error.get("code") or "")

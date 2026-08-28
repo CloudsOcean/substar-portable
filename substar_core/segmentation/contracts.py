@@ -6,6 +6,9 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from substar_core.credential_store import model_provider_credential_ref
+from substar_core.model_providers import canonical_provider_id, infer_model_provider
+
 from substar_core.glossary import normalize_entry
 from substar_core.manuscript_matching import reference_break_symbols_for_language
 from substar_core.runtime.model import InvalidTaskError
@@ -266,7 +269,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
 
     provider = value["provider"]
     if not isinstance(provider, Mapping) or not set(provider).issubset({
-        "base_url", "auth_mode", "grouping", "repair"
+        "id", "base_url", "auth_mode", "grouping", "repair"
     }) or not {"base_url", "grouping", "repair"}.issubset(provider):
         raise InvalidTaskError("segmentation provider fields are invalid")
     auth_mode = str(provider.get("auth_mode", "bearer")).strip().lower()
@@ -278,6 +281,14 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "grouping": _model_policy(provider["grouping"], "provider.grouping"),
         "repair": _model_policy(provider["repair"], "provider.repair"),
     }
+    if "id" in provider:
+        provider_id = canonical_provider_id(provider["id"])
+        endpoint_provider = infer_model_provider(normalized_provider["base_url"])
+        if endpoint_provider != "custom" and provider_id != endpoint_provider:
+            raise InvalidTaskError(
+                "provider.id does not own the configured provider.base_url"
+            )
+        normalized_provider["id"] = provider_id
 
     return {
         "schema_version": SEGMENTATION_INPUT_SCHEMA,
@@ -319,6 +330,13 @@ def build_segmentation_request(
     settings: Mapping[str, Any],
 ) -> dict[str, Any]:
     default_model = str(settings.get("translation_api_model") or "deepseek-v4-flash")
+    provider_base_url = str(
+        settings.get("translation_api_base_url") or "https://api.deepseek.com"
+    )
+    provider_id = canonical_provider_id(
+        settings.get("active_model_provider")
+        or infer_model_provider(provider_base_url)
+    )
 
     def policy(prefix: str, *, fallback: str = default_model) -> dict[str, Any]:
         fallback_stage = prefix.endswith("_repair")
@@ -375,7 +393,8 @@ def build_segmentation_request(
             ),
         },
         "provider": {
-            "base_url": str(settings.get("translation_api_base_url") or "https://api.deepseek.com"),
+            "id": provider_id,
+            "base_url": provider_base_url,
             "auth_mode": str(settings.get("translation_api_auth_mode") or "bearer"),
             "grouping": policy("stage_segmentation", fallback=default_model),
             "repair": policy("stage_segmentation_repair", fallback=default_model),
@@ -386,6 +405,15 @@ def build_segmentation_request(
     return validate_segmentation_request(
         {**normalized, "input_fingerprint": canonical_sha256(normalized)}
     )
+
+
+def segmentation_credential_ref(provider: Mapping[str, Any]) -> str:
+    """Resolve the credential authority frozen into a segmentation request."""
+
+    provider_id = canonical_provider_id(
+        provider.get("id") or infer_model_provider(provider.get("base_url"))
+    )
+    return model_provider_credential_ref(provider_id)
 
 
 def validate_segmentation_candidate(value: Any, request: Mapping[str, Any]) -> dict[str, Any]:

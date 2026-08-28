@@ -23,7 +23,6 @@ from substar_core.runtime.model import InvalidTaskError
 from substar_core.runtime.registry import TaskHandler, TaskWorkContext, WorkerLaunch
 from substar_core.runtime.supervisor import WorkerCompletion
 from substar_core.runtime.worker_protocol import WorkerMessage
-from substar_core.credential_store import SEGMENT_DEEPSEEK
 from substar_core.storage import ProjectStore
 from substar_core.transcription.contracts import (
     recognition_source_from_evidence,
@@ -39,6 +38,7 @@ from .contracts import (
     SEGMENTATION_VALIDATION_SCHEMA,
     sha256_file,
     sha256_tree,
+    segmentation_credential_ref,
     validate_segmentation_candidate,
     validate_segmentation_request,
 )
@@ -256,7 +256,7 @@ def build_segmentation_handler(
             if all((candidate / name).is_file() for name in _ARTIFACT_CONTRACTS):
                 previous_artifacts = candidate
         credentials = (
-            (SEGMENT_DEEPSEEK,)
+            (segmentation_credential_ref(request["provider"]),)
             if request["mode"] == "semantic"
             and os.environ.get("SUBSTAR_MOCK_SEGMENTATION", "") != "1"
             and previous_artifacts is None

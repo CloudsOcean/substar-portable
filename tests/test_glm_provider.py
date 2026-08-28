@@ -145,7 +145,7 @@ class GlmProviderTests(unittest.TestCase):
         with TemporaryDirectory() as directory, patch.object(
             config, "_unique_paths", return_value=(Path(directory) / "missing.json",)
         ), patch.object(config, "load_credentials", return_value=credentials):
-            settings = config.load_settings()
+            settings = config.load_settings(include_secret=True)
         self.assertTrue(settings["model_provider_key_set"]["glm"])
         self.assertFalse(settings["model_provider_key_set"]["deepseek"])
 

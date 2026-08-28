@@ -26,6 +26,43 @@ CANONICAL_CREDENTIAL_ROLES = frozenset(
 )
 
 
+def model_provider_credential_ref(provider_id: Any) -> str:
+    """Return the canonical provider-scoped authority name (never a secret)."""
+
+    from .model_providers import canonical_provider_id
+
+    return f"{MODEL_PROVIDER_PREFIX}{canonical_provider_id(provider_id)}"
+
+
+def resolve_model_provider_credential(
+    values: Mapping[str, Any], provider_id: Any
+) -> str:
+    """Read one provider's secret without borrowing another provider's key."""
+
+    from .model_providers import MODEL_PROVIDER_IDS, canonical_provider_id
+
+    provider = canonical_provider_id(provider_id)
+    direct = clean_credential(values.get(model_provider_credential_ref(provider)))
+    if direct:
+        return direct
+    if provider == "qwen":
+        legacy_qwen = clean_credential(values.get(f"{MODEL_PROVIDER_PREFIX}aliyun"))
+        if legacy_qwen:
+            return legacy_qwen
+    if provider != "deepseek":
+        return ""
+    legacy_deepseek = clean_credential(values.get(TRANSLATE_DEEPSEEK))
+    if not legacy_deepseek:
+        return ""
+    owned_by_other_provider = any(
+        name != "deepseek"
+        and clean_credential(values.get(model_provider_credential_ref(name)))
+        == legacy_deepseek
+        for name in MODEL_PROVIDER_IDS
+    )
+    return "" if owned_by_other_provider else legacy_deepseek
+
+
 def credential_key_path(envelope_path: Path) -> Path:
     return envelope_path.with_name("credentials.key")
 

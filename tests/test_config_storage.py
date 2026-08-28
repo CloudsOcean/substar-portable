@@ -12,10 +12,34 @@ from substar_core.credential_store import (
     ASR_QWEN,
     SEGMENT_DEEPSEEK,
     TRANSLATE_DEEPSEEK,
+    resolve_model_provider_credential,
 )
 
 
 class ConfigStorageTests(unittest.TestCase):
+    def test_provider_credentials_never_borrow_another_provider_key(self) -> None:
+        values = {
+            "model_provider:deepseek": "deepseek-key-123",
+            "model_provider:glm": "glm-key-123456",
+        }
+        self.assertEqual(
+            resolve_model_provider_credential(values, "glm"), "glm-key-123456"
+        )
+        self.assertEqual(
+            resolve_model_provider_credential(values, "deepseek"),
+            "deepseek-key-123",
+        )
+        self.assertEqual(resolve_model_provider_credential(values, "openai"), "")
+
+    def test_unambiguous_legacy_deepseek_key_remains_migratable(self) -> None:
+        values = {TRANSLATE_DEEPSEEK: "legacy-deepseek-key"}
+        self.assertEqual(
+            resolve_model_provider_credential(values, "deepseek"),
+            "legacy-deepseek-key",
+        )
+        values["model_provider:glm"] = "legacy-deepseek-key"
+        self.assertEqual(resolve_model_provider_credential(values, "deepseek"), "")
+
     def test_general_editor_defaults_are_part_of_the_persisted_contract(self) -> None:
         self.assertEqual(config.DEFAULTS["shortcut_undo"], "Ctrl+Z")
         self.assertEqual(config.DEFAULTS["shortcut_redo"], "Ctrl+Y")

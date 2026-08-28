@@ -84,6 +84,7 @@
       "additionalProperties": false,
       "required": ["base_url", "auth_mode", "grouping", "repair"],
       "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 100},
         "base_url": {"type": "string", "minLength": 1, "maxLength": 500},
         "auth_mode": {"enum": ["bearer", "api-key"]},
         "grouping": {"$ref": "#/$defs/model_policy"},

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from substar_core.artifacts import atomic_write_json
-from substar_core.credential_store import SEGMENT_DEEPSEEK
 from substar_core.domain import EditorDocument
 from substar_core.manuscript_matching import (
     extract_reference_text,
@@ -19,6 +18,7 @@ from substar_core.manuscript_matching import (
     materialize_reference_script,
 )
 from substar_core.segmentation.input_contract import build_segmentation_material
+from substar_core.segmentation.contracts import segmentation_credential_ref
 from substar_core.transcription.contracts import (
     recognition_source_from_evidence,
     validate_recognition_evidence,
@@ -712,7 +712,7 @@ def run(command: WorkerCommand) -> int:
         mock_semantic = os.environ.get("SUBSTAR_MOCK_SEGMENTATION", "") == "1"
         if request["mode"] == "semantic" and not mock_semantic:
             secret = os.environ.pop(
-                credential_environment_key(SEGMENT_DEEPSEEK), ""
+                credential_environment_key(segmentation_credential_ref(request["provider"])), ""
             ).strip()
             if not secret:
                 raise ValueError("segmentation provider credential is unavailable")
@@ -737,7 +737,7 @@ def run(command: WorkerCommand) -> int:
             # and keep its legacy console output isolated from JSONL stdout.
             from scripts.run_semantic_segmentation import main as run_segmentation
 
-            previous_key = os.environ.get("DEEPSEEK_API_KEY")
+            previous_key = os.environ.get("SUBSTAR_MODEL_API_KEY")
             previous_prompt_root = os.environ.get("SUBSTAR_PROMPT_ROOT")
             last_semantic_report: tuple[int, int, int, int, int] | None = None
 
@@ -784,7 +784,7 @@ def run(command: WorkerCommand) -> int:
                     step="segmentation.semantic_grouping",
                 )
 
-            os.environ["DEEPSEEK_API_KEY"] = secret
+            os.environ["SUBSTAR_MODEL_API_KEY"] = secret
             os.environ["SUBSTAR_PROMPT_ROOT"] = str(prompt_root)
             with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open(
                 "w", encoding="utf-8"
@@ -810,9 +810,9 @@ def run(command: WorkerCommand) -> int:
                         ) from exc
                 finally:
                     if previous_key is None:
-                        os.environ.pop("DEEPSEEK_API_KEY", None)
+                        os.environ.pop("SUBSTAR_MODEL_API_KEY", None)
                     else:
-                        os.environ["DEEPSEEK_API_KEY"] = previous_key
+                        os.environ["SUBSTAR_MODEL_API_KEY"] = previous_key
                     if previous_prompt_root is None:
                         os.environ.pop("SUBSTAR_PROMPT_ROOT", None)
                     else:

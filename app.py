@@ -131,11 +131,15 @@ from substar_core.credential_store import (
     ASR_QWEN,
     SEGMENT_DEEPSEEK,
     MODEL_PROVIDER_PREFIX,
+    model_provider_credential_ref,
+    resolve_model_provider_credential,
 )
+from substar_core.model_providers import MODEL_PROVIDER_IDS
 
 
 _WORKER_CREDENTIAL_ROLES = frozenset(
     {ASR_QWEN, ASR_GENERIC, SEGMENT_DEEPSEEK}
+    | {model_provider_credential_ref(provider) for provider in MODEL_PROVIDER_IDS}
 )
 
 
@@ -148,10 +152,15 @@ def _resolve_worker_credentials(references: tuple[str, ...]) -> dict[str, str]:
             "unsupported worker credential reference: " + ", ".join(sorted(unknown))
         )
     protected = load_credentials()
-    return {
-        reference: str(protected.get(reference, ""))
-        for reference in references
-    }
+    resolved: dict[str, str] = {}
+    for reference in references:
+        if reference.startswith(MODEL_PROVIDER_PREFIX):
+            resolved[reference] = resolve_model_provider_credential(
+                protected, reference[len(MODEL_PROVIDER_PREFIX):]
+            )
+        else:
+            resolved[reference] = str(protected.get(reference, ""))
+    return resolved
 
 
 WEB_DIR = PROJECT_ROOT / "web"
@@ -1168,8 +1177,10 @@ def _automatic_settings_from_payload(
         )
     }
     allowed = {
+        "active_model_provider",
         "translation_api_base_url",
         "translation_api_model",
+        "translation_api_auth_mode",
         "stage_segmentation_model",
         "stage_translation_model",
         "stage_translation_repair_model",
@@ -1216,10 +1227,22 @@ def _automatic_settings_from_payload(
 
     base_url = str(raw.get("translation_api_base_url") or saved["translation_api_base_url"])
     model = str(raw.get("translation_api_model") or saved["translation_api_model"])
+    provider_id = canonical_provider_id(
+        raw.get("active_model_provider")
+        or saved.get("active_model_provider")
+        or infer_model_provider(base_url)
+    )
+    auth_mode = str(
+        raw.get("translation_api_auth_mode")
+        or saved.get("translation_api_auth_mode")
+        or "bearer"
+    ).strip().lower()
     if not base_url or len(base_url) > 500:
         raise HTTPException(status_code=400, detail="模型 Base URL 无效")
     if not model or len(model) > 200:
         raise HTTPException(status_code=400, detail="模型 ID 无效")
+    if auth_mode not in {"bearer", "api-key"}:
+        raise HTTPException(status_code=400, detail="模型认证方式无效")
     def bounded_int(key: str, default: int, minimum: int, maximum: int) -> int:
         try:
             value = int(raw.get(key, default))
@@ -1233,7 +1256,7 @@ def _automatic_settings_from_payload(
         return value
 
     stage_config: dict[str, Any] = {}
-    endpoint_provider = infer_model_provider(base_url)
+    endpoint_provider = provider_id
     for stage in stage_names:
         model_key = f"stage_{stage}_model"
         value = str(raw.get(model_key) or saved.get(model_key) or model)
@@ -1313,8 +1336,10 @@ def _automatic_settings_from_payload(
 
     overrides = {
         "workflow_mode": "subtitle_creation",
+        "active_model_provider": provider_id,
         "translation_api_base_url": base_url.rstrip("/"),
         "translation_api_model": model,
+        "translation_api_auth_mode": auth_mode,
         "glossary_id": glossary_id,
         **{
             key: raw.get(key, saved.get(key))
@@ -1648,7 +1673,7 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
             payload.provider_id.strip() or infer_model_provider(payload.base_url)
         )
         api_key = str(
-            load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+            resolve_model_provider_credential(load_credentials(), provider_id)
         ).strip()
     if not api_key and not payload.provider_id.strip():
         api_key = str(saved.get(saved_key_name, "")).strip()
@@ -1687,7 +1712,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
         or infer_model_provider(settings.get("translation_api_base_url"))
     )
     api_key = str(
-        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+        resolve_model_provider_credential(load_credentials(), provider_id)
         or settings.get("translation_api_key", "")
     ).strip()
     if not api_key:
@@ -1787,7 +1812,7 @@ def discover_provider_models(payload: ModelDiscoveryPayload) -> dict[str, Any]:
         payload.provider_id.strip() or infer_model_provider(payload.base_url)
     )
     api_key = payload.api_key.strip() or str(
-        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+        resolve_model_provider_credential(load_credentials(), provider_id)
     ).strip()
     try:
         return discover_models(
@@ -1847,7 +1872,7 @@ def probe_reasoning_capabilities(payload: ReasoningProbePayload) -> dict[str, An
         payload.provider_id.strip() or infer_model_provider(payload.base_url)
     )
     api_key = payload.api_key.strip() or str(
-        load_credentials().get(f"{MODEL_PROVIDER_PREFIX}{provider_id}", "")
+        resolve_model_provider_credential(load_credentials(), provider_id)
     ).strip()
     if not api_key and provider_id == canonical_provider_id(
         saved.get("active_model_provider")
