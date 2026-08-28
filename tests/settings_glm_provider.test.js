@@ -78,4 +78,5 @@ test("normal stages default to thinking Low while fallback stages prefer non-thi
   assert.match(source, /select\.value = preserveEffort && levels\.includes\(current\) \? current : "low"/);
   assert.match(source, /explicitlyConfiguredThinkingStages\.has\(stage\)/);
   assert.match(source, /explicitlyConfiguredEffortStages\.has\(stage\)/);
+  assert.match(source, /思考（模型要求）/);
 });

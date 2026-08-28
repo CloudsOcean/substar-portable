@@ -4,7 +4,7 @@ import concurrent.futures
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from substar_core.artifacts import atomic_write_json
 from substar_core.domain import (
@@ -25,6 +25,7 @@ from substar_core.prompt_registry import (
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
 from substar_core.stage2 import call_translation_model
+from substar_core.model_routing import resolve_stage_request
 from substar_core.storage import ProjectStore
 from substar_core.task_info import load_task_info
 
@@ -83,6 +84,7 @@ def execution_block_batches(document: Any, groups: list[dict[str, Any]]) -> list
 def api_call(*, settings: dict[str, Any], system_prompt: str,
              groups: list[dict[str, Any]], stage_name: str = "translation") -> tuple[dict[str, Any], dict[str, Any]]:
     last_error: Exception | None = None
+    route = resolve_stage_request(settings, stage_name)
     prompt_groups = [
         {key: value for key, value in group.items() if not str(key).startswith("_")}
         for group in groups
@@ -90,18 +92,18 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
     for outer_attempt in range(1, 5):
         try:
             return call_translation_model(
-                base_url=str(settings["translation_api_base_url"]),
-                api_key=str(settings.get("translation_api_key") or ""),
-                auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
-                model=str(settings.get(f"stage_{stage_name}_model") or settings.get("translation_api_model") or "deepseek-v4-flash"),
+                base_url=str(route["base_url"]),
+                api_key=str(route["api_key"]),
+                auth_mode=str(route["auth_mode"]),
+                model=str(route["model"]),
                 system_prompt=system_prompt,
                 groups=prompt_groups,
                 timeout=int(settings.get("translation_api_timeout_seconds", 300)),
-                thinking_mode=str(settings.get(f"stage_{stage_name}_thinking_mode", "enabled")),
-                reasoning_effort=str(settings.get(f"stage_{stage_name}_reasoning_effort", "low")),
+                thinking_mode=str(route["thinking_mode"]),
+                reasoning_effort=str(route["reasoning_effort"]),
                 request_attempts=int(settings.get("http_retry_attempts", 2)),
-                max_tokens=int(settings.get(f"stage_{stage_name}_max_tokens", 131072)),
-                temperature=float(settings.get(f"stage_{stage_name}_temperature", 0.0)),
+                max_tokens=int(route["max_tokens"]),
+                temperature=float(route["temperature"]),
             )
         except Exception as exc:
             last_error = exc
@@ -112,7 +114,9 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
 
 
 def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
-                       batches: list[dict[str, Any]]) -> tuple[dict[str, Any], dict[str, Any]]:
+                       batches: list[dict[str, Any]],
+                       progress_callback: Callable[[int, int], None] | None = None,
+                       ) -> tuple[dict[str, Any], dict[str, Any]]:
     if not batches:
         return {"group_results": []}, {"execution_blocks": []}
     results: dict[str, dict[str, Any]] = {}
@@ -133,6 +137,13 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
         for future in concurrent.futures.as_completed(futures):
             block_id, value = future.result()
             results[block_id] = value
+            if progress_callback is not None:
+                finished_group_count = sum(
+                    len(batch["groups"])
+                    for batch in batches
+                    if str(batch["block_id"]) in results
+                )
+                progress_callback(finished_group_count, sum(len(row["groups"]) for row in batches))
     rows = [
         row for batch in batches
         for row in results[str(batch["block_id"])]["response"].get("group_results", [])
@@ -184,7 +195,10 @@ def _repair_group(*, settings: dict[str, Any], repair_prompt: str,
 
 
 def complete_results(*, settings: dict[str, Any], repair_prompt: str,
-                     groups: list[dict[str, Any]], response: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+                     groups: list[dict[str, Any]], response: dict[str, Any],
+                     progress_callback: Callable[[int, int, int], None] | None = None,
+                     failure_injector: Callable[[str, int], None] | None = None,
+                     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     rows = _result_rows(response)
     plans: list[dict[str, Any]] = []
     invalid: list[dict[str, Any]] = []
@@ -200,10 +214,14 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
         "groups": [],
     }
     attempts = max(0, int(settings.get("translation_repair_attempts", 1)))
+    if progress_callback is not None:
+        progress_callback(0, len(invalid), 0)
     if invalid and attempts:
         repair_results: dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {}
 
         def repair(group: dict[str, Any]) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
+            if failure_injector is not None:
+                failure_injector(str(group["group_id"]), 1)
             plan, records = _repair_group(
                 settings=settings, repair_prompt=repair_prompt,
                 group=group, attempts=attempts,
@@ -218,6 +236,11 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
             for future in concurrent.futures.as_completed(futures):
                 group_id, plan, records = future.result()
                 repair_results[group_id] = (plan, records)
+                if progress_callback is not None:
+                    progress_callback(
+                        len(repair_results), len(invalid),
+                        sum(bool(row[0]) for row in repair_results.values()),
+                    )
 
         remaining: list[dict[str, Any]] = []
         for group in invalid:
@@ -326,10 +349,59 @@ def materialize_presentation(
             })
     expected = set(cue_by_id)
     unresolved = expected - covered
+    display_tokens = {
+        token.token_id: token
+        for token in document.display_tokens
+        if token.state is EntityState.ACTIVE
+    }
+    unresolved_provenance = ChangeProvenance(
+        kind=ChangeKind.AI,
+        operation="contextual_translation_unresolved_passthrough",
+        actor="substar-production",
+        metadata={
+            "target_language": target_language,
+            "translation_unresolved": True,
+            "requires_manual_translation": True,
+        },
+    )
     for source_cue in document.cues:
         if source_cue.state is not EntityState.ACTIVE or source_cue.cue_id not in unresolved:
             continue
-        presentation.append(replace(source_cue, index=len(presentation)))
+        source_text = " ".join(
+            display_tokens[token_id].text
+            for token_id in source_cue.display_token_ids
+            if token_id in display_tokens
+        ).strip()
+        if not source_text:
+            raise RuntimeError(
+                f"未解决翻译 Cue {source_cue.cue_id} 缺少可编辑的源文占位"
+            )
+        unresolved_mapping = {
+            "schema_version": "substar.presentation-mapping.v1",
+            "mapping_type": "1:1",
+            "group_mapping_type": "unresolved-source-passthrough",
+            "source_cue_ids": [source_cue.cue_id],
+            "translation_unresolved": True,
+            "requires_manual_translation": True,
+        }
+        presentation.append(replace(
+            source_cue,
+            index=len(presentation),
+            target=TranslationTrack(
+                target_text=source_text,
+                original_text=source_text,
+                language=target_language,
+                provenance=unresolved_provenance,
+            ),
+            mapping=unresolved_mapping,
+        ))
+        report_rows.append({
+            **unresolved_mapping,
+            "cue_id": source_cue.cue_id,
+            "start": source_cue.start,
+            "end": source_cue.end,
+            "target_text": source_text,
+        })
     presentation.sort(key=lambda cue: (cue.start, cue.end, cue.index, cue.cue_id))
     presentation = [replace(cue, index=index) for index, cue in enumerate(presentation)]
     return replace(document, cues=tuple(presentation)), {
@@ -391,6 +463,7 @@ def run_contextual_translation(
     settings: dict[str, Any],
     *,
     artifact_dir: Path | None = None,
+    progress_callback: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
     audit_dir = artifact_dir or work
     audit_dir.mkdir(parents=True, exist_ok=True)
@@ -428,17 +501,39 @@ def run_contextual_translation(
     if source_language == target_language:
         direction += " 本任务是同语种字幕校订：保留原意与语言，只做自然表达和 Cue 分配。"
     batches = execution_block_batches(revision.document, groups)
+    if progress_callback is not None:
+        progress_callback("executing", completed=0, planned=len(groups))
     response, telemetry = call_block_batches(
         settings=settings,
         system_prompt=f"{prompt.text}\n\n{direction}\n\n{glossary}",
         batches=batches,
+        progress_callback=(
+            (lambda done, total: progress_callback(
+                "executing", completed=done, planned=total
+            )) if progress_callback is not None else None
+        ),
     )
     plans, repair = complete_results(
         settings=settings,
         repair_prompt=f"{repair_prompt.text}\n\n{direction}\n\n{glossary}",
         groups=groups,
         response=response,
+        progress_callback=(
+            (lambda done, total, accepted: progress_callback(
+                "repairing", completed=done, planned=len(groups),
+                repair_planned=total, repair_accepted=accepted,
+            )) if progress_callback is not None else None
+        ),
     )
+    if progress_callback is not None:
+        progress_callback(
+            "validating", completed=len(groups), planned=len(groups),
+            repair_planned=len(repair["model_repair"]["attempted_group_ids"]),
+            repair_accepted=(
+                len(repair["model_repair"]["attempted_group_ids"])
+                - len(repair["invalid_group_ids"])
+            ),
+        )
     atomic_write_json(audit_dir / "contextual_translation_response.json", response)
     atomic_write_json(audit_dir / "contextual_translation_telemetry.json", telemetry)
     atomic_write_json(audit_dir / "contextual_translation_repair.json", repair)
@@ -450,6 +545,15 @@ def run_contextual_translation(
         "execution_block_ids": [item["block_id"] for item in batches],
         "problem_group_ids": list(repair["invalid_group_ids"]),
     }
+    if progress_callback is not None:
+        progress_callback(
+            "materializing", completed=len(groups), planned=len(groups),
+            repair_planned=len(repair["model_repair"]["attempted_group_ids"]),
+            repair_accepted=(
+                len(repair["model_repair"]["attempted_group_ids"])
+                - len(repair["invalid_group_ids"])
+            ),
+        )
     revision_id = _save_translation(
         work=work, plans=plans, settings=settings,
         metadata=metadata, target_language=target_language,

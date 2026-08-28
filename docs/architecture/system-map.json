@@ -915,14 +915,14 @@
       "layer": "application",
       "role": "Resolve versioned prompts, atomically persist registered component bodies, apply the configured primary/repair model policy for segmentation, translation, calibration and review, and isolate editor-owned provider requests in killable child processes.",
       "must_not": ["Use hard-coded models when a stage setting exists", "Assign reasoning effort to non-thinking mode", "Load prompts outside the frozen snapshot for creation tasks", "Expose registry route mutation through settings", "Accept a prompt save whose SHA-256 basis is stale"],
-      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/stage2.py", "symbols": []}, {"path": "scripts/run_editor_model_request.py", "symbols": ["main"]}],
+      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/ai_progress.py", "symbols": ["ai_progress"]}, {"path": "substar_core/model_routing.py", "symbols": ["resolve_stage_request"]}, {"path": "substar_core/stage2.py", "symbols": []}, {"path": "scripts/run_editor_model_request.py", "symbols": ["main"]}],
       "inputs": ["settings_snapshot", "model_stage_policy", "production_prompt_component"],
       "outputs": ["model_stage_policy", "production_prompt_component"],
       "calls": [],
       "invariants": ["Every production primary and repair call resolves through a named stage", "Prompt file/version/hash is auditable", "Registered component writes are atomic and optimistic-concurrency checked", "Existing frozen task snapshots remain immutable after a production component edit", "Cancelling an editor-owned model call terminates its request process before control returns to the task finalizer"],
       "failure_modes": ["Unknown stage", "Missing prompt", "Unsupported thinking mode", "Model setting absent"],
       "recovery": {"strategy": "Reject unresolved stage configuration before a provider call.", "reuses": ["frozen prompt snapshot", "saved stage policy"], "restarts": [], "terminal": "Return configuration error."},
-      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_stage2_editor_cancellation.py"],
+      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_stage2_editor_cancellation.py", "tests/test_ai_stage_progress_contract.py"],
       "change_impact": {"modules": ["settings_ui", "settings_service", "segmentation_model_connector", "translation_service", "calibration_service"], "contracts": ["settings_snapshot", "model_stage_policy", "production_prompt_component"]}
     },
     "glossary_ui": {

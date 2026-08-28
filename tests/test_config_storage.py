@@ -128,8 +128,20 @@ class ConfigStorageTests(unittest.TestCase):
             SEGMENT_DEEPSEEK: "llm-key-123",
             TRANSLATE_DEEPSEEK: "llm-key-123",
         }
-        with patch.object(config, "load_credentials", return_value=credentials):
-            settings = config.load_settings()
+        # This contract is about legacy DeepSeek migration, not whichever
+        # provider happens to be selected in a developer's portable settings.
+        # Isolate it from local application state so it always exercises the
+        # documented default provider.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            empty_settings = Path(temp_dir) / "settings.json"
+            with patch.object(
+                config, "load_credentials", return_value=credentials
+            ), patch.object(
+                config, "SETTINGS_FILE", empty_settings
+            ), patch.object(
+                config, "_unique_paths", return_value=(empty_settings,)
+            ):
+                settings = config.load_settings()
 
         self.assertTrue(settings["api_key_set"])
         self.assertTrue(settings["alignment_api_key_set"])

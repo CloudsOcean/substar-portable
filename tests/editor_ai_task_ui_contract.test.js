@@ -25,3 +25,16 @@ test("task island close control cancels the active editor AI task", () => {
   assert.match(editorJs, /api\(projectPath\("\/ai-task"\), \{method:"DELETE"\}\)/);
   assert.match(editorJs, /#dismissTaskPanel"\)\.onclick = cancelOrDismissTaskPanel/);
 });
+
+test("exclusive task polling cannot overwrite translation's detailed task status", () => {
+  assert.match(
+    editorJs,
+    /const genericTaskOwnsPanel = state\.editorAiTask\?\.kind !== "translation";/,
+  );
+  assert.match(
+    editorJs,
+    /if \(locked && state\.editorAiTask && genericTaskOwnsPanel\)/,
+  );
+  assert.match(editorJs, /state\.editorAiTask\.display_error/);
+  assert.match(editorJs, /已等待 \$\{Math\.round\(elapsedSeconds\)\} 秒/);
+});

@@ -111,6 +111,11 @@ class AutomaticModelProviderConsistencyTests(unittest.TestCase):
             "translation_repair", "calibration", "audit_repair",
         ):
             self.assertEqual(settings[f"stage_{stage}_model"], "glm-5.3-flash")
+        for stage in (
+            "segmentation_repair", "translation_repair", "audit_repair",
+        ):
+            self.assertEqual(settings[f"stage_{stage}_thinking_mode"], "enabled")
+            self.assertEqual(settings[f"stage_{stage}_reasoning_effort"], "low")
         self.assertEqual(settings["active_model_provider"], "glm")
         self.assertEqual(settings["translation_api_auth_mode"], "bearer")
 

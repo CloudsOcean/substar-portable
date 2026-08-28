@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -6,6 +7,7 @@ from substar_core.editor.http_api import (
     _revision_id,
     _validated_calibration_contract_actions,
 )
+from substar_core.editor import http_api
 
 
 def action(**overrides):
@@ -150,3 +152,61 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_calibration_task_projection_uses_detailed_progress(tmp_path, monkeypatch) -> None:
+    detail_path = tmp_path / "calibration.json"
+    detail_path.write_text(json.dumps({
+        "task_id": "editor_ai_test",
+        "progress": 0.42,
+        "message": "正在校准第 2 / 5 个语义块",
+        "error": "",
+    }), encoding="utf-8")
+    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
+    task = {
+        "task_id": "editor_ai_test",
+        "kind": "calibration",
+        "state": "running",
+        "started_at": "2000-01-01T00:00:00+00:00",
+        "error": None,
+    }
+
+    projected = http_api._project_editor_ai_task_payload("project", task)
+
+    assert projected is not None
+    assert projected["progress"] == 0.42
+    assert projected["message"] == "正在校准第 2 / 5 个语义块"
+    assert projected["elapsed_seconds"] > 0
+
+
+def test_translation_lock_does_not_claim_calibration_progress_file(tmp_path, monkeypatch) -> None:
+    detail_path = tmp_path / "calibration.json"
+    detail_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
+    task = {
+        "task_id": "editor_ai_translation",
+        "kind": "translation",
+        "state": "running",
+        "error": None,
+    }
+
+    assert http_api._project_editor_ai_task_payload("project", task) == task
+
+
+def test_new_calibration_task_does_not_inherit_previous_task_timestamp(
+    tmp_path, monkeypatch
+) -> None:
+    detail_path = tmp_path / "calibration.json"
+    detail_path.write_text(json.dumps({
+        "task_id": "old-task",
+        "created_at": "2000-01-01T00:00:00+00:00",
+    }), encoding="utf-8")
+    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
+
+    value = http_api._write_editor_task(
+        "project", "calibration", status="running", progress=0.02,
+        message="准备中", task_id="new-task",
+    )
+
+    assert value["task_id"] == "new-task"
+    assert value["created_at"] != "2000-01-01T00:00:00+00:00"

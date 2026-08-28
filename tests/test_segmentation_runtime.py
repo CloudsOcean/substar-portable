@@ -318,6 +318,81 @@ class SegmentationContractTests(unittest.TestCase):
         self.assertEqual(audit["problem_cue_count"], 1)
         self.assertIn("validation_error", audit)
 
+    def test_invalid_primary_block_is_actually_repaired_by_fallback(self) -> None:
+        from scripts.run_semantic_segmentation import request_semantic_grouping_block
+
+        units = [
+            AlignmentUnit(index=10, start=0.0, end=0.6, text="A" * 30),
+            AlignmentUnit(index=11, start=0.7, end=1.3, text="B" * 29),
+        ]
+
+        def repaired_response(**kwargs):
+            binding = kwargs["user"]["result_binding"]
+            self.assertEqual(kwargs["stage"], "semantic_grouping_repair")
+            self.assertEqual(kwargs["thinking_mode"], "enabled")
+            self.assertEqual(kwargs["reasoning_effort"], "low")
+            self.assertIn("program_validation_error", kwargs["user"])
+            self.assertEqual(kwargs["user"]["repair_attempt"], 1)
+            return {
+                "schema_version": "substar.semantic-grouping-result.v1",
+                **binding,
+                "meaning_groups": [
+                    {
+                        "alignment_start": 10,
+                        "alignment_end": 11,
+                        "line_breaks_after": [10, 11],
+                    }
+                ],
+                "exceptions": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            args = Namespace(
+                source_language="en",
+                hard_limit=55,
+                repair_attempts=1,
+                output_dir=Path(temporary),
+                sentence_boundary_policy="unpunctuated",
+                grouping_model="glm-5.3-flash",
+                repair_model="glm-5.3-flash",
+                base_url="https://open.bigmodel.cn/api/paas/v4",
+                api_key="test-key-value",
+                auth_mode="bearer",
+                timeout=30,
+                api_telemetry=[],
+                grouping_thinking_mode="enabled",
+                grouping_reasoning_effort="low",
+                grouping_max_tokens=4096,
+                grouping_temperature=0.0,
+                repair_thinking_mode="enabled",
+                repair_reasoning_effort="low",
+                repair_max_tokens=4096,
+                repair_temperature=0.0,
+            )
+            with patch(
+                "scripts.run_semantic_segmentation.model_json",
+                side_effect=repaired_response,
+            ) as model_call:
+                row = request_semantic_grouping_block(
+                    units,
+                    (0, 1),
+                    1,
+                    args,
+                    "primary prompt",
+                    [],
+                    cached_value={"invalid": True},
+                    repair_prompt="repair prompt",
+                )
+
+        _number, _spans, groups, _corrections, cuts, exceptions = row
+        self.assertEqual(model_call.call_count, 1)
+        self.assertEqual(
+            [(item["alignment_start"], item["alignment_end"]) for item in groups],
+            [(10, 11)],
+        )
+        self.assertEqual(cuts, {10})
+        self.assertEqual(exceptions, [])
+
     def test_partial_model_success_is_frozen_before_repair(self) -> None:
         from scripts.run_semantic_segmentation import _salvage_semantic_groups
 

@@ -344,12 +344,17 @@ body.editor-shell {
 
 .cue-task-island { position: absolute; z-index: 12; right: 18px; bottom: 12px; width: min(560px, calc(100% - 36px)); overflow: hidden; border: 1px solid #343843; border-radius: 10px; background: rgba(16, 18, 24, .96); box-shadow: 0 12px 34px rgba(0, 0, 0, .45); backdrop-filter: blur(14px); }
 .cue-task-island:has(.translation-task-panel.hidden):has(.ordinary-error.hidden) { width: min(430px, calc(100% - 36px)); }
-.translation-task-panel { position: relative; min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; grid-template-areas: "head close" "progress close" "message close"; align-items: center; column-gap: 10px; row-gap: 6px; padding: 9px 8px 9px 11px; background: linear-gradient(135deg, rgba(139, 66, 255, .08), rgba(80, 205, 235, .025)); }
+.translation-task-panel { position: relative; min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; grid-template-areas: "head close" "progress close" "steps close" "message close"; align-items: center; column-gap: 10px; row-gap: 6px; padding: 9px 8px 9px 11px; background: linear-gradient(135deg, rgba(139, 66, 255, .08), rgba(80, 205, 235, .025)); }
 .translation-task-panel > div:first-child { grid-area: head; display: flex; justify-content: space-between; gap: 7px; font-size: 10px; }
 .translation-task-panel > div:first-child strong { color: #ebe7f7; font-size: 11px; }
 .translation-task-panel span,
 .translation-task-panel p { color: var(--editor-muted); font-size: 9px; }
 .translation-task-panel p { grid-area: message; overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
+.translation-task-steps { grid-area: steps; display: flex; gap: 4px; overflow: hidden; margin: 0; padding: 0; list-style: none; }
+.translation-task-steps li { min-width: 0; color: var(--editor-muted); font-size: 8px; white-space: nowrap; }
+.translation-task-steps li + li::before { content: "›"; padding-right: 4px; color: #596176; }
+.translation-task-steps li.done { color: var(--editor-green); }
+.translation-task-steps li.active { color: var(--editor-purple-soft); font-weight: 700; }
 .translation-progress { grid-area: progress; height: 4px; overflow: hidden; border-radius: 999px; background: #242b39; }
 .translation-progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--editor-purple), #5ed8eb); transition: width .45s ease; }
 .translation-task-panel.failed .translation-progress i { background: var(--editor-red); }

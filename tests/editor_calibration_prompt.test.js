@@ -15,6 +15,8 @@ assert.match(js, /ai-calibration-instruction:\$\{state\.projectId/);
 assert.match(js, /state\.editorAiTask\.progress[\s\S]*?renderWorkbenchTask/);
 assert.match(js, /ordinaryError\(`已保存：\$\{result\.filename}`, "completed"\)/);
 assert.match(css, /\.ordinary-error\.notice/);
-assert.match(css, /\.translation-task-panel[\s\S]*?grid-template-areas:[^;]*"head close" "progress close" "message close"/);
+assert.match(css, /\.translation-task-panel[\s\S]*?grid-template-areas:[^;]*"head close" "progress close" "steps close" "message close"/);
+assert.match(html, /id="translationTaskSteps"/);
+assert.match(js, /function renderAiProgress[\s\S]*?repair_completed[\s\S]*?repair_planned/);
 
 console.log("editor_calibration_prompt: ok");

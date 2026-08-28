@@ -59,7 +59,10 @@ from substar_core.segmentation.hierarchy import (  # noqa: E402
 from substar_core.config import load_settings  # noqa: E402
 from substar_core.glossary import active_glossary, glossary_prompt  # noqa: E402
 from substar_core.policy import classify_language  # noqa: E402
-from substar_core.reasoning_capabilities import reasoning_effort_for_request  # noqa: E402
+from substar_core.reasoning_capabilities import (  # noqa: E402
+    reasoning_effort_for_request,
+    resolve_thinking_mode,
+)
 
 
 PROMPTS = {
@@ -189,6 +192,10 @@ def call_model(
     temperature: float = 0.0,
     request_attempts: int = 2,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    requested_thinking_mode = str(thinking_mode or "disabled").strip().lower()
+    effective_thinking_mode = resolve_thinking_mode(
+        base_url, model, requested_thinking_mode
+    )
     requested_effort = str(reasoning_effort or "low")
     effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
@@ -200,7 +207,7 @@ def call_model(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    if thinking_mode == "enabled":
+    if effective_thinking_mode == "enabled":
         payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = effective_effort
     else:
@@ -256,10 +263,12 @@ def call_model(
     telemetry = {
         "schema_version": "substar.stage1.api-call.v1",
         "model": model,
-        "thinking_mode": thinking_mode,
-        "reasoning_effort": effective_effort if thinking_mode == "enabled" else None,
-        "requested_reasoning_effort": requested_effort if thinking_mode == "enabled" else None,
-        "effective_reasoning_effort": effective_effort if thinking_mode == "enabled" else None,
+        "thinking_mode": effective_thinking_mode,
+        "requested_thinking_mode": requested_thinking_mode,
+        "effective_thinking_mode": effective_thinking_mode,
+        "reasoning_effort": effective_effort if effective_thinking_mode == "enabled" else None,
+        "requested_reasoning_effort": requested_effort if effective_thinking_mode == "enabled" else None,
+        "effective_reasoning_effort": effective_effort if effective_thinking_mode == "enabled" else None,
         "duration_seconds": round(elapsed, 3),
         "finish_reason": finish_reason,
         "usage": usage,

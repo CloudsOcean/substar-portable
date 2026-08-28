@@ -8,6 +8,7 @@ from typing import Any, Mapping, Sequence
 
 from substar_core.credential_store import model_provider_credential_ref
 from substar_core.model_providers import canonical_provider_id, infer_model_provider
+from substar_core.model_routing import resolve_stage_request
 
 from substar_core.glossary import normalize_entry
 from substar_core.manuscript_matching import reference_break_symbols_for_language
@@ -339,16 +340,13 @@ def build_segmentation_request(
     )
 
     def policy(prefix: str, *, fallback: str = default_model) -> dict[str, Any]:
-        fallback_stage = prefix.endswith("_repair")
+        routed = resolve_stage_request(settings, prefix.removeprefix("stage_"))
         return {
-            "model": str(settings.get(f"{prefix}_model") or fallback),
-            "thinking_mode": str(
-                settings.get(f"{prefix}_thinking_mode")
-                or ("disabled" if fallback_stage else "enabled")
-            ),
-            "reasoning_effort": str(settings.get(f"{prefix}_reasoning_effort") or "low"),
-            "max_tokens": int(settings.get(f"{prefix}_max_tokens") or 65536),
-            "temperature": float(settings.get(f"{prefix}_temperature") or 0.0),
+            "model": str(routed["model"] or fallback),
+            "thinking_mode": str(routed["thinking_mode"]),
+            "reasoning_effort": str(routed["reasoning_effort"]),
+            "max_tokens": int(routed["max_tokens"]),
+            "temperature": float(routed["temperature"]),
         }
 
     raw = {

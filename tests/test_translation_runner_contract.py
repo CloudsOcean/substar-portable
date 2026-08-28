@@ -13,6 +13,14 @@ from substar_core.editor.translation.artifacts import (
     TRANSLATION_SUBTITLE_FILENAME,
 )
 from substar_core.editor.translation.contextual import _presentation_plan
+from substar_core.domain import (
+    ChangeKind,
+    ChangeProvenance,
+    DisplayCue,
+    DisplayToken,
+    EditorDocument,
+    SourceToken,
+)
 from substar_core.editor.translation.service import (
     _accepted_translation_rows,
     _progress,
@@ -92,6 +100,70 @@ def test_translation_finalizer_resolves_new_cues_through_source_lineage() -> Non
     assert _translated_text_by_source_cue(document) == {
         "source-cue-1": "第一段\n第二段",
         "source-cue-2": "另一条",
+    }
+
+
+def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> None:
+    provenance = ChangeProvenance(
+        kind=ChangeKind.SOURCE,
+        operation="translation-unresolved-test",
+    )
+    source_tokens = [
+        SourceToken.create(index=0, text="translated", start=0.0, end=0.5),
+        SourceToken.create(index=1, text="unresolved", start=0.5, end=1.0),
+    ]
+    display_tokens = [
+        DisplayToken.create(
+            position=index,
+            text=source.text,
+            source_token_ids=[source.token_id],
+            provenance=provenance,
+        )
+        for index, source in enumerate(source_tokens)
+    ]
+    cues = [
+        DisplayCue.create(
+            index=index,
+            display_token_ids=[display.token_id],
+            start=source.start,
+            end=source.end,
+        )
+        for index, (source, display) in enumerate(zip(source_tokens, display_tokens, strict=True))
+    ]
+    document = EditorDocument.create(
+        source_tokens=source_tokens,
+        display_tokens=display_tokens,
+        cues=cues,
+        document_key="translation-unresolved-test",
+    )
+    plan = {
+        "group_id": "group-1",
+        "meaning_units": [{
+            "meaning_unit_id": "unit-1",
+            "target_text": "已翻译",
+            "source_evidence_cue_ids": [cues[0].cue_id],
+        }],
+        "cue_assignments": [{
+            "cue_id": cues[0].cue_id,
+            "meaning_unit_id": "unit-1",
+        }],
+    }
+
+    candidate, report = contextual_translation.materialize_presentation(
+        document, [plan], "zh-CN"
+    )
+
+    unresolved = next(
+        cue for cue in candidate.cues
+        if cue.mapping.get("translation_unresolved") is True
+    )
+    assert unresolved.cue_id == cues[1].cue_id
+    assert unresolved.target is not None
+    assert unresolved.target.target_text == "unresolved"
+    assert unresolved.mapping["requires_manual_translation"] is True
+    assert report["unresolved_source_cue_ids"] == [cues[1].cue_id]
+    assert _translated_text_by_source_cue(candidate) == {
+        cues[0].cue_id: "已翻译",
     }
 
 

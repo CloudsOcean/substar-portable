@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from substar_core.artifacts import atomic_write_json
+from substar_core.ai_progress import ai_progress
+from substar_core.model_routing import resolve_stage_request
 from substar_core.chinese_script import convert_chinese_script
 from substar_core.config import load_settings
 from substar_core.glossary import active_glossary, load_glossary, normalize_entry, save_glossary
@@ -383,6 +385,7 @@ def _editor_task_path(project_id: str, kind: str) -> Path:
 def _write_editor_task(
     project_id: str, kind: str, *, status: str, progress: float,
     message: str, error: str = "", task_id: str = "",
+    ai_progress_value: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     path = _editor_task_path(project_id, kind)
     previous: dict[str, Any] = {}
@@ -392,21 +395,69 @@ def _write_editor_task(
         except (OSError, json.JSONDecodeError):
             previous = {}
     now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    resolved_task_id = task_id or str(
+        previous.get("task_id") or f"{kind}_{uuid.uuid4().hex[:16]}"
+    )
+    same_task = previous.get("task_id") == resolved_task_id
     value = {
         "schema_version": "substar.editor-task.v1",
-        "task_id": task_id or str(previous.get("task_id") or f"{kind}_{uuid.uuid4().hex[:16]}"),
+        "task_id": resolved_task_id,
         "project_id": project_id,
         "kind": kind,
         "status": status,
         "progress": max(0.0, min(1.0, float(progress))),
         "message": message,
         "error": error,
-        "created_at": previous.get("created_at") or now,
+        "created_at": (previous.get("created_at") or now) if same_task else now,
         "updated_at": now,
         "finished_at": now if status in {"completed", "failed", "cancelled"} else None,
     }
+    if ai_progress_value is not None:
+        value["ai_progress"] = dict(ai_progress_value)
+    elif same_task and isinstance(previous.get("ai_progress"), Mapping):
+        value["ai_progress"] = dict(previous["ai_progress"])
     atomic_write_json(path, value)
     return value
+
+
+def _project_editor_ai_task_payload(
+    project_id: str, task: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Project the detailed stage status onto the exclusive task lock.
+
+    The exclusive task is the sole lock/lifecycle authority.  Calibration's
+    stage file is the sole progress/message authority.  Keeping those roles
+    explicit prevents a lock-only poll from replacing real progress with 0%.
+    """
+
+    if task is None:
+        return None
+    projected = dict(task)
+    if str(task.get("kind") or "") != EditorAiTaskKind.CALIBRATION.value:
+        return projected
+    path = _editor_task_path(project_id, EditorAiTaskKind.CALIBRATION.value)
+    try:
+        detail = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return projected
+    if not isinstance(detail, dict) or detail.get("task_id") != task.get("task_id"):
+        return projected
+    projected["progress"] = max(
+        0.0, min(1.0, float(detail.get("progress") or 0.0))
+    )
+    projected["message"] = str(detail.get("message") or "")
+    projected["display_error"] = str(detail.get("error") or "")
+    if isinstance(detail.get("ai_progress"), Mapping):
+        projected["ai_progress"] = dict(detail["ai_progress"])
+    if str(task.get("state") or "") in {"queued", "running", "cancelling"}:
+        try:
+            started_at = datetime.fromisoformat(str(task.get("started_at") or ""))
+            projected["elapsed_seconds"] = max(
+                0, int((datetime.now(timezone.utc) - started_at).total_seconds())
+            )
+        except (TypeError, ValueError):
+            projected["elapsed_seconds"] = 0
+    return projected
 
 
 def _project_document_payload(document: EditorDocument) -> dict[str, Any]:
@@ -913,7 +964,8 @@ def apply_tutorial_stage(
 @router.get("/projects/{project_id}/ai-task")
 def get_project_editor_ai_task(project_id: str) -> dict[str, Any] | None:
     try:
-        return load_editor_ai_task(project_job_path(project_id))
+        task = load_editor_ai_task(project_job_path(project_id))
+        return _project_editor_ai_task_payload(project_id, task)
     except EditorAiTaskConflict as exc:
         raise HTTPException(status_code=500, detail={
             "code": "editor_ai_task_state_invalid", "message": str(exc)
@@ -1957,6 +2009,8 @@ def _run_editor_ai_blocks(
     retry_stage: str | None = "audit_repair",
     response_validator: Any | None = None,
     progress_callback: Any | None = None,
+    phase_callback: Any | None = None,
+    failure_injector: Any | None = None,
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
@@ -1964,63 +2018,106 @@ def _run_editor_ai_blocks(
 
     owned_task_id = current_editor_ai_task_id()
 
-    def run(item: tuple[str, list[dict[str, Any]]]) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    def run(
+        item: tuple[str, list[dict[str, Any]]], active_stage: str, attempt: int,
+        rejected: tuple[dict[str, Any], dict[str, Any]] | None = None,
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
         if owned_task_id:
             with editor_ai_task_context(owned_task_id):
-                return run_owned(item)
-        return run_owned(item)
+                return run_owned(item, active_stage, attempt, rejected)
+        return run_owned(item, active_stage, attempt, rejected)
 
-    def run_owned(item: tuple[str, list[dict[str, Any]]]) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    def run_owned(
+        item: tuple[str, list[dict[str, Any]]], active_stage: str, attempt: int,
+        rejected: tuple[dict[str, Any], dict[str, Any]] | None = None,
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
         block_id, block_cues = item
-        last_error: Exception | None = None
-        attempt_count = 2 if retry_stage else 1
-        for attempt in range(1, attempt_count + 1):
-            active_stage = stage_name if attempt == 1 else str(retry_stage)
-            fallback_stage = active_stage.endswith("_repair")
-            try:
-                value, request_metadata = call_translation_model(
-                    base_url=str(settings.get("translation_api_base_url", "https://api.deepseek.com")),
+        route = resolve_stage_request(settings, active_stage)
+        value: dict[str, Any] = {failure_key: []}
+        try:
+            if failure_injector is not None:
+                failure_injector(active_stage, block_id, attempt)
+            request_group: dict[str, Any] = {
+                "block_id": block_id, "cues": block_cues,
+            }
+            if rejected is not None:
+                rejected_value, rejected_metadata = rejected
+                request_group.update(
+                    rejected_output=rejected_value,
+                    program_validation_error=str(
+                        rejected_metadata.get("error") or "invalid response contract"
+                    ),
+                    repair_attempt=attempt - 1,
+                )
+            value, request_metadata = call_translation_model(
+                    base_url=str(route["base_url"]),
                     api_key=api_key,
-                    auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
-                    model=str(settings.get(f"stage_{active_stage}_model") or settings.get("translation_api_model", "deepseek-v4-flash")),
+                    auth_mode=str(route["auth_mode"]),
+                    model=str(route["model"]),
                     system_prompt=system_prompt,
-                    groups=[{"block_id": block_id, "cues": block_cues}],
+                    groups=[request_group],
                     timeout=min(600, int(settings.get("translation_api_timeout_seconds", 300))),
-                    thinking_mode=str(settings.get(
-                        f"stage_{active_stage}_thinking_mode",
-                        "disabled" if fallback_stage else "enabled",
-                    )),
-                    reasoning_effort=str(settings.get(f"stage_{active_stage}_reasoning_effort", "low")),
+                    thinking_mode=str(route["thinking_mode"]),
+                    reasoning_effort=str(route["reasoning_effort"]),
                     request_attempts=(
                         max(1, int(settings.get("http_retry_attempts", 2)) + 1)
                         if retry_stage else 1
                     ),
-                    max_tokens=int(settings.get(f"stage_{active_stage}_max_tokens", 65536)),
-                    temperature=float(settings.get(f"stage_{active_stage}_temperature", 0.0)),
+                    max_tokens=int(route["max_tokens"]),
+                    temperature=float(route["temperature"]),
+            )
+            if response_validator is not None and not response_validator(
+                block_id, value
+            ):
+                raise Stage2Error(
+                    f"{active_stage} returned an invalid response contract"
                 )
-                if response_validator is not None and not response_validator(value):
-                    raise Stage2Error(
-                        f"{active_stage} returned an invalid response contract"
-                    )
-                return block_id, value, {"attempt": attempt, **request_metadata}
-            except Stage2Error as exc:
-                last_error = exc
-        return block_id, {failure_key: []}, {
-            "attempt": attempt_count,
-            "error": str(last_error),
-        }
+            return block_id, value, {
+                "attempt": attempt, "stage": active_stage, **request_metadata,
+            }
+        except Stage2Error as exc:
+            return block_id, value, {
+                "attempt": attempt, "stage": active_stage, "error": str(exc),
+            }
 
     if not blocks:
         return []
-    results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+    primary_results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     workers = min(len(blocks), max(1, int(settings.get("translation_workers", 8))))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(run, item) for item in blocks.items()]
+        futures = [pool.submit(run, item, stage_name, 1) for item in blocks.items()]
         for future in concurrent.futures.as_completed(futures):
-            results.append(future.result())
+            primary_results.append(future.result())
             if progress_callback is not None:
-                progress_callback(len(results), len(blocks))
-    return results
+                progress_callback(len(primary_results), len(blocks))
+
+    failed = [row for row in primary_results if row[2].get("error")]
+    if not retry_stage or not failed:
+        if phase_callback is not None:
+            phase_callback("repairing", 0, 0, 0)
+        return primary_results
+
+    if phase_callback is not None:
+        phase_callback("repairing", 0, len(failed), 0)
+    repaired: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
+    retry_items = [
+        ((block_id, blocks[block_id]), (value, metadata))
+        for block_id, value, metadata in failed
+    ]
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(workers, len(retry_items))
+    ) as pool:
+        futures = [
+            pool.submit(run, item, str(retry_stage), 2, rejected)
+            for item, rejected in retry_items
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            row = future.result()
+            repaired[row[0]] = row
+            if phase_callback is not None:
+                accepted = sum(not item[2].get("error") for item in repaired.values())
+                phase_callback("repairing", len(repaired), len(failed), accepted)
+    return [repaired.get(row[0], row) for row in primary_results]
 
 
 _CALIBRATION_PUNCTUATION = ".,?!;:，。？！；：、…"
@@ -2658,8 +2755,12 @@ def _ai_calibrate_project(
         raise HTTPException(status_code=409, detail={"code": "revision_conflict", "message": "AI 校准基于旧版本，请刷新后重试"})
     token_map, cues = _editor_ai_cues(latest)
     if not token_map:
+        done_progress = ai_progress(
+            kind="calibration", phase="completed", unit_label="块"
+        )
         _write_editor_task(project_id, "calibration", status="completed", progress=1.0,
-                           message="AI 校准完成", task_id=task_id)
+                           message=done_progress["message"], task_id=task_id,
+                           ai_progress_value=done_progress)
         return {"revision": latest.to_dict(), "corrections": [], "failed_blocks": []}
 
     blocks = _editor_ai_group_blocks(cues)
@@ -2698,6 +2799,64 @@ def _ai_calibrate_project(
             + payload.instruction.strip()
             + "\n补充要求只能在既有校准动作契约允许的范围内执行；不得改变 Cue 时间或结构。"
         )
+    tracker = {
+        "planned": len(blocks), "completed": 0,
+        "primary_accepted": 0, "repair_planned": 0,
+        "repair_completed": 0, "repair_accepted": 0,
+    }
+    token_to_cue_id = {
+        str(token["token_id"]): str(cue["cue_id"])
+        for cue in cues
+        for token in cue["tokens"]
+    }
+
+    def valid_calibration_block(block_id: str, value: Any) -> bool:
+        owned_cues = [
+            cue for cue in blocks.get(block_id, []) if cue["editable"]
+        ]
+        token_ids = [
+            str(token["token_id"])
+            for cue in owned_cues for token in cue["tokens"]
+        ]
+        _actions, rejections = _validated_calibration_contract_actions(
+            value, token_ids, token_map, token_to_cue_id
+        )
+        return not any(bool(row.get("fatal")) for row in rejections)
+
+    def write_calibration_progress(phase: str, *, detail: str = "") -> None:
+        value = ai_progress(
+            kind="calibration", phase=phase, unit_label="块",
+            planned=tracker["planned"], completed=tracker["completed"],
+            accepted=tracker["primary_accepted"],
+            failed=max(0, tracker["completed"] - tracker["primary_accepted"]),
+            repair_planned=tracker["repair_planned"],
+            repair_completed=tracker["repair_completed"],
+            repair_accepted=tracker["repair_accepted"],
+            repair_failed=max(
+                0, tracker["repair_completed"] - tracker["repair_accepted"]
+            ),
+            detail=detail,
+        )
+        _write_editor_task(
+            project_id, "calibration", status="running",
+            progress=float(value["progress"]), message=str(value["message"]),
+            task_id=task_id, ai_progress_value=value,
+        )
+
+    def primary_progress(done: int, total: int) -> None:
+        tracker["planned"] = total
+        tracker["completed"] = done
+        write_calibration_progress("executing")
+
+    def phase_progress(_phase: str, done: int, total: int, accepted: int) -> None:
+        tracker["repair_planned"] = total
+        tracker["repair_completed"] = done
+        tracker["repair_accepted"] = accepted
+        tracker["primary_accepted"] = tracker["planned"] - total
+        if total:
+            write_calibration_progress("repairing")
+
+    write_calibration_progress("executing")
     results = _run_editor_ai_blocks(
         settings=settings,
         system_prompt=calibration_prompt,
@@ -2705,16 +2864,12 @@ def _ai_calibrate_project(
         failure_key="actions",
         stage_name="calibration",
         retry_stage="audit_repair",
-        response_validator=lambda value: (
-            isinstance(value, Mapping)
-            and isinstance(value.get("actions"), list)
-        ),
-        progress_callback=lambda done, total: _write_editor_task(
-            project_id, "calibration", status="running",
-            progress=0.08 + 0.82 * done / max(1, total),
-            message=f"AI 校准 {done}/{total} 块", task_id=task_id,
-        ),
+        response_validator=valid_calibration_block,
+        progress_callback=primary_progress,
+        phase_callback=phase_progress,
     )
+
+    write_calibration_progress("validating")
 
     desired_text: dict[str, str] = {}
     failed_blocks: list[str] = []
@@ -2724,11 +2879,6 @@ def _ai_calibrate_project(
     accepted_contract_actions: list[dict[str, Any]] = []
     review_actions: list[dict[str, Any]] = []
     merge_actions: list[dict[str, Any]] = []
-    token_to_cue_id = {
-        str(token["token_id"]): str(cue["cue_id"])
-        for cue in cues
-        for token in cue["tokens"]
-    }
     sentence_count = internal_count = case_suggested = lexical_count = filtered_count = 0
     for block_id, value, metadata in sorted(results):
         request_metadata.append({"block_id": block_id, "request_metadata": metadata})
@@ -2901,6 +3051,7 @@ def _ai_calibrate_project(
             f"AI 校准所有执行块均失败：{detail}"
         )
     if replacements or merge_actions:
+        write_calibration_progress("materializing", detail="正在应用校准动作")
         calibration_operation_id = f"op_calibration_{latest.revision_id}"
         try:
             document = _apply_ai_calibration_operations(
@@ -2930,6 +3081,7 @@ def _ai_calibrate_project(
             provenance=provenance,
         )
     else:
+        write_calibration_progress("materializing", detail="正在生成校准版本")
         provenance = ChangeProvenance(
             kind=ChangeKind.AI,
             operation="ai_calibration_apply",
@@ -2952,6 +3104,7 @@ def _ai_calibrate_project(
     result_path = calibration_directory / "latest.json"
     audit_path = calibration_directory / "audit.json"
     audit_error = ""
+    write_calibration_progress("publishing", detail="正在写入版本与审计产物")
     try:
         atomic_write_json(
             audit_path,
@@ -3023,10 +3176,25 @@ def _ai_calibrate_project(
     }
     if audit_error:
         result["calibration_audit_error"] = audit_error
-    _write_editor_task(project_id, "calibration", status="completed", progress=1.0,
-                       message=(
-                           f"AI 校准完成：替换 {len(replacements)} 项，合并 {len(merge_actions)} 项，过滤 {filtered_count} 项"
-                       ), task_id=task_id)
+    final_progress = ai_progress(
+        kind="calibration", phase="completed", unit_label="块",
+        planned=tracker["planned"], completed=tracker["planned"],
+        accepted=max(0, tracker["planned"] - len(failed_blocks)),
+        failed=len(failed_blocks), repair_planned=tracker["repair_planned"],
+        repair_completed=tracker["repair_planned"],
+        repair_accepted=tracker["repair_accepted"],
+        repair_failed=len(failed_blocks),
+        problem_count=len(set(problem_cue_ids)),
+        detail=(
+            f"替换 {len(replacements)} 项，合并 {len(merge_actions)} 项，"
+            f"{len(set(problem_cue_ids))} 条转人工"
+        ),
+    )
+    _write_editor_task(
+        project_id, "calibration", status="completed", progress=1.0,
+        message=final_progress["message"], task_id=task_id,
+        ai_progress_value=final_progress,
+    )
     return result
 
 

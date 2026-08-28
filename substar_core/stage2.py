@@ -27,7 +27,10 @@ from .policy import (
     classify_language,
     track_lines,
 )
-from .reasoning_capabilities import reasoning_effort_for_request
+from .reasoning_capabilities import (
+    reasoning_effort_for_request,
+    resolve_thinking_mode,
+)
 from .segmentation.material import (
     display_normalize,
     illegal_lower_punctuation,
@@ -234,6 +237,10 @@ def call_translation_model(
     max_tokens: int = 32768,
     temperature: float = 0.0,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    requested_thinking_mode = str(thinking_mode or "disabled").strip().lower()
+    effective_thinking_mode = resolve_thinking_mode(
+        base_url, model, requested_thinking_mode
+    )
     requested_effort = str(reasoning_effort or "low")
     effective_effort = reasoning_effort_for_request(base_url, model, requested_effort)
     payload: dict[str, Any] = {
@@ -249,7 +256,7 @@ def call_translation_model(
         "max_tokens": int(max_tokens),
         "stream": False,
     }
-    if thinking_mode == "enabled":
+    if effective_thinking_mode == "enabled":
         payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = effective_effort
     else:
@@ -317,10 +324,12 @@ def call_translation_model(
     prompt_details = prompt_details if isinstance(prompt_details, dict) else {}
     return parsed, {
         "model": model,
-        "thinking_mode": thinking_mode,
-        "reasoning_effort": effective_effort if thinking_mode == "enabled" else None,
-        "requested_reasoning_effort": requested_effort if thinking_mode == "enabled" else None,
-        "effective_reasoning_effort": effective_effort if thinking_mode == "enabled" else None,
+        "thinking_mode": effective_thinking_mode,
+        "requested_thinking_mode": requested_thinking_mode,
+        "effective_thinking_mode": effective_thinking_mode,
+        "reasoning_effort": effective_effort if effective_thinking_mode == "enabled" else None,
+        "requested_reasoning_effort": requested_effort if effective_thinking_mode == "enabled" else None,
+        "effective_reasoning_effort": effective_effort if effective_thinking_mode == "enabled" else None,
         "duration_seconds": round(time.perf_counter() - started, 3),
         "finish_reason": finish,
         "max_tokens": attempted_budgets[-1],

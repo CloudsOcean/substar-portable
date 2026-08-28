@@ -27,6 +27,7 @@ from .model_providers import (
     infer_model_provider,
     normalize_provider_profiles,
 )
+from .reasoning_capabilities import reasoning_capabilities
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
@@ -209,7 +210,55 @@ DEFAULTS: dict[str, Any] = {
 ALLOWED_KEYS = set(DEFAULTS)
 
 def apply_declared_model_capabilities(settings: dict[str, Any]) -> dict[str, Any]:
-    """Keep user-facing canonical choices; provider adapters map them at request time."""
+    """Persist only Stage modes the selected model can actually execute.
+
+    The settings document is a runnable task contract, not a wish list.  A
+    provider adapter still validates the request immediately before sending,
+    but known or live-probed capabilities must already be reflected in the UI,
+    saved settings and frozen project snapshot.
+    """
+
+    base_url = str(settings.get("translation_api_base_url") or "").strip()
+    connection_model = str(settings.get("translation_api_model") or "").strip()
+    cached_capabilities = settings.get("model_reasoning_capabilities", {})
+    if not isinstance(cached_capabilities, dict):
+        cached_capabilities = {}
+    for stage in (
+        "segmentation", "segmentation_repair", "translation",
+        "translation_repair", "calibration", "audit_repair",
+    ):
+        model = str(settings.get(f"stage_{stage}_model") or connection_model).strip()
+        if not base_url or not model:
+            continue
+        capability = reasoning_capabilities(base_url, model)
+        cache_key = "\n".join((base_url.lower(), model.lower()))
+        cached = cached_capabilities.get(cache_key, {})
+        modes = (
+            cached.get("supported_thinking_modes")
+            if isinstance(cached, dict)
+            else None
+        )
+        if not isinstance(modes, list) or not modes:
+            modes = capability.get("supported_thinking_modes", [])
+        supported = [
+            str(value) for value in modes
+            if str(value) in {"enabled", "disabled"}
+        ]
+        # Unknown compatible APIs remain user-configurable until their live
+        # connectivity probe records a concrete contract.
+        if not supported:
+            continue
+        thinking_key = f"stage_{stage}_thinking_mode"
+        effort_key = f"stage_{stage}_reasoning_effort"
+        requested = str(settings.get(thinking_key) or "disabled")
+        if requested in supported:
+            continue
+        effective = "enabled" if "enabled" in supported else supported[0]
+        settings[thinking_key] = effective
+        if effective == "enabled":
+            # The explicit policy for a preferred non-thinking Stage whose
+            # model cannot disable thinking is Thinking Low.
+            settings[effort_key] = "low"
     return settings
 
 

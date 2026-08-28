@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,7 +9,12 @@ from unittest.mock import patch
 import substar_core.config as config
 from substar_core.api_testing import test_chat as call_test_chat
 from substar_core.api_testing import probe_chat_thinking_modes
-from substar_core.config import DEFAULTS, save_credentials_from_settings, save_settings
+from substar_core.config import (
+    DEFAULTS,
+    apply_declared_model_capabilities,
+    save_credentials_from_settings,
+    save_settings,
+)
 from substar_core.config import infer_model_provider
 from substar_core.credential_store import (
     SEGMENT_DEEPSEEK,
@@ -23,6 +29,7 @@ from substar_core.reasoning_capabilities import (
 )
 from substar_core.model_providers import MODEL_PROVIDER_IDS, normalize_provider_profiles
 from substar_core.openai_compat import endpoint_url
+from substar_core.stage2 import call_translation_model
 
 
 class _ChatResponse:
@@ -205,6 +212,42 @@ class GlmProviderTests(unittest.TestCase):
             ),
             "low",
         )
+
+    def test_glm_fallback_is_persisted_as_thinking_low(self) -> None:
+        settings = {
+            "translation_api_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "translation_api_model": "glm-5.3-flash",
+            "stage_translation_repair_model": "glm-5.3-flash",
+            "stage_translation_repair_thinking_mode": "disabled",
+            "stage_translation_repair_reasoning_effort": "high",
+        }
+
+        apply_declared_model_capabilities(settings)
+
+        self.assertEqual(
+            settings["stage_translation_repair_thinking_mode"], "enabled"
+        )
+        self.assertEqual(
+            settings["stage_translation_repair_reasoning_effort"], "low"
+        )
+
+    def test_unknown_provider_keeps_user_thinking_choice_until_probed(self) -> None:
+        settings = {
+            "translation_api_base_url": "https://gateway.example/v1",
+            "translation_api_model": "vendor-model",
+            "stage_translation_repair_model": "vendor-model",
+            "stage_translation_repair_thinking_mode": "disabled",
+            "stage_translation_repair_reasoning_effort": "high",
+        }
+
+        apply_declared_model_capabilities(settings)
+
+        self.assertEqual(
+            settings["stage_translation_repair_thinking_mode"], "disabled"
+        )
+        self.assertEqual(
+            settings["stage_translation_repair_reasoning_effort"], "high"
+        )
         self.assertEqual(
             resolve_reasoning_effort(
                 "https://open.bigmodel.cn/api/paas/v4", "glm-5.3", "xhigh"
@@ -217,6 +260,38 @@ class GlmProviderTests(unittest.TestCase):
             ),
             "low",
         )
+
+    @patch("substar_core.stage2.requests.post")
+    def test_shared_stage_caller_enforces_provider_thinking_capability(self, post) -> None:
+        response_body = {
+            "choices": [{
+                "message": {"content": "{}"},
+                "finish_reason": "stop",
+            }],
+            "usage": {},
+        }
+        post.return_value.content = json.dumps(response_body).encode("utf-8")
+        post.return_value.raise_for_status.return_value = None
+
+        _result, telemetry = call_translation_model(
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            api_key="glm-test-key",
+            model="glm-5.3-flash",
+            system_prompt="test",
+            groups=[],
+            timeout=30,
+            thinking_mode="disabled",
+            reasoning_effort="low",
+            request_attempts=1,
+            max_tokens=128,
+        )
+
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["thinking"], {"type": "enabled"})
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertNotIn("temperature", payload)
+        self.assertEqual(telemetry["requested_thinking_mode"], "disabled")
+        self.assertEqual(telemetry["effective_thinking_mode"], "enabled")
 
     @patch("substar_core.api_testing.post", return_value=_ChatResponse())
     def test_connection_uses_official_chat_endpoint_and_bearer_key(self, mocked_post) -> None:

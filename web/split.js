@@ -200,8 +200,11 @@
         auth_mode: "bearer",
         timeout_seconds: Number(state.settings.translation_api_timeout_seconds || 300),
         api_key: key,
-        thinking_mode: "disabled",
-        reasoning_effort: "high",
+        // GLM 5.3 has no non-thinking mode.  Quick setup must exercise the
+        // same effective policy used by every Stage instead of probing an
+        // unsupported request shape and saving a misleading success state.
+        thinking_mode: "enabled",
+        reasoning_effort: "low",
       };
       const response = await api("/api/settings/test", {
         method: "POST",

@@ -62,6 +62,7 @@ test("Quick Start switches every LLM Stage atomically and preserves the reasonin
   for (const stage of ["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "audit_repair"]) {
     assert.match(source, new RegExp(`stage_\\$\\{stage\\}_model`));
   }
+  assert.match(source, /model: "glm-5\.3-flash",[\s\S]*?thinking_mode: "enabled",[\s\S]*?reasoning_effort: "low"/);
   assert.match(source, /state\.settings = await api\("\/api\/settings"\);[\s\S]*?quickSettingsPayload\(kind, key\)/);
 });
 

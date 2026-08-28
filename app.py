@@ -35,6 +35,7 @@ from substar_core.config import (
     load_settings,
     save_settings,
     infer_model_provider,
+    apply_declared_model_capabilities,
 )
 from substar_core.model_providers import canonical_provider_id, provider_catalog
 from substar_core.runtime_instance import (
@@ -1401,6 +1402,7 @@ def _automatic_settings_from_payload(
         "context": str(raw.get("context", ""))[:QWEN_PROMPT_MAX_CHARACTERS],
         "qwen_temporary_hotwords": temporary_hotwords,
     }
+    apply_declared_model_capabilities(overrides)
     return overrides, profile
 
 

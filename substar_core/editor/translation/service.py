@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ...artifacts import atomic_write_json
+from ...ai_progress import progress_from_mapping
 from ...process_command import python_script_command
 from ...storage import ProjectStore
 from ..tasks.contracts import EditorAiTaskState
@@ -89,6 +90,8 @@ def _translated_text_by_source_cue(document: Any) -> dict[str, str]:
         if not target_text:
             continue
         mapping = cue.mapping if isinstance(cue.mapping, Mapping) else {}
+        if mapping.get("translation_unresolved") is True:
+            continue
         source_cue_ids = mapping.get("source_cue_ids", [])
         if not isinstance(source_cue_ids, (list, tuple)) or not source_cue_ids:
             raise TranslationTaskError(
@@ -203,6 +206,9 @@ def _progress(stage_progress_path: Path) -> tuple[float, str]:
     except (OSError, json.JSONDecodeError):
         return 0.05, "正在准备字幕翻译"
     stages = value.get("stages", {}) if isinstance(value, dict) else {}
+    unified = progress_from_mapping(value if isinstance(value, Mapping) else None)
+    if unified is not None:
+        return float(unified["progress"]), str(unified["message"])
     fractions: list[float] = []
     active = "字幕翻译"
     for name in ("字幕翻译",):
@@ -346,8 +352,16 @@ def run_translation_task(
                 if cancelled:
                     process.terminate()
                     break
-                progress, message = _progress(run_dir / TRANSLATION_PROGRESS_FILENAME)
+                progress_path = run_dir / TRANSLATION_PROGRESS_FILENAME
+                progress, message = _progress(progress_path)
                 state.update(progress=round(progress, 4), message=message)
+                try:
+                    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    progress_payload = {}
+                unified = progress_from_mapping(progress_payload)
+                if unified is not None:
+                    state["ai_progress"] = unified
                 atomic_write_json(status_path, state)
                 time.sleep(0.25)
             return_code = process.wait()
@@ -410,6 +424,14 @@ def run_translation_task(
                 "translation_result": result_path.relative_to(job_dir).as_posix(),
             },
         )
+        final_progress = progress_from_mapping(
+            json.loads(
+                (run_dir / TRANSLATION_PROGRESS_FILENAME).read_text(encoding="utf-8")
+            )
+        )
+        if final_progress is not None:
+            final_progress["problem_count"] = len(review_problem_cue_ids)
+            state["ai_progress"] = final_progress
         finish_editor_ai_task(
             job_dir,
             task_id,

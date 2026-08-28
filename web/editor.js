@@ -162,18 +162,25 @@
     const locked = editorAiTaskLocksEditor();
     document.body.classList.toggle("editor-ai-task-locked", locked);
     renderHeader();
-    if (locked && state.editorAiTask) {
+    const genericTaskOwnsPanel = state.editorAiTask?.kind !== "translation";
+    if (locked && state.editorAiTask && genericTaskOwnsPanel) {
       const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
+      const baseMessage = state.editorAiTask.display_error || state.editorAiTask.message
+        || state.editorAiTask.error?.message || "任务运行中";
+      const elapsedSeconds = Math.max(0, Number(state.editorAiTask.elapsed_seconds || 0));
+      const taskMessage = elapsedSeconds >= 1
+        ? `${baseMessage} · 已等待 ${Math.round(elapsedSeconds)} 秒`
+        : baseMessage;
       renderWorkbenchTask(
         title,
         Math.max(0, Math.min(100, Number(state.editorAiTask.progress || 0) * 100)),
-        state.editorAiTask.error || state.editorAiTask.message || "任务运行中",
+        taskMessage,
         state.editorAiTask.state
       );
     }
-    if (state.editorAiTask?.state === "cancelled") {
+    if (state.editorAiTask?.state === "cancelled" && genericTaskOwnsPanel) {
       const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
@@ -1373,8 +1380,7 @@
     panel.classList.toggle("completed", task?.state === "succeeded");
     const progress = Math.max(0, Math.min(100, Number(task?.progress || 0) * 100));
     $("#translationProgressBar").style.width = `${progress}%`;
-    $("#translationTaskPercent").textContent = `${Math.round(progress)}%`;
-    $("#translationTaskMessage").textContent = task?.error || task?.message || "等待启动";
+    renderAiProgress(task?.ai_progress, progress, task?.error || task?.message || "等待启动");
     button.disabled = !state.revision || ["queued", "running", "cancelling"].includes(task?.state);
     const sourceLanguageSelect = $("#translationSourceLanguage");
     const languageSelect = $("#translationTargetLanguage");
@@ -1407,8 +1413,45 @@
     document.body.classList.toggle("translation-task-visible", !state.taskPanelDismissed);
     $("#translationTaskTitle").textContent = title;
     $("#translationProgressBar").style.width = `${Math.max(0, Math.min(100, progress))}%`;
-    $("#translationTaskPercent").textContent = `${Math.round(progress)}%`;
-    $("#translationTaskMessage").textContent = message;
+    const aiProgress = ["running", "cancelling", "succeeded"].includes(status)
+      && state.editorAiTask?.kind === "calibration"
+      ? state.editorAiTask?.ai_progress : null;
+    renderAiProgress(aiProgress, progress, message);
+  }
+
+  const AI_PHASE_ORDER = [
+    "executing", "repairing", "validating", "materializing", "publishing", "completed"
+  ];
+
+  function renderAiProgress(aiProgress, percent, fallbackMessage) {
+    const counter = $("#translationTaskPercent");
+    const message = $("#translationTaskMessage");
+    const steps = $("#translationTaskSteps");
+    if (!aiProgress?.phase || !aiProgress?.units) {
+      counter.textContent = `${Math.round(percent)}%`;
+      message.textContent = fallbackMessage;
+      steps.classList.add("hidden");
+      steps.replaceChildren();
+      return;
+    }
+    const units = aiProgress.units;
+    if (aiProgress.phase === "repairing" && Number(units.repair_planned || 0) > 0) {
+      counter.textContent = `${units.repair_completed}/${units.repair_planned}`;
+    } else if (Number(units.planned || 0) > 0) {
+      counter.textContent = `${units.completed}/${units.planned}`;
+    } else {
+      counter.textContent = `${Math.round(percent)}%`;
+    }
+    message.textContent = aiProgress.message || fallbackMessage;
+    const activeIndex = AI_PHASE_ORDER.indexOf(aiProgress.phase);
+    steps.replaceChildren(...(aiProgress.steps || []).map((row, index) => {
+      const item = document.createElement("li");
+      item.textContent = row.label;
+      item.classList.toggle("done", index < activeIndex || aiProgress.phase === "completed");
+      item.classList.toggle("active", index === activeIndex && aiProgress.phase !== "completed");
+      return item;
+    }));
+    steps.classList.toggle("hidden", !steps.childElementCount);
   }
 
   async function cancelOrDismissTaskPanel() {
