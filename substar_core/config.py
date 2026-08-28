@@ -298,25 +298,31 @@ def save_credentials_from_settings(payload: dict[str, Any]) -> dict[str, str]:
         provider_role = f"{MODEL_PROVIDER_PREFIX}{provider}"
         if payload.get("clear_translation_api_key"):
             values.pop(provider_role, None)
-            values.pop(SEGMENT_DEEPSEEK, None)
-            values.pop(TRANSLATE_DEEPSEEK, None)
+            # Legacy callers had no provider field and meant the historical
+            # DeepSeek slots explicitly. Modern provider-aware clears touch
+            # only the selected provider.
+            if provider == "deepseek" or not (
+                payload.get("active_model_provider")
+                or payload.get("translation_api_base_url")
+            ):
+                values.pop(SEGMENT_DEEPSEEK, None)
+                values.pop(TRANSLATE_DEEPSEEK, None)
         else:
             translation_key = clean_credential(payload.get("translation_api_key"))
             if translation_key:
                 values[provider_role] = translation_key
-                values[SEGMENT_DEEPSEEK] = translation_key
-                values[TRANSLATE_DEEPSEEK] = translation_key
+                if provider == "deepseek":
+                    values[SEGMENT_DEEPSEEK] = translation_key
+                    values[TRANSLATE_DEEPSEEK] = translation_key
             else:
                 existing_provider_key = values.get(provider_role)
                 if not existing_provider_key and provider == "qwen":
                     existing_provider_key = values.get(f"{MODEL_PROVIDER_PREFIX}aliyun")
                 if existing_provider_key:
                     values[provider_role] = existing_provider_key
-                    values[SEGMENT_DEEPSEEK] = existing_provider_key
-                    values[TRANSLATE_DEEPSEEK] = existing_provider_key
-                elif provider != "deepseek":
-                    values.pop(SEGMENT_DEEPSEEK, None)
-                    values.pop(TRANSLATE_DEEPSEEK, None)
+                    if provider == "deepseek":
+                        values[SEGMENT_DEEPSEEK] = existing_provider_key
+                        values[TRANSLATE_DEEPSEEK] = existing_provider_key
     _write_credential_envelope(values)
     return values
 
@@ -391,15 +397,25 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     translation_key = credentials.get(provider_role, "")
     if not translation_key and provider == "qwen":
         translation_key = credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun", "")
-    if not translation_key and provider == "deepseek":
-        translation_key = credentials.get(TRANSLATE_DEEPSEEK, "")
+    legacy_deepseek_key = credentials.get(TRANSLATE_DEEPSEEK, "")
+    legacy_owned_by_other_provider = bool(legacy_deepseek_key) and any(
+        name != "deepseek"
+        and credentials.get(f"{MODEL_PROVIDER_PREFIX}{name}") == legacy_deepseek_key
+        for name in MODEL_PROVIDER_IDS
+    )
+    if not translation_key and provider == "deepseek" and not legacy_owned_by_other_provider:
+        translation_key = legacy_deepseek_key
     settings["api_key_set"] = bool(key)
     settings["alignment_api_key_set"] = bool(alignment_key)
     settings["translation_api_key_set"] = bool(translation_key)
     settings["model_provider_key_set"] = {
         name: bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}{name}"))
         or (name == "qwen" and bool(credentials.get(f"{MODEL_PROVIDER_PREFIX}aliyun")))
-        or (name == "deepseek" and bool(credentials.get(TRANSLATE_DEEPSEEK)))
+        or (
+            name == "deepseek"
+            and bool(legacy_deepseek_key)
+            and not legacy_owned_by_other_provider
+        )
         for name in MODEL_PROVIDER_IDS
     }
     if include_secret:
@@ -414,6 +430,11 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
 def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
     current = load_settings(include_secret=True)
+    current_provider = canonical_provider_id(
+        current.get("active_model_provider")
+        or infer_model_provider(current.get("translation_api_base_url"))
+    )
+    current_model = str(current.get("translation_api_model", "")).strip()
     merged = {k: current.get(k, DEFAULTS[k]) for k in ALLOWED_KEYS}
     merged.update({k: payload[k] for k in ALLOWED_KEYS if k in payload})
     from .edition import constrain_settings
@@ -425,6 +446,17 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         or infer_model_provider(merged.get("translation_api_base_url"))
     )
     merged["active_model_provider"] = provider
+    next_model = str(merged.get("translation_api_model", "")).strip()
+    for stage in (
+        "segmentation", "segmentation_repair", "translation",
+        "translation_repair", "calibration", "audit_repair",
+    ):
+        model_key = f"stage_{stage}_model"
+        stage_model = str(merged.get(model_key, "")).strip()
+        # Provider changes invalidate every previous provider model ID. Within
+        # one provider, only inherited Stage values follow a model change.
+        if provider != current_provider or not stage_model or stage_model == current_model:
+            merged[model_key] = next_model
     base_url = str(merged.get("translation_api_base_url", "")).strip()
     parsed_base_url = urlparse(base_url)
     if parsed_base_url.scheme not in {"http", "https"} or not parsed_base_url.netloc:

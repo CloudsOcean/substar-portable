@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import substar_core.config as config
 from substar_core.api_testing import test_chat as call_test_chat
 from substar_core.api_testing import probe_chat_thinking_modes
-from substar_core.config import save_credentials_from_settings
+from substar_core.config import DEFAULTS, save_credentials_from_settings, save_settings
 from substar_core.config import infer_model_provider
-from substar_core.credential_store import canonicalize_credentials
+from substar_core.credential_store import (
+    SEGMENT_DEEPSEEK,
+    TRANSLATE_DEEPSEEK,
+    canonicalize_credentials,
+)
 from substar_core.reasoning_capabilities import (
     reasoning_capabilities,
     reasoning_effort_for_request,
@@ -115,6 +122,55 @@ class GlmProviderTests(unittest.TestCase):
         self.assertEqual(values["model_provider:deepseek"], "deepseek-test-key")
         self.assertEqual(values["model_provider:glm"], "glm-provider-key")
         write.assert_called_once()
+
+    @patch("substar_core.config._write_credential_envelope")
+    @patch("substar_core.config.load_credentials", return_value={})
+    def test_saving_glm_key_does_not_create_deepseek_legacy_aliases(self, _load, write) -> None:
+        values = save_credentials_from_settings({
+            "active_model_provider": "glm",
+            "translation_api_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "translation_api_key": "glm-provider-key",
+        })
+        self.assertEqual(values["model_provider:glm"], "glm-provider-key")
+        self.assertNotIn(SEGMENT_DEEPSEEK, values)
+        self.assertNotIn(TRANSLATE_DEEPSEEK, values)
+        write.assert_called_once()
+
+    def test_polluted_glm_legacy_alias_does_not_mark_deepseek_configured(self) -> None:
+        credentials = {
+            "model_provider:glm": "shared-old-glm-key",
+            SEGMENT_DEEPSEEK: "shared-old-glm-key",
+            TRANSLATE_DEEPSEEK: "shared-old-glm-key",
+        }
+        with TemporaryDirectory() as directory, patch.object(
+            config, "_unique_paths", return_value=(Path(directory) / "missing.json",)
+        ), patch.object(config, "load_credentials", return_value=credentials):
+            settings = config.load_settings()
+        self.assertTrue(settings["model_provider_key_set"]["glm"])
+        self.assertFalse(settings["model_provider_key_set"]["deepseek"])
+
+    @patch("substar_core.config.save_credentials_from_settings")
+    @patch("substar_core.config.atomic_write_json")
+    @patch("substar_core.config.load_settings")
+    def test_provider_switch_updates_every_stage_model(self, load, write, _credentials) -> None:
+        current = {
+            **DEFAULTS,
+            "active_model_provider": "deepseek",
+            "translation_api_base_url": "https://api.deepseek.com",
+            "translation_api_model": "deepseek-v4-flash",
+        }
+        load.side_effect = [current, current]
+        save_settings({
+            "active_model_provider": "glm",
+            "translation_api_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "translation_api_model": "glm-5.3-flash",
+        })
+        persisted = write.call_args.args[1]
+        for stage in (
+            "segmentation", "segmentation_repair", "translation",
+            "translation_repair", "calibration", "audit_repair",
+        ):
+            self.assertEqual(persisted[f"stage_{stage}_model"], "glm-5.3-flash")
 
     @patch("substar_core.config._write_credential_envelope")
     @patch("substar_core.config.load_credentials", return_value={})

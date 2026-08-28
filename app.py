@@ -1233,9 +1233,20 @@ def _automatic_settings_from_payload(
         return value
 
     stage_config: dict[str, Any] = {}
+    endpoint_provider = infer_model_provider(base_url)
     for stage in stage_names:
         model_key = f"stage_{stage}_model"
         value = str(raw.get(model_key) or saved.get(model_key) or model)
+        normalized_value = value.strip().lower()
+        # Old portable snapshots can contain the former provider's default in
+        # every Stage. Never send an unmistakable DeepSeek model to the GLM
+        # endpoint (or vice versa); inherit the frozen connection model.
+        if (
+            endpoint_provider == "glm" and normalized_value.startswith("deepseek")
+        ) or (
+            endpoint_provider == "deepseek" and normalized_value.startswith("glm")
+        ):
+            value = model
         if len(value) > 200:
             raise HTTPException(status_code=400, detail=f"{model_key} 模型 ID 无效")
         stage_config[model_key] = value
@@ -1691,10 +1702,9 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
     qwen_model = str(settings.get("qwen_cloud_model", ""))
     supports_hotwords = not qwen_model.startswith("qwen3-asr-flash-filetrans")
     base_url = str(settings["translation_api_base_url"])
-    assist_model = str(
-        settings.get("stage_segmentation_model")
-        or settings["translation_api_model"]
-    )
+    # Qwen field generation follows the active text-model connection rather
+    # than an imported or frozen segmentation Stage override.
+    assist_model = str(settings["translation_api_model"])
     capability = reasoning_capabilities(base_url, assist_model)
     cache_key = "\n".join((base_url.strip().lower(), assist_model.strip().lower()))
     cached_capability = settings.get("model_reasoning_capabilities", {}).get(

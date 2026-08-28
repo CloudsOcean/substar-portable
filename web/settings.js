@@ -172,7 +172,7 @@ function captureModelProviderDraft(providerId = selectedModelProvider) {
   };
 }
 
-function loadModelProviderDraft(providerId) {
+function loadModelProviderDraft(providerId, { forceStages = false } = {}) {
   const definition = providerDefinition(providerId) || {};
   const profile = modelProviderDrafts[providerId] || {};
   form.elements.translation_api_base_url.value = profile.base_url ?? definition.base_url ?? "";
@@ -182,7 +182,7 @@ function loadModelProviderDraft(providerId) {
   form.elements.translation_api_timeout_seconds.value = profile.timeout_seconds || 300;
   const baseHint = $("#baseUrlHint");
   if (baseHint) baseHint.textContent = definition.base_url_hint || "兼容 OpenAI Chat Completions 的服务地址";
-  setConnectionModel(model);
+  setConnectionModel(model, { force: forceStages });
 }
 
 function syncModelProvider(provider = null) {
@@ -374,14 +374,14 @@ function scheduleReasoningCapabilitiesRefresh() {
   reasoningRefreshTimer = setTimeout(() => { refreshReasoningCapabilities(); }, 180);
 }
 
-function setConnectionModel(value) {
+function setConnectionModel(value, { force = false } = {}) {
   const next = String(value || "").trim();
   const changedStages = new Set();
   for (const definitions of Object.values(stageDefinitions)) {
     for (const [stage] of definitions) {
       const input = form.elements[`stage_${stage}_model`];
       if (!input) continue;
-      if (inheritedModelStages.has(stage) || !input.value.trim() || input.value.trim() === connectionModelValue) {
+      if (force || inheritedModelStages.has(stage) || !input.value.trim() || input.value.trim() === connectionModelValue) {
         inheritedModelStages.add(stage);
         input.value = next;
         changedStages.add(stage);
@@ -1188,7 +1188,7 @@ $("#modelProviderList")?.addEventListener("click", (event) => {
     const providerChanged = provider !== selectedModelProvider;
     if (providerChanged) captureModelProviderDraft(selectedModelProvider);
     selectedModelProvider = provider;
-    loadModelProviderDraft(provider);
+    loadModelProviderDraft(provider, { forceStages: providerChanged });
     form.elements.translation_api_key.value = "";
     form.elements.clear_translation_api_key.checked = false;
     syncModelProvider(provider);

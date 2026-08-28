@@ -46,10 +46,18 @@ test("upload drop zone uses the media upload icon", () => {
 });
 
 test("AI assist prefers non-thinking and falls back to thinking Low", () => {
+  assert.match(app, /assist_model = str\(settings\["translation_api_model"\]\)/);
   assert.match(app, /assist_thinking_modes = \("disabled", "enabled"\)/);
   assert.match(app, /for thinking_mode in assist_thinking_modes/);
   assert.match(app, /thinking_mode=thinking_mode/);
   assert.match(app, /reasoning_effort="low"/);
+});
+
+test("Quick Start switches every LLM Stage atomically and preserves the reasoning probe", () => {
+  for (const stage of ["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "audit_repair"]) {
+    assert.match(source, new RegExp(`stage_\\$\\{stage\\}_model`));
+  }
+  assert.match(source, /state\.settings = await api\("\/api\/settings"\);[\s\S]*?quickSettingsPayload\(kind, key\)/);
 });
 
 test("provider registration links appear in tutorials instead of quick cards", () => {

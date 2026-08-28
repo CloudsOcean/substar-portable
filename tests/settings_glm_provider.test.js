@@ -34,10 +34,12 @@ test("connectivity testing also verifies thinking modes without probing every ef
 test("switching models updates inherited stages without clearing saved credentials", () => {
   assert.match(source, /if \(value\.includes\("bigmodel\.cn"\)\) return "glm"/);
   assert.match(source, /function captureModelProviderDraft\(providerId = selectedModelProvider\)/);
-  assert.match(source, /function loadModelProviderDraft\(providerId\)/);
+  assert.match(source, /function loadModelProviderDraft\(providerId, \{ forceStages = false \} = \{\}\)/);
   assert.match(source, /payload\.active_model_provider = selectedModelProvider/);
   assert.match(source, /payload\.model_provider_profiles = \{ \.\.\.modelProviderDrafts \}/);
-  assert.match(source, /function setConnectionModel\(value\)/);
+  assert.match(source, /function setConnectionModel\(value, \{ force = false \} = \{\}\)/);
+  assert.match(source, /loadModelProviderDraft\(provider, \{ forceStages: providerChanged \}\)/);
+  assert.match(source, /force \|\| inheritedModelStages\.has\(stage\)/);
   assert.match(source, /inheritedModelStages\.has\(stage\)/);
   assert.match(source, /reasoningCapabilityCache\.clear\(\)/);
   assert.match(source, /capability\.supported_thinking_modes/);

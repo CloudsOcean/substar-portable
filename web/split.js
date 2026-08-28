@@ -150,6 +150,11 @@
       payload.alignment_api_auth_mode = "bearer";
       payload.translation_api_key = key;
       payload.alignment_api_key = key;
+      // Quick Start changes the provider for the whole text-model pipeline.
+      // Do not freeze historical DeepSeek defaults into GLM tasks.
+      for (const stage of ["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration", "audit_repair"]) {
+        payload[`stage_${stage}_model`] = payload.translation_api_model;
+      }
     }
     return payload;
   }
@@ -218,6 +223,9 @@
           }),
         });
         thinkingModes = capability.probe?.accepted_thinking_modes || [];
+        // The probe persists its verified capability cache. Refresh the page
+        // snapshot so the following full settings save cannot erase it.
+        state.settings = await api("/api/settings");
       }
       state.settings = await api("/api/settings", {
         method: "POST",
