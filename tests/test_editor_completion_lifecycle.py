@@ -3,6 +3,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import replace
 
+import pytest
+
 from substar_core.domain.editor_document import (
     ChangeProvenance,
     DisplayCue,
@@ -12,7 +14,12 @@ from substar_core.domain.editor_document import (
     SourceToken,
     TranslationTrack,
 )
-from substar_core.storage.project_store import ProjectStore, _compress_json, _decompress_json
+from substar_core.storage.project_store import (
+    ProjectIntegrityError,
+    ProjectStore,
+    _compress_json,
+    _decompress_json,
+)
 
 
 def _document(*, complete: bool) -> EditorDocument:
@@ -62,7 +69,7 @@ def test_explicit_completion_revision_keeps_completed_identity(tmp_path) -> None
     assert saved.document.complete is True
 
 
-def test_patch_revision_does_not_store_unused_inverse_payload(tmp_path) -> None:
+def test_patch_revision_schema_has_no_inverse_payload_columns(tmp_path) -> None:
     store = ProjectStore.create(tmp_path / "project", project_id="compact-history-test")
     first = store.save(
         _document(complete=False),
@@ -84,21 +91,24 @@ def test_patch_revision_does_not_store_unused_inverse_payload(tmp_path) -> None:
 
     with sqlite3.connect(store.database_path) as connection:
         row = connection.execute(
-            "SELECT patch_blob, inverse_patch_blob, inverse_sha256 "
+            "SELECT patch_blob "
             "FROM revisions WHERE revision_number=?",
             (second.revision_number,),
         ).fetchone()
+        columns = {
+            value[1] for value in connection.execute("PRAGMA table_info(revisions)")
+        }
 
     assert row is not None
     assert row[0] is not None
-    assert row[1] is None
-    assert row[2] is None
+    assert "inverse_patch_blob" not in columns
+    assert "inverse_sha256" not in columns
     ProjectStore.clear_memory_cache(store.root)
     assert store.load_revision(first.revision_id).document == first.document
     assert store.load_latest().document == second.document
 
 
-def test_legacy_revision_hash_is_checked_before_schema_defaults(tmp_path) -> None:
+def test_legacy_revision_document_is_rejected(tmp_path) -> None:
     provenance = ChangeProvenance(
         kind="source", operation="legacy-translation", actor="test"
     )
@@ -144,11 +154,6 @@ def test_legacy_revision_hash_is_checked_before_schema_defaults(tmp_path) -> Non
         connection.commit()
 
     ProjectStore.clear_memory_cache(store.root)
-    loaded = store.load_latest()
-
-    assert loaded.revision_id == saved.revision_id
-    assert loaded.document.cues[0].target is not None
-    assert loaded.document.cues[0].target.translation_status == "translated"
-    assert loaded.document.cues[0].target.editable is True
-    assert loaded.document_hash == loaded.document.content_hash()
+    with pytest.raises(ProjectIntegrityError, match="revision content is invalid"):
+        store.load_latest()
 

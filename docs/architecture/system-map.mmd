@@ -67,7 +67,6 @@ flowchart LR
     local_environment_service["Optional local environment and model assets"]
   end
   subgraph layer_persistence["persistence"]
-    editor_task_repository["Exclusive editor AI operation repository"]
     project_store["ProjectStore revision repository"]
     runtime_store["SQLite runtime store"]
   end
@@ -132,16 +131,22 @@ flowchart LR
   segmentation_finalizer --> project_store
   editor_api --> project_store
   editor_api --> task_info_service
-  editor_api --> editor_task_repository
+  editor_api --> task_service
   editor_api --> reference_manuscript_service
   editor_api --> translation_service
   editor_api --> calibration_service
   editor_api --> media_service
   editor_api --> project_exchange_service
   task_info_service --> settings_service
-  translation_service --> editor_task_repository
+  translation_service --> task_service
+  translation_service --> scheduler
+  translation_service --> worker_supervisor
+  translation_service --> model_stage_scheduler
   translation_service --> project_store
-  calibration_service --> editor_task_repository
+  calibration_service --> task_service
+  calibration_service --> scheduler
+  calibration_service --> worker_supervisor
+  calibration_service --> model_stage_scheduler
   calibration_service --> project_store
   editor_ui --> editor_api
   editor_api_client --> editor_api

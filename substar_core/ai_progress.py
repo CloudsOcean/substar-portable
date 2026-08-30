@@ -4,7 +4,6 @@ from typing import Any, Mapping
 
 
 AI_PROGRESS_SCHEMA = "substar.ai-stage-progress.v2"
-LEGACY_AI_PROGRESS_SCHEMA = "substar.ai-stage-progress.v1"
 
 _PHASE_BANDS: dict[str, tuple[float, float]] = {
     "planning": (0.0, 0.05),
@@ -118,18 +117,6 @@ def progress_from_mapping(value: Mapping[str, Any] | None) -> dict[str, Any] | N
     if not isinstance(progress, Mapping):
         return None
     schema = progress.get("schema_version")
-    if schema not in {AI_PROGRESS_SCHEMA, LEGACY_AI_PROGRESS_SCHEMA}:
+    if schema != AI_PROGRESS_SCHEMA:
         return None
-    normalized = dict(progress)
-    if schema == LEGACY_AI_PROGRESS_SCHEMA:
-        normalized["schema_version"] = AI_PROGRESS_SCHEMA
-        if normalized.get("phase") == "repairing":
-            normalized["phase"] = "repair"
-        steps = normalized.get("steps")
-        if isinstance(steps, list):
-            normalized["steps"] = [
-                {**row, "id": "repair" if row.get("id") == "repairing" else row.get("id")}
-                if isinstance(row, Mapping) else row
-                for row in steps
-            ]
-    return normalized
+    return dict(progress)

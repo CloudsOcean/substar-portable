@@ -5,18 +5,24 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from substar_core import config, credential_store
+from substar_core import config, credential_store, security
 from substar_core.credential_store import (
     ALIGN_DEEPSEEK,
     ASR_GENERIC,
     ASR_QWEN,
-    SEGMENT_DEEPSEEK,
-    TRANSLATE_DEEPSEEK,
     resolve_model_provider_credential,
 )
 
 
 class ConfigStorageTests(unittest.TestCase):
+    def test_non_v2_credential_envelope_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "不支持的凭据信封格式"):
+                security.unprotect_text(
+                    "machine-bound-old-envelope",
+                    key_path=Path(temp_dir) / "credentials.key",
+                )
+
     def test_provider_credentials_never_borrow_another_provider_key(self) -> None:
         values = {
             "model_provider:deepseek": "deepseek-key-123",
@@ -31,13 +37,8 @@ class ConfigStorageTests(unittest.TestCase):
         )
         self.assertEqual(resolve_model_provider_credential(values, "openai"), "")
 
-    def test_unambiguous_legacy_deepseek_key_remains_migratable(self) -> None:
-        values = {TRANSLATE_DEEPSEEK: "legacy-deepseek-key"}
-        self.assertEqual(
-            resolve_model_provider_credential(values, "deepseek"),
-            "legacy-deepseek-key",
-        )
-        values["model_provider:glm"] = "legacy-deepseek-key"
+    def test_old_unscoped_provider_keys_are_not_accepted(self) -> None:
+        values = {"translate_deepseek": "old-deepseek-key"}
         self.assertEqual(resolve_model_provider_credential(values, "deepseek"), "")
 
     def test_general_editor_defaults_are_part_of_the_persisted_contract(self) -> None:
@@ -59,9 +60,8 @@ class ConfigStorageTests(unittest.TestCase):
             values = {
                 ASR_QWEN: "qwen-key-123",
                 ASR_GENERIC: "qwen-key-123",
-                SEGMENT_DEEPSEEK: "llm-key-123",
-                TRANSLATE_DEEPSEEK: "llm-key-123",
                 ALIGN_DEEPSEEK: "alignment-key-123",
+                "model_provider:deepseek": "llm-key-123",
             }
             with patch.object(config, "CREDENTIALS_FILE", active), patch.object(
                 config, "credential_file_candidates", return_value=(active,)
@@ -80,7 +80,7 @@ class ConfigStorageTests(unittest.TestCase):
             source.mkdir()
             destination.mkdir()
             envelope = source / "credentials.enc"
-            values = {ASR_QWEN: "portable-qwen-key", TRANSLATE_DEEPSEEK: "portable-llm-key"}
+            values = {ASR_QWEN: "portable-qwen-key", "model_provider:deepseek": "portable-llm-key"}
 
             credential_store.write_envelope(envelope, values)
             (destination / envelope.name).write_bytes(envelope.read_bytes())
@@ -98,8 +98,7 @@ class ConfigStorageTests(unittest.TestCase):
                 ASR_QWEN: "qwen-key-123",
                 ASR_GENERIC: "qwen-key-123",
                 ALIGN_DEEPSEEK: "llm-key-123",
-                SEGMENT_DEEPSEEK: "llm-key-123",
-                TRANSLATE_DEEPSEEK: "llm-key-123",
+                "model_provider:deepseek": "llm-key-123",
             }
             with patch.object(config, "CREDENTIALS_FILE", active), patch.object(
                 config, "credential_file_candidates", return_value=(active,)
@@ -112,26 +111,24 @@ class ConfigStorageTests(unittest.TestCase):
             ):
                 config._write_credential_envelope(values)
                 saved = config.save_credentials_from_settings(
-                    {"clear_translation_api_key": True}
+                    {
+                        "active_model_provider": "deepseek",
+                        "clear_translation_api_key": True,
+                    }
                 )
                 loaded = config.load_credentials()
 
-            self.assertNotIn(TRANSLATE_DEEPSEEK, saved)
-            self.assertNotIn(TRANSLATE_DEEPSEEK, loaded)
-            self.assertNotIn(SEGMENT_DEEPSEEK, loaded)
+            self.assertNotIn("model_provider:deepseek", saved)
+            self.assertNotIn("model_provider:deepseek", loaded)
 
     def test_settings_status_is_derived_from_unified_credentials(self) -> None:
         credentials = {
             ASR_QWEN: "qwen-key-123",
             ASR_GENERIC: "qwen-key-123",
             ALIGN_DEEPSEEK: "llm-key-123",
-            SEGMENT_DEEPSEEK: "llm-key-123",
-            TRANSLATE_DEEPSEEK: "llm-key-123",
+            "model_provider:deepseek": "llm-key-123",
         }
-        # This contract is about legacy DeepSeek migration, not whichever
-        # provider happens to be selected in a developer's portable settings.
-        # Isolate it from local application state so it always exercises the
-        # documented default provider.
+        # Isolate the provider status contract from local application state.
         with tempfile.TemporaryDirectory() as temp_dir:
             empty_settings = Path(temp_dir) / "settings.json"
             with patch.object(

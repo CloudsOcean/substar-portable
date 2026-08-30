@@ -23,7 +23,7 @@ from substar_core.prompt_registry import (
 )
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
-from substar_core.stage2 import Stage2RequestError, call_translation_model
+from substar_core.model_gateway import ModelGatewayRequestError, call_translation_model
 from substar_core.model_routing import resolve_stage_request
 from substar_core.storage import ProjectStore
 from substar_core.task_info import load_task_info
@@ -131,7 +131,7 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
                 settings=settings, system_prompt=system_prompt, groups=batch["groups"]
             )
             return block_id, {"response": response, "telemetry": telemetry}
-        except Stage2RequestError as exc:
+        except ModelGatewayRequestError as exc:
             if not exc.retryable:
                 raise
             return block_id, {
@@ -225,9 +225,9 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
         "attempted_group_ids": [str(group["group_id"]) for group in repairable_invalid],
         "groups": [],
     }
-    repair_enabled = bool(int(settings.get("translation_repair_attempts", 1)))
-    repair_record["repair_phase_entered"] = bool(repairable_invalid and repair_enabled)
-    if progress_callback is not None:
+    repair_enabled = True
+    repair_record["repair_phase_entered"] = bool(repairable_invalid)
+    if progress_callback is not None and repairable_invalid:
         progress_callback(0, len(repairable_invalid), 0)
     if repairable_invalid and repair_enabled:
         repair_results: dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {}
@@ -436,11 +436,14 @@ def materialize_presentation(
 
 
 def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict[str, Any],
-                      metadata: dict[str, Any], target_language: str) -> str:
+                      metadata: dict[str, Any], target_language: str,
+                      expected_revision_id: str) -> str:
     store = ProjectStore.open(work / "project")
     revision = store.load_latest()
     if revision is None:
         raise RuntimeError("项目缺少可翻译版本")
+    if revision.revision_id != expected_revision_id:
+        raise RuntimeError("翻译期间编辑版本已变化；结果未写入")
     candidate, presentation_report = materialize_presentation(
         revision.document, plans, target_language
     )
@@ -583,5 +586,6 @@ def run_contextual_translation(
     revision_id = _save_translation(
         work=work, plans=plans, settings=settings,
         metadata=metadata, target_language=target_language,
+        expected_revision_id=revision.revision_id,
     )
     return {"revision_id": revision_id, "repair": repair, **metadata}

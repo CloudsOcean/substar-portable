@@ -11,8 +11,6 @@ from .artifacts import atomic_write_json
 from .credential_store import (
     ALIGN_DEEPSEEK,
     ASR_QWEN,
-    SEGMENT_DEEPSEEK,
-    TRANSLATE_DEEPSEEK,
     MODEL_PROVIDER_PREFIX,
     model_provider_credential_ref,
     resolve_model_provider_credential,
@@ -37,6 +35,7 @@ PROJECT_MODELS_ROOT = (INSTALL_ROOT / "models").resolve()
 DATA_ROOT = Path(
     os.environ.get("SUBSTAR_DATA_ROOT", INSTALL_ROOT / "data")
 ).resolve()
+PROJECTS_ROOT = (DATA_ROOT / "projects-v2").resolve()
 PRIMARY_APP_DATA_DIR = (
     Path(os.environ.get("LOCALAPPDATA", PROJECT_ROOT)) / "SubstarWorkbench"
 )
@@ -194,12 +193,10 @@ DEFAULTS: dict[str, Any] = {
     "runtime_gpu_concurrency": 1,
     "runtime_download_concurrency": 2,
     "http_retry_attempts": 2,
-    "segmentation_repair_attempts": 1,
-    "translation_repair_attempts": 1,
     "stage_timeout_seconds": 3600,
-    # V2 deliberately uses an isolated data root.  It never scans or falls
-    # back to V1's outputs directory.
-    "output_dir": str(DATA_ROOT / "projects"),
+    # V2 deliberately uses an isolated data root. It never scans, migrates,
+    # imports, or falls back to V1's data/projects directory.
+    "output_dir": str(PROJECTS_ROOT),
     "shortcut_undo": "Ctrl+Z",
     "shortcut_redo": "Ctrl+Y",
     "shortcut_play_pause": "Space",
@@ -303,17 +300,7 @@ def _unique_paths(paths: list[Path] | tuple[Path, ...]) -> tuple[Path, ...]:
 
 
 def credential_file_candidates() -> tuple[Path, ...]:
-    return _unique_paths(
-        (
-            CREDENTIALS_FILE,
-            PORTABLE_APP_DATA_DIR / CREDENTIALS_FILE.name,
-            PRIMARY_CREDENTIALS_FILE,
-            FALLBACK_APP_DATA_DIR / CREDENTIALS_FILE.name,
-            PORTABLE_APP_DATA_DIR / "credentials.dpapi",
-            PRIMARY_APP_DATA_DIR / "credentials.dpapi",
-            FALLBACK_APP_DATA_DIR / "credentials.dpapi",
-        )
-    )
+    return (CREDENTIALS_FILE,)
 
 
 def _write_credential_envelope(values: dict[str, str]) -> None:
@@ -349,31 +336,14 @@ def save_credentials_from_settings(payload: dict[str, Any]) -> dict[str, str]:
         provider_role = model_provider_credential_ref(provider)
         if payload.get("clear_translation_api_key"):
             values.pop(provider_role, None)
-            # Legacy callers had no provider field and meant the historical
-            # DeepSeek slots explicitly. Modern provider-aware clears touch
-            # only the selected provider.
-            if provider == "deepseek" or not (
-                payload.get("active_model_provider")
-                or payload.get("translation_api_base_url")
-            ):
-                values.pop(SEGMENT_DEEPSEEK, None)
-                values.pop(TRANSLATE_DEEPSEEK, None)
         else:
             translation_key = clean_credential(payload.get("translation_api_key"))
             if translation_key:
                 values[provider_role] = translation_key
-                if provider == "deepseek":
-                    values[SEGMENT_DEEPSEEK] = translation_key
-                    values[TRANSLATE_DEEPSEEK] = translation_key
             else:
                 existing_provider_key = values.get(provider_role)
-                if not existing_provider_key and provider == "qwen":
-                    existing_provider_key = values.get(f"{MODEL_PROVIDER_PREFIX}aliyun")
                 if existing_provider_key:
                     values[provider_role] = existing_provider_key
-                    if provider == "deepseek":
-                        values[SEGMENT_DEEPSEEK] = existing_provider_key
-                        values[TRANSLATE_DEEPSEEK] = existing_provider_key
     _write_credential_envelope(values)
     return values
 
@@ -381,21 +351,7 @@ def save_credentials_from_settings(payload: dict[str, Any]) -> dict[str, str]:
 def load_settings(include_secret: bool = False) -> dict[str, Any]:
     settings = dict(DEFAULTS)
     stored: dict[str, Any] = {}
-    settings_path = next(
-        (
-            candidate
-            for candidate in _unique_paths(
-                (
-                    SETTINGS_FILE,
-                    PORTABLE_APP_DATA_DIR / "settings.json",
-                    PRIMARY_SETTINGS_FILE,
-                    FALLBACK_APP_DATA_DIR / "settings.json",
-                )
-            )
-            if candidate.exists()
-        ),
-        SETTINGS_FILE,
-    )
+    settings_path = SETTINGS_FILE
     stored: dict[str, Any] = {}
     if settings_path.exists():
         try:
@@ -411,7 +367,7 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
         settings["startup_port"] = 8769
     if settings.get("appearance_mode") not in {"light", "dark"}:
         settings["appearance_mode"] = "dark"
-    settings["output_dir"] = str(DATA_ROOT / "projects")
+    settings["output_dir"] = str(PROJECTS_ROOT)
     for name in ("shortcut_undo", "shortcut_redo"):
         settings[name] = _canonical_shortcut(settings.get(name)) or DEFAULTS[name]
     for name in ("shortcut_play_pause", "shortcut_hide_cue"):
@@ -427,7 +383,6 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     )
     # Translation content is model-authored. A structurally invalid first
     # response is repaired by another model call, never by local text logic.
-    settings["translation_repair_attempts"] = 1
     settings["translation_api_timeout_seconds"] = max(
         30,
         min(600, int(settings.get("translation_api_timeout_seconds", 300))),
@@ -517,7 +472,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         for key, value in list(raw_capabilities.items())[-100:]
         if isinstance(value, dict)
     }
-    merged["output_dir"] = str(DATA_ROOT / "projects")
+    merged["output_dir"] = str(PROJECTS_ROOT)
     merged["startup_port"] = max(1024, min(65535, int(merged["startup_port"])))
     choices = {
         "appearance_mode": {"light", "dark"},
@@ -691,8 +646,6 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     merged["http_retry_attempts"] = max(
         1, min(3, int(merged["http_retry_attempts"]))
     )
-    merged["segmentation_repair_attempts"] = 1
-    merged["translation_repair_attempts"] = 1
     merged["stage_timeout_seconds"] = max(
         60, min(21600, int(merged["stage_timeout_seconds"]))
     )

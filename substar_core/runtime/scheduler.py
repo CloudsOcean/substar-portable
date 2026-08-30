@@ -487,14 +487,21 @@ class TaskScheduler:
                         "message": None,
                         "step": None,
                         "wait_reason": None,
+                        "phase": None,
+                        "completed_units": None,
+                        "total_units": None,
                     }
                 )
-                if set(update) != {
-                    "progress", "message", "step", "wait_reason"
-                }:
+                required = {"progress", "message", "step", "wait_reason"}
+                optional = {"phase", "completed_units", "total_units"}
+                if not required.issubset(update) or set(update) - required - optional:
                     raise TaskRuntimeError(
                         "task handler returned an invalid progress projection"
                     )
+                if update.get("phase") == "repair":
+                    current_task = self.service.get_task(event.task_id)
+                    if not current_task["repair_phase_entered"]:
+                        self.service.enter_repair_phase(event.task_id, event.attempt)
                 self.service.record_progress(
                     event.task_id,
                     event.attempt,
@@ -502,6 +509,9 @@ class TaskScheduler:
                     message=update["message"],
                     step=update["step"],
                     wait_reason=update["wait_reason"],
+                    phase=update.get("phase"),
+                    completed_units=update.get("completed_units"),
+                    total_units=update.get("total_units"),
                 )
             elif message.message_type is WorkerMessageType.ARTIFACT:
                 relative_path, digest, byte_size = self._verify_worker_artifact(
@@ -758,9 +768,14 @@ class TaskScheduler:
                     )
                 elif completion.status == "succeeded":
                     result = execution.handler.finalize(execution.context, completion)
-                    self.service.complete(
-                        completion.task_id, completion.attempt, result
-                    )
+                    if bool(result.get("needs_attention")):
+                        self.service.complete_with_issues(
+                            completion.task_id, completion.attempt, result
+                        )
+                    else:
+                        self.service.complete(
+                            completion.task_id, completion.attempt, result
+                        )
                 elif completion.status == "cancelled":
                     self.service.cancelled(completion.task_id, completion.attempt)
                 else:

@@ -291,6 +291,9 @@ class TaskService:
         message: str | None = None,
         step: str | None = None,
         wait_reason: str | None = None,
+        phase: str | None = None,
+        completed_units: int | None = None,
+        total_units: int | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         return self._public(
@@ -302,6 +305,9 @@ class TaskService:
                 message=message,
                 step=step,
                 wait_reason=wait_reason,
+                phase=phase,
+                completed_units=completed_units,
+                total_units=total_units,
                 request_id=(
                     _required_text(request_id, "request_id")
                     if request_id is not None
@@ -357,6 +363,49 @@ class TaskService:
                 int(attempt),
                 self.instance_id,
                 normalized_result,
+                request_id=(
+                    _required_text(request_id, "request_id")
+                    if request_id is not None
+                    else None
+                ),
+            )
+        )
+
+    def complete_with_issues(
+        self,
+        task_id: str,
+        attempt: int,
+        result: Mapping[str, Any] | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        if result is not None and not isinstance(result, Mapping):
+            raise InvalidTaskError("result must be a JSON object")
+        normalized_result = dict(result) if result is not None else None
+        if normalized_result is not None:
+            _reject_inline_secrets(normalized_result, "task result")
+        return self._public(
+            self.store.complete_with_issues(
+                _required_text(task_id, "task_id"),
+                int(attempt),
+                self.instance_id,
+                normalized_result,
+                request_id=(
+                    _required_text(request_id, "request_id")
+                    if request_id is not None
+                    else None
+                ),
+            )
+        )
+
+    def enter_repair_phase(
+        self, task_id: str, attempt: int, *, request_id: str | None = None
+    ) -> dict[str, Any]:
+        return self._public(
+            self.store.enter_repair_phase(
+                _required_text(task_id, "task_id"),
+                int(attempt),
+                self.instance_id,
                 request_id=(
                     _required_text(request_id, "request_id")
                     if request_id is not None

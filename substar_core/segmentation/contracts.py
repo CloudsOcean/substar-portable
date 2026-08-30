@@ -256,7 +256,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "japanese_hard_limit": _integer(constraints["japanese_hard_limit"], "constraints.japanese_hard_limit", 1, 200),
         "korean_hard_limit": _integer(constraints["korean_hard_limit"], "constraints.korean_hard_limit", 1, 200),
         "sentence_boundary_policy": boundary_policy,
-        "repair_attempts": _integer(constraints["repair_attempts"], "constraints.repair_attempts", 0, 4),
+        "repair_attempts": _integer(constraints["repair_attempts"], "constraints.repair_attempts", 1, 1),
         "request_timeout_seconds": _integer(constraints["request_timeout_seconds"], "constraints.request_timeout_seconds", 10, 3600),
         "task_timeout_seconds": _integer(constraints["task_timeout_seconds"], "constraints.task_timeout_seconds", 60, 86400),
     }
@@ -271,7 +271,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
     provider = value["provider"]
     if not isinstance(provider, Mapping) or not set(provider).issubset({
         "id", "base_url", "auth_mode", "grouping", "repair"
-    }) or not {"base_url", "grouping", "repair"}.issubset(provider):
+    }) or not {"id", "base_url", "grouping", "repair"}.issubset(provider):
         raise InvalidTaskError("segmentation provider fields are invalid")
     auth_mode = str(provider.get("auth_mode", "bearer")).strip().lower()
     if auth_mode not in {"bearer", "api-key"}:
@@ -282,14 +282,13 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "grouping": _model_policy(provider["grouping"], "provider.grouping"),
         "repair": _model_policy(provider["repair"], "provider.repair"),
     }
-    if "id" in provider:
-        provider_id = canonical_provider_id(provider["id"])
-        endpoint_provider = infer_model_provider(normalized_provider["base_url"])
-        if endpoint_provider != "custom" and provider_id != endpoint_provider:
-            raise InvalidTaskError(
-                "provider.id does not own the configured provider.base_url"
-            )
-        normalized_provider["id"] = provider_id
+    provider_id = canonical_provider_id(provider["id"])
+    endpoint_provider = infer_model_provider(normalized_provider["base_url"])
+    if endpoint_provider != "custom" and provider_id != endpoint_provider:
+        raise InvalidTaskError(
+            "provider.id does not own the configured provider.base_url"
+        )
+    normalized_provider["id"] = provider_id
 
     return {
         "schema_version": SEGMENTATION_INPUT_SCHEMA,
@@ -408,9 +407,9 @@ def build_segmentation_request(
 def segmentation_credential_ref(provider: Mapping[str, Any]) -> str:
     """Resolve the credential authority frozen into a segmentation request."""
 
-    provider_id = canonical_provider_id(
-        provider.get("id") or infer_model_provider(provider.get("base_url"))
-    )
+    if "id" not in provider:
+        raise InvalidTaskError("segmentation provider.id is required")
+    provider_id = canonical_provider_id(provider["id"])
     return model_provider_credential_ref(provider_id)
 
 

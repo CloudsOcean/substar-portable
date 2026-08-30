@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
-from substar_core.ai_progress import ai_progress
+from substar_core.ai_progress import ai_progress, progress_from_mapping
 from substar_core.editor import http_api
-from substar_core.editor.translation.service import _progress
-from substar_core.stage2 import Stage2Error, Stage2RequestError
+from substar_core.model_gateway import ModelGatewayError, ModelGatewayRequestError
 
 
 def test_translation_progress_is_counted_monotonic_and_uses_short_repair_label(
@@ -39,11 +37,19 @@ def test_translation_progress_is_counted_monotonic_and_uses_short_repair_label(
         "模型处理", "修复", "结果验收", "生成可编辑结果", "交付产物", "已交付",
     ]
 
-    path = tmp_path / "progress.json"
-    path.write_text(json.dumps({"ai_progress": values[2]}), encoding="utf-8")
-    progress, message = _progress(path)
-    assert progress == values[2]["progress"]
-    assert message == values[2]["message"]
+    projected = progress_from_mapping({"ai_progress": values[2]})
+    assert projected is not None
+    assert projected["progress"] == values[2]["progress"]
+    assert projected["message"] == values[2]["message"]
+
+
+def test_v1_progress_is_not_normalized_or_displayed() -> None:
+    assert progress_from_mapping({
+        "ai_progress": {
+            "schema_version": "substar.ai-stage-progress.v1",
+            "phase": "repairing",
+        }
+    }) is None
 
 
 def test_calibration_reports_primary_and_repair_block_counts() -> None:
@@ -57,7 +63,7 @@ def test_calibration_reports_primary_and_repair_block_counts() -> None:
 
     def fail_one_primary(stage: str, block_id: str, _attempt: int) -> None:
         if stage == "calibration" and block_id == "b2":
-            raise Stage2Error("injected invalid primary block")
+            raise ModelGatewayError("injected invalid primary block")
 
     settings = {
         "translation_api_key": "test-key",
@@ -106,7 +112,7 @@ def test_calibration_does_not_repair_authentication_failures() -> None:
     def auth_failure(**_kwargs):
         nonlocal calls
         calls += 1
-        raise Stage2RequestError("HTTP 401", status=401)
+        raise ModelGatewayRequestError("HTTP 401", status=401)
 
     settings = {
         "translation_api_key": "bad-key",
@@ -127,7 +133,7 @@ def test_calibration_does_not_repair_authentication_failures() -> None:
                 stage_name="calibration",
                 retry_stage="audit_repair",
             )
-        except Stage2Error as exc:
+        except ModelGatewayError as exc:
             assert "401" in str(exc)
         else:
             raise AssertionError("authentication failure must fail the task")

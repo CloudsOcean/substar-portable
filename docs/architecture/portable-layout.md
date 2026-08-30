@@ -41,9 +41,12 @@ Substar/
    │  ├─ credentials.enc
    │  ├─ credentials.key
    │  ├─ runtime.json
-   │  └─ runtime.sqlite3
-   └─ projects/
+   │  └─ runtime-v2.sqlite3
+   └─ projects-v2/
 ```
+
+旧版 `data/projects/` 与旧 runtime 数据库可以原位存在，但 v2 不扫描、
+读取、导入或迁移它们。
 
 `credentials.enc` 使用 `credentials.key` 加密。二者随整个 `data/` 复制后可在另一台 Windows 电脑读取；只获得程序 ZIP 不包含任何用户凭据。密钥与密文放在同一便携数据目录的目标是避免绑定 Windows 身份或机器，不等同于防御整个数据目录被一并窃取。
 

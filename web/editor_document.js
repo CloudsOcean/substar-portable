@@ -9,7 +9,7 @@
 
   if (!ordering?.canonicalCueOrder) throw new Error("Cue ordering contract is required");
 
-  const DOCUMENT_SCHEMA = "substar.editor-document.v1";
+  const DOCUMENT_SCHEMA = "substar.editor-document.v2";
   const ACTIVE = "active";
   const DELETED = "deleted";
   const CHANGE_KINDS = new Set(["source", "import", "manual", "ai", "normalization"]);

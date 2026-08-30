@@ -11,7 +11,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from substar_core.config import load_settings
-from substar_core.domain import DocumentRevision
 from substar_core.storage import ProjectIntegrityError, ProjectStore
 
 
@@ -50,23 +49,13 @@ def audit(projects_root: Path, *, include_history: bool = False) -> dict[str, An
         project_id = store_path.parent.name
         try:
             manifest_path = store_path / "manifest.json"
-            marker = json.loads(manifest_path.read_text(encoding="utf-8"))
-            legacy_json_store = marker.get("schema_version") == "substar.project-store.v2"
-            store = None if legacy_json_store else ProjectStore.open(store_path)
-            manifest = marker if legacy_json_store else store.load_manifest()
+            store = ProjectStore.open(store_path)
+            manifest = store.load_manifest()
             rows = manifest.get("revisions", [])
             if not include_history and rows:
                 rows = [rows[-1]]
             for row in rows:
-                if legacy_json_store:
-                    revision_path = (store_path / str(row["path"])).resolve()
-                    if store_path.resolve() not in revision_path.parents:
-                        raise ValueError("revision path escapes project store")
-                    revision = DocumentRevision.from_dict(
-                        json.loads(revision_path.read_text(encoding="utf-8"))
-                    )
-                else:
-                    revision = store.load_revision(str(row["revision_id"]))
+                revision = store.load_revision(str(row["revision_id"]))
                 issues = _issues(revision.document.cues)
                 if issues:
                     projects.append(

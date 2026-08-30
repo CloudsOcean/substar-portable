@@ -117,8 +117,8 @@ def count_visible_characters(
     """Count the displayed Unicode characters used by every hard-limit path.
 
     A Cue is a displayed string, so every retained character follows one
-    universal metric.  The legacy switches remain accepted by callers during
-    this migration, but deliberately do not change the result.
+    universal metric. The keyword-only flags remain part of the current API
+    but deliberately do not change the result.
     """
     value = format_text(str(text or ""))
     return len(value)

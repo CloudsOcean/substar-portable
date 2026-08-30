@@ -241,7 +241,7 @@ class SegmentationContractTests(unittest.TestCase):
 
     def test_over_limit_repair_feedback_names_exact_cue_range(self) -> None:
         from scripts.run_semantic_segmentation import validate_semantic_grouping_result
-        from scripts.segmentation_support import SegmentationError
+        from scripts.run_semantic_segmentation import SegmentationError
 
         units = [
             AlignmentUnit(index=10, start=0.0, end=0.2, text="A" * 30),
@@ -273,7 +273,7 @@ class SegmentationContractTests(unittest.TestCase):
         self.assertIn('"left_length": 30', message)
         self.assertIn("不得删除、改写或重排词元", message)
 
-    def test_failed_model_block_is_delivered_as_reviewable_fallback_cues(self) -> None:
+    def test_failed_model_block_is_delivered_as_reviewable_problem_cues(self) -> None:
         from scripts.run_semantic_segmentation import request_semantic_grouping_block
 
         units = [
@@ -303,7 +303,7 @@ class SegmentationContractTests(unittest.TestCase):
                 cached_value={"invalid": True},
             )
             audit = json.loads(
-                (Path(temporary) / "semantic_grouping_fallback_c0001.json").read_text(
+                (Path(temporary) / "semantic_grouping_repair_c0001.json").read_text(
                     encoding="utf-8"
                 )
             )
@@ -318,7 +318,7 @@ class SegmentationContractTests(unittest.TestCase):
         self.assertEqual(audit["problem_cue_count"], 1)
         self.assertIn("validation_error", audit)
 
-    def test_invalid_primary_block_is_actually_repaired_by_fallback(self) -> None:
+    def test_invalid_primary_block_is_actually_repaired_once(self) -> None:
         from scripts.run_semantic_segmentation import request_semantic_grouping_block
 
         units = [

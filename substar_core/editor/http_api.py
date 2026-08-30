@@ -6,7 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Annotated, Any, Literal, Mapping
+from typing import Annotated, Any, Callable, Literal, Mapping
 from urllib.parse import quote
 
 import json
@@ -18,7 +18,7 @@ import wave
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -42,7 +42,11 @@ from substar_core.media import (
     prepare_playback_media,
     smart_forward_snap,
 )
-from substar_core.stage2 import Stage2Error, Stage2RequestError, call_translation_model
+from substar_core.model_gateway import (
+    ModelGatewayError,
+    ModelGatewayRequestError,
+    call_translation_model,
+)
 from substar_core.domain import (
     ChangeKind,
     ChangeProvenance,
@@ -65,19 +69,6 @@ from substar_core.editor.api import (
 from substar_core.editor.domain.cue_ordering import canonicalize_document_cues
 from substar_core.editor.domain.cue_timing import smart_snap_search_minimum
 from substar_core.editor.infrastructure import SQLiteProjectRepository
-from substar_core.editor.tasks.contracts import EditorAiTaskKind, EditorAiTaskState
-from substar_core.editor.tasks.repository import (
-    EditorAiTaskCancelled,
-    EditorAiTaskConflict,
-    assert_editor_write_allowed,
-    finish_task as finish_editor_ai_task,
-    load_task as load_editor_ai_task,
-    raise_if_task_cancelled,
-    request_task_cancellation,
-    start_task as start_editor_ai_task,
-    current_task_id as current_editor_ai_task_id,
-    task_context as editor_ai_task_context,
-)
 from substar_core.storage import (
     ProjectConflictError,
     ProjectIntegrityError,
@@ -86,12 +77,9 @@ from substar_core.storage import (
 )
 from substar_core.validation import ValidationPolicy, validate_revision
 from substar_core.export import SubtitleExportMode, render_document_srt
-from substar_core.editor.translation.service import (
-    TranslationTaskError,
-    cancel_translation_task,
-    create_translation_task,
-    load_translation_status,
-)
+from substar_core.editor.translation.artifacts import TRANSLATION_INPUT_SCHEMA
+from substar_core.editor.calibration.handler import CALIBRATION_INPUT_SCHEMA
+from substar_core.credential_store import model_provider_credential_ref
 from substar_core.project_exchange import (
     ProjectExchangeError,
     apply_external_generation_checkpoint,
@@ -263,7 +251,6 @@ def _tutorial_project(project_id: str) -> dict[str, Any] | None:
             "code": "tutorial_project_invalid", "message": str(exc)
         }) from exc
     allowed = {
-        "substar.tutorial-project.v1": {"reference-script-v1"},
         "substar.tutorial-project.v2": {"reference-script-v1", "advanced-ai-v1"},
     }
     if (
@@ -296,7 +283,7 @@ def _tutorial_example(case_id: str) -> tuple[Path, dict[str, Any]]:
         }) from exc
     if (
         not isinstance(value, dict)
-        or value.get("schema_version") != "substar.tutorial-example.v1"
+        or value.get("schema_version") != "substar.tutorial-example.v2"
         or value.get("case_id") != case_id
         or not isinstance(value.get("assets"), dict)
     ):
@@ -377,90 +364,6 @@ def _collect_generated_hotwords(project_id: str, glossary_id: str) -> list[dict[
     if changed:
         save_glossary(list(by_key.values()))
     return active_glossary(glossary_id)
-
-
-def _editor_task_path(project_id: str, kind: str) -> Path:
-    return project_job_path(project_id) / "editor_tasks" / f"{kind}.json"
-
-
-def _write_editor_task(
-    project_id: str, kind: str, *, status: str, progress: float,
-    message: str, error: str = "", task_id: str = "",
-    ai_progress_value: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    path = _editor_task_path(project_id, kind)
-    previous: dict[str, Any] = {}
-    if path.is_file():
-        try:
-            previous = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            previous = {}
-    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-    resolved_task_id = task_id or str(
-        previous.get("task_id") or f"{kind}_{uuid.uuid4().hex[:16]}"
-    )
-    same_task = previous.get("task_id") == resolved_task_id
-    value = {
-        "schema_version": "substar.editor-task.v1",
-        "task_id": resolved_task_id,
-        "project_id": project_id,
-        "kind": kind,
-        "status": status,
-        "progress": max(0.0, min(1.0, float(progress))),
-        "message": message,
-        "error": error,
-        "created_at": (previous.get("created_at") or now) if same_task else now,
-        "updated_at": now,
-        "finished_at": now if status in {
-            "completed", "succeeded", "succeeded_with_issues", "failed", "cancelled"
-        } else None,
-    }
-    if ai_progress_value is not None:
-        value["ai_progress"] = dict(ai_progress_value)
-    elif same_task and isinstance(previous.get("ai_progress"), Mapping):
-        value["ai_progress"] = dict(previous["ai_progress"])
-    atomic_write_json(path, value)
-    return value
-
-
-def _project_editor_ai_task_payload(
-    project_id: str, task: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    """Project the detailed stage status onto the exclusive task lock.
-
-    The exclusive task is the sole lock/lifecycle authority.  Calibration's
-    stage file is the sole progress/message authority.  Keeping those roles
-    explicit prevents a lock-only poll from replacing real progress with 0%.
-    """
-
-    if task is None:
-        return None
-    projected = dict(task)
-    if str(task.get("kind") or "") != EditorAiTaskKind.CALIBRATION.value:
-        return projected
-    path = _editor_task_path(project_id, EditorAiTaskKind.CALIBRATION.value)
-    try:
-        detail = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
-        return projected
-    if not isinstance(detail, dict) or detail.get("task_id") != task.get("task_id"):
-        return projected
-    projected["progress"] = max(
-        0.0, min(1.0, float(detail.get("progress") or 0.0))
-    )
-    projected["message"] = str(detail.get("message") or "")
-    projected["display_error"] = str(detail.get("error") or "")
-    if isinstance(detail.get("ai_progress"), Mapping):
-        projected["ai_progress"] = dict(detail["ai_progress"])
-    if str(task.get("state") or "") in {"queued", "running", "cancelling"}:
-        try:
-            started_at = datetime.fromisoformat(str(task.get("started_at") or ""))
-            projected["elapsed_seconds"] = max(
-                0, int((datetime.now(timezone.utc) - started_at).total_seconds())
-            )
-        except (TypeError, ValueError):
-            projected["elapsed_seconds"] = 0
-    return projected
 
 
 def _project_document_payload(document: EditorDocument) -> dict[str, Any]:
@@ -706,54 +609,26 @@ def list_projects() -> dict[str, Any]:
 
 
 @router.get("/editor-tasks")
-def list_editor_tasks() -> dict[str, Any]:
+def list_editor_tasks(request: Request) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
-    root = _projects_root()
-    if not root.is_dir():
-        return {"schema_version": "substar.editor-task-list.v1", "tasks": tasks}
-    for directory in root.iterdir():
-        if not directory.is_dir() or not (directory / PROJECT_DIRECTORY / "manifest.json").is_file():
+    for task in request.app.state.task_service.list_tasks(limit=500):
+        if task["task_type"] not in {"calibration", "translation"}:
             continue
-        project_id = directory.name
+        project_id = str(task.get("project_id") or "")
         display_name = project_id
         try:
-            display_name = load_task_info(directory, project_id)["display_name"]
-        except (OSError, TypeError, ValueError):
+            display_name = load_task_info(project_job_path(project_id), project_id)["display_name"]
+        except (OSError, TypeError, ValueError, HTTPException):
             pass
-        try:
-            translation = load_translation_status(directory)
-        except (OSError, TypeError, ValueError, ProjectStoreError):
-            # One damaged or half-migrated project must not make the global
-            # task feed unusable for every healthy project.  The project
-            # remains available to its own integrity/error surfaces while
-            # the aggregate feed isolates it.
-            translation = None
-        if translation and translation.get("state") in {
-            "queued", "running", "cancelling", "failed", "interrupted"
-        }:
-            tasks.append({
-                **translation,
-                # The split-page task runtime consumes one canonical status
-                # field for every long-running task.  Translation's persisted
-                # detail contract calls the same value ``state``; expose both
-                # without forcing the client to guess by task kind.
-                "status": str(translation.get("state") or ""),
-                "kind": "translation",
-                "display_name": display_name,
-            })
-        task_dir = directory / "editor_tasks"
-        if not task_dir.is_dir():
-            continue
-        for path in task_dir.glob("*.json"):
-            try:
-                value = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if value.get("status") not in {"queued", "running", "failed"}:
-                continue
-            tasks.append({**value, "display_name": display_name})
+        tasks.append({
+            **task,
+            "status": task["state"],
+            "kind": task["task_type"],
+            "message": task.get("progress_message") or "",
+            "display_name": display_name,
+        })
     tasks.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
-    return {"schema_version": "substar.editor-task-list.v1", "tasks": tasks}
+    return {"schema_version": "substar.editor-task-list.v2", "tasks": tasks}
 
 
 @router.get("/projects/{project_id}")
@@ -977,28 +852,79 @@ def apply_tutorial_stage(
 
 
 @router.get("/projects/{project_id}/ai-task")
-def get_project_editor_ai_task(project_id: str) -> dict[str, Any] | None:
-    try:
-        task = load_editor_ai_task(project_job_path(project_id))
-        return _project_editor_ai_task_payload(project_id, task)
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(status_code=500, detail={
-            "code": "editor_ai_task_state_invalid", "message": str(exc)
-        }) from exc
+def get_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any] | None:
+    tasks = request.app.state.task_service.list_tasks(project_id=project_id, limit=20)
+    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation"}]
+    if not tasks:
+        return None
+    task = tasks[0]
+    task_input = request.app.state.task_service.get_task_input(task["task_id"])
+    return _runtime_ai_task_projection(task, task_input)
+
+
+def _runtime_ai_task_projection(
+    task: Mapping[str, Any], task_input: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """Return the single UI projection shared by calibration and translation."""
+
+    completed = int(task.get("completed_units") or 0)
+    total = int(task.get("total_units") or 0)
+    result = task.get("result") if isinstance(task.get("result"), Mapping) else {}
+    error = task.get("error") if isinstance(task.get("error"), Mapping) else {}
+    frozen = task_input if isinstance(task_input, Mapping) else {}
+    runtime_phase = str(task.get("phase") or "primary")
+    display_phase = {
+        "primary": "executing",
+        "validation": "validating",
+        "delivery": (
+            "completed"
+            if str(task.get("state") or "") in {"succeeded", "succeeded_with_issues"}
+            else "publishing"
+        ),
+        "repair": "repair",
+    }.get(runtime_phase, runtime_phase)
+    return {
+        **dict(task),
+        "kind": task["task_type"],
+        "message": task.get("progress_message") or "",
+        "display_error": str(error.get("message") or ""),
+        "result_revision_id": result.get("result_revision_id"),
+        "source_language_selection": frozen.get("source_language_selection"),
+        "source_language": frozen.get("source_language"),
+        "target_language": frozen.get("target_language"),
+        "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
+        "problem_cue_ids": list(result.get("problem_cue_ids") or []),
+        "ai_progress": {
+            "phase": display_phase,
+            "message": task.get("progress_message") or "",
+            "units": {
+                "planned": total,
+                "completed": completed,
+                "repair_planned": total if task.get("phase") == "repair" else 0,
+                "repair_completed": completed if task.get("phase") == "repair" else 0,
+            },
+            "steps": [
+                {"label": "模型处理"}, {"label": "修复"},
+                {"label": "结果验收"}, {"label": "生成可编辑结果"},
+                {"label": "交付"},
+            ],
+        },
+    }
 
 
 @router.delete("/projects/{project_id}/ai-task")
-def cancel_project_editor_ai_task(project_id: str) -> dict[str, Any]:
-    job_dir = project_job_path(project_id)
-    try:
-        task = request_task_cancellation(job_dir)
-    except EditorAiTaskConflict as exc:
+def cancel_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any]:
+    tasks = request.app.state.task_service.list_tasks(
+        project_id=project_id,
+        states=["queued", "running", "cancelling"],
+        limit=20,
+    )
+    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation"}]
+    if not tasks:
         raise HTTPException(status_code=409, detail={
-            "code": "editor_ai_task_cancel_rejected", "message": str(exc)
-        }) from exc
-    if task.get("kind") == EditorAiTaskKind.TRANSLATION.value:
-        cancel_translation_task(job_dir, str(task["task_id"]))
-    return task
+            "code": "editor_ai_task_cancel_rejected", "message": "当前没有可取消的 AI 任务"
+        })
+    return request.app.state.task_service.request_cancel(tasks[0]["task_id"])
 
 
 @router.get("/projects/{project_id}/task-info")
@@ -1470,13 +1396,6 @@ def _save_revision(
     operation: str,
     provenance: ChangeProvenance | None = None,
 ) -> Any:
-    try:
-        assert_editor_write_allowed(project_job_path(project_id))
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(
-            status_code=423,
-            detail={"code": "editor_ai_task_locked", "message": str(exc)},
-        ) from exc
     store = open_project_store(project_id)
     provenance = provenance or ChangeProvenance(
         kind=ChangeKind.MANUAL, operation=operation, actor="editor"
@@ -1540,12 +1459,6 @@ def save_project_document(
 def apply_project_operation(
     project_id: str, payload: DocumentOperationRequest
 ) -> dict[str, Any]:
-    try:
-        assert_editor_write_allowed(project_job_path(project_id))
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(status_code=423, detail={
-            "code": "editor_ai_task_locked", "message": str(exc)
-        }) from exc
     return commit_single_operation(
         project_id,
         payload,
@@ -1560,12 +1473,6 @@ def apply_project_operation(
 def apply_project_operation_batch(
     project_id: str, payload: DocumentOperationBatchRequest
 ) -> dict[str, Any]:
-    try:
-        assert_editor_write_allowed(project_job_path(project_id))
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(status_code=423, detail={
-            "code": "editor_ai_task_locked", "message": str(exc)
-        }) from exc
     return commit_operation_batch(
         project_id,
         payload,
@@ -2031,15 +1938,10 @@ def _run_editor_ai_blocks(
     if not api_key:
         raise HTTPException(status_code=400, detail={"code": "api_key_missing", "message": "尚未配置翻译 API Key"})
 
-    owned_task_id = current_editor_ai_task_id()
-
     def run(
         item: tuple[str, list[dict[str, Any]]], active_stage: str, attempt: int,
         rejected: tuple[dict[str, Any], dict[str, Any]] | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-        if owned_task_id:
-            with editor_ai_task_context(owned_task_id):
-                return run_owned(item, active_stage, attempt, rejected)
         return run_owned(item, active_stage, attempt, rejected)
 
     def run_owned(
@@ -2084,7 +1986,7 @@ def _run_editor_ai_blocks(
             if response_validator is not None and not response_validator(
                 block_id, value
             ):
-                raise Stage2Error(
+                raise ModelGatewayError(
                     f"{active_stage} returned an invalid response contract"
                 )
             return block_id, value, {
@@ -2095,13 +1997,13 @@ def _run_editor_ai_blocks(
                 "repair_request_count": 1 if attempt > 1 else 0,
                 **request_metadata,
             }
-        except Stage2Error as exc:
+        except ModelGatewayError as exc:
             return block_id, value, {
                 "attempt": attempt,
                 "stage": active_stage,
                 "error": str(exc),
                 "terminal_error": (
-                    isinstance(exc, Stage2RequestError)
+                    isinstance(exc, ModelGatewayRequestError)
                 ),
                 "primary_request_count": 1,
                 "repair_attempted": attempt > 1,
@@ -2122,7 +2024,7 @@ def _run_editor_ai_blocks(
     failed = [row for row in primary_results if row[2].get("error")]
     terminal = [row for row in failed if row[2].get("terminal_error")]
     if terminal:
-        raise Stage2Error(str(terminal[0][2]["error"]))
+        raise ModelGatewayError(str(terminal[0][2]["error"]))
     if not retry_stage or not failed:
         if phase_callback is not None:
             phase_callback("repair", 0, 0, 0)
@@ -2323,8 +2225,10 @@ def _validated_calibration_contract_actions(
     return accepted, rejected
 
 
-@router.post("/projects/{project_id}/ai-calibrate")
-def ai_calibrate_project(project_id: str, payload: AiCalibrationRequest) -> dict[str, Any]:
+@router.post("/projects/{project_id}/ai-calibrate", status_code=202)
+def ai_calibrate_project(
+    project_id: str, payload: AiCalibrationRequest, request: Request
+) -> dict[str, Any]:
     """Apply model-authored punctuation, casing, terminology and ASR corrections."""
     latest = open_project_store(project_id).load_latest()
     if latest is None:
@@ -2335,61 +2239,50 @@ def ai_calibrate_project(project_id: str, payload: AiCalibrationRequest) -> dict
         raise HTTPException(status_code=409, detail={
             "code": "revision_conflict", "message": "AI 校准基于旧版本，请刷新后重试"
         })
-    try:
-        exclusive_task = start_editor_ai_task(
-            project_job_path(project_id),
-            project_id=project_id,
-            kind=EditorAiTaskKind.CALIBRATION,
-            based_on_revision_id=latest.revision_id,
-        )
-    except EditorAiTaskConflict as exc:
-        raise HTTPException(status_code=423, detail={
-            "code": "editor_ai_task_locked", "message": str(exc)
-        }) from exc
-    task = _write_editor_task(
-        project_id, "calibration", status="running", progress=0.02,
-        message="AI 校准准备中", task_id=exclusive_task["task_id"],
+    service = request.app.state.task_service
+    active = service.list_tasks(
+        project_id=project_id,
+        states=["queued", "running", "cancelling"],
+        limit=20,
     )
+    if any(task["task_type"] in {"translation", "calibration"} for task in active):
+        raise HTTPException(status_code=423, detail={
+            "code": "editor_ai_task_locked", "message": "当前项目已有 AI 任务正在运行"
+        })
+    settings = load_settings(include_secret=False)
     try:
-        with editor_ai_task_context(task["task_id"]):
-            result = _ai_calibrate_project(project_id, payload, task["task_id"])
-        result_state = (
-            EditorAiTaskState.SUCCEEDED_WITH_ISSUES
-            if result.get("failed_blocks") or result.get("problem_cue_ids")
-            else EditorAiTaskState.SUCCEEDED
+        settings.update(task_info_settings(load_task_info(project_job_path(project_id), project_id)))
+    except (OSError, TypeError, ValueError):
+        pass
+    provider_id = str(settings.get("active_model_provider") or "").strip()
+    frozen_settings = {
+        key: value for key, value in settings.items()
+        if not any(marker in key.lower() for marker in (
+            "api_key", "secret", "password", "authorization", "token"
+        )) and not key.startswith("_")
+    }
+    task_input = {
+        "schema_version": CALIBRATION_INPUT_SCHEMA,
+        "expected_revision_id": latest.revision_id,
+        "instruction": payload.instruction,
+        "provider_id": provider_id,
+        "credential_ref": model_provider_credential_ref(provider_id),
+        "settings": frozen_settings,
+    }
+    try:
+        task = service.create_task(
+            "calibration",
+            CALIBRATION_INPUT_SCHEMA,
+            task_input,
+            project_id=project_id,
+            expected_revision_id=latest.revision_id,
+            idempotency_key=f"calibration:{latest.revision_id}:{sha256(payload.instruction.encode('utf-8')).hexdigest()}",
         )
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            result_state,
-            result_revision_id=_revision_id(result["revision"]),
-        )
-        return result
-    except EditorAiTaskCancelled as exc:
-        _write_editor_task(
-            project_id, "calibration", status="cancelled", progress=0.0,
-            message="AI 校准已取消", task_id=task["task_id"],
-        )
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            EditorAiTaskState.CANCELLED,
-        )
-        raise HTTPException(status_code=409, detail={
-            "code": "editor_ai_task_cancelled", "message": str(exc)
-        }) from exc
+        return _runtime_ai_task_projection(task, task_input)
     except Exception as exc:
-        _write_editor_task(
-            project_id, "calibration", status="failed", progress=0.0,
-            message="AI 校准失败", error=str(exc), task_id=task["task_id"],
-        )
-        finish_editor_ai_task(
-            project_job_path(project_id),
-            task["task_id"],
-            EditorAiTaskState.FAILED,
-            error={"code": "calibration_failed", "message": str(exc)[:2000]},
-        )
-        raise
+        raise HTTPException(status_code=409, detail={
+            "code": "calibration_start_rejected", "message": str(exc)
+        }) from exc
 
 
 def _exchange_prompt_options(project_id: str) -> dict[str, Any]:
@@ -2781,7 +2674,12 @@ def _apply_ai_calibration_operations(
 
 
 def _ai_calibrate_project(
-    project_id: str, payload: AiCalibrationRequest, task_id: str
+    project_id: str,
+    payload: AiCalibrationRequest,
+    task_id: str,
+    *,
+    settings_snapshot: Mapping[str, Any] | None = None,
+    progress_sink: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     store = open_project_store(project_id)
     latest = store.load_latest()
@@ -2794,14 +2692,13 @@ def _ai_calibrate_project(
         done_progress = ai_progress(
             kind="calibration", phase="completed", unit_label="块"
         )
-        _write_editor_task(project_id, "calibration", status="completed", progress=1.0,
-                           message=done_progress["message"], task_id=task_id,
-                           ai_progress_value=done_progress)
+        if progress_sink is not None:
+            progress_sink(done_progress)
         return {"revision": latest.to_dict(), "corrections": [], "failed_blocks": []}
 
     blocks = _editor_ai_group_blocks(cues)
     request_blocks = _calibration_model_blocks(blocks)
-    settings = load_settings(include_secret=True)
+    settings = dict(settings_snapshot or load_settings(include_secret=True))
     calibration_glossary = [
         {
             "source": row.get("source"),
@@ -2873,11 +2770,8 @@ def _ai_calibrate_project(
             ),
             detail=detail,
         )
-        _write_editor_task(
-            project_id, "calibration", status="running",
-            progress=float(value["progress"]), message=str(value["message"]),
-            task_id=task_id, ai_progress_value=value,
-        )
+        if progress_sink is not None:
+            progress_sink(value)
 
     def primary_progress(done: int, total: int) -> None:
         tracker["planned"] = total
@@ -3046,7 +2940,6 @@ def _ai_calibrate_project(
         "semantic_group_count": len({str(cue.get("group_id")) for cue in cues}),
         "single_attempt_delivery": True,
     }
-    raise_if_task_cancelled(task_id)
     if blocks and len(failed_blocks) == len(blocks):
         # A provider-wide failure is not a completed calibration. In
         # particular, do not append an empty AI revision whose fatal block
@@ -3062,7 +2955,7 @@ def _ai_calibrate_project(
         atomic_write_json(
             failure_audit_path,
             {
-                "schema_version": "substar.calibration-audit.v1",
+                "schema_version": "substar.calibration-audit.v2",
                 "project_id": project_id,
                 "task_id": task_id,
                 "based_on_revision_id": latest.revision_id,
@@ -3145,7 +3038,7 @@ def _ai_calibrate_project(
         atomic_write_json(
             audit_path,
             {
-                "schema_version": "substar.calibration-audit.v1",
+                "schema_version": "substar.calibration-audit.v2",
                 "project_id": project_id,
                 "task_id": task_id,
                 "based_on_revision_id": latest.revision_id,
@@ -3168,7 +3061,7 @@ def _ai_calibrate_project(
         atomic_write_json(
             result_path,
             {
-                "schema_version": "substar.calibration-result.v1",
+                "schema_version": "substar.calibration-result.v2",
                 "task_id": task_id,
                 "project_id": project_id,
                 "based_on_revision_id": latest.revision_id,
@@ -3226,13 +3119,8 @@ def _ai_calibrate_project(
             f"{len(set(problem_cue_ids))} 条转人工"
         ),
     )
-    _write_editor_task(
-        project_id, "calibration",
-        status=("succeeded_with_issues" if failed_blocks or problem_cue_ids else "succeeded"),
-        progress=1.0,
-        message=final_progress["message"], task_id=task_id,
-        ai_progress_value=final_progress,
-    )
+    if progress_sink is not None:
+        progress_sink(final_progress)
     return result
 
 
@@ -3291,7 +3179,7 @@ def validate_project(
 
 @router.post("/projects/{project_id}/translation", status_code=202)
 def start_project_translation(
-    project_id: str, payload: TranslationStartRequest
+    project_id: str, payload: TranslationStartRequest, request: Request
 ) -> dict[str, Any]:
     job_dir = project_job_path(project_id)
     settings = load_settings(include_secret=False)
@@ -3334,70 +3222,63 @@ def start_project_translation(
         raise HTTPException(status_code=409, detail={
             "code": "revision_conflict", "message": "翻译基于旧版本，请刷新后重试"
         })
-    try:
-        exclusive_task = start_editor_ai_task(
-            job_dir,
-            project_id=project_id,
-            kind=EditorAiTaskKind.TRANSLATION,
-            based_on_revision_id=latest.revision_id,
-        )
-    except EditorAiTaskConflict as exc:
+    task_service = request.app.state.task_service
+    active = task_service.list_tasks(
+        project_id=project_id,
+        states=["queued", "running", "cancelling"],
+        limit=20,
+    )
+    if any(task["task_type"] in {"translation", "calibration"} for task in active):
         raise HTTPException(status_code=423, detail={
-            "code": "editor_ai_task_locked", "message": str(exc)
-        }) from exc
+            "code": "editor_ai_task_locked", "message": "当前项目已有 AI 任务正在运行"
+        })
+    provider_id = str(settings.get("active_model_provider") or "").strip()
+    frozen_settings = {
+        key: value
+        for key, value in settings.items()
+        if not any(marker in key.lower() for marker in (
+            "api_key", "secret", "password", "authorization", "token"
+        ))
+        and not key.startswith("_")
+    }
+    task_input = {
+        "schema_version": TRANSLATION_INPUT_SCHEMA,
+        "expected_revision_id": latest.revision_id,
+        "source_language_selection": payload.source_language,
+        "source_language": settings["translation_source_language"],
+        "target_language": payload.target_language,
+        "mapping_mode": payload.mapping_mode,
+        "provider_id": provider_id,
+        "credential_ref": model_provider_credential_ref(provider_id),
+        "settings": frozen_settings,
+    }
     try:
-        return create_translation_task(
-            job_dir,
+        task = task_service.create_task(
+            "translation",
+            TRANSLATION_INPUT_SCHEMA,
+            task_input,
+            project_id=project_id,
             expected_revision_id=payload.expected_revision_id,
-            workers=payload.workers,
-            settings=settings,
-            task_id=exclusive_task["task_id"],
+            idempotency_key=f"translation:{payload.expected_revision_id}:{payload.mapping_mode}",
         )
-    except TranslationTaskError as exc:
-        finish_editor_ai_task(
-            job_dir,
-            exclusive_task["task_id"],
-            EditorAiTaskState.FAILED,
-            error={"code": "translation_start_failed", "message": str(exc)[:2000]},
-        )
+        return _runtime_ai_task_projection(task, task_input)
+    except Exception as exc:
         raise HTTPException(
             status_code=409,
             detail={"code": "translation_start_rejected", "message": str(exc)},
         ) from exc
-    except (ProjectStoreError, ProjectIntegrityError) as exc:
-        finish_editor_ai_task(
-            job_dir,
-            exclusive_task["task_id"],
-            EditorAiTaskState.FAILED,
-            error={"code": "translation_start_failed", "message": str(exc)[:2000]},
-        )
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "project_not_found", "message": str(exc)},
-        ) from exc
-    except Exception as exc:
-        finish_editor_ai_task(
-            job_dir,
-            exclusive_task["task_id"],
-            EditorAiTaskState.FAILED,
-            error={"code": "translation_start_failed", "message": str(exc)[:2000]},
-        )
-        raise
 
 
 @router.get("/projects/{project_id}/translation")
-def get_project_translation(project_id: str) -> dict[str, Any]:
-    job_dir = project_job_path(project_id)
-    try:
-        state = load_translation_status(job_dir)
-    except TranslationTaskError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "translation_status_invalid", "message": str(exc)},
-        ) from exc
-    if state is None:
+def get_project_translation(project_id: str, request: Request) -> dict[str, Any]:
+    tasks = request.app.state.task_service.list_tasks(
+        project_id=project_id, task_type="translation", limit=1
+    )
+    if not tasks:
         raise HTTPException(
             status_code=404,
             detail={"code": "translation_not_started", "message": "项目尚未启动翻译"},
         )
-    return state
+    task = tasks[0]
+    task_input = request.app.state.task_service.get_task_input(task["task_id"])
+    return _runtime_ai_task_projection(task, task_input)

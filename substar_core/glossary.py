@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import uuid
@@ -18,11 +17,6 @@ QWEN_HOTWORD_MAX_COUNT = 2000
 
 def _clean_text(value: Any, limit: int = 300) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or "")).strip()[:limit]
-
-
-def _legacy_collection_id(name: str) -> str:
-    digest = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()[:16]
-    return f"legacy_{digest}"
 
 
 def normalize_collection(value: dict[str, Any]) -> dict[str, str]:
@@ -73,20 +67,18 @@ def normalize_entry(value: dict[str, Any]) -> dict[str, Any]:
 
 def _normalize_library(value: Any) -> dict[str, Any]:
     collections: list[dict[str, str]] = [normalize_collection({"kind": "global"})]
-    entries_value: Any = []
-    if isinstance(value, list):
-        entries_value = value
-    elif isinstance(value, dict):
-        entries_value = value.get("entries", [])
-        raw_collections = value.get("collections", [])
-        if isinstance(raw_collections, list):
-            for item in raw_collections:
-                if not isinstance(item, dict) or item.get("kind") == "global" or item.get("id") == GLOBAL_GLOSSARY_ID:
-                    continue
-                try:
-                    collections.append(normalize_collection(item))
-                except ValueError:
-                    continue
+    if not isinstance(value, dict) or value.get("schema_version") != GLOSSARY_SCHEMA_VERSION:
+        return {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": collections, "entries": []}
+    entries_value: Any = value.get("entries", [])
+    raw_collections = value.get("collections", [])
+    if isinstance(raw_collections, list):
+        for item in raw_collections:
+            if not isinstance(item, dict) or item.get("kind") == "global" or item.get("id") == GLOBAL_GLOSSARY_ID:
+                continue
+            try:
+                collections.append(normalize_collection(item))
+            except ValueError:
+                continue
 
     known_ids = {item["id"] for item in collections}
     entries: list[dict[str, Any]] = []
@@ -97,33 +89,24 @@ def _normalize_library(value: Any) -> dict[str, Any]:
             continue
         candidate = dict(raw)
         if not _clean_text(candidate.get("glossary_id"), 80):
-            scope = _clean_text(candidate.get("scope", "global"), 30)
-            legacy_name = _clean_text(candidate.get("project"), 100)
-            if scope == "project" and legacy_name:
-                candidate["glossary_id"] = _legacy_collection_id(legacy_name)
-                if candidate["glossary_id"] not in known_ids:
-                    collections.append({"id": candidate["glossary_id"], "name": legacy_name, "kind": "project"})
-                    known_ids.add(candidate["glossary_id"])
-            else:
-                candidate["glossary_id"] = GLOBAL_GLOSSARY_ID
+            continue
         try:
             entry = normalize_entry(candidate)
         except ValueError:
             continue
         if entry["glossary_id"] not in known_ids:
-            collections.append({"id": entry["glossary_id"], "name": entry["project"] or "已恢复的项目词库", "kind": "project"})
-            known_ids.add(entry["glossary_id"])
+            continue
         entries.append(entry)
     return {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": collections, "entries": entries}
 
 
 def load_glossary_library() -> dict[str, Any]:
     if not GLOSSARY_FILE.exists():
-        return _normalize_library({})
+        return _normalize_library({"schema_version": GLOSSARY_SCHEMA_VERSION})
     try:
         value = json.loads(GLOSSARY_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return _normalize_library({})
+        return _normalize_library({"schema_version": GLOSSARY_SCHEMA_VERSION})
     return _normalize_library(value)
 
 

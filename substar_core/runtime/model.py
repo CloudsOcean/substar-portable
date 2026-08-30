@@ -6,8 +6,8 @@ from enum import Enum
 from typing import Any, Mapping
 
 
-TASK_SCHEMA_VERSION = "substar.task.v1"
-TASK_EVENT_SCHEMA_VERSION = "substar.task-event.v1"
+TASK_SCHEMA_VERSION = "substar.task.v2"
+TASK_EVENT_SCHEMA_VERSION = "substar.task-event.v2"
 API_ERROR_SCHEMA_VERSION = "substar.api-error.v1"
 API_ERROR_CATEGORIES = frozenset(
     {
@@ -33,6 +33,7 @@ class TaskState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
+    SUCCEEDED_WITH_ISSUES = "succeeded_with_issues"
     FAILED = "failed"
     CANCELLING = "cancelling"
     CANCELLED = "cancelled"
@@ -46,14 +47,14 @@ TASK_TYPES = frozenset(
         "segmentation",
         "translation",
         "calibration",
-        "review",
         "model_download",
         "export",
-        "dubbing",
     }
 )
 
-TERMINAL_STATES = frozenset({TaskState.SUCCEEDED, TaskState.CANCELLED})
+TERMINAL_STATES = frozenset(
+    {TaskState.SUCCEEDED, TaskState.SUCCEEDED_WITH_ISSUES, TaskState.CANCELLED}
+)
 ACTIVE_STATES = frozenset({TaskState.QUEUED, TaskState.RUNNING, TaskState.CANCELLING})
 RETRYABLE_STATES = frozenset({TaskState.FAILED, TaskState.INTERRUPTED})
 
@@ -64,6 +65,7 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
     TaskState.RUNNING: frozenset(
         {
             TaskState.SUCCEEDED,
+            TaskState.SUCCEEDED_WITH_ISSUES,
             TaskState.FAILED,
             TaskState.CANCELLING,
             TaskState.INTERRUPTED,
@@ -73,6 +75,7 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
         {
             TaskState.CANCELLED,
             TaskState.SUCCEEDED,
+            TaskState.SUCCEEDED_WITH_ISSUES,
             TaskState.FAILED,
             TaskState.INTERRUPTED,
         }
@@ -80,6 +83,7 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
     TaskState.FAILED: frozenset({TaskState.QUEUED}),
     TaskState.INTERRUPTED: frozenset({TaskState.QUEUED}),
     TaskState.SUCCEEDED: frozenset(),
+    TaskState.SUCCEEDED_WITH_ISSUES: frozenset(),
     TaskState.CANCELLED: frozenset(),
 }
 
@@ -93,6 +97,7 @@ EVENT_TYPES = frozenset(
         "task.cancel_requested",
         "task.cancelled",
         "task.succeeded",
+        "task.succeeded_with_issues",
         "task.failed",
         "task.interrupted",
         "task.artifact_registered",
@@ -206,6 +211,11 @@ class TaskRecord:
     progress: float
     progress_message: str | None
     step: str | None
+    phase: str | None
+    completed_units: int
+    total_units: int
+    repair_phase_entered: bool
+    needs_attention: bool
     wait_reason: str | None
     input_schema: str
     input_payload: dict[str, Any]
@@ -234,6 +244,11 @@ class TaskRecord:
             progress=float(row["progress"]),
             progress_message=row["progress_message"],
             step=row["step"],
+            phase=row["phase"],
+            completed_units=int(row["completed_units"]),
+            total_units=int(row["total_units"]),
+            repair_phase_entered=bool(row["repair_phase_entered"]),
+            needs_attention=bool(row["needs_attention"]),
             wait_reason=row["wait_reason"],
             input_schema=str(row["input_schema"]),
             input_payload=decode_json_object(row["input_json"]) or {},
@@ -266,6 +281,11 @@ class TaskRecord:
             "progress": self.progress,
             "progress_message": self.progress_message,
             "step": self.step,
+            "phase": self.phase,
+            "completed_units": self.completed_units,
+            "total_units": self.total_units,
+            "repair_phase_entered": self.repair_phase_entered,
+            "needs_attention": self.needs_attention,
             "wait_reason": self.wait_reason,
             "input_schema": self.input_schema,
             "expected_revision_id": self.expected_revision_id,

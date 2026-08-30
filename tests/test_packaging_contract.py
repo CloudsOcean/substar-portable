@@ -28,15 +28,16 @@ class PackagingContractTests(unittest.TestCase):
             self.assertIn(f"'{resource}'", script)
         self.assertIn("run_transcription_worker.py", script)
         self.assertIn("run_segmentation_worker.py", script)
-        self.assertIn("run_flash_map_pro_editor.py", script)
-        self.assertIn("run_global_planner_ab.py", script)
-        self.assertIn("run_production_translation.py", script)
-        self.assertIn("run_editor_model_request.py", script)
+        self.assertNotIn("run_flash_map_pro_editor.py", script)
+        self.assertNotIn("run_global_planner_ab.py", script)
+        self.assertNotIn("segmentation_support.py", script)
+        self.assertIn("run_translation_worker.py", script)
+        self.assertIn("run_calibration_worker.py", script)
         self.assertNotIn("Copy-RequiredDirectory 'tests'", script)
 
     def test_release_manifest_contains_no_projects_or_retired_capability(self) -> None:
         manifest = read_text("portable_manifest.json")
-        self.assertIn('"version": "1.0.14"', manifest)
+        self.assertIn('"version": "2.0.0"', manifest)
         self.assertIn('"package_layout": "transparent-source-runtime"', manifest)
         self.assertIn('"reference-script-v1"', manifest)
         self.assertIn('"advanced-ai-v1"', manifest)
@@ -184,7 +185,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("PORTABLE_PREFIX", security)
         self.assertIn("AESGCM", security)
         self.assertIn('"credentials.enc"', config)
-        self.assertIn('"credentials.dpapi"', config)
+        self.assertNotIn('"credentials.dpapi"', config)
 
 
 if __name__ == "__main__":

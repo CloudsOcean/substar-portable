@@ -3,13 +3,11 @@ from __future__ import annotations
 import json
 from unittest.mock import Mock, patch
 
-from substar_core.ai_progress import ai_progress
+from substar_core.ai_progress import ai_progress, progress_from_mapping
 from substar_core.editor import http_api
 from substar_core.editor.translation import contextual
-from substar_core.editor.translation.service import _progress
-from substar_core.stage2 import Stage2Error
+from substar_core.model_gateway import ModelGatewayError, call_json_model
 from substar_core.model_routing import resolve_stage_request
-from scripts.segmentation_support import call_model
 
 
 def test_common_progress_contract_is_monotonic_and_counted() -> None:
@@ -82,7 +80,7 @@ def test_calibration_runs_primary_then_one_repair_and_reports_both_counts() -> N
 
     def fail_one_primary(stage: str, block_id: str, _attempt: int) -> None:
         if stage == "calibration" and block_id == "b2":
-            raise Stage2Error("injected invalid primary block")
+            raise ModelGatewayError("injected invalid primary block")
 
     settings = {
         "translation_api_key": "test-key",
@@ -118,7 +116,7 @@ def test_calibration_runs_primary_then_one_repair_and_reports_both_counts() -> N
     assert [row["stage"] for _block, _value, row in results].count("audit_repair") == 1
     assert phases[0] == ("repair", 0, 1, 0)
     assert phases[-1] == ("repair", 1, 1, 1)
-    assert len(calls) == 2  # b1 primary + b2 fallback; injected b2 primary made no request
+    assert len(calls) == 2  # b1 primary + b2 repair; injected b2 primary made no request
     assert all(call["api_key"] == "test-key" for call in calls)
     assert all(call["model"] == "glm-5.3-flash" for call in calls)
     assert all(call["thinking_mode"] == "enabled" for call in calls)
@@ -163,40 +161,62 @@ def test_translation_repairs_only_invalid_groups_and_reports_repair_denominator(
     assert progress[-1] == (1, 1, 1)
 
 
-def test_translation_service_reads_unified_counted_progress(tmp_path) -> None:
-    path = tmp_path / "progress.json"
+def test_translation_does_not_enter_an_empty_repair_phase() -> None:
+    groups = [{"group_id": "g1"}]
+    progress: list[tuple[int, int, int]] = []
+
+    with patch.object(
+        contextual,
+        "_presentation_plan",
+        return_value={"group_id": "g1"},
+    ):
+        plans, report = contextual.complete_results(
+            settings={"translation_workers": 1},
+            repair_prompt="repair",
+            groups=groups,
+            response={"group_results": [{"group_id": "g1"}]},
+            progress_callback=lambda done, total, accepted: progress.append(
+                (done, total, accepted)
+            ),
+        )
+
+    assert plans == [{"group_id": "g1"}]
+    assert report["model_repair"]["repair_phase_entered"] is False
+    assert progress == []
+
+
+def test_translation_runtime_reads_unified_counted_progress() -> None:
     value = ai_progress(
         kind="translation", phase="executing", unit_label="个意义组",
         planned=7, completed=3,
     )
-    path.write_text(json.dumps({"ai_progress": value}), encoding="utf-8")
-    progress, message = _progress(path)
-    assert progress == value["progress"]
-    assert message == "模型处理 3/7 个意义组"
+    projected = progress_from_mapping({"ai_progress": value})
+    assert projected is not None
+    assert projected["progress"] == value["progress"]
+    assert projected["message"] == "模型处理 3/7 个意义组"
 
 
-@patch("scripts.segmentation_support.requests.post")
+@patch("substar_core.model_gateway.gateway.requests.post")
 def test_segmentation_shared_caller_enforces_glm_thinking_low(post: Mock) -> None:
     response = Mock()
     response.raise_for_status.return_value = None
-    response.json.return_value = {
+    response.content = json.dumps({
         "choices": [{
             "message": {"content": "{}"},
             "finish_reason": "stop",
         }],
         "usage": {},
-    }
+    }).encode("utf-8")
     post.return_value = response
 
-    _result, telemetry = call_model(
+    _result, telemetry = call_json_model(
         base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key="glm-key",
         model="glm-5.3-flash",
         system_prompt="test",
-        user_payload="{}",
+        user_payload={},
         timeout=30,
         max_tokens=128,
-        json_mode=False,
         thinking_mode="disabled",
         reasoning_effort="low",
         request_attempts=1,

@@ -89,9 +89,8 @@ try {
     )
     foreach ($worker in @(
         'run_transcription_worker.py', 'run_segmentation_worker.py',
-        'run_semantic_segmentation.py', 'segmentation_support.py',
-        'run_flash_map_pro_editor.py', 'run_global_planner_ab.py',
-        'run_production_translation.py', 'run_editor_model_request.py'
+        'run_semantic_segmentation.py',
+        'run_translation_worker.py', 'run_calibration_worker.py'
     )) { Copy-RequiredFile "scripts\$worker" }
 
     foreach ($cache in Get-ChildItem -LiteralPath $BundleRoot -Directory -Recurse -Force | Where-Object { $_.Name -eq '__pycache__' }) {

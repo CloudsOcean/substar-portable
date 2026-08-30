@@ -27,7 +27,7 @@ from .model import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = 2
+RUNTIME_SCHEMA_VERSION = 3
 
 
 def utc_now() -> str:
@@ -144,8 +144,12 @@ class RuntimeStore:
                     f"runtime database schema {current} is newer than supported "
                     f"schema {RUNTIME_SCHEMA_VERSION}"
                 )
-            applied_at = utc_now().replace("'", "''")
-            if current < 1:
+            if current not in (0, RUNTIME_SCHEMA_VERSION):
+                raise InvalidTaskError(
+                    "legacy runtime database is unsupported; v2 requires a fresh runtime-v2.sqlite3"
+                )
+            if current == 0:
+                applied_at = utc_now().replace("'", "''")
                 connection.executescript(
                     f"""
                     BEGIN IMMEDIATE;
@@ -160,13 +164,18 @@ class RuntimeStore:
                         parent_task_id TEXT REFERENCES tasks(task_id),
                         task_type TEXT NOT NULL,
                         state TEXT NOT NULL CHECK (state IN (
-                            'queued','running','succeeded','failed',
+                            'queued','running','succeeded','succeeded_with_issues','failed',
                             'cancelling','cancelled','interrupted'
                         )),
                         attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
                         progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
                         progress_message TEXT,
                         step TEXT,
+                        phase TEXT,
+                        completed_units INTEGER NOT NULL DEFAULT 0 CHECK (completed_units >= 0),
+                        total_units INTEGER NOT NULL DEFAULT 0 CHECK (total_units >= 0),
+                        repair_phase_entered INTEGER NOT NULL DEFAULT 0 CHECK (repair_phase_entered IN (0,1)),
+                        needs_attention INTEGER NOT NULL DEFAULT 0 CHECK (needs_attention IN (0,1)),
                         wait_reason TEXT,
                         input_schema TEXT NOT NULL,
                         input_json TEXT NOT NULL,
@@ -222,6 +231,7 @@ class RuntimeStore:
                         artifact_id TEXT PRIMARY KEY,
                         task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
                         project_id TEXT,
+                        attempt INTEGER NOT NULL CHECK (attempt >= 1),
                         artifact_type TEXT NOT NULL,
                         schema_version TEXT,
                         relative_path TEXT NOT NULL,
@@ -229,7 +239,7 @@ class RuntimeStore:
                         byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
                         created_at TEXT NOT NULL,
                         metadata_json TEXT,
-                        UNIQUE (task_id, relative_path)
+                        UNIQUE (task_id, attempt, relative_path)
                     );
                     CREATE INDEX IF NOT EXISTS tasks_dispatch_idx
                         ON tasks(state, created_at, task_id);
@@ -245,66 +255,10 @@ class RuntimeStore:
                     CREATE INDEX IF NOT EXISTS task_events_project_cursor_idx
                         ON task_events(project_id, event_id);
                     CREATE INDEX IF NOT EXISTS task_artifacts_task_idx
-                        ON task_artifacts(task_id, created_at);
-                    INSERT OR IGNORE INTO schema_migrations(version, name, applied_at)
-                        VALUES (1, 'initial_task_runtime', '{applied_at}');
-                    PRAGMA user_version=1;
-                    COMMIT;
-                    """
-                )
-                current = 1
-            if current < 2:
-                connection.executescript(
-                    f"""
-                    BEGIN IMMEDIATE;
-                    ALTER TABLE task_artifacts RENAME TO task_artifacts_v1;
-                    CREATE TABLE task_artifacts (
-                        artifact_id TEXT PRIMARY KEY,
-                        task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
-                        project_id TEXT,
-                        attempt INTEGER NOT NULL CHECK (attempt >= 1),
-                        artifact_type TEXT NOT NULL,
-                        schema_version TEXT,
-                        relative_path TEXT NOT NULL,
-                        sha256 TEXT NOT NULL,
-                        byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
-                        created_at TEXT NOT NULL,
-                        metadata_json TEXT,
-                        UNIQUE (task_id, attempt, relative_path)
-                    );
-                    INSERT INTO task_artifacts(
-                        artifact_id, task_id, project_id, attempt, artifact_type,
-                        schema_version, relative_path, sha256, byte_size,
-                        created_at, metadata_json
-                    )
-                    SELECT
-                        artifact_id,
-                        task_id,
-                        project_id,
-                        CASE
-                            WHEN COALESCE(
-                                (SELECT attempt FROM tasks
-                                 WHERE tasks.task_id=task_artifacts_v1.task_id),
-                                0
-                            ) >= 1
-                            THEN (SELECT attempt FROM tasks
-                                  WHERE tasks.task_id=task_artifacts_v1.task_id)
-                            ELSE 1
-                        END,
-                        artifact_type,
-                        schema_version,
-                        relative_path,
-                        sha256,
-                        byte_size,
-                        created_at,
-                        metadata_json
-                    FROM task_artifacts_v1;
-                    DROP TABLE task_artifacts_v1;
-                    CREATE INDEX IF NOT EXISTS task_artifacts_task_idx
                         ON task_artifacts(task_id, attempt, created_at);
                     INSERT OR IGNORE INTO schema_migrations(version, name, applied_at)
-                        VALUES (2, 'artifact_attempt_ownership', '{applied_at}');
-                    PRAGMA user_version=2;
+                        VALUES ({RUNTIME_SCHEMA_VERSION}, 'v2_task_runtime', '{applied_at}');
+                    PRAGMA user_version={RUNTIME_SCHEMA_VERSION};
                     COMMIT;
                     """
                 )
@@ -621,7 +575,9 @@ class RuntimeStore:
             )
             connection.execute(
                 "UPDATE tasks SET state='running', attempt=?, progress=0, "
-                "progress_message=NULL, step=NULL, wait_reason=NULL, updated_at=?, "
+                "progress_message=NULL, step=NULL, phase=NULL, completed_units=0, "
+                "total_units=0, repair_phase_entered=0, needs_attention=0, "
+                "wait_reason=NULL, updated_at=?, "
                 "started_at=?, finished_at=NULL, cancel_requested_at=NULL, "
                 "owner_instance_id=?, lease_expires_at=?, result_json=NULL, "
                 "error_json=NULL, row_version=row_version+1 WHERE task_id=?",
@@ -722,6 +678,9 @@ class RuntimeStore:
         message: str | None = None,
         step: str | None = None,
         wait_reason: str | None = None,
+        phase: str | None = None,
+        completed_units: int | None = None,
+        total_units: int | None = None,
         request_id: str | None = None,
     ) -> TaskRecord:
         if not 0.0 <= float(progress) <= 1.0:
@@ -739,10 +698,15 @@ class RuntimeStore:
                 raise TaskStateConflictError(
                     "progress must be monotonic within one task attempt"
                 )
+            completed = int(row["completed_units"]) if completed_units is None else int(completed_units)
+            total = int(row["total_units"]) if total_units is None else int(total_units)
+            if completed < 0 or total < 0 or (total and completed > total):
+                raise InvalidTaskError("unit progress is invalid")
             connection.execute(
-                "UPDATE tasks SET progress=?, progress_message=?, step=?, "
-                "wait_reason=?, updated_at=?, row_version=row_version+1 WHERE task_id=?",
-                (float(progress), message, step, wait_reason, now, task_id),
+                "UPDATE tasks SET progress=?, progress_message=?, step=?, phase=?, "
+                "completed_units=?, total_units=?, wait_reason=?, updated_at=?, "
+                "row_version=row_version+1 WHERE task_id=?",
+                (float(progress), message, step, phase, completed, total, wait_reason, now, task_id),
             )
             event_type = "task.waiting" if wait_reason else "task.progress"
             self._event(
@@ -757,6 +721,9 @@ class RuntimeStore:
                     "progress": float(progress),
                     "message": message,
                     "step": step,
+                    "phase": phase,
+                    "completed_units": completed,
+                    "total_units": total,
                     "wait_reason": wait_reason,
                 },
             )
@@ -883,11 +850,15 @@ class RuntimeStore:
             )
             source = coerce_state(row["state"])
             require_transition(source, target)
-            progress = 1.0 if target is TaskState.SUCCEEDED else float(row["progress"])
+            progress = 1.0 if target in (
+                TaskState.SUCCEEDED,
+                TaskState.SUCCEEDED_WITH_ISSUES,
+            ) else float(row["progress"])
+            needs_attention = 1 if target is TaskState.SUCCEEDED_WITH_ISSUES else int(row["needs_attention"])
             connection.execute(
                 "UPDATE tasks SET state=?, progress=?, updated_at=?, finished_at=?, "
                 "owner_instance_id=NULL, lease_expires_at=NULL, result_json=?, "
-                "error_json=?, row_version=row_version+1 WHERE task_id=?",
+                "error_json=?, needs_attention=?, row_version=row_version+1 WHERE task_id=?",
                 (
                     target.value,
                     progress,
@@ -895,6 +866,7 @@ class RuntimeStore:
                     now,
                     result_json,
                     error_json,
+                    needs_attention,
                     task_id,
                 ),
             )
@@ -948,6 +920,64 @@ class RuntimeStore:
             terminal_reason="succeeded",
             request_id=request_id,
         )
+
+    def complete_with_issues(
+        self,
+        task_id: str,
+        attempt: int,
+        owner_instance_id: str,
+        result: Mapping[str, Any] | None = None,
+        *,
+        request_id: str | None = None,
+    ) -> TaskRecord:
+        return self._finish_owned(
+            task_id=task_id,
+            attempt=attempt,
+            owner_instance_id=owner_instance_id,
+            target=TaskState.SUCCEEDED_WITH_ISSUES,
+            event_type="task.succeeded_with_issues",
+            result=result,
+            exit_code=0,
+            terminal_reason="succeeded_with_issues",
+            request_id=request_id,
+        )
+
+    def enter_repair_phase(
+        self,
+        task_id: str,
+        attempt: int,
+        owner_instance_id: str,
+        *,
+        request_id: str | None = None,
+    ) -> TaskRecord:
+        """Atomically enter the only task-wide repair phase."""
+        now = utc_now()
+        with self._transaction() as connection:
+            row = self._owned_task(
+                connection,
+                task_id=task_id,
+                attempt=attempt,
+                owner_instance_id=owner_instance_id,
+                allowed_states=(TaskState.RUNNING, TaskState.CANCELLING),
+            )
+            if bool(row["repair_phase_entered"]):
+                raise TaskStateConflictError("repair phase may be entered only once")
+            connection.execute(
+                "UPDATE tasks SET repair_phase_entered=1, phase='repair', updated_at=?, "
+                "row_version=row_version+1 WHERE task_id=?",
+                (now, task_id),
+            )
+            self._event(
+                connection,
+                event_type="task.progress",
+                occurred_at=now,
+                task_id=task_id,
+                project_id=row["project_id"],
+                attempt=attempt,
+                request_id=request_id,
+                data={"phase": "repair", "repair_phase_entered": True},
+            )
+            return TaskRecord.from_row(self._task_row(connection, task_id))
 
     def fail(
         self,

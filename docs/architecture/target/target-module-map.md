@@ -2,7 +2,7 @@
 
 ## Package decision
 
-The refactor keeps the existing `substar_core` package root and introduces clear internal layers. It does not create a second permanent product package beside the old one. Historical modules are migrated into the target tree or isolated under compatibility tooling.
+The refactor keeps the existing `substar_core` package root and introduces clear internal layers. It does not create a second product package or ship importable historical-project compatibility tooling.
 
 ```text
 substar_core/
@@ -23,8 +23,7 @@ substar_core/
 │   │   ├── tasks.py
 │   │   ├── editor.py
 │   │   ├── settings.py
-│   │   ├── glossary.py
-│   │   └── compatibility.py
+│   │   └── glossary.py
 │   └── schemas/
 │       ├── common.py
 │       ├── projects.py
@@ -138,14 +137,8 @@ substar_core/
 │       ├── segmentation.py
 │       ├── translation.py
 │       ├── calibration.py
-│       ├── review.py
 │       ├── model_download.py
 │       └── export.py
-└── compatibility/
-    ├── legacy_project_reader.py
-    ├── legacy_artifact_names.py
-    ├── legacy_settings.py
-    └── legacy_http.py
 ```
 
 This is a responsibility map, not a demand that every file be created before it is needed. A module is introduced when its first production slice moves, and modules with trivial content may initially be combined without violating the dependency rules.
@@ -167,7 +160,6 @@ flowchart LR
     BOOT --> APP
     BOOT --> RUNTIME
     BOOT --> INFRA
-    COMPAT["compatibility"] --> APP
 ```
 
 Forbidden dependencies:
@@ -175,7 +167,7 @@ Forbidden dependencies:
 - domain to FastAPI, SQLite, filesystem, `requests/httpx`, subprocess or environment variables;
 - application services to route functions;
 - runtime to provider-specific implementations;
-- canonical modules to compatibility HTTP/status-file models;
+- canonical modules to historical HTTP/status-file models;
 - production translation/segmentation to experimental modules;
 - frontend to worker steps, artifact directory names or provider payloads.
 
@@ -223,11 +215,7 @@ Implements all cloud/local provider calls through one gateway policy. Retry, tim
 
 ### `workers/*`
 
-Provides one stable worker executable and registered computation handlers. Historical `run_*` scripts become compatibility/developer entry points that call this executable or are retired.
-
-### `compatibility/*`
-
-Is the only canonical location allowed to recognize old project directories, artifact keys, settings names and HTTP shapes. Compatibility code may depend on application commands; canonical code must not depend on compatibility representations.
+Provides one stable worker executable and registered computation handlers. Historical `run_*` scripts are retired; only current worker entry points are packaged.
 
 ## Frontend target modules
 
@@ -250,8 +238,6 @@ web/
 │   ├── cue_list_view.js
 │   ├── timeline.js
 │   └── waveform_cache.js
-└── compatibility/
-    └── response_adapters.js
 ```
 
 No React/Vue migration is part of the backend refactor. TypeScript may be adopted for new contracts after packaging impact is proven, but is not required to implement the frozen architecture.
@@ -265,7 +251,7 @@ No React/Vue migration is part of the backend refactor. TypeScript may be adopte
 | `storage/project_store.py` | `infrastructure/persistence/project_sqlite.py` |
 | `editor/application/*` | `application/editing/*` |
 | `pipeline.py` | transcription handler plus media/provider adapters |
-| `contracts/split_result_v2.py` | `domain/segmentation/document_builder.py` plus compatibility schema reader |
+| current split-result contract | `domain/segmentation/document_builder.py` |
 | active segmentation worker | `workers/handlers/segmentation.py` |
 | `translation_t1mix.py` | translation worker plus `domain/translation/presentation_mapping.py` |
 | `translation_service_v2.py` | replaced by `application/tasks` and `runtime` |
@@ -273,7 +259,7 @@ No React/Vue migration is part of the backend refactor. TypeScript may be adopte
 | `model_assets.py` download registry | model-download handler; catalog remains infrastructure/application data |
 | `artifacts.py` | `infrastructure/artifacts/filesystem.py` |
 | `runtime_instance.py` | `instance/*` |
-| old routers/status files | compatibility adapters/readers |
+| old routers/status files | deleted; Git history only |
 
 ## Size discipline
 

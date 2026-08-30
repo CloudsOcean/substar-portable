@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import base64
-import ctypes
-import os
 import secrets
-from ctypes import wintypes
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -12,19 +9,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .artifacts import atomic_write_text
 
 
-class _DataBlob(ctypes.Structure):
-    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-
-
-CRYPTPROTECT_UI_FORBIDDEN = 0x01
-CRYPTPROTECT_LOCAL_MACHINE = 0x04
 PORTABLE_PREFIX = "substar-portable-aesgcm-v1:"
 PORTABLE_AAD = b"substar.credentials.v2"
-
-
-def _blob(data: bytes) -> tuple[_DataBlob, object]:
-    buffer = ctypes.create_string_buffer(data)
-    return _DataBlob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_byte))), buffer
 
 
 def _portable_key(key_path: Path, *, create: bool) -> bytes:
@@ -50,37 +36,11 @@ def protect_text(value: str, *, key_path: Path) -> str:
     return PORTABLE_PREFIX + base64.b64encode(nonce + encrypted).decode("ascii")
 
 
-def _unprotect_legacy_dpapi(value: str) -> str:
-    """Read the previous machine-bound envelope only for one-time migration."""
-    if os.name != "nt":
-        raise RuntimeError("旧 DPAPI 凭据只能在原 Windows 机器上迁移")
-
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
-    source, source_buffer = _blob(base64.b64decode(value))
-    result = _DataBlob()
-    if not crypt32.CryptUnprotectData(
-        ctypes.byref(source),
-        None,
-        None,
-        None,
-        None,
-        CRYPTPROTECT_UI_FORBIDDEN,
-        ctypes.byref(result),
-    ):
-        raise ctypes.WinError()
-    try:
-        return ctypes.string_at(result.pbData, result.cbData).decode("utf-8")
-    finally:
-        kernel32.LocalFree(result.pbData)
-        del source_buffer
-
-
 def unprotect_text(value: str, *, key_path: Path) -> str:
     if not value:
         return ""
     if not value.startswith(PORTABLE_PREFIX):
-        return _unprotect_legacy_dpapi(value)
+        raise ValueError("不支持的凭据信封格式")
     encoded = base64.b64decode(value[len(PORTABLE_PREFIX):])
     if len(encoded) < 13:
         raise ValueError("便携凭据信封无效")

@@ -44,22 +44,20 @@ class AutomaticModelProviderConsistencyTests(unittest.TestCase):
         self.assertEqual(
             segmentation_credential_ref(request["provider"]), "model_provider:glm"
         )
-        legacy = {
+        missing_provider_id = {
             **request,
             "provider": {
                 key: value for key, value in request["provider"].items() if key != "id"
             },
         }
-        legacy_without_fingerprint = {
-            key: value for key, value in legacy.items() if key != "input_fingerprint"
+        missing_without_fingerprint = {
+            key: value for key, value in missing_provider_id.items() if key != "input_fingerprint"
         }
-        legacy["input_fingerprint"] = canonical_sha256(legacy_without_fingerprint)
-        validated_legacy = validate_segmentation_request(legacy)
-        self.assertNotIn("id", validated_legacy["provider"])
-        self.assertEqual(
-            segmentation_credential_ref(validated_legacy["provider"]),
-            "model_provider:glm",
+        missing_provider_id["input_fingerprint"] = canonical_sha256(
+            missing_without_fingerprint
         )
+        with self.assertRaisesRegex(InvalidTaskError, "provider fields"):
+            validate_segmentation_request(missing_provider_id)
 
         mismatched = {
             **request,

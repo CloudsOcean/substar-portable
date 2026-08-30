@@ -10,8 +10,6 @@ from .security import protect_text, unprotect_text
 
 ASR_QWEN = "asr_qwen"
 ASR_GENERIC = "asr_generic"
-SEGMENT_DEEPSEEK = "segment_deepseek"
-TRANSLATE_DEEPSEEK = "translate_deepseek"
 ALIGN_DEEPSEEK = "align_deepseek"
 MODEL_PROVIDER_PREFIX = "model_provider:"
 
@@ -19,8 +17,6 @@ CANONICAL_CREDENTIAL_ROLES = frozenset(
     {
         ASR_QWEN,
         ASR_GENERIC,
-        SEGMENT_DEEPSEEK,
-        TRANSLATE_DEEPSEEK,
         ALIGN_DEEPSEEK,
     }
 )
@@ -39,28 +35,13 @@ def resolve_model_provider_credential(
 ) -> str:
     """Read one provider's secret without borrowing another provider's key."""
 
-    from .model_providers import MODEL_PROVIDER_IDS, canonical_provider_id
+    from .model_providers import canonical_provider_id
 
     provider = canonical_provider_id(provider_id)
     direct = clean_credential(values.get(model_provider_credential_ref(provider)))
     if direct:
         return direct
-    if provider == "qwen":
-        legacy_qwen = clean_credential(values.get(f"{MODEL_PROVIDER_PREFIX}aliyun"))
-        if legacy_qwen:
-            return legacy_qwen
-    if provider != "deepseek":
-        return ""
-    legacy_deepseek = clean_credential(values.get(TRANSLATE_DEEPSEEK))
-    if not legacy_deepseek:
-        return ""
-    owned_by_other_provider = any(
-        name != "deepseek"
-        and clean_credential(values.get(model_provider_credential_ref(name)))
-        == legacy_deepseek
-        for name in MODEL_PROVIDER_IDS
-    )
-    return "" if owned_by_other_provider else legacy_deepseek
+    return ""
 
 
 def credential_key_path(envelope_path: Path) -> Path:

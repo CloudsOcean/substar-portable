@@ -13,8 +13,8 @@ except ImportError:  # pragma: no cover - the packaged runtime installs orjson
     orjson = None
 
 
-EDITOR_DOCUMENT_SCHEMA = "substar.editor-document.v1"
-EDITOR_REVISION_SCHEMA = "substar.editor-revision.v1"
+EDITOR_DOCUMENT_SCHEMA = "substar.editor-document.v2"
+EDITOR_REVISION_SCHEMA = "substar.editor-revision.v2"
 
 
 class DocumentValidationError(ValueError):
@@ -269,9 +269,9 @@ class TranslationTrack:
             target_text=str(value["target_text"]),
             original_text=value.get("original_text"),
             language=value.get("language"),
-            translation_status=str(value.get("translation_status") or "translated"),
-            issue_code=(str(value["issue_code"]) if value.get("issue_code") else None),
-            editable=bool(value.get("editable", True)),
+            translation_status=str(value["translation_status"]),
+            issue_code=(str(value["issue_code"]) if value["issue_code"] else None),
+            editable=bool(value["editable"]),
             provenance=ChangeProvenance.from_dict(value["provenance"]),
         )
 
@@ -678,10 +678,9 @@ class EditorDocument:
             "source_tokens": [item.to_dict() for item in self.source_tokens],
             "display_tokens": [item.to_dict() for item in self.display_tokens],
             "cues": [item.to_dict() for item in self.cues],
+            "groups": [item.to_dict() for item in self.groups],
             "changes": [item.to_dict() for item in self.changes],
         }
-        if self.groups:
-            value["groups"] = [item.to_dict() for item in self.groups]
         return value
 
     @classmethod
@@ -697,8 +696,8 @@ class EditorDocument:
             source_tokens=tuple(SourceToken.from_dict(item) for item in value["source_tokens"]),
             display_tokens=tuple(DisplayToken.from_dict(item) for item in value["display_tokens"]),
             cues=tuple(DisplayCue.from_dict(item) for item in value["cues"]),
-            groups=tuple(SemanticGroup.from_dict(item) for item in value.get("groups", [])),
-            changes=tuple(ChangeProvenance.from_dict(item) for item in value.get("changes", [])),
+            groups=tuple(SemanticGroup.from_dict(item) for item in value["groups"]),
+            changes=tuple(ChangeProvenance.from_dict(item) for item in value["changes"]),
         )
 
     def content_hash(self) -> str:

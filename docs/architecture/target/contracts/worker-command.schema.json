@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://substar.local/schemas/worker-command.v1.json",
+  "$id": "https://substar.local/schemas/worker-command.v2.json",
   "title": "Substar worker command",
   "type": "object",
   "additionalProperties": false,
@@ -15,7 +15,7 @@
     "credential_refs"
   ],
   "properties": {
-    "schema_version": { "const": "substar.worker-command.v1" },
+    "schema_version": { "const": "substar.worker-command.v2" },
     "task_id": { "type": "string", "minLength": 1 },
     "attempt": { "type": "integer", "minimum": 1 },
     "task_type": {
@@ -25,10 +25,8 @@
         "segmentation",
         "translation",
         "calibration",
-        "review",
         "model_download",
-        "export",
-        "dubbing"
+        "export"
       ]
     },
     "project_id": { "type": ["string", "null"] },

@@ -1,6 +1,6 @@
 # Target architecture record
 
-This directory freezes the Phase 2 architecture boundary for the Substar refactor. Later implementation phases may refine internal code, but must not silently change these public concepts, state authorities or compatibility rules.
+This directory records the v2 architecture boundary. The v2.0.0 cutover deliberately rejects historical projects, routes, settings aliases and artifacts; Git history is the only legacy implementation archive.
 
 ## Decisions
 
@@ -37,9 +37,9 @@ This directory freezes the Phase 2 architecture boundary for the Substar refacto
 5. Per-project SQLite remains the authority for subtitle revisions.
 6. Runtime SQLite is the authority for task lifecycle and event history.
 7. Artifacts are registered outputs, never inferred task state.
-8. Existing UI and editor-domain behavior are preserved behind new adapters.
-9. New code uses business names only; historical names stay inside compatibility readers/tests.
-10. Migration proceeds by vertical production cutovers, without a user-visible old/new route selector.
+8. Current UI and editor-domain behavior use only canonical v2 contracts.
+9. Historical project readers and importable compatibility adapters are absent from production.
+10. The cutover is breaking: old data stays untouched on disk and is not discovered or migrated.
 
 ## Status
 

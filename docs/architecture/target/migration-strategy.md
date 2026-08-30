@@ -26,20 +26,20 @@ Build without migrating business algorithms:
 - handler registry and scheduler;
 - worker protocol/supervisor/process-tree cancellation;
 - canonical task/events/runtime API;
-- SSE replay and polling fallback tests;
+- SSE replay and bounded polling recovery tests;
 - instance behavior: second launch opens existing backend; graceful stop/restart;
 - one low-risk `model_download` or test worker proves dispatch/cancel/recovery.
 
-Exit gate: kill/restart/cancel/idempotency tests pass and old production tasks still run unchanged.
+Exit gate: kill/restart/cancel/idempotency tests pass and non-current runtime databases are rejected.
 
 ### Slice 2 — review and calibration
 
 - extract model-call and validation behavior out of `editor_api_v2.py`;
-- register `review` and `calibration` handlers;
+- register `calibration`; keep review external;
 - remove their HTTP-request-bound execution;
 - bind every task to an expected revision;
-- preserve review as non-mutating and calibration as validated revision commit;
-- adapt existing editor endpoints temporarily to return canonical tasks.
+- preserve calibration as a validated revision commit;
+- expose only canonical editor task projections.
 
 Exit gate: network disconnect/restart does not lose task visibility; revision conflicts are deterministic.
 
@@ -50,7 +50,7 @@ Exit gate: network disconnect/restart does not lose task visibility; revision co
 - move provider calls behind the gateway;
 - register translation worker/finalizer;
 - replace translation status JSON as lifecycle authority;
-- retain legacy translation artifacts only through readers.
+- reject historical translation artifacts rather than reading them.
 
 Exit gate: identical source fixture produces contract-equivalent document/export, and interruption can resume or retry without duplicate revision commits.
 
@@ -60,7 +60,7 @@ Exit gate: identical source fixture produces contract-equivalent document/export
 - connect compiled glossary/hotword input;
 - register transcription worker with resumable remote-provider metadata;
 - extract active segmentation symbols from mixed historical files;
-- preserve strict validation, repair and deterministic fallback;
+- preserve strict validation, one repair phase and deterministic partial delivery;
 - register segmentation worker and initial-document finalizer;
 - make the subtitle-creation workflow create a durable dependency graph.
 
@@ -120,8 +120,8 @@ characterize current behavior
 → implement canonical contract behind tests
 → run old/new fixture comparison
 → switch the sole production composition binding
-→ observe/log compatibility reads
-→ remove the old dispatcher/status writer
+→ verify old shapes are rejected
+→ remove the old dispatcher, status writer and reader
 ```
 
 Temporary selection exists only inside tests/composition during development. It is not persisted as `route`, `branch`, `experiment` or a user setting.

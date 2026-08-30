@@ -65,6 +65,9 @@ def _default_worker_event(
         "message": None,
         "step": None,
         "wait_reason": None,
+        "phase": None,
+        "completed_units": None,
+        "total_units": None,
     }
 
 

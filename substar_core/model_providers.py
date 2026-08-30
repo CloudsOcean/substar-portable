@@ -92,13 +92,6 @@ def provider_catalog() -> list[dict[str, Any]]:
 
 def canonical_provider_id(value: Any) -> str:
     provider_id = str(value or "").strip().lower().replace("-", "_")
-    aliases = {
-        "aliyun": "qwen",
-        "azureopenai": "azure_openai",
-        "deer_api": "deerapi",
-        "gemini_openai": "gemini",
-    }
-    provider_id = aliases.get(provider_id, provider_id)
     return provider_id if provider_id in MODEL_PROVIDER_IDS else "custom"
 
 
@@ -132,7 +125,9 @@ def normalize_provider_profiles(raw_profiles: Any) -> dict[str, dict[str, Any]]:
     for raw_id, raw_profile in raw_profiles.items():
         if not isinstance(raw_profile, dict):
             continue
-        provider_id = canonical_provider_id(raw_id)
+        provider_id = str(raw_id or "").strip().lower()
+        if provider_id not in MODEL_PROVIDER_IDS:
+            continue
         auth_mode = str(raw_profile.get("auth_mode", "bearer")).strip().lower()
         if auth_mode not in {"bearer", "api-key"}:
             auth_mode = "bearer"

@@ -87,7 +87,6 @@ flowchart LR
     local_environment_service["Optional local environment and model assets"]
   end
   subgraph layer_persistence["persistence"]
-    editor_task_repository["Exclusive editor AI operation repository"]
     project_store["ProjectStore revision repository"]
     runtime_store["SQLite runtime store"]
   end
@@ -152,16 +151,22 @@ flowchart LR
   segmentation_finalizer --> project_store
   editor_api --> project_store
   editor_api --> task_info_service
-  editor_api --> editor_task_repository
+  editor_api --> task_service
   editor_api --> reference_manuscript_service
   editor_api --> translation_service
   editor_api --> calibration_service
   editor_api --> media_service
   editor_api --> project_exchange_service
   task_info_service --> settings_service
-  translation_service --> editor_task_repository
+  translation_service --> task_service
+  translation_service --> scheduler
+  translation_service --> worker_supervisor
+  translation_service --> model_stage_scheduler
   translation_service --> project_store
-  calibration_service --> editor_task_repository
+  calibration_service --> task_service
+  calibration_service --> scheduler
+  calibration_service --> worker_supervisor
+  calibration_service --> model_stage_scheduler
   calibration_service --> project_store
   editor_ui --> editor_api
   editor_api_client --> editor_api
@@ -225,18 +230,17 @@ flowchart LR
 | `segmentation_input_contract` | `contract` | Derive one unpunctuated, reindexed editor timeline from immutable recognition evidence, expanding CJK blocks by character and retaining alphabetic words. | `substar_core/segmentation/input_contract.py` | `recognition_evidence` | `segmentation_material` | — |
 | `segmentation_worker` | `worker` | Build canonical material, run semantic grouping, deterministic reference-script alignment, or artifact recovery, validate candidates and emit every artifact before result. | `substar_core/segmentation/worker.py`<br>`scripts/run_segmentation_worker.py` | `worker_command`<br>`segmentation_request`<br>`recognition_evidence`<br>`segmentation_material`<br>`credential_reference` | `worker_message`<br>`semantic_grouping_result`<br>`segmentation_candidate`<br>`segmentation_result`<br>`editor_document` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`worker_protocol` |
 | `execution_planner` | `domain_service` | Choose deterministic approximately 90-second processing seams bounded to 75--100 seconds; bootstrap split uses observable timing evidence, while downstream stages replan only at accepted AI meaning-group boundaries. | `substar_core/segmentation/execution_planner.py` | `segmentation_material` | `segmentation_candidate` | — |
-| `semantic_segmentation_algorithm` | `model_orchestration` | Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan. | `scripts/run_semantic_segmentation.py`<br>`scripts/run_flash_map_pro_editor.py`<br>`scripts/run_global_planner_ab.py` | `segmentation_material`<br>`segmentation_request` | `semantic_grouping_result`<br>`editor_document` | `segmentation_model_connector` |
-| `segmentation_model_connector` | `provider_connector` | Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint. | `scripts/segmentation_support.py`<br>`substar_core/openai_compat.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result` | — |
+| `semantic_segmentation_algorithm` | `model_orchestration` | Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan. | `scripts/run_semantic_segmentation.py` | `segmentation_material`<br>`segmentation_request` | `semantic_grouping_result`<br>`editor_document` | `segmentation_model_connector` |
+| `segmentation_model_connector` | `provider_connector` | Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint. | `substar_core/model_gateway/gateway.py`<br>`substar_core/openai_compat.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result` | — |
 | `segmentation_finalizer` | `finalizer` | Revalidate registered segmentation artifacts against the same canonical projection, commit Revision 1 and publish the project atomically. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`segmentation_result`<br>`segmentation_candidate`<br>`recognition_evidence`<br>`editor_document`<br>`worker_completion` | `editor_revision`<br>`task_record` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`project_store` |
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
-| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`editor_task_repository`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
-| `task_info_service` | `application_service` | Load, validate, atomically save and one-time migrate the five project task-information fields. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
-| `editor_task_repository` | `persistence` | Persist one translation, calibration or review operation, enforce the editing lock while it runs, and publish a process-local cancellation signal for owned provider work. | `substar_core/editor/tasks/repository.py`<br>`substar_core/editor/tasks/contracts.py` | `editor_operation_state`<br>`editor_revision` | `editor_operation_state` | — |
-| `translation_service` | `model_orchestration` | Translate meaning units with full group context, materialize one authoritative final text for each Cue, and terminate the owned translation process when cancellation is requested. | `substar_core/editor/translation/service.py`<br>`substar_core/editor/translation/contextual.py`<br>`scripts/run_production_translation.py` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference`<br>`translation_request` | `translation_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
-| `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md` | `editor_revision`<br>`editor_operation_state`<br>`credential_reference` | `calibration_result`<br>`editor_revision` | `editor_task_repository`<br>`project_store` |
+| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
+| `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
+| `translation_service` | `model_orchestration` | Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/editor/translation/result_policy.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request` | `task_record`<br>`translation_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
+| `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`scripts/run_calibration_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference` | `task_record`<br>`calibration_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
-| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`editor_operation_state`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
-| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`editor_operation_state`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
+| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
+| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
 | `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py` | `editor_operation`<br>`editor_revision` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Parse TXT/DOCX/SRT with a Unicode script-aware tokenizer, apply aligned reference spelling, casing, punctuation and boundaries over ASR timing, preserve ASR-only wording with retained-source markers, and produce reversible corrections, insertions and audit records. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
@@ -246,7 +250,7 @@ flowchart LR
 | `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
 | `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
 | `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
-| `model_stage_scheduler` | `application` | Resolve versioned prompts, atomically persist registered component bodies, apply the configured primary/repair model policy for segmentation, translation, calibration and review, and isolate editor-owned provider requests in killable child processes. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/stage2.py`<br>`scripts/run_editor_model_request.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
+| `model_stage_scheduler` | `application` | Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
 | `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
@@ -264,7 +268,7 @@ flowchart LR
 |---|---|---|---|---|
 | `project_creation_request` | `app.py::create_workbench_split_job` | domain validation | `split_ui` | `composition_root`<br>`glossary_service` |
 | `project_creation_projection` | `substar_core/creation/projection.py::subtitle_creation_projection` | domain validation | `composition_root`<br>`creation_projection`<br>`project_exchange_service` | `split_ui`<br>`task_info_service`<br>`editor_api_client` |
-| `task_record` | `substar_core/runtime/model.py::TaskRecord` | `docs/architecture/target/contracts/task.schema.json` | `creation_graph`<br>`runtime_api`<br>`task_service`<br>`runtime_store`<br>`transcription_finalizer`<br>`segmentation_finalizer` | `composition_root`<br>`creation_projection`<br>`runtime_api`<br>`task_service`<br>`runtime_store`<br>`handler_registry`<br>`scheduler`<br>`transcription_handler`<br>`segmentation_handler` |
+| `task_record` | `substar_core/runtime/model.py::TaskRecord` | `docs/architecture/target/contracts/task.schema.json` | `creation_graph`<br>`runtime_api`<br>`task_service`<br>`runtime_store`<br>`transcription_finalizer`<br>`segmentation_finalizer`<br>`translation_service`<br>`calibration_service`<br>`editor_api_client` | `composition_root`<br>`creation_projection`<br>`runtime_api`<br>`task_service`<br>`runtime_store`<br>`handler_registry`<br>`scheduler`<br>`transcription_handler`<br>`segmentation_handler`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`editor_ui` |
 | `task_event` | `substar_core/runtime/store.py::RuntimeStore` | `docs/architecture/target/contracts/task-event.schema.json` | `runtime_api`<br>`task_service`<br>`runtime_store`<br>`scheduler` | `task_service`<br>`runtime_store` |
 | `worker_command` | `substar_core/runtime/worker_protocol.py::WorkerCommand` | `docs/architecture/target/contracts/worker-command.schema.json` | `handler_registry`<br>`scheduler`<br>`worker_protocol`<br>`transcription_handler`<br>`segmentation_handler` | `worker_supervisor`<br>`worker_protocol`<br>`transcription_worker`<br>`segmentation_worker` |
 | `worker_message` | `substar_core/runtime/worker_protocol.py::WorkerMessage` | `docs/architecture/target/contracts/worker-message.schema.json` | `worker_supervisor`<br>`worker_protocol`<br>`transcription_worker`<br>`segmentation_worker` | `handler_registry`<br>`scheduler`<br>`worker_supervisor`<br>`worker_protocol` |
@@ -280,12 +284,11 @@ flowchart LR
 | `segmentation_candidate` | `substar_core/segmentation/contracts.py::validate_segmentation_candidate` | `docs/architecture/target/contracts/segmentation-candidate.schema.json` | `segmentation_worker`<br>`execution_planner`<br>`segmentation_domain` | `segmentation_finalizer`<br>`editor_domain` |
 | `segmentation_result` | `substar_core/segmentation/handler.py::_worker_result` | `docs/architecture/target/contracts/segmentation-result.schema.json` | `segmentation_worker` | `segmentation_finalizer` |
 | `editor_document` | `substar_core/domain/editor_document.py::EditorDocument` | domain validation | `segmentation_worker`<br>`semantic_segmentation_algorithm`<br>`editor_domain`<br>`presentation_service`<br>`segmentation_domain` | `segmentation_finalizer`<br>`project_store` |
-| `editor_revision` | `substar_core/storage/project_store.py::ProjectStore` | domain validation | `segmentation_finalizer`<br>`project_store`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`editor_api_client`<br>`editor_application`<br>`project_exchange_service` | `composition_root`<br>`creation_projection`<br>`editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`editor_ui`<br>`editor_application`<br>`reference_manuscript_service`<br>`presentation_service`<br>`export_service`<br>`project_exchange_service`<br>`translation_domain` |
+| `editor_revision` | `substar_core/storage/project_store.py::ProjectStore` | domain validation | `segmentation_finalizer`<br>`project_store`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`editor_api_client`<br>`editor_application`<br>`project_exchange_service` | `composition_root`<br>`creation_projection`<br>`editor_api`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`editor_ui`<br>`editor_application`<br>`reference_manuscript_service`<br>`presentation_service`<br>`export_service`<br>`project_exchange_service`<br>`translation_domain` |
 | `editor_operation` | `substar_core/editor/protocol/editor_protocol.schema.json` | `substar_core/editor/protocol/editor_protocol.schema.json` | `editor_ui`<br>`reference_manuscript_service`<br>`project_exchange_service` | `project_store`<br>`editor_api`<br>`editor_api_client`<br>`editor_domain`<br>`editor_application`<br>`presentation_service` |
-| `editor_operation_state` | `substar_core/editor/tasks/contracts.py` | `schemas/editor-ai-task.v1.schema.json` | `editor_task_repository`<br>`editor_api_client` | `editor_api`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`editor_ui` |
 | `translation_request` | `substar_core/editor/http_api.py::TranslationStartRequest` | domain validation | `editor_ui`<br>`editor_api_client` | `editor_api`<br>`translation_service` |
-| `translation_result` | `substar_core/editor/translation/contracts.py` | `schemas/translation-result.v1.schema.json` | `editor_api`<br>`translation_service`<br>`editor_api_client`<br>`translation_domain` | `editor_ui` |
-| `calibration_result` | `substar_core/editor/calibration/contracts.py` | `schemas/calibration-result.v1.schema.json` | `editor_api`<br>`calibration_service`<br>`editor_api_client` | `editor_ui` |
+| `translation_result` | `substar_core/editor/translation/contracts.py` | `schemas/translation-result.v2.schema.json` | `editor_api`<br>`translation_service`<br>`editor_api_client`<br>`translation_domain` | `editor_ui` |
+| `calibration_result` | `substar_core/editor/calibration/contracts.py` | `schemas/calibration-result.v2.schema.json` | `editor_api`<br>`calibration_service`<br>`editor_api_client` | `editor_ui` |
 | `media_stream` | `substar_core/editor/http_api.py` | domain validation | `editor_api`<br>`media_service`<br>`editor_api_client` | `editor_ui` |
 | `media_info` | `substar_core/editor/http_api.py` | domain validation | `editor_api`<br>`media_service`<br>`editor_api_client` | `editor_ui` |
 | `settings_snapshot` | `substar_core/config.py` | domain validation | `settings_ui`<br>`settings_service`<br>`provider_test_service`<br>`local_environment_service` | `task_info_service`<br>`settings_ui`<br>`settings_service`<br>`model_stage_scheduler`<br>`launcher_runtime`<br>`local_environment_service`<br>`web_shell` |
@@ -321,7 +324,7 @@ Tests: `tests/test_segmentation_runtime.py`
 
 ### Revision-bound AI translation (`editor_translation`)
 
-`editor_ui` → `editor_api` → `editor_task_repository` → `translation_service` → `project_store`
+`editor_ui` → `editor_api` → `task_service` → `scheduler` → `worker_supervisor` → `translation_service` → `project_store`
 
 Success condition: One final model-authored target text is committed for each resolved Cue and unresolved Cues remain explicit.
 
@@ -329,7 +332,7 @@ Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translati
 
 ### Revision-bound AI calibration (`editor_calibration`)
 
-`editor_ui` → `editor_api` → `editor_task_repository` → `calibration_service` → `project_store`
+`editor_ui` → `editor_api` → `task_service` → `scheduler` → `worker_supervisor` → `calibration_service` → `project_store`
 
 Success condition: Validated model-authored source corrections are committed without topology changes.
 
@@ -1228,9 +1231,7 @@ Ask the configured Flash model in low-effort semantic mode for meaning groups an
 
 Code:
 
-- `scripts/run_semantic_segmentation.py` — `main`, `request_semantic_grouping_block`, `validate_semantic_grouping_result`, `_salvage_semantic_groups`
-- `scripts/run_flash_map_pro_editor.py` — `build_plan_from_cuts`
-- `scripts/run_global_planner_ab.py` — `call_streaming_model`
+- `scripts/run_semantic_segmentation.py` — `main`, `request_semantic_grouping_block`, `validate_semantic_grouping_result`, `_salvage_semantic_groups`, `build_plan_from_cuts`
 
 Must not:
 
@@ -1272,7 +1273,7 @@ Render versioned prompts, apply stage-specific model scheduling and call the act
 
 Code:
 
-- `scripts/segmentation_support.py` — `call_model`, `stage_system`, `resolve_api_key`
+- `substar_core/model_gateway/gateway.py` — `call_json_model`
 - `substar_core/openai_compat.py` — `endpoint_url`, `auth_headers`
 - `prompts/production/segmentation/common/semantic_grouping.md`
 - `prompts/production/segmentation/common/semantic_grouping_repair.md`
@@ -1427,15 +1428,15 @@ Reuses: `latest verified revision`<br>`completed AI result`; restarts: `failed A
 
 Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`
 
-Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
+Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
-Change impact contracts: `editor_operation`<br>`editor_operation_state`<br>`editor_revision`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`
+Change impact contracts: `editor_operation`<br>`task_record`<br>`editor_revision`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`
 
 ### Canonical project task information service (`task_info_service`)
 
 Layer: `application_service`
 
-Load, validate, atomically save and one-time migrate the five project task-information fields.
+Load, validate and atomically save the required v2 project task-information fields.
 
 Code:
 
@@ -1445,13 +1446,13 @@ Must not:
 
 - Mutate editor revisions
 - Recompute existing subtitle content
-- Merge legacy snapshots after task_info.json exists
+- Synthesize metadata from a legacy project
 
 Invariants:
 
-- task_info.json is the only runtime authority after one-time migration
-- All five fields are committed atomically
-- Legacy artifacts remain untouched and are migration inputs only
+- task_info.json is required and is the only runtime authority
+- All fields are committed atomically
+- Unsupported project versions are rejected
 
 Failure modes:
 
@@ -1470,74 +1471,36 @@ Change impact modules: `composition_root`<br>`editor_api`<br>`editor_ui`<br>`pro
 
 Change impact contracts: `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection`
 
-### Exclusive editor AI operation repository (`editor_task_repository`)
-
-Layer: `persistence`
-
-Persist one translation, calibration or review operation, enforce the editing lock while it runs, and publish a process-local cancellation signal for owned provider work.
-
-Code:
-
-- `substar_core/editor/tasks/repository.py` — `load_task`, `start_task`, `finish_task`, `request_task_cancellation`, `raise_if_task_cancelled`, `assert_editor_write_allowed`
-- `substar_core/editor/tasks/contracts.py`
-
-Must not:
-
-- Represent user document edits
-- Run two AI operations concurrently
-- Release the lock before terminal persistence
-- Allow cancelled provider work to commit a result
-
-Invariants:
-
-- Running state locks document writes
-- Task basis is one immutable revision
-- Terminal state is durable before editing unlocks
-- Cancellation keeps the lock through cancelling and releases it only after provider work stops
-
-Failure modes:
-
-- Concurrent task conflict
-- Stale basis revision
-- Corrupt state file
-
-Recovery: On startup, reconcile stale running state against the owning process/task result.
-
-Reuses: `completed task result`; restarts: `operation only when explicitly requested`; terminal behavior: Persist failed or interrupted operation state.
-
-Tests: `tests/test_editor_ai_task_repository.py`, `tests/test_editor_ai_contracts.py`
-
-Change impact modules: `editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`
-
-Change impact contracts: `editor_operation_state`<br>`editor_revision`
-
 ### Editor translation service (`translation_service`)
 
 Layer: `model_orchestration`
 
-Translate meaning units with full group context, materialize one authoritative final text for each Cue, and terminate the owned translation process when cancellation is requested.
+Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue.
 
 Code:
 
-- `substar_core/editor/translation/service.py` — `create_translation_task`, `run_translation_task`
+- `substar_core/editor/translation/handler.py` — `build_translation_handler`
+- `substar_core/editor/translation/worker.py` — `run`
+- `substar_core/editor/translation/runner.py` — `execute_translation`
 - `substar_core/editor/translation/contextual.py` — `run_contextual_translation`, `complete_results`, `materialize_presentation`
-- `scripts/run_production_translation.py` — `main`
+- `substar_core/editor/translation/result_policy.py` — `accepted_translation_rows`, `translation_problem_cue_ids`
+- `scripts/run_translation_worker.py`
 
 Must not:
 
-- Split or synthesize translated text in program fallback
+- Synthesize missing translation text
 - Modify source tokens
 - Discard valid groups because another group failed
+- Enter repair more than once
 
 Invariants:
 
 - Model sees meaning-unit context
-- Translation inherits the accepted-split execution plan and runs independent blocks concurrently
-- Each Cue has exactly one model-authored final text
-- Accepted groups are registered before one concurrent repair pass for all failures
-- Presentation validation enforces hard character limits but does not calculate or reject CPS
-- A missing translation from an unresolved block leaves that Cue unchanged and registers it as a problem subtitle without discarding accepted translations
-- A cancelling translation terminates its child process and never enters the successful parent finalizer
+- Each unit has one primary request and at most one repair request
+- The whole task enters repair at most once
+- Accepted groups survive unrelated failures
+- Every unresolved Cue has empty editable manual-required target text
+- Final partial success is succeeded_with_issues
 
 Failure modes:
 
@@ -1552,9 +1515,9 @@ Reuses: `all accepted Cue translations`; restarts: `unresolved Cues only`; termi
 
 Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translation_binding.py`
 
-Change impact modules: `editor_api`<br>`editor_task_repository`<br>`project_store`<br>`editor_ui`
+Change impact modules: `editor_api`<br>`task_service`<br>`scheduler`<br>`project_store`<br>`editor_ui`
 
-Change impact contracts: `editor_operation_state`<br>`editor_revision`<br>`translation_request`<br>`translation_result`
+Change impact contracts: `task_record`<br>`editor_revision`<br>`translation_request`<br>`translation_result`
 
 ### AI calibration service (`calibration_service`)
 
@@ -1564,10 +1527,13 @@ Apply model-authored punctuation, casing, terminology, proper-name and ASR lexic
 
 Code:
 
+- `substar_core/editor/calibration/handler.py` — `build_calibration_handler`
+- `substar_core/editor/calibration/worker.py` — `run`
 - `substar_core/editor/http_api.py` — `ai_calibrate_project`, `_ai_calibrate_project`, `_validated_calibration_contract_actions`
 - `substar_core/editor/calibration/contracts.py`
 - `prompts/production/calibration/en.md`
 - `prompts/production/calibration/zh.md`
+- `scripts/run_calibration_worker.py`
 
 Must not:
 
@@ -1596,9 +1562,9 @@ Reuses: `valid calibration actions`; restarts: `invalid blocks only`; terminal b
 
 Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_ai_calibration_instruction.py`
 
-Change impact modules: `editor_api`<br>`editor_task_repository`<br>`project_store`<br>`editor_ui`
+Change impact modules: `editor_api`<br>`task_service`<br>`scheduler`<br>`project_store`<br>`editor_ui`
 
-Change impact contracts: `editor_operation_state`<br>`editor_revision`<br>`calibration_result`
+Change impact contracts: `task_record`<br>`editor_revision`<br>`calibration_result`
 
 ### Editor media and waveform service (`media_service`)
 
@@ -1714,9 +1680,9 @@ Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: 
 
 Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
 
-Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`editor_task_repository`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
+Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
-Change impact contracts: `editor_document`<br>`editor_revision`<br>`editor_operation`<br>`editor_operation_state`<br>`translation_request`<br>`media_info`<br>`media_stream`<br>`project_task_info`
+Change impact contracts: `editor_document`<br>`editor_revision`<br>`editor_operation`<br>`task_record`<br>`translation_request`<br>`media_info`<br>`media_stream`<br>`project_task_info`
 
 ### Editor browser API caller (`editor_api_client`)
 
@@ -1755,9 +1721,9 @@ Reuses: `project_id`<br>`operation_id`; restarts: `read requests`; terminal beha
 
 Tests: `tests/editor_document_contract.test.js`, `tests/test_editor_translation_binding.py`
 
-Change impact modules: `editor_ui`<br>`editor_api`<br>`project_store`
+Change impact modules: `editor_ui`<br>`editor_api`<br>`project_store`<br>`task_service`
 
-Change impact contracts: `editor_operation`<br>`editor_revision`<br>`editor_operation_state`<br>`media_info`<br>`media_stream`
+Change impact contracts: `editor_operation`<br>`editor_revision`<br>`task_record`<br>`media_info`<br>`media_stream`
 
 ### Editor document domain and operation engine (`editor_domain`)
 
@@ -2178,7 +2144,7 @@ Change impact contracts: `provider_test_request`<br>`credential_reference`<br>`s
 
 Layer: `application`
 
-Resolve versioned prompts, atomically persist registered component bodies, apply the configured primary/repair model policy for segmentation, translation, calibration and review, and isolate editor-owned provider requests in killable child processes.
+Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway.
 
 Code:
 
@@ -2187,8 +2153,7 @@ Code:
 - `substar_core/stage_progress.py`
 - `substar_core/ai_progress.py` — `ai_progress`
 - `substar_core/model_routing.py` — `resolve_stage_request`
-- `substar_core/stage2.py`
-- `scripts/run_editor_model_request.py` — `main`
+- `substar_core/model_gateway/gateway.py` — `call_json_model`, `call_translation_model`
 
 Must not:
 
@@ -2201,10 +2166,9 @@ Must not:
 Invariants:
 
 - Every production primary and repair call resolves through a named stage
-- Prompt file/version/hash is auditable
-- Registered component writes are atomic and optimistic-concurrency checked
-- Existing frozen task snapshots remain immutable after a production component edit
-- Cancelling an editor-owned model call terminates its request process before control returns to the task finalizer
+- Provider, model, credential reference, thinking mode and reasoning effort are frozen in task input
+- Provider capability mapping happens once
+- Transport retries are bounded and distinct from the single semantic repair phase
 
 Failure modes:
 
@@ -2217,7 +2181,7 @@ Recovery: Reject unresolved stage configuration before a provider call.
 
 Reuses: `frozen prompt snapshot`<br>`saved stage policy`; restarts: —; terminal behavior: Return configuration error.
 
-Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_prompt_catalog.py`, `tests/test_stage2_editor_cancellation.py`, `tests/test_ai_stage_progress_contract.py`
+Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_prompt_catalog.py`, `tests/test_glm_provider.py`, `tests/test_ai_stage_progress_contract.py`
 
 Change impact modules: `settings_ui`<br>`settings_service`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`
 

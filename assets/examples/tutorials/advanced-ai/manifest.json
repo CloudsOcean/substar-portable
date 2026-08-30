@@ -1,5 +1,5 @@
 {
-  "schema_version": "substar.tutorial-example.v1",
+  "schema_version": "substar.tutorial-example.v2",
   "case_id": "advanced-ai-v1",
   "level": "advanced",
   "display_name": "进阶教程",
@@ -16,8 +16,8 @@
   },
   "sha256": {
     "media.wav": "fe82b4574c51dab8578a5d6f203bb8ae52ef15cbba192e0292814815b0190c6f",
-    "segmented.json": "88967eca6e50dc793746ae329d843c126eeb5c12682f75564a7d972c4377e4c7",
-    "calibrated.json": "1c3bf21d5be555943fbaf0736225861232e36be9121d9d7bd7356b5f233ba85a",
-    "translated.json": "e391f45799af578442564dd362e31a39713983ff6f3be76877fa5b93a4882356"
+    "segmented.json": "aac2a770826a19ec4b6fbd56929aa5c2c4f980f14dedd312015a1a73cf066234",
+    "calibrated.json": "b80f5cae7771bf7f3ac1161ea75ca89663f9e740098df913963b860f8252b98e",
+    "translated.json": "f6bcde9e93c1567e443c09846d0999e28285f11dd8ca58190609bd77be5c27c7"
   }
 }

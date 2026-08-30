@@ -16,7 +16,7 @@ Regenerate with `python scripts/system_map.py`. CI and the Windows release build
 - [Frozen OpenAPI](baseline/openapi.json)
 - [UI screenshots](baseline/ui)
 
-## Phase 1 — current system audit
+## Phase 1 — historical pre-v2 audit
 
 - [Current system map](current-system-map.md)
 - [Current data flow](current-data-flow.md)
@@ -26,7 +26,10 @@ Regenerate with `python scripts/system_map.py`. CI and the Windows release build
 - [Module catalog](module-catalog.md)
 - [Legacy naming map](legacy-naming-map.md)
 
-## Phase 2 — frozen target architecture
+These Phase 1 documents are retained as audit evidence only. They describe the
+pre-v2 implementation and are not executable authority.
+
+## Phase 2 — v2 target architecture
 
 - [Target architecture index](target/README.md)
 - [Target architecture](target/target-architecture.md)

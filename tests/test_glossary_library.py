@@ -10,7 +10,7 @@ from substar_core import glossary
 
 
 class GlossaryLibraryTests(unittest.TestCase):
-    def test_legacy_project_entries_migrate_without_loss(self) -> None:
+    def test_pre_v2_glossary_is_not_migrated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "glossary.json"
@@ -20,12 +20,9 @@ class GlossaryLibraryTests(unittest.TestCase):
             ], ensure_ascii=False), encoding="utf-8")
             with patch.object(glossary, "GLOSSARY_FILE", path), patch.object(glossary, "APP_DATA_DIR", root):
                 library = glossary.load_glossary_library()
-                project = next(item for item in library["collections"] if item["kind"] == "project")
-                migrated = next(item for item in library["entries"] if item["source"] == "Codex")
-                self.assertEqual(project["name"], "第一期")
-                self.assertEqual(migrated["glossary_id"], project["id"])
-                self.assertEqual(migrated["target"], "代码助手")
-                self.assertEqual(migrated["notes"], "保留备注")
+                self.assertEqual(library["schema_version"], glossary.GLOSSARY_SCHEMA_VERSION)
+                self.assertEqual(library["collections"], [{"id": "global", "name": "全局词库", "kind": "global"}])
+                self.assertEqual(library["entries"], [])
 
     def test_selected_project_glossary_overrides_global(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

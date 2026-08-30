@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import concurrent.futures
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 import threading
@@ -16,14 +18,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.run_flash_map_pro_editor import build_plan_from_cuts  # noqa: E402
-from scripts.segmentation_support import (  # noqa: E402
-    SegmentationError,
-    SegmentationRequestError,
-    _direct_report,
-    call_model,
-    resolve_api_key,
-    write_two_level_artifacts,
+from substar_core.model_gateway import (  # noqa: E402
+    ModelGatewayError,
+    ModelGatewayRequestError,
+    call_json_model,
 )
 from substar_core.artifacts import atomic_write_json, atomic_write_text  # noqa: E402
 from substar_core.contracts.editor_document import (  # noqa: E402
@@ -54,6 +52,25 @@ from substar_core.stage_progress import StageProgress  # noqa: E402
 
 ROUTES = {"semantic"}
 _RUNTIME_PRINT_LOCK = threading.Lock()
+SegmentationError = ModelGatewayError
+SegmentationRequestError = ModelGatewayRequestError
+
+
+def resolve_api_key(env_name: str) -> tuple[str, str]:
+    value = os.environ.get(env_name, "")
+    return (value, f"environment:{env_name}") if value else ("", "missing")
+
+
+def _direct_report(result: Any, *, repaired: bool, attempts: int) -> dict[str, Any]:
+    return {
+        "schema_version": "substar.segmentation-validation.v2",
+        "valid": result.valid,
+        "repaired": repaired,
+        "repair_attempts": attempts,
+        "plan_issues": result.issues,
+        "review_notices": result.review_notices,
+        "draft_validation": copy.deepcopy(result.validation),
+    }
 
 
 def emit_runtime_event(event: str, payload: Any | None = None) -> None:
@@ -113,6 +130,63 @@ def finalize_display_cuts(
         int(value)
         for value in [*local_cuts, *execution_seams]
         if int(value) < int(final_alignment_index)
+    }
+
+
+def build_plan_from_cuts(
+    cuts: set[int],
+    units: list[Any],
+    protection: dict[str, Any],
+    meaning_groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Materialize the validated semantic cuts into the canonical Cue plan."""
+
+    first = int(units[0].index)
+    last = int(units[-1].index)
+    valid_cuts = sorted(cut for cut in cuts if first <= cut < last)
+    relations = {
+        int(group["alignment_end"]): copy.deepcopy(group["continuity_after"])
+        for group in meaning_groups
+        if isinstance(group.get("continuity_after"), dict)
+    }
+    spans = list(protection.get("spans", []))
+    groups: list[dict[str, Any]] = []
+    start = first
+    for number, end in enumerate([*valid_cuts, last], start=1):
+        groups.append({
+            "group_id": f"g{number:04d}",
+            "alignment_start": start,
+            "alignment_end": end,
+            "line_breaks_after": [],
+            "protected_spans": [
+                copy.deepcopy(span) for span in spans
+                if start <= int(span["alignment_start"])
+                <= int(span["alignment_end"]) <= end
+            ],
+            "deletions": [],
+            "corrections": [],
+            "confidence": 0.8,
+            "needs_review": False,
+            "continuity_after": relations.get(end, {
+                "relation": "continuous",
+                "confidence": 1.0,
+                "reason": "validated display boundary",
+                "speaker_transition": "unknown",
+            }),
+            "reason": "validated semantic group and display cut",
+        })
+        start = end + 1
+    groups[-1]["continuity_after"] = {
+        "relation": "separate",
+        "confidence": 1.0,
+        "reason": "terminal programme boundary",
+        "speaker_transition": "unknown",
+    }
+    return {
+        "schema_version": "substar.segmentation-cue-plan.v2",
+        "source_language": "Auto",
+        "groups": groups,
+        "coverage_check": {"complete": True, "ordered": True},
     }
 
 
@@ -327,16 +401,15 @@ def model_json(
             "input": user,
         },
     )
-    value, call_info = call_model(
+    value, call_info = call_json_model(
         base_url=base_url,
         api_key=api_key,
         auth_mode=auth_mode,
         model=model,
         system_prompt=system,
-        user_payload=json.dumps(user, ensure_ascii=False),
+        user_payload=user if isinstance(user, dict) else {"input": user},
         timeout=timeout,
         max_tokens=max_tokens,
-        json_mode=False,
         thinking_mode=thinking_mode,
         reasoning_effort=reasoning_effort,
         temperature=temperature,
@@ -804,8 +877,8 @@ def request_semantic_grouping_block(
         cursor = max(cursor, int(group["alignment_end"]) + 1)
     groups.sort(key=lambda row: int(row["alignment_start"]))
 
-    fallback_audit = {
-        "schema_version": "substar.segmentation-fallback.v1",
+    repair_audit = {
+        "schema_version": "substar.segmentation-repair.v2",
         "block_id": block_id,
         "alignment_start": int(local_units[0].index),
         "alignment_end": int(local_units[-1].index),
@@ -815,8 +888,8 @@ def request_semantic_grouping_block(
         "problem_cue_count": len(exceptions),
     }
     atomic_write_json(
-        args.output_dir / f"semantic_grouping_fallback_{block_id}.json",
-        fallback_audit,
+        args.output_dir / f"semantic_grouping_repair_{block_id}.json",
+        repair_audit,
     )
     if progress is not None:
         progress.event(
@@ -982,10 +1055,6 @@ def main(
     args.api_key = ""
     emit_runtime_event("segmentation initialization", {"step": "resolve_credential"})
     args.api_key, key_source = resolve_api_key("SUBSTAR_MODEL_API_KEY")
-    if not args.api_key:
-        # Direct invocations from pre-provider builds may still carry the old
-        # variable. The supervised worker never writes this legacy slot.
-        args.api_key, key_source = resolve_api_key("DEEPSEEK_API_KEY")
     if not args.api_key:
         raise SegmentationError("语义切分缺少当前模型服务密钥")
 

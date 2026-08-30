@@ -10,13 +10,6 @@ from substar_core.editor.calibration import (
     CALIBRATION_RESULT_SCHEMA,
     CalibrationActionKind,
 )
-from substar_core.editor.tasks import (
-    EDITOR_AI_TASK_SCHEMA,
-    EditorAiTaskState,
-    EditorAiTaskStateError,
-    editor_ai_task_holds_lock,
-    require_editor_ai_task_transition,
-)
 from substar_core.editor.translation import TRANSLATION_RESULT_SCHEMA
 from substar_core.segmentation.semantic_grouping_contract import (
     SEMANTIC_GROUPING_RESULT_SCHEMA,
@@ -41,9 +34,8 @@ class EditorAiContractTests(unittest.TestCase):
     def test_all_new_schemas_are_valid_draft_2020_12(self) -> None:
         for name in (
             "semantic-grouping-result.v1.schema.json",
-            "calibration-result.v1.schema.json",
-            "translation-result.v1.schema.json",
-            "editor-ai-task.v1.schema.json",
+            "calibration-result.v2.schema.json",
+            "translation-result.v2.schema.json",
         ):
             Draft202012Validator.check_schema(load_schema(name))
 
@@ -91,11 +83,11 @@ class EditorAiContractTests(unittest.TestCase):
                 }
             ],
         }
-        validate("calibration-result.v1.schema.json", value)
+        validate("calibration-result.v2.schema.json", value)
         invalid = json.loads(json.dumps(value))
         invalid["actions"][0]["kind"] = "rewrite_sentence"
         with self.assertRaises(ValidationError):
-            validate("calibration-result.v1.schema.json", invalid)
+            validate("calibration-result.v2.schema.json", invalid)
 
     def test_translation_contract_binds_each_cue_to_source_hash(self) -> None:
         value = {
@@ -110,59 +102,16 @@ class EditorAiContractTests(unittest.TestCase):
                     "cue_id": "cue-1",
                     "source_hash": "b" * 64,
                     "target_text": "你好",
+                    "translation_status": "translated",
+                    "issue_code": None,
+                    "editable": True,
                 }
             ],
         }
-        validate("translation-result.v1.schema.json", value)
+        validate("translation-result.v2.schema.json", value)
         del value["cues"][0]["source_hash"]
         with self.assertRaises(ValidationError):
-            validate("translation-result.v1.schema.json", value)
-
-    def test_editor_ai_task_is_an_exclusive_lock_contract(self) -> None:
-        running = {
-            "schema_version": EDITOR_AI_TASK_SCHEMA,
-            "task_id": "task-1",
-            "project_id": "project-1",
-            "kind": "calibration",
-            "state": "running",
-            "locks_editor": True,
-            "based_on_revision_id": "revision-1",
-            "result_revision_id": None,
-            "created_at": "2026-08-17T00:00:00Z",
-            "started_at": "2026-08-17T00:00:01Z",
-            "finished_at": None,
-            "cancel_requested_at": None,
-            "error": None,
-        }
-        validate("editor-ai-task.v1.schema.json", running)
-        with self.assertRaises(ValidationError):
-            validate(
-                "editor-ai-task.v1.schema.json",
-                {**running, "locks_editor": False},
-            )
-
-        succeeded = {
-            **running,
-            "state": "succeeded",
-            "locks_editor": False,
-            "finished_at": "2026-08-17T00:01:00Z",
-        }
-        validate("editor-ai-task.v1.schema.json", succeeded)
-
-    def test_editor_ai_task_transition_rules_release_only_at_terminal_state(self) -> None:
-        self.assertTrue(editor_ai_task_holds_lock(EditorAiTaskState.QUEUED))
-        self.assertTrue(editor_ai_task_holds_lock(EditorAiTaskState.RUNNING))
-        self.assertTrue(editor_ai_task_holds_lock(EditorAiTaskState.CANCELLING))
-        self.assertFalse(editor_ai_task_holds_lock(EditorAiTaskState.SUCCEEDED))
-
-        require_editor_ai_task_transition("queued", "running")
-        require_editor_ai_task_transition("running", "cancelling")
-        require_editor_ai_task_transition("cancelling", "cancelled")
-        with self.assertRaises(EditorAiTaskStateError):
-            require_editor_ai_task_transition("running", "cancelled")
-        with self.assertRaises(EditorAiTaskStateError):
-            require_editor_ai_task_transition("succeeded", "running")
-
+            validate("translation-result.v2.schema.json", value)
 
 if __name__ == "__main__":
     unittest.main()

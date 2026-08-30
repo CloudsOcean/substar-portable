@@ -20,10 +20,9 @@
       "scripts/run_transcription_worker.py",
       "scripts/run_segmentation_worker.py",
       "scripts/run_semantic_segmentation.py",
-      "scripts/segmentation_support.py",
-      "scripts/run_production_translation.py",
-      "scripts/run_flash_map_pro_editor.py",
-      "scripts/run_global_planner_ab.py"
+      "scripts/run_translation_worker.py",
+      "scripts/run_calibration_worker.py",
+      "substar_core/model_gateway/**/*.py"
     ],
     "ignored_globs": [
       "substar_core/__init__.py",
@@ -170,12 +169,6 @@
       "schema": "substar_core/editor/protocol/editor_protocol.schema.json",
       "description": "Revision-bound user document edit; never an AI task lock."
     },
-    "editor_operation_state": {
-      "title": "Exclusive editor AI operation state",
-      "authority": "substar_core/editor/tasks/contracts.py",
-      "schema": "schemas/editor-ai-task.v1.schema.json",
-      "description": "Durable translation or calibration ownership that locks editing while running and records cancelling/cancelled terminal semantics."
-    },
     "translation_request": {
       "title": "Revision-bound translation request",
       "authority": "substar_core/editor/http_api.py::TranslationStartRequest",
@@ -185,14 +178,14 @@
     "translation_result": {
       "title": "AI translation result",
       "authority": "substar_core/editor/translation/contracts.py",
-      "schema": "schemas/translation-result.v1.schema.json",
-      "description": "Model-authored meaning-unit plan and unique final text for each Cue."
+      "schema": "schemas/translation-result.v2.schema.json",
+      "description": "Model-authored meaning-unit plan plus a translated or blank, editable manual-required target for every Cue."
     },
     "calibration_result": {
       "title": "AI calibration result",
       "authority": "substar_core/editor/calibration/contracts.py",
-      "schema": "schemas/calibration-result.v1.schema.json",
-      "description": "Model-authored punctuation, casing, terminology and ASR correction actions."
+      "schema": "schemas/calibration-result.v2.schema.json",
+      "description": "Model-authored punctuation, casing, terminology and ASR correction actions under the unified Task Runtime."
     },
     "media_stream": {
       "title": "Project media and waveform response",
@@ -600,7 +593,7 @@
       "layer": "model_orchestration",
       "role": "Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan.",
       "must_not": ["Reorder, delete or rewrite source tokens", "Replace valid model output with deterministic semantic content", "Roll back valid groups because another group failed"],
-      "code": [{"path": "scripts/run_semantic_segmentation.py", "symbols": ["main", "request_semantic_grouping_block", "validate_semantic_grouping_result", "_salvage_semantic_groups"]}, {"path": "scripts/run_flash_map_pro_editor.py", "symbols": ["build_plan_from_cuts"]}, {"path": "scripts/run_global_planner_ab.py", "symbols": ["call_streaming_model"]}],
+      "code": [{"path": "scripts/run_semantic_segmentation.py", "symbols": ["main", "request_semantic_grouping_block", "validate_semantic_grouping_result", "_salvage_semantic_groups", "build_plan_from_cuts"]}],
       "inputs": ["segmentation_material", "segmentation_request"],
       "outputs": ["semantic_grouping_result", "editor_document"],
       "calls": ["segmentation_model_connector"],
@@ -615,7 +608,7 @@
       "layer": "provider_connector",
       "role": "Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint.",
       "must_not": ["Choose deterministic replacement Cues", "Ignore per-stage model settings", "Leak keys into logs or artifacts"],
-      "code": [{"path": "scripts/segmentation_support.py", "symbols": ["call_model", "stage_system", "resolve_api_key"]}, {"path": "substar_core/openai_compat.py", "symbols": ["endpoint_url", "auth_headers"]}, {"path": "prompts/production/segmentation/common/semantic_grouping.md", "symbols": []}, {"path": "prompts/production/segmentation/common/semantic_grouping_repair.md", "symbols": []}],
+      "code": [{"path": "substar_core/model_gateway/gateway.py", "symbols": ["call_json_model"]}, {"path": "substar_core/openai_compat.py", "symbols": ["endpoint_url", "auth_headers"]}, {"path": "prompts/production/segmentation/common/semantic_grouping.md", "symbols": []}, {"path": "prompts/production/segmentation/common/semantic_grouping_repair.md", "symbols": []}],
       "inputs": ["segmentation_material", "segmentation_request", "credential_reference"],
       "outputs": ["semantic_grouping_result"],
       "calls": [],
@@ -661,74 +654,59 @@
       "role": "Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands.",
       "must_not": ["Bypass ProjectStore", "Allow edits while an exclusive AI operation is running", "Use historical v2 names in public routes"],
       "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["get_project", "save_project_document", "apply_project_operation", "start_project_translation", "ai_calibrate_project"]}],
-      "inputs": ["editor_operation", "editor_operation_state", "editor_revision", "reference_document", "translation_request", "project_task_info", "external_ai_exchange"],
+      "inputs": ["editor_operation", "task_record", "editor_revision", "reference_document", "translation_request", "project_task_info", "external_ai_exchange"],
       "outputs": ["editor_revision", "translation_result", "calibration_result", "media_info", "media_stream", "project_task_info", "external_ai_exchange"],
-      "calls": ["project_store", "task_info_service", "editor_task_repository", "reference_manuscript_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"],
+      "calls": ["project_store", "task_info_service", "task_service", "reference_manuscript_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"],
       "invariants": ["Every document mutation binds expected_revision_id", "Task information changes never rewrite existing ASR, Cue topology, timing or translations", "Editor reference matching uses the canonical project source language or explicit Auto detection", "Low-confidence editor reference matches remain advisory and do not mutate the revision", "External prooftranslation applies only matching Cue and source hashes", "External segmentation binds the exact revision, document and token sequence and cannot replace existing translations", "Only one exclusive AI operation runs per project", "AI results bind the revision they inspected"],
       "failure_modes": ["Revision conflict", "AI task conflict", "Invalid operation", "Missing media"],
       "recovery": {"strategy": "Reload the latest revision and durable AI operation state.", "reuses": ["latest verified revision", "completed AI result"], "restarts": ["failed AI operation when user requests"], "terminal": "Return structured conflict or task error."},
       "tests": ["tests/test_editor_translation_binding.py", "tests/test_editor_ai_contracts.py", "tests/test_editor_ai_calibration_protocol.py", "tests/test_reference_script_mode.py", "tests/test_project_exchange.py"],
-      "change_impact": {"modules": ["editor_ui", "task_info_service", "project_store", "editor_task_repository", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_operation", "editor_operation_state", "editor_revision", "translation_request", "translation_result", "calibration_result", "media_info", "media_stream", "project_task_info"]}
+      "change_impact": {"modules": ["editor_ui", "task_info_service", "project_store", "task_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_operation", "task_record", "editor_revision", "translation_request", "translation_result", "calibration_result", "media_info", "media_stream", "project_task_info"]}
     },
     "task_info_service": {
       "title": "Canonical project task information service",
       "layer": "application_service",
-      "role": "Load, validate, atomically save and one-time migrate the five project task-information fields.",
-      "must_not": ["Mutate editor revisions", "Recompute existing subtitle content", "Merge legacy snapshots after task_info.json exists"],
+      "role": "Load, validate and atomically save the required v2 project task-information fields.",
+      "must_not": ["Mutate editor revisions", "Recompute existing subtitle content", "Synthesize metadata from a legacy project"],
       "code": [{"path": "substar_core/task_info.py", "symbols": ["load_task_info", "save_task_info", "task_info_settings"]}],
       "inputs": ["project_task_info", "settings_snapshot", "project_creation_projection"],
       "outputs": ["project_task_info"],
       "calls": ["settings_service"],
-      "invariants": ["task_info.json is the only runtime authority after one-time migration", "All five fields are committed atomically", "Legacy artifacts remain untouched and are migration inputs only"],
+      "invariants": ["task_info.json is required and is the only runtime authority", "All fields are committed atomically", "Unsupported project versions are rejected"],
       "failure_modes": ["Invalid task name", "Unsupported language", "Invalid line length", "Corrupt task information"],
       "recovery": {"strategy": "Reject invalid updates and retain the prior task_info.json.", "reuses": ["prior canonical task information"], "restarts": [], "terminal": "Return an explicit validation error without document mutation."},
       "tests": ["tests/test_project_exchange.py", "tests/editor_reference_boundary_ui.test.js"],
       "change_impact": {"modules": ["composition_root", "editor_api", "editor_ui", "project_exchange_service", "creation_projection"], "contracts": ["project_task_info", "settings_snapshot", "project_creation_projection"]}
     },
-    "editor_task_repository": {
-      "title": "Exclusive editor AI operation repository",
-      "layer": "persistence",
-      "role": "Persist one translation, calibration or review operation, enforce the editing lock while it runs, and publish a process-local cancellation signal for owned provider work.",
-      "must_not": ["Represent user document edits", "Run two AI operations concurrently", "Release the lock before terminal persistence", "Allow cancelled provider work to commit a result"],
-      "code": [{"path": "substar_core/editor/tasks/repository.py", "symbols": ["load_task", "start_task", "finish_task", "request_task_cancellation", "raise_if_task_cancelled", "assert_editor_write_allowed"]}, {"path": "substar_core/editor/tasks/contracts.py", "symbols": []}],
-      "inputs": ["editor_operation_state", "editor_revision"],
-      "outputs": ["editor_operation_state"],
-      "calls": [],
-      "invariants": ["Running state locks document writes", "Task basis is one immutable revision", "Terminal state is durable before editing unlocks", "Cancellation keeps the lock through cancelling and releases it only after provider work stops"],
-      "failure_modes": ["Concurrent task conflict", "Stale basis revision", "Corrupt state file"],
-      "recovery": {"strategy": "On startup, reconcile stale running state against the owning process/task result.", "reuses": ["completed task result"], "restarts": ["operation only when explicitly requested"], "terminal": "Persist failed or interrupted operation state."},
-      "tests": ["tests/test_editor_ai_task_repository.py", "tests/test_editor_ai_contracts.py"],
-      "change_impact": {"modules": ["editor_api", "editor_ui", "translation_service", "calibration_service"], "contracts": ["editor_operation_state", "editor_revision"]}
-    },
     "translation_service": {
       "title": "Editor translation service",
       "layer": "model_orchestration",
-      "role": "Translate meaning units with full group context, materialize one authoritative final text for each Cue, and terminate the owned translation process when cancellation is requested.",
-      "must_not": ["Split or synthesize translated text in program fallback", "Modify source tokens", "Discard valid groups because another group failed"],
-      "code": [{"path": "substar_core/editor/translation/service.py", "symbols": ["create_translation_task", "run_translation_task"]}, {"path": "substar_core/editor/translation/contextual.py", "symbols": ["run_contextual_translation", "complete_results", "materialize_presentation"]}, {"path": "scripts/run_production_translation.py", "symbols": ["main"]}],
-      "inputs": ["editor_revision", "editor_operation_state", "credential_reference", "translation_request"],
-      "outputs": ["translation_result", "editor_revision"],
-      "calls": ["editor_task_repository", "project_store"],
-      "invariants": ["Model sees meaning-unit context", "Translation inherits the accepted-split execution plan and runs independent blocks concurrently", "Each Cue has exactly one model-authored final text", "Accepted groups are registered before one concurrent repair pass for all failures", "Presentation validation enforces hard character limits but does not calculate or reject CPS", "A missing translation from an unresolved block leaves that Cue unchanged and registers it as a problem subtitle without discarding accepted translations", "A cancelling translation terminates its child process and never enters the successful parent finalizer"],
+      "role": "Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue.",
+      "must_not": ["Synthesize missing translation text", "Modify source tokens", "Discard valid groups because another group failed", "Enter repair more than once"],
+      "code": [{"path": "substar_core/editor/translation/handler.py", "symbols": ["build_translation_handler"]}, {"path": "substar_core/editor/translation/worker.py", "symbols": ["run"]}, {"path": "substar_core/editor/translation/runner.py", "symbols": ["execute_translation"]}, {"path": "substar_core/editor/translation/contextual.py", "symbols": ["run_contextual_translation", "complete_results", "materialize_presentation"]}, {"path": "substar_core/editor/translation/result_policy.py", "symbols": ["accepted_translation_rows", "translation_problem_cue_ids"]}, {"path": "scripts/run_translation_worker.py", "symbols": []}],
+      "inputs": ["task_record", "editor_revision", "credential_reference", "translation_request"],
+      "outputs": ["task_record", "translation_result", "editor_revision"],
+      "calls": ["task_service", "scheduler", "worker_supervisor", "model_stage_scheduler", "project_store"],
+      "invariants": ["Model sees meaning-unit context", "Each unit has one primary request and at most one repair request", "The whole task enters repair at most once", "Accepted groups survive unrelated failures", "Every unresolved Cue has empty editable manual-required target text", "Final partial success is succeeded_with_issues"],
       "failure_modes": ["Provider error", "Invalid group assignment", "Missing Cue result", "Revision changed"],
       "recovery": {"strategy": "Register successful Cue results, repair all unresolved Cues once, and mark any remainder as problem subtitles.", "reuses": ["all accepted Cue translations"], "restarts": ["unresolved Cues only"], "terminal": "Persist problem-subtitle markers without replacing content."},
       "tests": ["tests/test_translation_runner_contract.py", "tests/test_editor_translation_binding.py"],
-      "change_impact": {"modules": ["editor_api", "editor_task_repository", "project_store", "editor_ui"], "contracts": ["editor_operation_state", "editor_revision", "translation_request", "translation_result"]}
+      "change_impact": {"modules": ["editor_api", "task_service", "scheduler", "project_store", "editor_ui"], "contracts": ["task_record", "editor_revision", "translation_request", "translation_result"]}
     },
     "calibration_service": {
       "title": "AI calibration service",
       "layer": "model_orchestration",
       "role": "Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track.",
       "must_not": ["Change Cue timing or topology", "Apply an action the model marked review-only", "Use advisory review as automatic correction"],
-      "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["ai_calibrate_project", "_ai_calibrate_project", "_validated_calibration_contract_actions"]}, {"path": "substar_core/editor/calibration/contracts.py", "symbols": []}, {"path": "prompts/production/calibration/en.md", "symbols": []}, {"path": "prompts/production/calibration/zh.md", "symbols": []}],
-      "inputs": ["editor_revision", "editor_operation_state", "credential_reference"],
-      "outputs": ["calibration_result", "editor_revision"],
-      "calls": ["editor_task_repository", "project_store"],
+      "code": [{"path": "substar_core/editor/calibration/handler.py", "symbols": ["build_calibration_handler"]}, {"path": "substar_core/editor/calibration/worker.py", "symbols": ["run"]}, {"path": "substar_core/editor/http_api.py", "symbols": ["ai_calibrate_project", "_ai_calibrate_project", "_validated_calibration_contract_actions"]}, {"path": "substar_core/editor/calibration/contracts.py", "symbols": []}, {"path": "prompts/production/calibration/en.md", "symbols": []}, {"path": "prompts/production/calibration/zh.md", "symbols": []}, {"path": "scripts/run_calibration_worker.py", "symbols": []}],
+      "inputs": ["task_record", "editor_revision", "credential_reference"],
+      "outputs": ["task_record", "calibration_result", "editor_revision"],
+      "calls": ["task_service", "scheduler", "worker_supervisor", "model_stage_scheduler", "project_store"],
       "invariants": ["Calibration inherits the accepted-split execution plan and runs independent blocks concurrently", "Each block sees ordered source Cues with its required context", "A bounded per-run user instruction may refine terminology and attention but cannot expand the frozen calibration action contract or change Cue timing/topology", "Every action binds exact Cue/token text", "Model disposition is authoritative"],
       "failure_modes": ["Invalid action", "Provider error", "Revision changed", "Partial block failure"],
       "recovery": {"strategy": "Preserve valid block actions, repair all invalid blocks once, and expose unresolved items for review.", "reuses": ["valid calibration actions"], "restarts": ["invalid blocks only"], "terminal": "Leave unresolved source text unchanged and flagged."},
       "tests": ["tests/test_editor_ai_calibration_protocol.py", "tests/test_ai_calibration.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_ai_calibration_instruction.py"],
-      "change_impact": {"modules": ["editor_api", "editor_task_repository", "project_store", "editor_ui"], "contracts": ["editor_operation_state", "editor_revision", "calibration_result"]}
+      "change_impact": {"modules": ["editor_api", "task_service", "scheduler", "project_store", "editor_ui"], "contracts": ["task_record", "editor_revision", "calibration_result"]}
     },
     "media_service": {
       "title": "Editor media and waveform service",
@@ -751,14 +729,14 @@
       "role": "Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls.",
       "must_not": ["Invent backend revisions", "Edit while exclusive AI operation is running", "Rewrite canonical source tokens outside operations"],
       "code": [{"path": "web/editor.js", "symbols": []}, {"path": "web/editor_document.js", "symbols": []}, {"path": "web/editor_document_store.js", "symbols": []}, {"path": "web/editor_operation_queue.js", "symbols": []}, {"path": "web/editor_timeline.js", "symbols": []}, {"path": "web/editor_cue_list_view.js", "symbols": []}, {"path": "web/editor_external_review.js", "symbols": ["build", "resolveScope"]}, {"path": "web/editor_tutorial.js", "symbols": []}, {"path": "web/system_save_as.js", "symbols": []}, {"path": "web/editor_cue_ordering.js", "symbols": []}, {"path": "web/editor_cue_time_controller.js", "symbols": []}, {"path": "web/editor_waveform_cache.js", "symbols": []}, {"path": "web/editor_language.js", "symbols": []}],
-      "inputs": ["editor_revision", "editor_operation_state", "translation_result", "calibration_result", "media_info", "media_stream", "subtitle_export", "project_task_info"],
+      "inputs": ["editor_revision", "task_record", "translation_result", "calibration_result", "media_info", "media_stream", "subtitle_export", "project_task_info"],
       "outputs": ["editor_operation", "translation_request", "project_task_info"],
       "calls": ["editor_api"],
       "invariants": ["Selected project_id never silently falls back to another project", "The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner", "Large Cue lists are windowed", "Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar", "External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state", "External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked", "External review preserves Cue timing, upper/lower subtitle text and translation meaning-unit evidence, and explicitly permits one-to-many, many-to-one and many-to-many translation mappings", "Every user-visible export opens the operating-system Save As picker before requesting or writing bytes", "Space inserts text only in a real text-editing context; without modifiers it toggles media playback everywhere else through one capture-phase shortcut route", "The editor export menu exposes exactly upper subtitle, lower subtitle, upper/lower single-line subtitle, upper/lower double-line subtitle and portable subtitle project", "AI calibration uses a button-anchored compact menu whose project-scoped optional instruction affects one run only", "Running editor AI tasks render their durable backend progress in the same title/progress/message hierarchy as split-page pipeline cards", "Informational copy/export notices use the ordinary theme and only actual failures use the red error treatment", "Document edits use the current revision basis", "The task-information dialog edits exactly name, source language, target language and both track line lengths", "Task information changes do not rewrite existing subtitle content", "Editor import accepts portable subtitle projects only", "Audio and video use the same currentTime authority for Cue, subtitle and timeline following", "Playback UI never depends on the existence of video frames", "Virtual CJK lines have character boundaries without word gaps", "Word-language lines retain virtual gaps", "Right-clicking an auxiliary point or virtual boundary splits after its left token", "Right-clicking the final purple connector merges the next Cue", "Left-clicking remains reserved for token selection", "Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers", "Reference choices appear above the selected token and remain reversible", "Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract"],
       "failure_modes": ["Stale response race", "Revision conflict", "Media unavailable", "AI task lock"],
       "recovery": {"strategy": "Reload the current project revision and operation state; retain no speculative backend truth.", "reuses": ["project_id", "viewport selection"], "restarts": [], "terminal": "Show the exact structured API error."},
       "tests": ["tests/editor_document_contract.test.js", "tests/editor_auto_snap.test.js", "tests/editor_cue_list_view.test.js", "tests/editor_external_review.test.js", "tests/editor_review_popover_contract.test.js", "tests/editor_calibration_prompt.test.js", "tests/editor_space_shortcut.test.js", "tests/system_save_as.test.js", "tests/editor_language.test.js", "tests/editor_media_routing.test.js", "tests/editor_reference_boundary_ui.test.js", "tests/editor_tools_hotfix_ui_contract.test.js", "tests/test_editor_translation_binding.py", "tests/test_project_exchange.py"],
-      "change_impact": {"modules": ["editor_api_client", "editor_api", "task_info_service", "project_store", "editor_task_repository", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_document", "editor_revision", "editor_operation", "editor_operation_state", "translation_request", "media_info", "media_stream", "project_task_info"]}
+      "change_impact": {"modules": ["editor_api_client", "editor_api", "task_info_service", "project_store", "task_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_document", "editor_revision", "editor_operation", "task_record", "translation_request", "media_info", "media_stream", "project_task_info"]}
     },
     "editor_api_client": {
       "title": "Editor browser API caller",
@@ -767,13 +745,13 @@
       "must_not": ["Silently select another project", "Treat HTTP success as revision success without validating payload", "Retry mutating operations without their operation identity"],
       "code": [{"path": "web/editor.js", "symbols": []}, {"path": "web/editor_document_store.js", "symbols": []}, {"path": "web/editor_operation_queue.js", "symbols": []}],
       "inputs": ["editor_operation", "project_creation_projection"],
-      "outputs": ["editor_revision", "editor_operation_state", "translation_request", "translation_result", "calibration_result", "media_info", "media_stream"],
+      "outputs": ["editor_revision", "task_record", "translation_request", "translation_result", "calibration_result", "media_info", "media_stream"],
       "calls": ["editor_api", "composition_root"],
       "invariants": ["Every project URL uses the selected stable project_id", "Mutation responses advance the local revision basis atomically", "Structured API errors remain visible"],
       "failure_modes": ["Network failure", "Stale response", "Revision conflict", "Malformed payload"],
       "recovery": {"strategy": "Abort or ignore stale requests and reload the selected project plus latest revision.", "reuses": ["project_id", "operation_id"], "restarts": ["read requests"], "terminal": "Show the decoded backend error."},
       "tests": ["tests/editor_document_contract.test.js", "tests/test_editor_translation_binding.py"],
-      "change_impact": {"modules": ["editor_ui", "editor_api", "project_store"], "contracts": ["editor_operation", "editor_revision", "editor_operation_state", "media_info", "media_stream"]}
+      "change_impact": {"modules": ["editor_ui", "editor_api", "project_store", "task_service"], "contracts": ["editor_operation", "editor_revision", "task_record", "media_info", "media_stream"]}
     },
     "editor_domain": {
       "title": "Editor document domain and operation engine",
@@ -913,16 +891,16 @@
     "model_stage_scheduler": {
       "title": "Prompt registry and per-stage model scheduler",
       "layer": "application",
-      "role": "Resolve versioned prompts, atomically persist registered component bodies, apply the configured primary/repair model policy for segmentation, translation, calibration and review, and isolate editor-owned provider requests in killable child processes.",
+      "role": "Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway.",
       "must_not": ["Use hard-coded models when a stage setting exists", "Assign reasoning effort to non-thinking mode", "Load prompts outside the frozen snapshot for creation tasks", "Expose registry route mutation through settings", "Accept a prompt save whose SHA-256 basis is stale"],
-      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/ai_progress.py", "symbols": ["ai_progress"]}, {"path": "substar_core/model_routing.py", "symbols": ["resolve_stage_request"]}, {"path": "substar_core/stage2.py", "symbols": []}, {"path": "scripts/run_editor_model_request.py", "symbols": ["main"]}],
+      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/ai_progress.py", "symbols": ["ai_progress"]}, {"path": "substar_core/model_routing.py", "symbols": ["resolve_stage_request"]}, {"path": "substar_core/model_gateway/gateway.py", "symbols": ["call_json_model", "call_translation_model"]}],
       "inputs": ["settings_snapshot", "model_stage_policy", "production_prompt_component"],
       "outputs": ["model_stage_policy", "production_prompt_component"],
       "calls": [],
-      "invariants": ["Every production primary and repair call resolves through a named stage", "Prompt file/version/hash is auditable", "Registered component writes are atomic and optimistic-concurrency checked", "Existing frozen task snapshots remain immutable after a production component edit", "Cancelling an editor-owned model call terminates its request process before control returns to the task finalizer"],
+      "invariants": ["Every production primary and repair call resolves through a named stage", "Provider, model, credential reference, thinking mode and reasoning effort are frozen in task input", "Provider capability mapping happens once", "Transport retries are bounded and distinct from the single semantic repair phase"],
       "failure_modes": ["Unknown stage", "Missing prompt", "Unsupported thinking mode", "Model setting absent"],
       "recovery": {"strategy": "Reject unresolved stage configuration before a provider call.", "reuses": ["frozen prompt snapshot", "saved stage policy"], "restarts": [], "terminal": "Return configuration error."},
-      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_stage2_editor_cancellation.py", "tests/test_ai_stage_progress_contract.py"],
+      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_glm_provider.py", "tests/test_ai_stage_progress_contract.py"],
       "change_impact": {"modules": ["settings_ui", "settings_service", "segmentation_model_connector", "translation_service", "calibration_service"], "contracts": ["settings_snapshot", "model_stage_policy", "production_prompt_component"]}
     },
     "glossary_ui": {
@@ -1091,13 +1069,13 @@
     },
     "editor_translation": {
       "title": "Revision-bound AI translation",
-      "modules": ["editor_ui", "editor_api", "editor_task_repository", "translation_service", "project_store"],
+      "modules": ["editor_ui", "editor_api", "task_service", "scheduler", "worker_supervisor", "translation_service", "project_store"],
       "success": "One final model-authored target text is committed for each resolved Cue and unresolved Cues remain explicit.",
       "tests": ["tests/test_translation_runner_contract.py", "tests/test_editor_translation_binding.py"]
     },
     "editor_calibration": {
       "title": "Revision-bound AI calibration",
-      "modules": ["editor_ui", "editor_api", "editor_task_repository", "calibration_service", "project_store"],
+      "modules": ["editor_ui", "editor_api", "task_service", "scheduler", "worker_supervisor", "calibration_service", "project_store"],
       "success": "Validated model-authored source corrections are committed without topology changes.",
       "tests": ["tests/test_editor_ai_calibration_protocol.py", "tests/test_ai_calibration.py"]
     },

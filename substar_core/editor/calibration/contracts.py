@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 
 
-CALIBRATION_RESULT_SCHEMA = "substar.calibration-result.v1"
+CALIBRATION_RESULT_SCHEMA = "substar.calibration-result.v2"
 
 
 class CalibrationActionKind(str, Enum):

@@ -831,7 +831,6 @@
     $("#chunkSecondsInput").value = settings.segmentation_chunk_seconds || 90;
     $("#workersInput").value = settings.translation_workers || 16;
     $("#retryInput").value = settings.http_retry_attempts ?? 3;
-    $("#repairInput").value = settings.segmentation_repair_attempts ?? 1;
     state.settingsDirty = false;
     state.taskConfigLoaded = true;
     setSettingsSaveState("任务配置已保留；多个素材将共用此配置", "saved");
@@ -1025,7 +1024,6 @@
       segmentation_chunk_seconds: Number($("#chunkSecondsInput").value),
       translation_workers: Number($("#workersInput").value),
       http_retry_attempts: Number($("#retryInput").value),
-      segmentation_repair_attempts: Number($("#repairInput").value),
     };
     for (const key of [
       "whisper_model", "whisper_model_path", "whisper_device",
@@ -1565,7 +1563,7 @@
   for (const selector of [
     "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
     "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
-    "#chunkSecondsInput", "#workersInput", "#retryInput", "#repairInput",
+    "#chunkSecondsInput", "#workersInput", "#retryInput",
     "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {
     $(selector).addEventListener("input", markSettingsDirty);

@@ -1,6 +1,6 @@
 # Substar 综合收敛修复与验收计划
 
-> 状态：运行链路已实施并验收；结构收敛项分阶段继续  
+> 状态：v2 破坏性切换已实施；正在执行最终发布门禁
 > 编制日期：2026-08-30  
 > 适用代码库：`C:\temp\Substar\substar-portable-repo`  
 > 测试素材：`C:\temp\R01_No Music_Map_Animation.mp4`、`C:\temp\参考文稿.docx`
@@ -94,7 +94,7 @@
 
 - UI、日志、设置和用户文档统一使用“修复”。
 - 新任务契约使用 `repair`。
-- 旧项目中的 `fallback`、`repairing` 只做兼容读取，不继续写入。
+- v2 不读取旧项目中的 `fallback`、`repairing`；旧数据原地保留但不进入项目发现。
 
 ### 3.2 一项任务只进入一次修复阶段
 
@@ -125,7 +125,7 @@ unit.transport_attempt_count: integer
 - 每个失败单元 `repair_request_count <= 1`；
 - 禁止修复再次调用修复；
 - 删除次数型 `segmentation_repair_attempts`、`translation_repair_attempts` 的产品语义；
-- 旧的 0～2、1～2、最大 4 次配置迁移为布尔资格。
+- 次数型旧配置不迁移、不读取；v2 只有任务级布尔修复资格。
 
 ### 3.3 传输重试不等于内容修复
 
@@ -167,8 +167,7 @@ unit.transport_attempt_count: integer
 - 不占项目 AI 锁；
 - 新项目不写 `stage_review_*`；
 - 新工程导出不携带内部 `review/`；
-- 旧项目审阅字段只读兼容并忽略执行；
-- 不因清理审阅残留破坏旧项目。
+- v2 项目不写入或读取内部审阅字段；旧项目整体不进入 v2。
 
 ## 4. 目标运行架构
 
@@ -390,11 +389,11 @@ ASR 和程序切块不重写内部算法，只接入统一任务进度与终态�
 - 只修复缺失或非法意义组；
 - 未解决源 Cue 分别生成可编辑空目标行。
 
-### 7.3 兼容规则
+### 7.3 模式规则
 
 - 默认保持多对多翻译；
 - 模式在任务创建时冻结；
-- 旧项目缺失字段时按 `many_to_many` 读取；
+- 模式缺失是无效 v2 任务输入，不从旧项目推断；
 - 任务审计、运行报告和导出说明记录模式；
 - 两种模式共享凭据、思考、错误、修复和部分交付规则。
 
@@ -403,8 +402,8 @@ ASR 和程序切块不重写内部算法，只接入统一任务进度与终态�
 ### 8.1 创建任务与正式项目分离
 
 ```text
-data/jobs/<job_id>/
-data/projects/<project_id>/
+data/.substar-workbench/task-runtime/<task_id>/
+data/projects-v2/<project_id>/
 ```
 
 - 上传和处理中只创建 job；
@@ -415,37 +414,30 @@ data/projects/<project_id>/
 ### 8.2 正式项目结构
 
 ```text
-projects/<project_id>/
-├── project.json
-├── assets/
-│   ├── source.<ext>
-│   └── reference.<ext>
-├── document/
+projects-v2/<project_id>/
+├── project/
+│   ├── manifest.json
 │   └── project.sqlite3
-├── evidence/
-│   └── recognition.json
-├── provenance/
-│   ├── creation-request.json
-│   ├── recognition-audit.json
-│   └── prompts/<sha256>.zip
-└── runs/
-    ├── segmentation/<task_id>/
-    ├── calibration/<task_id>/
-    └── translation/<task_id>/
+├── input.<ext>
+├── reference.<ext (optional)>
+├── recognition_evidence.json
+├── task_info.json
+├── project_creation.json
+└── run-specific durable audits
 ```
 
 ### 8.3 根级资产清单
 
-`project.json` 至少记录：
+`project/manifest.json` 与根级任务信息共同记录：
 
-- 项目格式版本、项目 ID、文档 ID；
-- 原媒体相对路径、类型、大小、SHA-256；
+- 项目格式版本、数据库格式版本、项目 ID、文档 ID；
+- 原媒体与可选参考稿的规范相对路径；
 - SQLite 路径和当前修订 ID；
 - 听写证据路径、格式和 SHA-256；
 - 可选参考稿路径和 SHA-256；
 - 创建配置摘要；
 - Prompt 快照哈希；
-- 创建时间和更新时间。
+- 创建时间、更新时间和冻结任务配置。
 
 打开项目只按清单验证，不扫描目录猜测资产。
 
@@ -468,7 +460,7 @@ projects/<project_id>/
 ### 8.6 可安全精简项
 
 - 新修订停止写未被读取的 `inverse_patch_blob`；
-- 旧数据库继续可读，不立即破坏性压缩；
+- v2 数据库不读取旧 schema；旧数据库只在磁盘原位保留；
 - 重复 Prompt 目录合并为一份内容寻址快照；
 - `translation/latest.json` 不复制 SQLite 中的完整译文；
 - 校准 latest 与 audit 收敛到对应 run；
@@ -489,7 +481,7 @@ projects/<project_id>/
 
 ### 8.8 三种导出
 
-- 可迁移工程：当前修订、媒体、参考稿和必要证据；
+- v2 字幕工程：当前修订、媒体、参考稿和必要证据；只允许导入 v2 工程；
 - 完整备份：全部 SQLite 修订历史和运行审计；
 - 字幕导出：SRT、TXT 等交付文件。
 
@@ -548,17 +540,15 @@ projects/<project_id>/
 - tag version 等于 manifest 和界面版本；
 - 真实视频 E2E 不是 `not_run`。
 
-## 10. 迁移策略
+## 10. 破坏性切换策略
 
-- 新项目直接写 v2；
-- 老项目先只读解析和完整性检查；
-- 成功打开并创建备份后才惰性迁移；
-- 旧状态文件可以保留但不再作为活动真相源；
-- 旧 `fallback` 字段转换为 `repair_attempted`，不能恢复修复资格；
-- 旧翻译任务缺少模式时设为 `many_to_many`；
-- 旧审阅数据忽略执行；
-- 迁移失败必须回退到原项目，不留下半迁移目录；
-- 不进行批量破坏性重写或无备份清理。
+- 新项目只写 `data/projects-v2` 与 v2 契约；
+- v2 不扫描、读取、导入、迁移或规范化旧项目；
+- 旧 `data/projects` 原地保留，但不出现在最近项目、编辑器列表或直接 URL 中；
+- 旧 Runtime、状态文件、凭据别名、修复次数和审阅字段不授予任何 v2 行为；
+- 不存在隐式迁移、惰性迁移、兼容默认值或旧字段转换；
+- 需要历史内容时由用户在旧版本中导出普通媒体/字幕，再作为全新 v2 项目创建；
+- Git 历史是旧实现唯一代码归档，发布包不携带 importable legacy 模块。
 
 ## 11. 自动化测试
 
@@ -605,7 +595,7 @@ projects/<project_id>/
 
 ### 11.5 项目格式与缓存
 
-- 老项目可打开并安全迁移；
+- 旧项目不可发现、不可打开，直接 URL 返回明确的不支持或 404；
 - 原媒体缺失时要求重新关联；
 - 清缓存不会删除耐久数据；
 - 新项目没有重复 Prompt；
@@ -634,13 +624,13 @@ projects/<project_id>/
 7. 原子发布可编辑项目；
 8. 验证媒体、波形、Cue 和参考文稿标记；
 9. 完成 AI 校准；
-10. 从校准后同一修订复制两个隔离分支；
-11. 分别完成逐行翻译和多对多翻译；
+10. 项目 A 从校准后的同一修订完成逐行翻译；
+11. 另建项目 B，仅执行 AI 切分，在编辑器注入参考稿后完成多对多翻译；
 12. 检查问题字幕、目标输入框、任务卡和运行审计；
 13. 完成人工补填、保存、撤销、重做；
 14. 导出并重新导入字幕；
 15. 重启后端后重新打开项目；
-16. 导出可迁移工程并在全新数据根目录导入。
+16. 导出 v2 字幕工程并在全新 v2 数据根目录导入。
 
 ### 12.3 确定性故障注入
 
@@ -682,9 +672,9 @@ projects/<project_id>/
 
 - Task、Unit、Repair、Error、StageRequest、Project v2 schema；
 - 翻译模式契约；
-- 迁移和兼容规则。
+- v2 破坏性边界和拒绝规则。
 
-退出门槛：契约测试覆盖一次修复、部分交付和旧项目读取。
+退出门槛：契约测试覆盖一次修复、部分交付和旧项目拒绝。
 
 ### Phase 2：ModelGateway 与请求预算
 
@@ -719,10 +709,10 @@ projects/<project_id>/
 
 - jobs/projects 分离；
 - 根级 Manifest；
-- 缓存迁移、媒体重新关联；
+- 缓存裁剪、媒体重新关联；
 - Prompt、逆向补丁、运行产物收敛。
 
-退出门槛：老项目迁移、缓存清理和三种导出测试通过。
+退出门槛：旧项目拒绝、缓存清理和三种导出测试通过。
 
 ### Phase 7：源码拆分与施工图更新
 
@@ -754,14 +744,14 @@ projects/<project_id>/
 
 以下任一项失败，不得发布：
 
-- Python、前端、契约、迁移测试未全绿；
+- Python、前端、契约、旧格式拒绝测试未全绿；
 - 真实视频的切分、校准和两种翻译未全部完成；
 - 故障注入没有证明修复实际工作；
 - 任一单元 `repair_request_count > 1`；
 - 终态任务仍持有活动 AI 锁；
 - 存在 0% 假运行或两个页面状态不一致；
 - 局部翻译失败没有可编辑空目标行；
-- 老项目兼容、媒体重新关联或缓存清理失败；
+- 旧项目仍可被 v2 发现/读取，或媒体重新关联、缓存清理失败；
 - 真实 E2E 在构建记录中仍为 `not_run`；
 - 工作区不干净；
 - tag 不来自 main；
@@ -771,7 +761,7 @@ projects/<project_id>/
 
 ## 15. 交付物
 
-- 代码修改和兼容迁移；
+- 代码修改和 v2 破坏性切换；
 - Task、Repair、ModelGateway 和 Project v2 契约；
 - 更新后的系统图、数据流和模块图；
 - 双代码树归并记录；
@@ -788,6 +778,6 @@ projects/<project_id>/
 - 不把外部 AI 审阅重新放回内部状态机；
 - 不引入微服务、消息队列或新的数据库；
 - 不为了降低行数机械拆分文件；
-- 不破坏性批量迁移旧项目；
+- 不提供任何旧项目迁移、导入或兼容路径；
 - 不用更多兜底掩盖配置、鉴权或编程错误；
 - 不在真实 E2E 未通过时先打包发布。

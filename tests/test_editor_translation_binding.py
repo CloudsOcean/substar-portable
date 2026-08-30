@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from substar_core.editor.translation.service import _source_rows
+from substar_core.editor.translation.result_policy import source_rows
 from substar_core.editor.http_api import TranslationStartRequest
 
 
@@ -40,7 +40,7 @@ class EditorTranslationBindingTests(unittest.TestCase):
                 ),
             ),
         )
-        rows = _source_rows(document)
+        rows = source_rows(document)
         self.assertEqual(rows, [{
             "cue_id": "cue-1",
             "source_hash": hashlib.sha256(b"Hello world.").hexdigest(),

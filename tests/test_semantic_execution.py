@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 
 from substar_core.editor.translation.contextual import complete_results, warning_report
-from substar_core.editor.translation.service import _translation_problem_cue_ids
+from substar_core.editor.translation.result_policy import translation_problem_cue_ids
 from substar_core.semantic_execution import validate_presentation_plan
 
 
@@ -97,7 +97,7 @@ class SemanticExecutionTests(unittest.TestCase):
                 metadata={"translation_problem_cue_ids": ["cue_2", "cue_2", "cue_5"]},
             ),
         ))
-        self.assertEqual(_translation_problem_cue_ids(document), ["cue_2", "cue_5"])
+        self.assertEqual(translation_problem_cue_ids(document), ["cue_2", "cue_5"])
 
 
 if __name__ == "__main__":

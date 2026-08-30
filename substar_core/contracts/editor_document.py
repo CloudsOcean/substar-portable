@@ -166,9 +166,9 @@ def _display_tokens(
     ai_calibrations = _require_rows(
         raw_ai_calibrations, "semantic_grouping.ai_calibrations"
     )
-    # A split-stage correction is allowed to arrive in either the legacy
-    # canonicalizations field or the explicit AI calibration container.  Keep
-    # one materialized row per source span, preferring the explicit AI record.
+    # Deterministic canonicalizations and AI calibrations are separate current
+    # inputs. Keep one materialized row per source span, preferring the
+    # explicit AI record when both stages address the same span.
     by_span: dict[tuple[int, int], Mapping[str, Any]] = {}
     for row in canonicalizations:
         start = int(row.get("alignment_start", -1))

@@ -3,7 +3,7 @@ from __future__ import annotations
 from substar_core.config import DEFAULTS
 import substar_core.editor.http_api as editor_http_api
 from substar_core.segmentation.contracts import build_segmentation_request
-from substar_core.stage2 import Stage2Error
+from substar_core.model_gateway import ModelGatewayError
 
 
 def test_segmentation_repair_reads_the_canonical_non_thinking_policy() -> None:

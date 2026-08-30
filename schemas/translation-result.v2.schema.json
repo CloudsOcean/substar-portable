@@ -1,20 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://substar.local/schemas/translation-result.v1.schema.json",
+  "$id": "https://substar.local/schemas/translation-result.v2.schema.json",
   "title": "AI translation result",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "task_id",
-    "project_id",
-    "based_on_revision_id",
-    "source_language",
-    "target_language",
-    "cues"
-  ],
+  "required": ["schema_version", "task_id", "project_id", "based_on_revision_id", "source_language", "target_language", "cues"],
   "properties": {
-    "schema_version": {"const": "substar.translation-result.v1"},
+    "schema_version": {"const": "substar.translation-result.v2"},
     "task_id": {"type": "string", "minLength": 1, "maxLength": 200},
     "project_id": {"type": "string", "minLength": 1, "maxLength": 200},
     "based_on_revision_id": {"type": "string", "minLength": 1, "maxLength": 200},
@@ -25,11 +17,14 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["cue_id", "source_hash", "target_text"],
+        "required": ["cue_id", "source_hash", "target_text", "translation_status", "issue_code", "editable"],
         "properties": {
           "cue_id": {"type": "string", "minLength": 1, "maxLength": 200},
           "source_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-          "target_text": {"type": "string", "minLength": 1, "maxLength": 10000}
+          "target_text": {"type": "string", "maxLength": 10000},
+          "translation_status": {"enum": ["translated", "manual_required"]},
+          "issue_code": {"type": ["string", "null"], "maxLength": 200},
+          "editable": {"const": true}
         }
       }
     }

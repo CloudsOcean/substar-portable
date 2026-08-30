@@ -4,7 +4,7 @@
   "title": "Substar finalized segmentation result v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "candidate", "revision", "summary"],
+  "required": ["schema_version", "candidate", "revision", "summary", "needs_attention"],
   "properties": {
     "schema_version": {"const": "substar.segmentation-task-result.v1"},
     "candidate": {
@@ -33,6 +33,7 @@
         "attempt": {"type": "integer", "minimum": 1}
       }
     },
+    "needs_attention": {"type": "boolean"},
     "summary": {
       "type": "object",
       "additionalProperties": false,

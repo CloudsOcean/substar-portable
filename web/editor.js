@@ -1382,7 +1382,11 @@
     panel.classList.toggle("completed", ["succeeded", "succeeded_with_issues"].includes(task?.state));
     const progress = Math.max(0, Math.min(100, Number(task?.progress || 0) * 100));
     $("#translationProgressBar").style.width = `${progress}%`;
-    renderAiProgress(task?.ai_progress, progress, task?.error || task?.message || "等待启动");
+    renderAiProgress(
+      task?.ai_progress,
+      progress,
+      task?.display_error || task?.error?.message || task?.message || "等待启动"
+    );
     button.disabled = !state.revision || ["queued", "running", "cancelling"].includes(task?.state);
     const sourceLanguageSelect = $("#translationSourceLanguage");
     const languageSelect = $("#translationTargetLanguage");
@@ -2805,30 +2809,10 @@
           instruction
         })
       });
-      if (result.revision?.revision_id !== state.revision.revision_id) {
-        setRevision(result.revision);
-        recordCommittedRevision(state.revision, {
-          kind:"ai", operation:"ai_calibration_apply", metadata:{}
-        });
-      }
-      const corrected = result.corrections?.length || 0;
-      const failed = result.failed_blocks?.length || 0;
-      const checked = Number(result.checked_cues || 0);
-      const blocks = Number(result.block_count || 0);
-      const groups = Number(result.semantic_group_count || 0);
-      const suggested = Number(result.suggested_count || 0);
-      const filtered = Number(result.filtered_count || 0);
-      const sentences = Number(result.sentence_count || 0);
-      const casing = Number(result.case_applied_count || 0);
-      const punctuation = Number(result.punctuation_applied_count || 0);
-      const merges = Number(result.merge_applied_count || 0);
-      const duration = Number(result.duration_seconds || 0);
-      const problems = Number(result.problem_cue_ids?.length || 0);
-      renderWorkbenchTask(
-        "AI 校准", 100,
-        `已检查 ${checked} 条 Cue / ${groups} 个意义组 / ${blocks} 块 · 识别 ${sentences} 个句子 · 应用大小写 ${casing} 处 / 标点 ${punctuation} 处${merges ? ` / 合并 ${merges} 处` : ""}${problems ? ` · ${problems} 条放行至问题字幕` : ""}${filtered ? ` · 过滤 ${filtered} 项` : ""}${duration ? ` · ${duration.toFixed(1)} 秒` : ""}${failed ? ` · ${failed} 块接口失败` : ""}`,
-        (failed || problems) ? "succeeded_with_issues" : "succeeded"
-      );
+      state.editorAiTask = {...result, kind:"calibration"};
+      document.body.classList.add("editor-ai-task-locked");
+      renderWorkbenchTask("AI 校准", 0, "等待任务调度…", result.state);
+      startEditorAiTaskPoll();
     } catch (error) {
       if (error.code === "editor_ai_task_cancelled") {
         renderWorkbenchTask("AI 校准", 0, "任务已取消", "cancelled");

@@ -17,8 +17,6 @@ from substar_core.config import (
 )
 from substar_core.config import infer_model_provider
 from substar_core.credential_store import (
-    SEGMENT_DEEPSEEK,
-    TRANSLATE_DEEPSEEK,
     canonicalize_credentials,
 )
 from substar_core.reasoning_capabilities import (
@@ -29,7 +27,7 @@ from substar_core.reasoning_capabilities import (
 )
 from substar_core.model_providers import MODEL_PROVIDER_IDS, normalize_provider_profiles
 from substar_core.openai_compat import endpoint_url
-from substar_core.stage2 import call_translation_model
+from substar_core.model_gateway import call_translation_model
 
 
 class _ChatResponse:
@@ -88,7 +86,7 @@ class GlmProviderTests(unittest.TestCase):
             "chat/completions?api-version=2024-10-21",
         )
 
-    def test_provider_profiles_are_schema_normalized_and_legacy_qwen_is_migrated(self) -> None:
+    def test_provider_profiles_reject_retired_provider_aliases(self) -> None:
         profiles = normalize_provider_profiles({
             "aliyun": {
                 "base_url": " https://dashscope.aliyuncs.com/compatible-mode/v1 ",
@@ -98,11 +96,7 @@ class GlmProviderTests(unittest.TestCase):
                 "ignored": "not persisted",
             }
         })
-        self.assertEqual(set(profiles), {"qwen"})
-        self.assertEqual(profiles["qwen"]["model"], "qwen-plus")
-        self.assertEqual(profiles["qwen"]["auth_mode"], "bearer")
-        self.assertEqual(profiles["qwen"]["timeout_seconds"], 600)
-        self.assertNotIn("ignored", profiles["qwen"])
+        self.assertEqual(profiles, {})
 
     def test_provider_profiles_have_distinct_persistable_credential_roles(self) -> None:
         values = canonicalize_credentials({
@@ -139,15 +133,15 @@ class GlmProviderTests(unittest.TestCase):
             "translation_api_key": "glm-provider-key",
         })
         self.assertEqual(values["model_provider:glm"], "glm-provider-key")
-        self.assertNotIn(SEGMENT_DEEPSEEK, values)
-        self.assertNotIn(TRANSLATE_DEEPSEEK, values)
+        self.assertNotIn("segment_deepseek", values)
+        self.assertNotIn("translate_deepseek", values)
         write.assert_called_once()
 
-    def test_polluted_glm_legacy_alias_does_not_mark_deepseek_configured(self) -> None:
+    def test_unscoped_provider_aliases_do_not_mark_deepseek_configured(self) -> None:
         credentials = {
             "model_provider:glm": "shared-old-glm-key",
-            SEGMENT_DEEPSEEK: "shared-old-glm-key",
-            TRANSLATE_DEEPSEEK: "shared-old-glm-key",
+            "segment_deepseek": "shared-old-glm-key",
+            "translate_deepseek": "shared-old-glm-key",
         }
         with TemporaryDirectory() as directory, patch.object(
             config, "_unique_paths", return_value=(Path(directory) / "missing.json",)
@@ -261,7 +255,7 @@ class GlmProviderTests(unittest.TestCase):
             "low",
         )
 
-    @patch("substar_core.stage2.requests.post")
+    @patch("substar_core.model_gateway.gateway.requests.post")
     def test_shared_stage_caller_enforces_provider_thinking_capability(self, post) -> None:
         response_body = {
             "choices": [{

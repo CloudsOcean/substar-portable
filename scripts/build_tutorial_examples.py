@@ -161,7 +161,7 @@ def main() -> None:
     if not (beginner / "media.mp3").is_file() or not (beginner / "reference.txt").is_file():
         raise RuntimeError("beginner tutorial assets must already exist in assets/examples/tutorials/beginner")
     write_json(beginner / "manifest.json", {
-        "schema_version": "substar.tutorial-example.v1",
+        "schema_version": "substar.tutorial-example.v2",
         "case_id": "reference-script-v1",
         "level": "beginner",
         "display_name": "初级教程",
@@ -181,7 +181,7 @@ def main() -> None:
     write_json(advanced / "review.json", review_snapshot(translated))
     files = ("media.wav", "segmented.json", "calibrated.json", "translated.json", "review.json")
     write_json(advanced / "manifest.json", {
-        "schema_version": "substar.tutorial-example.v1",
+        "schema_version": "substar.tutorial-example.v2",
         "case_id": "advanced-ai-v1",
         "level": "advanced",
         "display_name": "进阶教程",

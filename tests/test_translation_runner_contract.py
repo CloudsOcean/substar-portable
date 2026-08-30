@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
-import scripts.run_production_translation as translation_runner
+import substar_core.editor.translation.runner as translation_runner
 import substar_core.editor.translation.contextual as contextual_translation
 from substar_core.editor.translation.artifacts import (
     TRANSLATION_PROGRESS_FILENAME,
-    TRANSLATION_PROGRESS_SCHEMA,
     TRANSLATION_REVISION_FILENAME,
-    TRANSLATION_STAGE_ID,
     TRANSLATION_SUBTITLE_FILENAME,
 )
 from substar_core.editor.translation.contextual import _presentation_plan
@@ -21,11 +18,10 @@ from substar_core.domain import (
     EditorDocument,
     SourceToken,
 )
-from substar_core.editor.translation.service import (
-    _accepted_translation_rows,
-    _progress,
-    _source_hashes_by_lineage,
-    _translated_text_by_source_cue,
+from substar_core.editor.translation.result_policy import (
+    accepted_translation_rows,
+    source_hashes_by_lineage,
+    translated_text_by_source_cue,
 )
 from substar_core.prompt_registry import render_prompt
 
@@ -42,11 +38,12 @@ def test_unrepaired_translation_units_remain_problem_cues_without_discarding_acc
         {"cue_id": "cue-a", "source_hash": "hash-a"},
         {"cue_id": "cue-b", "source_hash": "hash-b"},
     ]
-    rows, problems = _accepted_translation_rows(source, {"cue-a": "译文"})
+    rows, problems = accepted_translation_rows(source, {"cue-a": "译文"})
     assert rows == [
         {
             "cue_id": "cue-a", "source_hash": "hash-a", "target_text": "译文",
             "translation_status": "translated",
+            "issue_code": None, "editable": True,
         },
         {
             "cue_id": "cue-b", "source_hash": "hash-b", "target_text": "",
@@ -55,27 +52,6 @@ def test_unrepaired_translation_units_remain_problem_cues_without_discarding_acc
         },
     ]
     assert problems == ["cue-b"]
-
-
-def test_translation_progress_uses_the_status_reader_contract() -> None:
-    payload = json.dumps({
-        "schema_version": TRANSLATION_PROGRESS_SCHEMA,
-        "stages": {
-            TRANSLATION_STAGE_ID: {
-                "status": "completed",
-                "planned": 1,
-                "accepted": 1,
-            }
-        },
-    })
-
-    class ProgressPath:
-        def read_text(self, *, encoding: str) -> str:
-            assert encoding == "utf-8"
-            return payload
-
-    progress, _message = _progress(ProgressPath())
-    assert abs(progress - 0.95) < 1e-9
 
 
 def test_translation_runner_has_no_retired_artifact_names() -> None:
@@ -107,7 +83,7 @@ def test_translation_finalizer_resolves_new_cues_through_source_lineage() -> Non
             mapping={"source_cue_ids": ["source-cue-2"]},
         ),
     ])
-    assert _translated_text_by_source_cue(document) == {
+    assert translated_text_by_source_cue(document) == {
         "source-cue-1": "第一段\n第二段",
         "source-cue-2": "另一条",
     }
@@ -175,7 +151,7 @@ def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> Non
     assert unresolved.target.editable is True
     assert unresolved.mapping["requires_manual_translation"] is True
     assert report["unresolved_source_cue_ids"] == [cues[1].cue_id]
-    assert _translated_text_by_source_cue(candidate) == {
+    assert translated_text_by_source_cue(candidate) == {
         cues[0].cue_id: "已翻译",
     }
 
@@ -263,7 +239,7 @@ def test_staleness_indexes_rematerialized_cues_by_source_lineage() -> None:
             mapping={"source_cue_ids": ["translated-source-cue"]},
         )],
     )
-    hashes = _source_hashes_by_lineage(document)
+    hashes = source_hashes_by_lineage(document)
     assert set(hashes) == {"translated-source-cue"}
     assert len(hashes["translated-source-cue"]) == 1
 

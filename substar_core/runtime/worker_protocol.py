@@ -8,9 +8,9 @@ from enum import Enum
 from typing import Any, Mapping
 
 
-WORKER_COMMAND_SCHEMA = "substar.worker-command.v1"
-WORKER_MESSAGE_SCHEMA = "substar.worker-message.v1"
-WORKER_CONTROL_SCHEMA = "substar.worker-control.v1"
+WORKER_COMMAND_SCHEMA = "substar.worker-command.v2"
+WORKER_MESSAGE_SCHEMA = "substar.worker-message.v2"
+WORKER_CONTROL_SCHEMA = "substar.worker-control.v2"
 # The frozen contract is strict JSON Lines without a textual prefix.
 CONTROL_PREFIX = ""
 _CREDENTIAL_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -27,10 +27,8 @@ class WorkerTaskType(str, Enum):
     SEGMENTATION = "segmentation"
     TRANSLATION = "translation"
     CALIBRATION = "calibration"
-    REVIEW = "review"
     MODEL_DOWNLOAD = "model_download"
     EXPORT = "export"
-    DUBBING = "dubbing"
 
 
 class WorkerMessageType(str, Enum):

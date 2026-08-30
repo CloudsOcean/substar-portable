@@ -167,7 +167,7 @@ def main() -> int:
                     break
                 time.sleep(0.05)
             else:
-                raise TimeoutError(f"compatibility job did not finish: {current}")
+                raise TimeoutError(f"pipeline job did not finish: {current}")
 
             if current["status"] != "awaiting_edit":
                 task_debug = {}
@@ -184,7 +184,7 @@ def main() -> int:
                     for path in (acceptance_root / "task-runtime").rglob("stderr.log")
                 }
                 raise RuntimeError(
-                    f"compatibility job failed: {current}; "
+                    f"pipeline job failed: {current}; "
                     f"tasks={task_debug}; stderr={stderr_debug}"
                 )
             task_id = str(current["transcription_task_id"])

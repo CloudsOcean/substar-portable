@@ -16,8 +16,8 @@ from substar_core.artifacts import atomic_write_json
 from substar_core.domain import ChangeProvenance, DocumentRevision, EditorDocument
 
 
-PROJECT_MANIFEST_SCHEMA = "substar.project-store.sqlite.v3"
-PROJECT_DATABASE_SCHEMA = 1
+PROJECT_MANIFEST_SCHEMA = "substar.project-store.sqlite.v4"
+PROJECT_DATABASE_SCHEMA = 3
 CHECKPOINT_INTERVAL = 50
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _CACHE_LIMIT = 4
@@ -162,7 +162,7 @@ def _document_patch(before: EditorDocument, after: EditorDocument) -> dict[str, 
     before_changes = before.changes
     changes_are_append = after.changes[: len(before_changes)] == before_changes
     return {
-        "schema_version": "substar.document-patch.v1",
+        "schema_version": "substar.document-patch.v2",
         "properties": after.properties.to_dict() if before.properties != after.properties else None,
         "presentation": (
             after.presentation.to_dict() if before.presentation != after.presentation else None
@@ -232,7 +232,7 @@ def _apply_ordered_entity_patch(
 def _apply_document_patch(
     document: dict[str, Any], patch: Mapping[str, Any]
 ) -> dict[str, Any]:
-    if patch.get("schema_version") != "substar.document-patch.v1":
+    if patch.get("schema_version") != "substar.document-patch.v2":
         raise ProjectIntegrityError("unsupported document patch schema")
     result = dict(document)
     if patch.get("properties") is not None:
@@ -251,12 +251,10 @@ def _apply_document_patch(
     result["cues"] = [
         {**cue, "index": index} for index, cue in enumerate(current_cues)
     ]
-    if patch.get("groups"):
+    if "groups" in patch:
         result["groups"] = _apply_entity_patch(
-            list(result.get("groups", [])), patch.get("groups", {}), id_key="group_id"
+            list(result["groups"]), patch.get("groups", {}), id_key="group_id"
         )
-        if not result["groups"]:
-            result.pop("groups", None)
     changes = list(patch.get("changes", []))
     result["changes"] = (
         [*result.get("changes", []), *changes]
@@ -343,9 +341,7 @@ class ProjectStore:
                     document_hash TEXT NOT NULL,
                     snapshot_blob BLOB,
                     patch_blob BLOB,
-                    inverse_patch_blob BLOB,
                     payload_sha256 TEXT NOT NULL,
-                    inverse_sha256 TEXT,
                     CHECK ((snapshot_blob IS NOT NULL) != (patch_blob IS NOT NULL))
                 );
                 CREATE INDEX revisions_parent_idx ON revisions(parent_revision_id);
@@ -514,12 +510,7 @@ class ProjectStore:
                 document_value,
                 _decompress_json(patch_row["patch_blob"], patch_row["payload_sha256"]),
             )
-        # Verify the exact reconstructed payload before schema defaults are
-        # applied by ``EditorDocument.from_dict``.  New optional fields may be
-        # added with backward-compatible defaults; hashing only the normalized
-        # document would then make an intact legacy revision look corrupt.
         stored_document_hash = str(row["document_hash"])
-        serialized_document_hash = _sha256_bytes(_canonical_bytes(document_value))
         try:
             document = EditorDocument.from_dict(document_value)
             provenance = ChangeProvenance.from_dict(
@@ -528,10 +519,7 @@ class ProjectStore:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ProjectIntegrityError("revision content is invalid") from exc
         document_hash = document.content_hash()
-        if stored_document_hash not in {
-            serialized_document_hash,
-            document_hash,
-        }:
+        if stored_document_hash != document_hash:
             raise ProjectIntegrityError("revision document checksum mismatch")
         revision = DocumentRevision(
             revision_id=row["revision_id"],
@@ -597,24 +585,16 @@ class ProjectStore:
             if checkpoint:
                 snapshot_blob, payload_sha = _compress_json(document.to_dict())
                 patch_blob = None
-                inverse_blob = None
-                inverse_sha = None
             else:
                 patch_blob, payload_sha = _compress_json(
                     _document_patch(latest.document, document)
                 )
-                # Undo/redo navigates immutable forward revisions and never
-                # reads inverse_patch_blob. Keep the nullable legacy columns so
-                # old databases remain readable, but stop doubling every new
-                # patch with an unused reverse copy.
-                inverse_blob = None
-                inverse_sha = None
                 snapshot_blob = None
             connection.execute(
                 "INSERT INTO revisions(revision_number, revision_id, parent_revision_id, created_at, "
                 "complete, provenance_json, document_hash, snapshot_blob, patch_blob, "
-                "inverse_patch_blob, payload_sha256, inverse_sha256) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "payload_sha256) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     revision.revision_number,
                     revision.revision_id,
@@ -625,9 +605,7 @@ class ProjectStore:
                     revision.document_hash,
                     snapshot_blob,
                     patch_blob,
-                    inverse_blob,
                     payload_sha,
-                    inverse_sha,
                 ),
             )
             if not current_document_id:

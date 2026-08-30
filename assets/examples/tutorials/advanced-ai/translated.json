@@ -1,5 +1,5 @@
 {
-  "schema_version": "substar.editor-document.v1",
+  "schema_version": "substar.editor-document.v2",
   "document_id": "doc_6c4ea76e4240aca35b1d9db8",
   "presentation": {
     "upper_punctuation": "remove",
@@ -8347,6 +8347,9 @@
         "target_text": "中国现在最大的新闻是茉莉奶白被路易威登起诉了",
         "original_text": "中国现在最大的新闻是茉莉奶白被路易威登起诉了",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8394,6 +8397,9 @@
         "target_text": "中国现在最大的新闻是茉莉奶白被路易威登起诉了",
         "original_text": "中国现在最大的新闻是茉莉奶白被路易威登起诉了",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8439,6 +8445,9 @@
         "target_text": "因使用其标志性的四叶草设计而侵犯了该品牌商标",
         "original_text": "因使用其标志性的四叶草设计而侵犯了该品牌商标",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8487,6 +8496,9 @@
         "target_text": "因使用其标志性的四叶草设计而侵犯了该品牌商标",
         "original_text": "因使用其标志性的四叶草设计而侵犯了该品牌商标",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8537,6 +8549,9 @@
         "target_text": "苏州法院刚判路易威登胜诉",
         "original_text": "苏州法院刚判路易威登胜诉",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8586,6 +8601,9 @@
         "target_text": "因此茉莉奶白刚被责令向路易威登付款",
         "original_text": "因此茉莉奶白刚被责令向路易威登付款",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8632,6 +8650,9 @@
         "target_text": "金额为1030万元人民币，约合150万美元",
         "original_text": "金额为1030万元人民币，约合150万美元",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8675,6 +8696,9 @@
         "target_text": "并须在10天内付清",
         "original_text": "并须在10天内付清",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8721,6 +8745,9 @@
         "target_text": "不过，茉莉奶白将对该判决提出上诉",
         "original_text": "不过，茉莉奶白将对该判决提出上诉",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8767,6 +8794,9 @@
         "target_text": "但中国网友并不买账",
         "original_text": "但中国网友并不买账",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8815,6 +8845,9 @@
         "target_text": "多数人站在茉莉奶白一边",
         "original_text": "多数人站在茉莉奶白一边",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8860,6 +8893,9 @@
         "target_text": "尽管两个标志颇为相似",
         "original_text": "尽管两个标志颇为相似",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8904,6 +8940,9 @@
         "target_text": "许多中国网友表示",
         "original_text": "许多中国网友表示",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8950,6 +8989,9 @@
         "target_text": "这种图案在中国很早就出现了",
         "original_text": "这种图案在中国很早就出现了",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -8997,6 +9039,9 @@
         "target_text": "而且已有上千年历史",
         "original_text": "而且已有上千年历史",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9041,6 +9086,9 @@
         "target_text": "至少可追溯到唐代",
         "original_text": "至少可追溯到唐代",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9088,6 +9136,9 @@
         "target_text": "在中国，这种图案被称为海棠纹",
         "original_text": "在中国，这种图案被称为海棠纹",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9133,6 +9184,9 @@
         "target_text": "也叫海棠花图案",
         "original_text": "也叫海棠花图案",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9179,6 +9233,9 @@
         "target_text": "你常能看到这种图案用于中国建筑中",
         "original_text": "你常能看到这种图案用于中国建筑中",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9223,6 +9280,9 @@
         "target_text": "尤其常见于中国建筑的窗棂",
         "original_text": "尤其常见于中国建筑的窗棂",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9264,6 +9324,9 @@
         "target_text": "以及门檐上",
         "original_text": "以及门檐上",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9309,6 +9372,9 @@
         "target_text": "不过这种图案其实很有代表性",
         "original_text": "不过这种图案其实很有代表性",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9356,6 +9422,9 @@
         "target_text": "对茉莉奶白来说尤其如此，不仅在于其悠久历史",
         "original_text": "对茉莉奶白来说尤其如此，不仅在于其悠久历史",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9400,6 +9469,9 @@
         "target_text": "还因为 Molly 源自中文",
         "original_text": "还因为 Molly 源自中文",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9445,6 +9517,9 @@
         "target_text": "“茉莉”这个词",
         "original_text": "“茉莉”这个词",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9493,6 +9568,9 @@
         "target_text": "茉莉直译成英文就是 Jasmine",
         "original_text": "茉莉直译成英文就是 Jasmine",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9535,6 +9613,9 @@
         "target_text": "因此有了花卉联想",
         "original_text": "因此有了花卉联想",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9578,6 +9659,9 @@
         "target_text": "如果上诉失败",
         "original_text": "如果上诉失败",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9624,6 +9708,9 @@
         "target_text": "茉莉奶白就需要更换标志",
         "original_text": "茉莉奶白就需要更换标志",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9670,6 +9757,9 @@
         "target_text": "许多中国网友已经开始提供",
         "original_text": "许多中国网友已经开始提供",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9715,6 +9805,9 @@
         "target_text": "新的标志方案",
         "original_text": "新的标志方案",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9764,6 +9857,9 @@
         "target_text": "中国网友还表示，路易威登",
         "original_text": "中国网友还表示，路易威登",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9812,6 +9908,9 @@
         "target_text": "不够了解中国市场",
         "original_text": "不够了解中国市场",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",
@@ -9859,6 +9958,9 @@
         "target_text": "因为连迪奥都还没起诉霸王茶姬",
         "original_text": "因为连迪奥都还没起诉霸王茶姬",
         "language": "zh-CN",
+        "translation_status": "translated",
+        "issue_code": null,
+        "editable": true,
         "provenance": {
           "kind": "ai",
           "operation": "tutorial_snapshot_translation",

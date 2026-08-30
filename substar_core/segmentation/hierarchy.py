@@ -10,65 +10,31 @@ PROTECTION_LEVELS = {"hard", "strong_soft", "outer_soft"}
 
 
 def normalize_analysis_v2(analysis: dict[str, Any]) -> dict[str, Any]:
-    """Return the hierarchical v2 analysis shape.
+    """Return a defensive copy of the current hierarchical analysis shape.
 
-    The compatibility path is intentionally lossless: legacy hard/soft spans
-    are upgraded, never collapsed into the direct plan's flat representation.
+    v2 deliberately rejects retired flat boundary and protection fields.  A
+    caller must regenerate the analysis instead of silently upgrading it.
     """
 
     normalized = copy.deepcopy(analysis)
     normalized["schema_version"] = "substar.segmentation.analysis.v1"
     for group in normalized.get("groups", []):
-        spans = list(group.get("protected_spans", []))
-        if not spans:
-            for level, key in (
-                ("hard", "hard_protected_spans"),
-                ("strong_soft", "soft_protected_spans"),
-            ):
-                for number, span in enumerate(group.get(key, []), start=1):
-                    spans.append(
-                        {
-                            "span_id": f"{group.get('group_id', 'g')}_{level}_{number}",
-                            "alignment_start": int(
-                                span.get("alignment_start", span.get("start_alignment", -1))
-                            ),
-                            "alignment_end": int(
-                                span.get("alignment_end", span.get("end_alignment", -1))
-                            ),
-                            "category": str(span.get("category", key)),
-                            "protection_level": level,
-                            "reason": str(span.get("reason", "")),
-                        }
-                    )
-        group["protected_spans"] = spans
-        group.pop("hard_protected_spans", None)
-        group.pop("soft_protected_spans", None)
-
-        preferred = group.get("preferred_boundaries")
-        if preferred is None:
-            preferred = [
-                {
-                    "after_alignment": int(value),
-                    "priority": "normal",
-                    "relation": "legacy_preferred_cut",
-                    "reason": "由旧 preferred_cut_after 升级",
-                }
-                for value in group.get("preferred_cut_after", [])
-            ]
-        group["preferred_boundaries"] = preferred
-        group.pop("preferred_cut_after", None)
-
-        forbidden = group.get("forbidden_boundaries")
-        if forbidden is None:
-            forbidden = [
-                {
-                    "after_alignment": int(value),
-                    "reason": "由旧 forbidden_cut_after 升级",
-                }
-                for value in group.get("forbidden_cut_after", [])
-            ]
-        group["forbidden_boundaries"] = forbidden
-        group.pop("forbidden_cut_after", None)
+        retired = {
+            "hard_protected_spans",
+            "soft_protected_spans",
+            "preferred_cut_after",
+            "forbidden_cut_after",
+        }.intersection(group)
+        if retired:
+            raise ValueError(
+                "retired segmentation analysis fields are unsupported: "
+                + ", ".join(sorted(retired))
+            )
+        for key in ("protected_spans", "preferred_boundaries", "forbidden_boundaries"):
+            value = group.get(key, [])
+            if not isinstance(value, list):
+                raise ValueError(f"{key} must be a list")
+            group[key] = value
     return normalized
 
 

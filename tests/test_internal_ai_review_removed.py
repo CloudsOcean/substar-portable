@@ -29,16 +29,13 @@ class InternalAiReviewRemovalTests(unittest.TestCase):
         self.assertNotIn("editor_review", registry["prompts"])
         self.assertFalse((ROOT / "prompts" / "production" / "editor" / "review.md").exists())
 
-    def test_editor_ai_task_contract_has_no_review_kind(self) -> None:
+    def test_unified_task_contract_has_no_review_kind(self) -> None:
         schema = json.loads(
-            (ROOT / "schemas" / "editor-ai-task.v1.schema.json").read_text(
+            (ROOT / "docs" / "architecture" / "target" / "contracts" / "task.schema.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(
-            schema["properties"]["kind"]["enum"],
-            ["calibration", "translation"],
-        )
+        self.assertNotIn("review", schema["properties"]["task_type"]["enum"])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ function provenance() {
 
 function documentWithGroupOrigin(origin) {
   return {
-    schema_version:"substar.editor-document.v1",
+    schema_version:"substar.editor-document.v2",
     document_id:"doc_contract",
     properties:{complete:false},
     presentation:{

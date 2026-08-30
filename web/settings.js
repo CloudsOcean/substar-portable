@@ -415,7 +415,6 @@ const numericFields = new Set([
   "segmentation_overlap_seconds",
   "segmentation_batch_groups",
   "http_retry_attempts",
-  "segmentation_repair_attempts",
   "stage_timeout_seconds",
   "translation_workers",
   "runtime_worker_concurrency",

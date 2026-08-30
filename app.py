@@ -31,6 +31,7 @@ from substar_core.config import (
     INSTALL_ROOT,
     PROJECT_ROOT,
     DATA_ROOT,
+    PROJECTS_ROOT,
     load_credentials,
     load_settings,
     save_settings,
@@ -78,7 +79,7 @@ from substar_core.qwen_enhancement import (
     prioritize_generated_qwen_hotwords,
     qwen_hotword_mapping,
 )
-from substar_core.stage2 import Stage2Error, call_translation_model
+from substar_core.model_gateway import ModelGatewayError, call_translation_model
 from substar_core.prompt_registry import (
     PromptRegistryError,
     prompt_catalog,
@@ -115,6 +116,8 @@ from substar_core.transcription import (
     build_transcription_request,
 )
 from substar_core.segmentation import build_segmentation_handler
+from substar_core.editor.translation import build_translation_handler
+from substar_core.editor.calibration import build_calibration_handler
 from substar_core.creation import (
     create_subtitle_creation_graph,
     freeze_prompt_snapshot,
@@ -130,7 +133,6 @@ from substar_core.recognition.registry import (
 from substar_core.credential_store import (
     ASR_GENERIC,
     ASR_QWEN,
-    SEGMENT_DEEPSEEK,
     MODEL_PROVIDER_PREFIX,
     model_provider_credential_ref,
     resolve_model_provider_credential,
@@ -139,7 +141,7 @@ from substar_core.model_providers import MODEL_PROVIDER_IDS
 
 
 _WORKER_CREDENTIAL_ROLES = frozenset(
-    {ASR_QWEN, ASR_GENERIC, SEGMENT_DEEPSEEK}
+    {ASR_QWEN, ASR_GENERIC}
     | {model_provider_credential_ref(provider) for provider in MODEL_PROVIDER_IDS}
 )
 
@@ -185,7 +187,7 @@ async def _application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Substar Workbench",
-    version="1.0.0-beta.4",
+    version="2.0.0",
     lifespan=_application_lifespan,
 )
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
@@ -240,15 +242,21 @@ def _claim_backend_instance() -> None:
                 }
             )
             _OWNS_RUNTIME_RECORD = True
-        task_store = RuntimeStore(APP_DATA_DIR / "runtime.sqlite3")
+        task_store = RuntimeStore(APP_DATA_DIR / "runtime-v2.sqlite3")
         task_service = TaskService(task_store, APP_INSTANCE_ID)
         task_service.reconcile_startup()
         task_registry = TaskRegistry()
         task_registry.register(
-            build_transcription_handler(DATA_ROOT / "projects", PROJECT_ROOT)
+            build_transcription_handler(PROJECTS_ROOT, PROJECT_ROOT)
         )
         task_registry.register(
-            build_segmentation_handler(DATA_ROOT / "projects", PROJECT_ROOT)
+            build_segmentation_handler(PROJECTS_ROOT, PROJECT_ROOT)
+        )
+        task_registry.register(
+            build_translation_handler(PROJECTS_ROOT, PROJECT_ROOT)
+        )
+        task_registry.register(
+            build_calibration_handler(PROJECTS_ROOT, PROJECT_ROOT)
         )
         runtime_settings = load_settings()
         task_scheduler = TaskScheduler(
@@ -409,8 +417,6 @@ class SettingsPayload(BaseModel):
     segmentation_candidates: int = 1
     translation_workers: int = 64
     http_retry_attempts: int = 2
-    segmentation_repair_attempts: int = 1
-    translation_repair_attempts: int = 0
     stage_timeout_seconds: int = 3600
     shortcut_undo: str = "Ctrl+Z"
     shortcut_redo: str = "Ctrl+Y"
@@ -1202,7 +1208,6 @@ def _automatic_settings_from_payload(
         "segmentation_chunk_seconds",
         "translation_workers",
         "http_retry_attempts",
-        "segmentation_repair_attempts",
         "english_hard_limit",
         "chinese_hard_limit",
         "mixed_hard_limit",
@@ -1367,7 +1372,6 @@ def _automatic_settings_from_payload(
         "http_retry_attempts": bounded_int(
             "http_retry_attempts", 2, 1, 3
         ),
-        "segmentation_repair_attempts": 1,
         "translation_style": profile["translation_style"],
         "display_order": (
             "source_target"
@@ -1765,7 +1769,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
 6. 不要输出解释、Markdown 或额外字段。"""
     try:
         result: dict[str, Any] | None = None
-        last_stage_error: Stage2Error | None = None
+        last_stage_error: ModelGatewayError | None = None
         for thinking_mode in assist_thinking_modes:
             try:
                 result, _metadata = call_translation_model(
@@ -1783,7 +1787,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
                     temperature=0.0,
                 )
                 break
-            except Stage2Error as exc:
+            except ModelGatewayError as exc:
                 last_stage_error = exc
         if result is None:
             assert last_stage_error is not None
@@ -1797,7 +1801,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
         )
         if not supports_hotwords:
             hotwords = []
-    except (Stage2Error, ValueError) as exc:
+    except (ModelGatewayError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"prompt": prompt, "hotwords": hotwords}
 
@@ -2041,7 +2045,7 @@ async def create_workbench_split_job(
         atomic_write_json(
             job_dir / "project_creation.json",
             {
-                "schema_version": "substar.project-creation.v1",
+                "schema_version": "substar.project-creation.v2",
                 "input_mode": mode,
                 "source_file": media_name,
                 "reference_document": reference_name,
@@ -2052,6 +2056,28 @@ async def create_workbench_split_job(
                 "tutorial_case_id": tutorial_case_id,
             },
         )
+        source_language = str(overrides.get("language") or "Auto")
+        target_language = str(overrides.get("target_language_mode") or "zh-CN")
+        source_limit_key = {
+            "en": "english_hard_limit", "zh": "chinese_hard_limit",
+            "zh-CN": "chinese_hard_limit", "ja": "japanese_hard_limit",
+            "ko": "korean_hard_limit", "mixed": "mixed_hard_limit",
+        }.get(source_language, "mixed_hard_limit")
+        target_limit_key = {
+            "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
+            "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
+        }.get(target_language, "chinese_hard_limit")
+        save_task_info(job_dir, job_id, {
+            "display_name": (
+                "初级教程" if tutorial_case_id == "reference-script-v1"
+                else f"{Path(media_name).stem} · {recognition_profile.short_label}"
+            ),
+            "language": source_language,
+            "target_language_mode": target_language,
+            "glossary_id": str(overrides.get("glossary_id") or ""),
+            "source_hard_limit": int(overrides.get(source_limit_key, 25)),
+            "target_hard_limit": int(overrides.get(target_limit_key, 25)),
+        })
     except ManuscriptMatchError as exc:
         shutil.rmtree(job_dir, ignore_errors=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2704,12 +2730,8 @@ def _restore_persisted_jobs(wanted_id: str = "") -> None:
             if job_id in JOBS:
                 continue
         try:
-            # Public/legacy portable projects may have been written by
-            # Windows PowerShell with a UTF-8 BOM.  Accept both encodings so
-            # a valid persisted task is not silently omitted from Recent
-            # Tasks after the app starts.
             if status_path.is_file():
-                value = json.loads(status_path.read_text(encoding="utf-8-sig"))
+                value = json.loads(status_path.read_text(encoding="utf-8"))
             else:
                 tutorial = json.loads(tutorial_path.read_text(encoding="utf-8"))
                 case_id = str(tutorial.get("case_id", ""))

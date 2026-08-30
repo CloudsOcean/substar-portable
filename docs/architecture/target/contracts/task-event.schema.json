@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://substar.local/schemas/task-event.v1.json",
+  "$id": "https://substar.local/schemas/task-event.v2.json",
   "title": "Substar task/project event",
   "type": "object",
   "additionalProperties": false,
@@ -12,7 +12,7 @@
     "data"
   ],
   "properties": {
-    "schema_version": { "const": "substar.task-event.v1" },
+    "schema_version": { "const": "substar.task-event.v2" },
     "event_id": { "type": "integer", "minimum": 1 },
     "event_type": {
       "enum": [
@@ -23,6 +23,7 @@
         "task.cancel_requested",
         "task.cancelled",
         "task.succeeded",
+        "task.succeeded_with_issues",
         "task.failed",
         "task.interrupted",
         "task.artifact_registered",

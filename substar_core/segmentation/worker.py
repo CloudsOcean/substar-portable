@@ -157,7 +157,7 @@ _ARTIFACT_CONTRACTS = {
     ),
     "editor_document_candidate.json": (
         "editor_document_candidate",
-        "substar.editor-document.v1",
+        "substar.editor-document.v2",
     ),
     "segmentation_validation.json": (
         "segmentation_validation",

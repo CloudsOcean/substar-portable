@@ -64,7 +64,7 @@ _ARTIFACT_CONTRACTS = {
     ),
     "editor_document_candidate.json": (
         "editor_document_candidate",
-        "substar.editor-document.v1",
+        "substar.editor-document.v2",
     ),
     "segmentation_validation.json": (
         "segmentation_validation",
@@ -304,6 +304,20 @@ def build_segmentation_handler(
             "message": display_message,
             "step": step,
             "wait_reason": None,
+            "phase": (
+                "repair" if step == "segmentation.repair" else
+                "validation" if step == "segmentation.validation" else
+                "delivery" if step in {"segmentation.document_build", "segmentation.project_finalize"} else
+                "primary"
+            ),
+            "completed_units": (
+                int(message.data.get("completed", 0) or 0)
+                if step == "segmentation.semantic_grouping" else None
+            ),
+            "total_units": (
+                int(message.data.get("planned", 0) or 0)
+                if step == "segmentation.semantic_grouping" else None
+            ),
         }
 
     def finalize(
@@ -493,6 +507,7 @@ def build_segmentation_handler(
             },
             "revision": pointer,
             "summary": summary,
+            "needs_attention": bool(summary["review_required_count"]),
         }
 
     return TaskHandler(

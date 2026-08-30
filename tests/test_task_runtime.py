@@ -46,7 +46,7 @@ class TaskRuntimeTest(unittest.TestCase):
             }
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
-        self.assertEqual(version, 2)
+        self.assertEqual(version, 3)
         self.assertEqual(journal.lower(), "wal")
         self.assertTrue(
             {
@@ -58,7 +58,7 @@ class TaskRuntimeTest(unittest.TestCase):
             }.issubset(tables)
         )
 
-    def test_v1_artifacts_migrate_to_their_current_attempt(self) -> None:
+    def test_legacy_runtime_database_is_rejected(self) -> None:
         legacy = Path(self.temporary.name) / "legacy-runtime.sqlite3"
         with closing(sqlite3.connect(legacy)) as connection:
             connection.executescript(
@@ -99,18 +99,8 @@ class TaskRuntimeTest(unittest.TestCase):
                 """
             )
 
-        migrated = RuntimeStore(legacy)
-        artifacts = migrated.list_artifacts("legacy-task")
-        with closing(sqlite3.connect(legacy)) as connection:
-            version = connection.execute("PRAGMA user_version").fetchone()[0]
-            columns = {
-                row[1]
-                for row in connection.execute("PRAGMA table_info(task_artifacts)")
-            }
-
-        self.assertEqual(version, 2)
-        self.assertIn("attempt", columns)
-        self.assertEqual(artifacts[0].attempt, 2)
+        with self.assertRaisesRegex(InvalidTaskError, "legacy runtime database"):
+            RuntimeStore(legacy)
 
     def test_create_and_idempotent_replay_return_schema_projection(self) -> None:
         first = self.create_task(
@@ -119,7 +109,7 @@ class TaskRuntimeTest(unittest.TestCase):
         replay = self.create_task(idempotency_key="upload-action-1")
 
         self.assertEqual(first, replay)
-        self.assertEqual(first["schema_version"], "substar.task.v1")
+        self.assertEqual(first["schema_version"], "substar.task.v2")
         self.assertEqual(first["state"], "queued")
         self.assertEqual(first["attempt"], 0)
         self.assertEqual(first["progress"], 0.0)
@@ -181,6 +171,28 @@ class TaskRuntimeTest(unittest.TestCase):
             self.service.complete(created["task_id"], 1, {"access_token": "secret"})
         completed = self.service.complete(created["task_id"], 1, {"ok": True})
         self.assertEqual(completed["state"], "succeeded")
+
+    def test_task_can_enter_exactly_one_repair_phase(self) -> None:
+        task = self.create_task()
+        claimed = self.service.claim_next({"transcription"})
+        assert claimed is not None
+        repairing = self.service.enter_repair_phase(task["task_id"], 1)
+        self.assertTrue(repairing["repair_phase_entered"])
+        self.assertEqual(repairing["phase"], "repair")
+        with self.assertRaisesRegex(TaskStateConflictError, "only once"):
+            self.service.enter_repair_phase(task["task_id"], 1)
+
+    def test_partial_success_is_terminal_and_attention_bearing(self) -> None:
+        task = self.create_task()
+        claimed = self.service.claim_next({"transcription"})
+        assert claimed is not None
+        completed = self.service.complete_with_issues(
+            task["task_id"], 1,
+            {"needs_attention": True, "problem_cue_ids": ["cue-2"]},
+        )
+        self.assertEqual(completed["state"], "succeeded_with_issues")
+        self.assertTrue(completed["needs_attention"])
+        self.assertEqual(completed["result"]["problem_cue_ids"], ["cue-2"])
 
     def test_terminal_error_requires_the_frozen_public_envelope(self) -> None:
         created = self.create_task()

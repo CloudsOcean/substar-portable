@@ -154,59 +154,48 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_calibration_task_projection_uses_detailed_progress(tmp_path, monkeypatch) -> None:
-    detail_path = tmp_path / "calibration.json"
-    detail_path.write_text(json.dumps({
-        "task_id": "editor_ai_test",
-        "progress": 0.42,
-        "message": "正在校准第 2 / 5 个语义块",
-        "error": "",
-    }), encoding="utf-8")
-    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
+def test_calibration_task_projection_uses_runtime_progress() -> None:
     task = {
-        "task_id": "editor_ai_test",
-        "kind": "calibration",
+        "task_id": "tsk_" + "a" * 32,
+        "task_type": "calibration",
         "state": "running",
-        "started_at": "2000-01-01T00:00:00+00:00",
+        "progress": 0.42,
+        "progress_message": "正在校准第 2 / 5 个语义块",
+        "phase": "primary",
+        "completed_units": 2,
+        "total_units": 5,
         "error": None,
     }
 
-    projected = http_api._project_editor_ai_task_payload("project", task)
+    projected = http_api._runtime_ai_task_projection(task)
 
-    assert projected is not None
     assert projected["progress"] == 0.42
     assert projected["message"] == "正在校准第 2 / 5 个语义块"
-    assert projected["elapsed_seconds"] > 0
+    assert projected["ai_progress"]["units"]["completed"] == 2
+    assert projected["kind"] == "calibration"
 
 
-def test_translation_lock_does_not_claim_calibration_progress_file(tmp_path, monkeypatch) -> None:
-    detail_path = tmp_path / "calibration.json"
-    detail_path.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
+def test_translation_projection_uses_its_frozen_input() -> None:
     task = {
-        "task_id": "editor_ai_translation",
-        "kind": "translation",
+        "task_id": "tsk_" + "b" * 32,
+        "task_type": "translation",
         "state": "running",
+        "phase": "primary",
         "error": None,
     }
 
-    assert http_api._project_editor_ai_task_payload("project", task) == task
+    projected = http_api._runtime_ai_task_projection(task, {
+        "target_language": "zh-CN", "mapping_mode": "one_to_one"
+    })
+    assert projected["target_language"] == "zh-CN"
+    assert projected["mapping_mode"] == "one_to_one"
 
 
-def test_new_calibration_task_does_not_inherit_previous_task_timestamp(
-    tmp_path, monkeypatch
-) -> None:
-    detail_path = tmp_path / "calibration.json"
-    detail_path.write_text(json.dumps({
-        "task_id": "old-task",
-        "created_at": "2000-01-01T00:00:00+00:00",
-    }), encoding="utf-8")
-    monkeypatch.setattr(http_api, "_editor_task_path", lambda *_args: detail_path)
-
-    value = http_api._write_editor_task(
-        "project", "calibration", status="running", progress=0.02,
-        message="准备中", task_id="new-task",
-    )
-
-    assert value["task_id"] == "new-task"
-    assert value["created_at"] != "2000-01-01T00:00:00+00:00"
+def test_runtime_projection_does_not_synthesize_another_task_identity() -> None:
+    task = {
+        "task_id": "tsk_" + "c" * 32,
+        "task_type": "calibration",
+        "state": "queued",
+        "phase": "primary",
+    }
+    assert http_api._runtime_ai_task_projection(task)["task_id"] == task["task_id"]

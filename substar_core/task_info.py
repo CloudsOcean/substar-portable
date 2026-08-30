@@ -7,13 +7,10 @@ import re
 from typing import Any, Mapping
 
 from substar_core.artifacts import atomic_write_json
-from substar_core.config import load_settings
-
-
-TASK_INFO_SCHEMA = "substar.task-info.v1"
+TASK_INFO_SCHEMA = "substar.task-info.v2"
 TASK_INFO_FILENAME = "task_info.json"
 SOURCE_LANGUAGES = {"Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"}
-TARGET_LANGUAGES = {"zh-CN", "en", "ja", "ko"}
+TARGET_LANGUAGES = {"auto_opposite", "zh-CN", "en", "ja", "ko"}
 
 
 def _read_mapping(path: Path) -> dict[str, Any]:
@@ -24,24 +21,6 @@ def _read_mapping(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _source_limit(settings: Mapping[str, Any], language: str) -> int:
-    key = {
-        "en": "english_hard_limit",
-        "zh": "chinese_hard_limit",
-        "zh-CN": "chinese_hard_limit",
-        "ja": "japanese_hard_limit",
-        "ko": "korean_hard_limit",
-        "mixed": "mixed_hard_limit",
-    }.get(language, "mixed_hard_limit")
-    return int(settings.get(key, 25))
-
-
-def _resolved_target(language: str, target: str) -> str:
-    if target in TARGET_LANGUAGES:
-        return target
-    return "zh-CN" if language == "en" else "en"
-
-
 def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     display_name = str(value.get("display_name", "")).strip()
     if not display_name:
@@ -49,7 +28,7 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     if len(display_name) > 120 or any(ord(char) < 32 for char in display_name) or re.search(r'[\\/:*?"<>|]', display_name):
         raise ValueError("任务名称包含不允许的字符")
     language = str(value.get("language", "Auto"))
-    target = str(value.get("target_language_mode", "zh-CN"))
+    target = str(value.get("target_language_mode", "auto_opposite"))
     if language not in SOURCE_LANGUAGES:
         raise ValueError("原文语言无效")
     if target not in TARGET_LANGUAGES:
@@ -71,37 +50,15 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     }
 
 
-def load_task_info(job_dir: Path, project_id: str, *, materialize: bool = True) -> dict[str, Any]:
-    """Load the sole runtime authority, migrating legacy snapshots only once."""
+def load_task_info(job_dir: Path, project_id: str) -> dict[str, Any]:
+    """Load the required v2 project metadata authority."""
     path = job_dir / TASK_INFO_FILENAME
     current = _read_mapping(path)
-    if current:
-        if current.get("schema_version") != TASK_INFO_SCHEMA:
-            raise ValueError("任务信息版本不受支持")
-        return _validate(current, project_id)
-
-    settings = load_settings(include_secret=False)
-    frozen = _read_mapping(job_dir / "project_creation.json")
-    overrides = frozen.get("settings_overrides", {})
-    if isinstance(overrides, dict):
-        settings.update(overrides)
-    state = _read_mapping(job_dir / "creation_state.json")
-    preferences = _read_mapping(job_dir / "editor_preferences.json")
-    language = str(settings.get("language") or "Auto")
-    if language not in SOURCE_LANGUAGES:
-        language = "Auto"
-    target = _resolved_target(language, str(settings.get("target_language_mode") or ""))
-    migrated = _validate({
-        "display_name": state.get("display_name") or state.get("filename") or project_id,
-        "language": language,
-        "target_language_mode": target,
-        "glossary_id": settings.get("glossary_id", ""),
-        "source_hard_limit": preferences.get("source_hard_limit", _source_limit(settings, language)),
-        "target_hard_limit": preferences.get("target_hard_limit", _source_limit(settings, target)),
-    }, project_id)
-    if materialize:
-        atomic_write_json(path, migrated)
-    return migrated
+    if not current:
+        raise ValueError("项目缺少 v2 任务信息；旧项目不受支持")
+    if current.get("schema_version") != TASK_INFO_SCHEMA:
+        raise ValueError("任务信息版本不受支持")
+    return _validate(current, project_id)
 
 
 def save_task_info(job_dir: Path, project_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
