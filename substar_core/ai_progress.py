@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 
-AI_PROGRESS_SCHEMA = "substar.ai-stage-progress.v1"
+AI_PROGRESS_SCHEMA = "substar.ai-stage-progress.v2"
+LEGACY_AI_PROGRESS_SCHEMA = "substar.ai-stage-progress.v1"
 
 _PHASE_BANDS: dict[str, tuple[float, float]] = {
     "planning": (0.0, 0.05),
     "executing": (0.05, 0.70),
-    "repairing": (0.70, 0.85),
+    "repair": (0.70, 0.85),
     "validating": (0.85, 0.92),
     "materializing": (0.92, 0.97),
     "publishing": (0.97, 1.0),
@@ -18,7 +19,7 @@ _PHASE_BANDS: dict[str, tuple[float, float]] = {
 _PHASE_LABELS = {
     "planning": "准备任务",
     "executing": "模型处理",
-    "repairing": "修复",
+    "repair": "修复",
     "validating": "结果验收",
     "materializing": "生成可编辑结果",
     "publishing": "交付产物",
@@ -61,7 +62,7 @@ def ai_progress(
     low, high = _PHASE_BANDS[phase]
     if phase == "executing":
         fraction = completed / planned if planned else 0.0
-    elif phase == "repairing":
+    elif phase == "repair":
         fraction = repair_completed / repair_planned if repair_planned else 1.0
     elif phase in {"planning", "completed"}:
         fraction = 1.0 if phase == "completed" else 0.0
@@ -71,7 +72,7 @@ def ai_progress(
 
     if phase == "executing" and planned:
         message = f"{_PHASE_LABELS[phase]} {completed}/{planned} {unit_label}"
-    elif phase == "repairing" and repair_planned:
+    elif phase == "repair" and repair_planned:
         message = (
             f"{_PHASE_LABELS[phase]} {repair_completed}/{repair_planned} {unit_label}"
             f" · 首轮通过 {accepted}/{planned}"
@@ -103,7 +104,7 @@ def ai_progress(
         "steps": [
             {"id": name, "label": _PHASE_LABELS[name]}
             for name in (
-                "executing", "repairing", "validating",
+                "executing", "repair", "validating",
                 "materializing", "publishing", "completed",
             )
         ],
@@ -116,6 +117,19 @@ def progress_from_mapping(value: Mapping[str, Any] | None) -> dict[str, Any] | N
     progress = value.get("ai_progress")
     if not isinstance(progress, Mapping):
         return None
-    if progress.get("schema_version") != AI_PROGRESS_SCHEMA:
+    schema = progress.get("schema_version")
+    if schema not in {AI_PROGRESS_SCHEMA, LEGACY_AI_PROGRESS_SCHEMA}:
         return None
-    return dict(progress)
+    normalized = dict(progress)
+    if schema == LEGACY_AI_PROGRESS_SCHEMA:
+        normalized["schema_version"] = AI_PROGRESS_SCHEMA
+        if normalized.get("phase") == "repairing":
+            normalized["phase"] = "repair"
+        steps = normalized.get("steps")
+        if isinstance(steps, list):
+            normalized["steps"] = [
+                {**row, "id": "repair" if row.get("id") == "repairing" else row.get("id")}
+                if isinstance(row, Mapping) else row
+                for row in steps
+            ]
+    return normalized

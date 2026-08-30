@@ -138,7 +138,7 @@ DEFAULTS: dict[str, Any] = {
     "stage_translation_repair_reasoning_effort": "low",
     "stage_translation_repair_max_tokens": 65536,
     "stage_translation_repair_temperature": 0.0,
-    # Normal stages default to thinking at Low. Fallback repair stages prefer
+    # Normal stages default to thinking at Low. Repair stages prefer
     # non-thinking and are promoted to thinking at Low only when required by
     # the selected model.
     "stage_calibration_thinking_mode": "enabled",
@@ -427,9 +427,7 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     )
     # Translation content is model-authored. A structurally invalid first
     # response is repaired by another model call, never by local text logic.
-    settings["translation_repair_attempts"] = max(
-        1, min(2, int(settings.get("translation_repair_attempts", 1)))
-    )
+    settings["translation_repair_attempts"] = 1
     settings["translation_api_timeout_seconds"] = max(
         30,
         min(600, int(settings.get("translation_api_timeout_seconds", 300))),
@@ -691,14 +689,10 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         merged[key] = max(1, min(maximum, int(merged[key])))
     merged["http_retry_attempts"] = max(
-        1, min(4, int(merged["http_retry_attempts"]))
+        1, min(3, int(merged["http_retry_attempts"]))
     )
-    merged["segmentation_repair_attempts"] = max(
-        0, min(2, int(merged["segmentation_repair_attempts"]))
-    )
-    merged["translation_repair_attempts"] = max(
-        1, min(2, int(merged["translation_repair_attempts"]))
-    )
+    merged["segmentation_repair_attempts"] = 1
+    merged["translation_repair_attempts"] = 1
     merged["stage_timeout_seconds"] = max(
         60, min(21600, int(merged["stage_timeout_seconds"]))
     )

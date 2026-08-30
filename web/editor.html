@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260828-ai-task-card-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260830-convergence-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
   <script src="/assets/theme/personalization.js?v=20260814-8"></script>
@@ -53,6 +53,11 @@
             <option value="en">英文</option>
             <option value="ja">日文</option>
             <option value="ko">韩文</option>
+          </select>
+          <label for="translationMappingMode">翻译方式</label>
+          <select id="translationMappingMode">
+            <option value="many_to_many">多对多翻译</option>
+            <option value="one_to_one">逐行翻译</option>
           </select>
           <button id="translateDocument" class="translation-command" type="button" disabled>执行</button>
         </div>
@@ -280,6 +285,6 @@
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260826-tutorial-target-1"></script>
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
-  <script src="/assets/editor.js?v=20260828-advanced-tutorial-menus-1"></script>
+  <script src="/assets/editor.js?v=20260830-convergence-1"></script>
 </body>
 </html>

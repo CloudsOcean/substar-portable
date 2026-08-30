@@ -30,6 +30,7 @@
         "running",
         "cancelling",
         "succeeded",
+        "succeeded_with_issues",
         "failed",
         "cancelled",
         "interrupted"
@@ -74,7 +75,7 @@
     {
       "if": {
         "properties": {
-          "state": {"enum": ["succeeded", "failed", "cancelled", "interrupted"]}
+          "state": {"enum": ["succeeded", "succeeded_with_issues", "failed", "cancelled", "interrupted"]}
         }
       },
       "then": {

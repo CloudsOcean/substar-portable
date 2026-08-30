@@ -49,7 +49,7 @@ _PROGRESS_MESSAGES = {
     "segmentation.semantic_grouping": "模型处理",
     "segmentation.cue_layout": "正在生成字幕 Cue",
     "segmentation.validation": "结果验收 · 正在校验字幕结构",
-    "segmentation.repair": "Fallback 修复 · 正在修复无效字幕结构",
+    "segmentation.repair": "修复 · 正在修复无效字幕结构",
     "segmentation.document_build": "生成可编辑结果 · 正在生成初始编辑文档",
     "segmentation.project_finalize": "交付产物 · 正在发布可编辑项目",
 }
@@ -296,7 +296,7 @@ def build_segmentation_handler(
                 failed = max(0, int(message.data.get("failed", 0) or 0))
                 display_message = f"模型处理 {completed}/{planned} 块"
                 if repairing:
-                    display_message += f" · Fallback 修复中 {repairing} 块"
+                    display_message += f" · 修复中 {repairing} 块"
                 if failed:
                     display_message += f" · 待人工 {failed} 块"
         return {

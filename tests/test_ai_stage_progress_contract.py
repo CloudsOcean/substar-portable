@@ -17,12 +17,12 @@ def test_common_progress_contract_is_monotonic_and_counted() -> None:
         ai_progress(kind="calibration", phase="executing", unit_label="块", planned=4, completed=0),
         ai_progress(kind="calibration", phase="executing", unit_label="块", planned=4, completed=4),
         ai_progress(
-            kind="calibration", phase="repairing", unit_label="块",
+            kind="calibration", phase="repair", unit_label="块",
             planned=4, completed=4, accepted=3, failed=1,
             repair_planned=1, repair_completed=0,
         ),
         ai_progress(
-            kind="calibration", phase="repairing", unit_label="块",
+            kind="calibration", phase="repair", unit_label="块",
             planned=4, completed=4, accepted=3, failed=1,
             repair_planned=1, repair_completed=1, repair_accepted=1,
         ),
@@ -68,7 +68,7 @@ def test_all_model_stages_resolve_one_active_provider_and_capability_policy() ->
     assert {row["reasoning_effort"] for row in routes} == {"low"}
 
 
-def test_calibration_runs_primary_then_real_fallback_and_reports_both_counts() -> None:
+def test_calibration_runs_primary_then_one_repair_and_reports_both_counts() -> None:
     calls: list[dict[str, object]] = []
     phases: list[tuple[str, int, int, int]] = []
 
@@ -116,8 +116,8 @@ def test_calibration_runs_primary_then_real_fallback_and_reports_both_counts() -
     assert len(results) == 2
     assert all(not metadata.get("error") for _block, _value, metadata in results)
     assert [row["stage"] for _block, _value, row in results].count("audit_repair") == 1
-    assert phases[0] == ("repairing", 0, 1, 0)
-    assert phases[-1] == ("repairing", 1, 1, 1)
+    assert phases[0] == ("repair", 0, 1, 0)
+    assert phases[-1] == ("repair", 1, 1, 1)
     assert len(calls) == 2  # b1 primary + b2 fallback; injected b2 primary made no request
     assert all(call["api_key"] == "test-key" for call in calls)
     assert all(call["model"] == "glm-5.3-flash" for call in calls)

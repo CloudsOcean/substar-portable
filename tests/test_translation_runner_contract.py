@@ -42,8 +42,18 @@ def test_unrepaired_translation_units_remain_problem_cues_without_discarding_acc
         {"cue_id": "cue-a", "source_hash": "hash-a"},
         {"cue_id": "cue-b", "source_hash": "hash-b"},
     ]
-    accepted, problems = _accepted_translation_rows(source, {"cue-a": "译文"})
-    assert accepted == [{"cue_id": "cue-a", "source_hash": "hash-a", "target_text": "译文"}]
+    rows, problems = _accepted_translation_rows(source, {"cue-a": "译文"})
+    assert rows == [
+        {
+            "cue_id": "cue-a", "source_hash": "hash-a", "target_text": "译文",
+            "translation_status": "translated",
+        },
+        {
+            "cue_id": "cue-b", "source_hash": "hash-b", "target_text": "",
+            "translation_status": "manual_required",
+            "issue_code": "translation_unresolved", "editable": True,
+        },
+    ]
     assert problems == ["cue-b"]
 
 
@@ -159,12 +169,87 @@ def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> Non
     )
     assert unresolved.cue_id == cues[1].cue_id
     assert unresolved.target is not None
-    assert unresolved.target.target_text == "unresolved"
+    assert unresolved.target.target_text == ""
+    assert unresolved.target.translation_status == "manual_required"
+    assert unresolved.target.issue_code == "translation_unresolved"
+    assert unresolved.target.editable is True
     assert unresolved.mapping["requires_manual_translation"] is True
     assert report["unresolved_source_cue_ids"] == [cues[1].cue_id]
     assert _translated_text_by_source_cue(candidate) == {
         cues[0].cue_id: "已翻译",
     }
+
+
+def test_translation_repair_is_exactly_one_request_per_failed_group(monkeypatch) -> None:
+    group = {"group_id": "g1", "cues": [_cue("c1", 0)]}
+    calls = 0
+
+    def invalid_repair(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return {"group_results": []}, {"transport_attempt_count": 1}
+
+    monkeypatch.setattr(contextual_translation, "api_call", invalid_repair)
+    _plans, report = contextual_translation.complete_results(
+        settings={"translation_repair_attempts": 99},
+        repair_prompt="repair",
+        groups=[group],
+        response={"group_results": []},
+    )
+
+    assert calls == 1
+    assert report["model_repair"]["repair_phase_entered"] is True
+    assert report["model_repair"]["groups"][0]["repair_request_count"] == 1
+
+
+def test_non_repairable_translation_failure_creates_no_repair_request(monkeypatch) -> None:
+    group = {"group_id": "g1", "cues": [_cue("c1", 0)]}
+    calls = 0
+
+    def unexpected_repair(**_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("transport failures must not enter content repair")
+
+    monkeypatch.setattr(contextual_translation, "api_call", unexpected_repair)
+    plans, report = contextual_translation.complete_results(
+        settings={"translation_repair_attempts": 1},
+        repair_prompt="repair",
+        groups=[group],
+        response={"group_results": []},
+        non_repairable_group_ids={"g1"},
+    )
+
+    assert plans == []
+    assert calls == 0
+    assert report["model_repair"]["repair_phase_entered"] is False
+    assert report["model_repair"]["attempted_group_ids"] == []
+    assert report["invalid_group_ids"] == ["g1"]
+
+
+def test_one_to_one_mode_freezes_one_source_cue_per_model_group(monkeypatch) -> None:
+    groups = [{
+        "group_id": "meaning-1",
+        "semantic_group_ids": ["semantic-1"],
+        "cues": [
+            {"cue_id": "c1", "source_text": "first"},
+            {"cue_id": "c2", "source_text": "second"},
+        ],
+    }]
+    monkeypatch.setattr(
+        contextual_translation,
+        "translation_groups",
+        lambda _document, _settings: (groups, {}, {}),
+    )
+
+    result = contextual_translation.clean_groups(
+        object(), {"translation_mapping_mode": "one_to_one"}
+    )
+
+    assert [row["group_id"] for row in result] == ["line:c1", "line:c2"]
+    assert [[cue["cue_id"] for cue in row["cues"]] for row in result] == [
+        ["c1"], ["c2"],
+    ]
 
 
 def test_staleness_indexes_rematerialized_cues_by_source_lineage() -> None:

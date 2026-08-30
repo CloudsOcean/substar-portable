@@ -514,6 +514,12 @@ class ProjectStore:
                 document_value,
                 _decompress_json(patch_row["patch_blob"], patch_row["payload_sha256"]),
             )
+        # Verify the exact reconstructed payload before schema defaults are
+        # applied by ``EditorDocument.from_dict``.  New optional fields may be
+        # added with backward-compatible defaults; hashing only the normalized
+        # document would then make an intact legacy revision look corrupt.
+        stored_document_hash = str(row["document_hash"])
+        serialized_document_hash = _sha256_bytes(_canonical_bytes(document_value))
         try:
             document = EditorDocument.from_dict(document_value)
             provenance = ChangeProvenance.from_dict(
@@ -522,7 +528,10 @@ class ProjectStore:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ProjectIntegrityError("revision content is invalid") from exc
         document_hash = document.content_hash()
-        if document_hash != row["document_hash"]:
+        if stored_document_hash not in {
+            serialized_document_hash,
+            document_hash,
+        }:
             raise ProjectIntegrityError("revision document checksum mismatch")
         revision = DocumentRevision(
             revision_id=row["revision_id"],
@@ -594,9 +603,12 @@ class ProjectStore:
                 patch_blob, payload_sha = _compress_json(
                     _document_patch(latest.document, document)
                 )
-                inverse_blob, inverse_sha = _compress_json(
-                    _document_patch(document, latest.document)
-                )
+                # Undo/redo navigates immutable forward revisions and never
+                # reads inverse_patch_blob. Keep the nullable legacy columns so
+                # old databases remain readable, but stop doubling every new
+                # patch with an unused reverse copy.
+                inverse_blob = None
+                inverse_sha = None
                 snapshot_blob = None
             connection.execute(
                 "INSERT INTO revisions(revision_number, revision_id, parent_revision_id, created_at, "

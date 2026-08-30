@@ -17,6 +17,7 @@ class EditorAiTaskState(str, Enum):
     RUNNING = "running"
     CANCELLING = "cancelling"
     SUCCEEDED = "succeeded"
+    SUCCEEDED_WITH_ISSUES = "succeeded_with_issues"
     FAILED = "failed"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
@@ -33,6 +34,7 @@ ACTIVE_EDITOR_AI_TASK_STATES = frozenset(
 TERMINAL_EDITOR_AI_TASK_STATES = frozenset(
     {
         EditorAiTaskState.SUCCEEDED,
+        EditorAiTaskState.SUCCEEDED_WITH_ISSUES,
         EditorAiTaskState.FAILED,
         EditorAiTaskState.CANCELLED,
         EditorAiTaskState.INTERRUPTED,
@@ -53,6 +55,7 @@ ALLOWED_EDITOR_AI_TASK_TRANSITIONS: Mapping[
         {
             EditorAiTaskState.CANCELLING,
             EditorAiTaskState.SUCCEEDED,
+            EditorAiTaskState.SUCCEEDED_WITH_ISSUES,
             EditorAiTaskState.FAILED,
             EditorAiTaskState.INTERRUPTED,
         }
@@ -61,11 +64,13 @@ ALLOWED_EDITOR_AI_TASK_TRANSITIONS: Mapping[
         {
             EditorAiTaskState.CANCELLED,
             EditorAiTaskState.SUCCEEDED,
+            EditorAiTaskState.SUCCEEDED_WITH_ISSUES,
             EditorAiTaskState.FAILED,
             EditorAiTaskState.INTERRUPTED,
         }
     ),
     EditorAiTaskState.SUCCEEDED: frozenset(),
+    EditorAiTaskState.SUCCEEDED_WITH_ISSUES: frozenset(),
     EditorAiTaskState.FAILED: frozenset(),
     EditorAiTaskState.CANCELLED: frozenset(),
     EditorAiTaskState.INTERRUPTED: frozenset(),

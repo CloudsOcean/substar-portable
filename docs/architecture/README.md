@@ -43,6 +43,8 @@ Regenerate with `python scripts/system_map.py`. CI and the Windows release build
 - [Current implemented module architecture](implementation/current-module-architecture.md)
 - [Phase 5 segmentation cutover](implementation/phase-5-segmentation-cutover.md)
 - [Phase 9 release acceptance](implementation/phase-9-release-acceptance.md)
+- [Phase 10 convergence repair plan](implementation/phase-10-convergence-repair-plan.md)
+- [Phase 10 convergence acceptance](implementation/phase-10-convergence-acceptance.md)
 
 - Audited source commit: `932a5be`
 - Phase 0: complete

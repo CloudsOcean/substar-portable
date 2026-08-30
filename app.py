@@ -1365,11 +1365,9 @@ def _automatic_settings_from_payload(
             "translation_workers", 64, 1, 256
         ),
         "http_retry_attempts": bounded_int(
-            "http_retry_attempts", 2, 0, 4
+            "http_retry_attempts", 2, 1, 3
         ),
-        "segmentation_repair_attempts": bounded_int(
-            "segmentation_repair_attempts", 1, 0, 2
-        ),
+        "segmentation_repair_attempts": 1,
         "translation_style": profile["translation_style"],
         "display_order": (
             "source_target"

@@ -13,6 +13,7 @@ from typing import Any, Mapping
 
 from ...artifacts import atomic_write_json
 from ...ai_progress import progress_from_mapping
+from ...credential_store import model_provider_credential_ref
 from ...process_command import python_script_command
 from ...storage import ProjectStore
 from ..tasks.contracts import EditorAiTaskState
@@ -127,16 +128,27 @@ def _source_hashes_by_lineage(document: Any) -> dict[str, set[str]]:
 
 def _accepted_translation_rows(
     source_rows: list[dict[str, str]], translated_text: Mapping[str, str]
-) -> tuple[list[dict[str, str]], list[str]]:
-    accepted: list[dict[str, str]] = []
+) -> tuple[list[dict[str, Any]], list[str]]:
+    result: list[dict[str, Any]] = []
     problems: list[str] = []
     for row in source_rows:
         target_text = str(translated_text.get(row["cue_id"], "")).strip()
         if not target_text:
             problems.append(row["cue_id"])
+            result.append({
+                **row,
+                "target_text": "",
+                "translation_status": "manual_required",
+                "issue_code": "translation_unresolved",
+                "editable": True,
+            })
         else:
-            accepted.append({**row, "target_text": target_text})
-    return accepted, problems
+            result.append({
+                **row,
+                "target_text": target_text,
+                "translation_status": "translated",
+            })
+    return result, problems
 
 
 def _translation_problem_cue_ids(document: Any) -> list[str]:
@@ -152,7 +164,7 @@ def _translation_problem_cue_ids(document: Any) -> list[str]:
 
 
 def translation_stale_cue_ids(job_dir: Path, state: Mapping[str, Any]) -> list[str]:
-    if state.get("state") != "succeeded":
+    if state.get("state") not in {"succeeded", "succeeded_with_issues"}:
         return []
     path = job_dir / "translation" / "latest.json"
     try:
@@ -217,7 +229,7 @@ def _progress(stage_progress_path: Path) -> tuple[float, str]:
         accepted = min(planned, int(row.get("accepted", 0) or 0))
         status = str(row.get("status", "pending"))
         fractions.append(1.0 if status.startswith("completed") else accepted / planned)
-        if status in {"running", "repairing"}:
+        if status in {"running", "repair", "repairing"}:
             active = name
     return 0.05 + 0.9 * sum(fractions), f"{active} 翻译处理中"
 
@@ -272,6 +284,10 @@ def create_translation_task(
         raise TranslationTaskError(
             "target language must be one of auto_opposite, zh-CN, en, ja, ko"
         )
+    mapping_mode = str(settings.get("translation_mapping_mode") or "many_to_many")
+    if mapping_mode not in {"one_to_one", "many_to_many"}:
+        raise TranslationTaskError("translation mapping mode is invalid")
+    provider_id = str(settings.get("active_model_provider") or "").strip()
     run_dir = job_dir / "translation" / "runs" / task_id
     run_dir.mkdir(parents=True, exist_ok=False)
     state = {
@@ -286,6 +302,8 @@ def create_translation_task(
         "source_language_selection": source_language_selection,
         "source_language": source_language,
         "target_language": target_language,
+        "mapping_mode": mapping_mode,
+        "credential_reference": model_provider_credential_ref(provider_id),
         "result_revision_id": None,
         "created_at": _now(),
         "started_at": None,
@@ -397,6 +415,10 @@ def run_translation_task(
             source_rows, translated_text
         )
         review_problem_cue_ids = _translation_problem_cue_ids(result_revision.document)
+        all_problem_cue_ids = list(dict.fromkeys([
+            *problem_cue_ids,
+            *review_problem_cue_ids,
+        ]))
         result_path = job_dir / "translation" / "latest.json"
         atomic_write_json(result_path, {
             "schema_version": TRANSLATION_RESULT_SCHEMA,
@@ -409,12 +431,16 @@ def run_translation_task(
             "problem_cue_ids": problem_cue_ids,
             "review_problem_cue_ids": review_problem_cue_ids,
         })
+        final_state = (
+            "succeeded_with_issues"
+            if all_problem_cue_ids else "succeeded"
+        )
         state.update(
-            state="succeeded",
+            state=final_state,
             progress=1.0,
             message=(
-                f"翻译完成，{len(review_problem_cue_ids)} 条需要人工检查并已计入问题字幕"
-                if review_problem_cue_ids else "翻译完成"
+                f"翻译完成，{len(all_problem_cue_ids)} 条需要人工处理并已计入问题字幕"
+                if all_problem_cue_ids else "翻译完成"
             ),
             result_revision_id=result_revision_id,
             finished_at=_now(),
@@ -430,12 +456,19 @@ def run_translation_task(
             )
         )
         if final_progress is not None:
-            final_progress["problem_count"] = len(review_problem_cue_ids)
+            final_progress["problem_count"] = len(all_problem_cue_ids)
             state["ai_progress"] = final_progress
+        # Publish the detailed task result before releasing the generic editor
+        # lock so both UI projections observe the same terminal result.
+        atomic_write_json(status_path, state)
         finish_editor_ai_task(
             job_dir,
             task_id,
-            EditorAiTaskState.SUCCEEDED,
+            (
+                EditorAiTaskState.SUCCEEDED_WITH_ISSUES
+                if final_state == "succeeded_with_issues"
+                else EditorAiTaskState.SUCCEEDED
+            ),
             result_revision_id=result_revision_id,
         )
         _OWNED_TRANSLATION_TASK_IDS.discard(task_id)

@@ -855,9 +855,6 @@
 
   function routeLabel(job) {
     if (job.tutorial_case_id) return "内置教程";
-    if (job.workflow_mode === "project_pipeline") {
-      return job.current_phase_label || "项目流水线";
-    }
     if (job.workflow_mode === "editor_task") {
       return ({translation:"翻译", calibration:"AI 校准", review:"AI 审阅"})[job.task_kind] || "编辑器任务";
     }
@@ -869,50 +866,8 @@
     return job.display_name || job.filename || job.id;
   }
 
-  function editorTaskLabel(kind) {
-    return ({translation:"翻译", calibration:"AI 校准", review:"AI 审阅"})[kind] || "编辑器任务";
-  }
-
-  function coalescePipelineJobs(jobs) {
-    const groups = new Map();
-    for (const job of jobs) {
-      const projectId = job.project_id || (job.workflow_mode === "editor_task" ? "" : job.id);
-      const key = projectId || job.id;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(job);
-    }
-    return [...groups.entries()].map(([projectId, items]) => {
-      if (items.length === 1) return items[0];
-      const split = items.find(item => item.workflow_mode !== "editor_task");
-      const editorTasks = items.filter(item => item.workflow_mode === "editor_task");
-      const current = editorTasks.find(item => item.status === "running")
-        || editorTasks.find(item => item.status === "queued")
-        || split
-        || editorTasks[0];
-      const hasRunning = items.some(item => item.status === "running");
-      const hasQueued = items.some(item => item.status === "queued");
-      const failed = items.find(item => item.status === "failed");
-      const status = hasRunning ? "running" : hasQueued ? "queued" : failed ? "failed" : current.status;
-      return {
-        ...current,
-        id:`pipeline:${projectId}`,
-        project_id:projectId,
-        display_name:split?.display_name || split?.filename || current.display_name || projectId,
-        workflow_mode:"project_pipeline",
-        status,
-        progress:current.progress,
-        message:current.message,
-        error:status === "failed" ? (failed?.error || "") : (current.error || ""),
-        current_phase_label:current.workflow_mode === "editor_task"
-          ? editorTaskLabel(current.task_kind) : "切分",
-        pipeline_items:items,
-        split_job:split || null,
-      };
-    });
-  }
-
   function normalizedProgress(job) {
-    const value = Number(job.progress || 0);
+    const value = Number(job.ai_progress?.progress ?? job.progress ?? 0);
     const stored = value <= 1 ? value * 100 : value;
     return Math.max(0, Math.min(100, Math.round(stored)));
   }
@@ -923,6 +878,7 @@
     if (job.status === "failed") return "处理失败";
     if (job.status === "interrupted") return "任务已中断";
     if (job.status === "cancelled") return "任务已取消，项目文件已保留";
+    if (job.status === "succeeded_with_issues") return "已交付，部分内容需要人工处理";
     if (job.status === "awaiting_edit") return "等待编辑";
     return "切分完成";
   }
@@ -943,7 +899,9 @@
   });
 
   function taskPhase(job) {
-    return TASK_STEP_LABELS[String(job.step || "")] || humanStatus(job);
+    return String(job.ai_progress?.message || "")
+      || TASK_STEP_LABELS[String(job.step || "")]
+      || humanStatus(job);
   }
 
   function taskError(job) {
@@ -1184,19 +1142,6 @@
   }
 
   function renderTaskProgress(job) {
-    if (job.workflow_mode === "project_pipeline") {
-      const phaseRows = (job.pipeline_items || []).map(item => {
-        const label = item.workflow_mode === "editor_task" ? editorTaskLabel(item.task_kind) : "切分";
-        return `${label} · ${taskPhase(item)} · ${normalizedProgress(item)}%`;
-      });
-      state.runtimeLogText = [
-        `${jobLabel(job)} · 当前阶段 ${job.current_phase_label}`,
-        ...phaseRows,
-        ...(taskError(job) ? [`错误：${taskError(job)}`] : []),
-      ].join("\n");
-      renderRuntimeLog();
-      return;
-    }
     if (job.workflow_mode === "editor_task") {
       state.runtimeLogText = [
         `${jobLabel(job)} · ${routeLabel(job)} · ${normalizedProgress(job)}%`,
@@ -1225,15 +1170,11 @@
   }
 
   function renderQueue(jobs) {
-    const activeEditorProjects = new Set(
-      jobs.filter(job => job.workflow_mode === "editor_task" && ACTIVE_STATUSES.has(job.status))
-        .map(job => job.project_id)
-    );
-    const active = coalescePipelineJobs(
-      jobs.filter((job) => QUEUE_WORKFLOWS.has(job.workflow_mode) && (
-        ACTIVE_STATUSES.has(job.status)
-        || (activeEditorProjects.has(job.id) && job.workflow_mode !== "editor_task")
-      ))
+    // A creation, calibration or translation task keeps its own immutable card
+    // identity for its complete lifecycle.  Combining jobs by project made the
+    // same DOM card jump between unrelated states and progress counters.
+    const active = jobs.filter((job) =>
+      QUEUE_WORKFLOWS.has(job.workflow_mode) && ACTIVE_STATUSES.has(job.status)
     );
     const container = $("#pipelineJobs");
     state.activeQueueCount = active.length;
@@ -1296,7 +1237,7 @@
       const actions = document.createElement("div");
       actions.className = "queue-job-actions";
       if (!disconnectedActive && ["failed", "interrupted"].includes(job.status)) {
-        if (!["editor_task", "project_pipeline"].includes(job.workflow_mode)) {
+        if (job.workflow_mode !== "editor_task") {
           const retry = document.createElement("button");
           retry.type = "button";
           retry.textContent = "重试";
@@ -1304,7 +1245,7 @@
           actions.append(retry);
         }
       }
-      const removableJob = job.workflow_mode === "project_pipeline" ? job.split_job : job;
+      const removableJob = job;
       if (!disconnectedActive && removableJob && removableJob.workflow_mode !== "editor_task") {
         const remove = document.createElement("button");
         remove.type = "button";
@@ -1535,6 +1476,7 @@
         progress:Number(task.progress || 0),
         message:task.message || "",
         error:task.error || "",
+        ai_progress:task.ai_progress || null,
         created_at:task.created_at,
       }));
       renderQueue([...taskJobs, ...state.jobs]);

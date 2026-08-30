@@ -26,3 +26,10 @@ test("runtime log wraps long messages without a horizontal scrollbar", () => {
   assert.match(styles, /\.runtime-log-lines pre \{[^}]*overflow-wrap: anywhere/);
   assert.doesNotMatch(styles, /\.runtime-log-lines pre \{[^}]*min-width: max-content/);
 });
+
+test("creation calibration and translation retain independent task cards", () => {
+  assert.doesNotMatch(source, /coalescePipelineJobs|project_pipeline/);
+  assert.match(source, /id:`editor:\$\{task\.project_id\}:\$\{task\.task_id\}`/);
+  assert.match(source, /ai_progress:task\.ai_progress \|\| null/);
+  assert.match(source, /job\.ai_progress\?\.progress \?\? job\.progress/);
+});

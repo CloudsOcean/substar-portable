@@ -379,18 +379,10 @@
                     name="http_retry_attempts"
                     type="number"
                     min="1"
-                    max="8"
+                    max="3"
                   />
                 </div>
-                <div class="field">
-                  <label>切分复议次数</label
-                  ><input
-                    name="segmentation_repair_attempts"
-                    type="number"
-                    min="0"
-                    max="4"
-                  />
-                </div>
+                <input name="segmentation_repair_attempts" type="hidden" value="1" />
                 <div class="field">
                   <label>单阶段上限（秒）</label
                   ><input
@@ -603,6 +595,6 @@
         </form>
       </section>
     </main>
-  <script src="/assets/settings.js?v=20260828-reasoning-defaults-1"></script>
+  <script src="/assets/settings.js?v=20260830-convergence-1"></script>
   </body>
 </html>

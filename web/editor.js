@@ -163,7 +163,8 @@
     document.body.classList.toggle("editor-ai-task-locked", locked);
     renderHeader();
     const genericTaskOwnsPanel = state.editorAiTask?.kind !== "translation";
-    if (locked && state.editorAiTask && genericTaskOwnsPanel) {
+    if ((locked || state.editorAiTask?.state === "succeeded_with_issues")
+      && state.editorAiTask && genericTaskOwnsPanel) {
       const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
@@ -189,7 +190,7 @@
     if (
       previousLocked && !locked && previousTaskId
       && state.editorAiTask?.task_id === previousTaskId
-      && state.editorAiTask?.state === "succeeded"
+      && ["succeeded", "succeeded_with_issues"].includes(state.editorAiTask?.state)
     ) {
       const revision = contract.consumeRevision(await api(projectPath()));
       setRevision(revision);
@@ -1377,26 +1378,30 @@
     panel.classList.toggle("hidden", !visible || state.taskPanelDismissed);
     document.body.classList.toggle("translation-task-visible", visible && !state.taskPanelDismissed);
     panel.classList.toggle("failed", task?.state === "failed");
-    panel.classList.toggle("completed", task?.state === "succeeded");
+    panel.classList.toggle("issues", task?.state === "succeeded_with_issues");
+    panel.classList.toggle("completed", ["succeeded", "succeeded_with_issues"].includes(task?.state));
     const progress = Math.max(0, Math.min(100, Number(task?.progress || 0) * 100));
     $("#translationProgressBar").style.width = `${progress}%`;
     renderAiProgress(task?.ai_progress, progress, task?.error || task?.message || "等待启动");
     button.disabled = !state.revision || ["queued", "running", "cancelling"].includes(task?.state);
     const sourceLanguageSelect = $("#translationSourceLanguage");
     const languageSelect = $("#translationTargetLanguage");
+    const mappingModeSelect = $("#translationMappingMode");
     const running = ["queued", "running", "cancelling"].includes(task?.state);
     sourceLanguageSelect.disabled = running;
     languageSelect.disabled = running;
+    mappingModeSelect.disabled = running;
     if (running && task?.source_language_selection) {
       sourceLanguageSelect.value = task.source_language_selection;
     }
     if (task?.target_language && !running) languageSelect.value = task.target_language;
+    if (task?.mapping_mode) mappingModeSelect.value = task.mapping_mode;
     button.classList.toggle("retry", task?.state === "failed");
     button.textContent = task?.state === "failed"
-      ? "重试" : task?.state === "succeeded" ? "再次执行"
+      ? "重试" : ["succeeded", "succeeded_with_issues"].includes(task?.state) ? "再次执行"
         : running ? "翻译中…" : "执行";
     $("#translationMenuSummary").textContent = running ? "AI 翻译中…" : "AI 翻译";
-    if (task?.state === "succeeded") {
+    if (["succeeded", "succeeded_with_issues"].includes(task?.state)) {
       const staleCount = task.stale_cue_ids?.length || 0;
       $("#translationTaskMessage").textContent = staleCount
         ? `翻译已过期：${staleCount} 条源文在翻译后发生变化`
@@ -1406,21 +1411,22 @@
 
   function renderWorkbenchTask(title, progress, message, status = "running") {
     const panel = $("#translationTaskPanel");
-    panel.classList.remove("failed", "completed");
+    panel.classList.remove("failed", "completed", "issues");
     panel.classList.toggle("hidden", state.taskPanelDismissed);
     panel.classList.toggle("failed", status === "failed");
-    panel.classList.toggle("completed", status === "succeeded");
+    panel.classList.toggle("completed", ["completed", "succeeded", "succeeded_with_issues"].includes(status));
+    panel.classList.toggle("issues", status === "succeeded_with_issues");
     document.body.classList.toggle("translation-task-visible", !state.taskPanelDismissed);
     $("#translationTaskTitle").textContent = title;
     $("#translationProgressBar").style.width = `${Math.max(0, Math.min(100, progress))}%`;
-    const aiProgress = ["running", "cancelling", "succeeded"].includes(status)
+    const aiProgress = ["running", "cancelling", "succeeded", "succeeded_with_issues"].includes(status)
       && state.editorAiTask?.kind === "calibration"
       ? state.editorAiTask?.ai_progress : null;
     renderAiProgress(aiProgress, progress, message);
   }
 
   const AI_PHASE_ORDER = [
-    "executing", "repairing", "validating", "materializing", "publishing", "completed"
+    "executing", "repair", "validating", "materializing", "publishing", "completed"
   ];
 
   function renderAiProgress(aiProgress, percent, fallbackMessage) {
@@ -1435,7 +1441,7 @@
       return;
     }
     const units = aiProgress.units;
-    if (aiProgress.phase === "repairing" && Number(units.repair_planned || 0) > 0) {
+    if (["repair", "repairing"].includes(aiProgress.phase) && Number(units.repair_planned || 0) > 0) {
       counter.textContent = `${units.repair_completed}/${units.repair_planned}`;
     } else if (Number(units.planned || 0) > 0) {
       counter.textContent = `${units.completed}/${units.planned}`;
@@ -1489,11 +1495,11 @@
     if (!state.projectId) return null;
     try {
       const task = await api(projectPath("/translation"));
-      const wasComplete = state.translationTask?.state === "succeeded"
+      const wasComplete = ["succeeded", "succeeded_with_issues"].includes(state.translationTask?.state)
         && state.translationTask?.result_revision_id === task.result_revision_id;
       renderTranslationTask(task);
       if (!["queued", "running", "cancelling"].includes(task.state)) stopTranslationPoll();
-      if (reloadOnComplete && task.state === "succeeded" && !wasComplete
+      if (reloadOnComplete && ["succeeded", "succeeded_with_issues"].includes(task.state) && !wasComplete
         && task.result_revision_id !== state.revision?.revision_id) {
         await loadProject(state.projectId, {restoreTranslation:false});
       }
@@ -1527,9 +1533,11 @@
     state.taskPanelDismissed = false;
     const sourceLanguage = $("#translationSourceLanguage").value;
     const targetLanguage = $("#translationTargetLanguage").value;
+    const mappingMode = $("#translationMappingMode").value;
     $("#translateDocument").disabled = true;
     $("#translationSourceLanguage").disabled = true;
     $("#translationTargetLanguage").disabled = true;
+    $("#translationMappingMode").disabled = true;
     $("#translationMenu").open = false;
     try {
       const task = await api(projectPath("/translation"), {
@@ -1538,14 +1546,15 @@
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
           source_language:sourceLanguage,
-          target_language:targetLanguage
+          target_language:targetLanguage,
+          mapping_mode:mappingMode
         })
       });
       followTranslationTask(task);
     } catch (error) {
       ordinaryError(`翻译启动失败：${error.message}`);
       renderTranslationTask({
-        status:"failed", progress:0, message:"翻译启动失败", error:error.message
+        state:"failed", progress:0, message:"翻译启动失败", error:error.message
       });
     }
   }
@@ -1671,7 +1680,10 @@
   function cueElement(cue, index, tokenById) {
     const row = document.createElement("article");
     const projected = projectedCueLines(cue);
-    const hasTarget = Boolean(String(cue.target?.target_text || "").trim());
+    // A target track is a real editable deliverable even when the model left
+    // its text blank and marked it for manual completion.  Rendering based on
+    // non-empty text hid exactly the recovery row the user needed to fill.
+    const hasTarget = Boolean(cue.target);
     const sourceMetric = subtitleLengthMetric(projected.source, state.trackLanguages.source, "source");
     const targetMetric = subtitleLengthMetric(projected.target, state.trackLanguages.target, "target");
     const overLimit = sourceMetric.count > sourceMetric.limit
@@ -2815,7 +2827,7 @@
       renderWorkbenchTask(
         "AI 校准", 100,
         `已检查 ${checked} 条 Cue / ${groups} 个意义组 / ${blocks} 块 · 识别 ${sentences} 个句子 · 应用大小写 ${casing} 处 / 标点 ${punctuation} 处${merges ? ` / 合并 ${merges} 处` : ""}${problems ? ` · ${problems} 条放行至问题字幕` : ""}${filtered ? ` · 过滤 ${filtered} 项` : ""}${duration ? ` · ${duration.toFixed(1)} 秒` : ""}${failed ? ` · ${failed} 块接口失败` : ""}`,
-        "completed"
+        (failed || problems) ? "succeeded_with_issues" : "succeeded"
       );
     } catch (error) {
       if (error.code === "editor_ai_task_cancelled") {

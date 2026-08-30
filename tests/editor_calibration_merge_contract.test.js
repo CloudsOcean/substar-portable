@@ -10,6 +10,6 @@ const html = fs.readFileSync(path.join(root, "web", "editor.html"), "utf8");
 
 assert.match(editor, /result\.merge_applied_count/);
 assert.match(editor, /合并 \$\{merges\} 处/);
-assert.match(html, /editor\.js\?v=20260828-advanced-tutorial-menus-1/);
+assert.match(html, /editor\.js\?v=20260830-convergence-1/);
 
 console.log("editor_calibration_merge_contract: ok");

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import subprocess
@@ -41,6 +42,18 @@ from .segmentation.material import (
 
 class Stage2Error(RuntimeError):
     pass
+
+
+class Stage2RequestError(Stage2Error):
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def retryable(self) -> bool:
+        return self.status is None or self.status in {408, 425, 429} or (
+            self.status is not None and self.status >= 500
+        )
 
 
 def _response_json_utf8(response: requests.Response) -> Any:
@@ -183,9 +196,15 @@ def _cancellable_editor_post(
     except json.JSONDecodeError as exc:
         raise Stage2Error("翻译 API 请求进程没有返回有效 JSON") from exc
     if not result.get("ok"):
-        raise Stage2Error(
-            f"翻译 API 请求失败：HTTP {result.get('status') or '-'} "
-            f"{str(result.get('error') or '')[:1000]}"
+        raw_status = result.get("status")
+        try:
+            status = int(raw_status) if raw_status is not None else None
+        except (TypeError, ValueError):
+            status = None
+        raise Stage2RequestError(
+            f"翻译 API 请求失败：HTTP {raw_status or '-'} "
+            f"{str(result.get('error') or '')[:1000]}",
+            status=status,
         )
     body = result.get("body")
     if not isinstance(body, dict):
@@ -195,17 +214,25 @@ def _cancellable_editor_post(
 
 def _response_text(body: dict[str, Any]) -> str:
     try:
-        content = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise Stage2Error("翻译响应中找不到 choices[0].message.content") from exc
-    if isinstance(content, str):
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
         return content
     if isinstance(content, list):
-        return "".join(
+        combined = "".join(
             str(item.get("text", "")) if isinstance(item, dict) else str(item)
             for item in content
         )
-    return str(content)
+        if combined.strip():
+            return combined
+    if content not in (None, ""):
+        return str(content)
+    reasoning = message.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    raise Stage2Error("翻译响应正文为空")
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -264,59 +291,62 @@ def call_translation_model(
         payload["temperature"] = float(temperature)
     started = time.perf_counter()
     requested = max(1, int(max_tokens))
-    budget_ladder = [requested]
-    for candidate in (131072, 262144, 393216):
-        if candidate > requested:
-            budget_ladder.append(candidate)
-    attempted_budgets: list[int] = []
+    attempted_budgets: list[int] = [requested]
     body: dict[str, Any] | None = None
     finish: str | None = None
-    for output_budget in budget_ladder:
-        payload["max_tokens"] = output_budget
-        attempted_budgets.append(output_budget)
-        total_attempts = max(1, min(4, int(request_attempts)))
-        last_error: Exception | None = None
-        body = None
-        for attempt in range(1, total_attempts + 1):
-            try:
-                headers = {**auth_headers(api_key, auth_mode), "Content-Type": "application/json"}
-                if current_task_id():
-                    body = _cancellable_editor_post(
-                        url=_endpoint(base_url),
-                        headers=headers,
-                        payload=payload,
-                        timeout=timeout,
-                    )
-                else:
-                    response = requests.post(
-                        _endpoint(base_url),
-                        headers=headers,
-                        json=payload,
-                        timeout=timeout,
-                    )
-                    response.raise_for_status()
-                    body = _response_json_utf8(response)
-                break
-            except requests.RequestException as exc:
-                last_error = exc
-                if attempt < total_attempts:
-                    time.sleep(min(3.0, attempt * 0.75))
-                    continue
-                detail = (
-                    _response_text_utf8(exc.response)[:1000]
-                    if getattr(exc, "response", None)
-                    else ""
+    payload["max_tokens"] = requested
+    idempotency_key = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    total_attempts = max(1, min(3, int(request_attempts)))
+    last_error: Exception | None = None
+    transport_attempt_count = 0
+    for attempt in range(1, total_attempts + 1):
+        transport_attempt_count = attempt
+        try:
+            headers = {
+                **auth_headers(api_key, auth_mode),
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key,
+            }
+            if current_task_id():
+                body = _cancellable_editor_post(
+                    url=_endpoint(base_url), headers=headers, payload=payload, timeout=timeout,
                 )
-                raise Stage2Error(f"翻译 API 请求失败：{exc} {detail}") from exc
-            except ValueError as exc:
-                raise Stage2Error("翻译 API 返回的 HTTP 内容不是 JSON") from exc
-        if body is None:
-            raise Stage2Error(f"翻译 API 请求未完成：{last_error}")
-        finish = body.get("choices", [{}])[0].get("finish_reason")
-        if finish != "length":
+            else:
+                response = requests.post(
+                    _endpoint(base_url), headers=headers, json=payload, timeout=timeout,
+                )
+                response.raise_for_status()
+                body = _response_json_utf8(response)
             break
-    if body is None or finish == "length":
-        raise Stage2Error("翻译输出在 384K 上限仍被截断")
+        except Stage2RequestError as exc:
+            last_error = exc
+            if exc.retryable and attempt < total_attempts:
+                time.sleep(min(3.0, attempt * 0.75))
+                continue
+            raise
+        except requests.RequestException as exc:
+            last_error = exc
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            retryable = status is None or status in {408, 425, 429} or (
+                status is not None and status >= 500
+            )
+            if retryable and attempt < total_attempts:
+                time.sleep(min(3.0, attempt * 0.75))
+                continue
+            detail = (
+                _response_text_utf8(exc.response)[:1000]
+                if getattr(exc, "response", None) else ""
+            )
+            raise Stage2Error(f"翻译 API 请求失败：{exc} {detail}") from exc
+        except ValueError as exc:
+            raise Stage2Error("翻译 API 返回的 HTTP 内容不是 JSON") from exc
+    if body is None:
+        raise Stage2Error(f"翻译 API 请求未完成：{last_error}")
+    finish = body.get("choices", [{}])[0].get("finish_reason")
+    if finish == "length":
+        raise Stage2Error(f"翻译输出达到当前 {requested} token 上限；该单元将进入一次修复")
     parsed = _extract_json(_response_text(body))
     usage = body.get("usage", {})
     usage = usage if isinstance(usage, dict) else {}
@@ -334,6 +364,7 @@ def call_translation_model(
         "finish_reason": finish,
         "max_tokens": attempted_budgets[-1],
         "attempted_output_budgets": attempted_budgets,
+        "transport_attempt_count": transport_attempt_count,
         "usage": usage,
         "cache_usage": {
             "hit_tokens": int(usage.get("prompt_cache_hit_tokens", 0) or 0),

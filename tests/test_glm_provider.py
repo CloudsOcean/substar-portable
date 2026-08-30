@@ -213,7 +213,7 @@ class GlmProviderTests(unittest.TestCase):
             "low",
         )
 
-    def test_glm_fallback_is_persisted_as_thinking_low(self) -> None:
+    def test_glm_repair_is_persisted_as_thinking_low(self) -> None:
         settings = {
             "translation_api_base_url": "https://open.bigmodel.cn/api/paas/v4",
             "translation_api_model": "glm-5.3-flash",
@@ -287,6 +287,9 @@ class GlmProviderTests(unittest.TestCase):
         )
 
         payload = post.call_args.kwargs["json"]
+        self.assertRegex(
+            post.call_args.kwargs["headers"]["Idempotency-Key"], r"^[0-9a-f]{64}$"
+        )
         self.assertEqual(payload["thinking"], {"type": "enabled"})
         self.assertEqual(payload["reasoning_effort"], "low")
         self.assertNotIn("temperature", payload)

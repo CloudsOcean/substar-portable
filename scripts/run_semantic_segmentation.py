@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.run_flash_map_pro_editor import build_plan_from_cuts  # noqa: E402
 from scripts.segmentation_support import (  # noqa: E402
     SegmentationError,
+    SegmentationRequestError,
     _direct_report,
     call_model,
     resolve_api_key,
@@ -316,47 +317,37 @@ def model_json(
     thinking_mode: str = "enabled", reasoning_effort: str = "low",
     max_tokens: int = 131072, temperature: float = 0.0,
 ) -> dict[str, Any]:
-    value: dict[str, Any] | None = None
-    budgets = [max_tokens] + [value for value in (131072, 262144, 393216) if value > max_tokens]
-    for output_budget in budgets:
-        try:
-            emit_runtime_event(
-                f"{stage} {block_id} API request",
-                {
-                    "model": model,
-                    "maxTokens": output_budget,
-                    "thinkingMode": thinking_mode,
-                    "reasoningEffort": reasoning_effort if thinking_mode == "enabled" else None,
-                    "input": user,
-                },
-            )
-            value, call_info = call_model(
-                base_url=base_url,
-                api_key=api_key,
-                auth_mode=auth_mode,
-                model=model,
-                system_prompt=system,
-                user_payload=json.dumps(user, ensure_ascii=False),
-                timeout=timeout,
-                max_tokens=output_budget,
-                json_mode=False,
-                thinking_mode=thinking_mode,
-                reasoning_effort=reasoning_effort,
-                temperature=temperature,
-                request_attempts=2,
-            )
-            if telemetry is not None:
-                telemetry.append({"stage": stage, "block_id": block_id, **call_info})
-            emit_runtime_event(
-                f"{stage} {block_id} API response",
-                {"output": value, "telemetry": call_info},
-            )
-            break
-        except SegmentationError as exc:
-            if "截断" not in str(exc) or output_budget == 393216:
-                raise
-    if value is None:
-        raise SegmentationError("API 未返回有效 JSON")
+    emit_runtime_event(
+        f"{stage} {block_id} API request",
+        {
+            "model": model,
+            "maxTokens": max_tokens,
+            "thinkingMode": thinking_mode,
+            "reasoningEffort": reasoning_effort if thinking_mode == "enabled" else None,
+            "input": user,
+        },
+    )
+    value, call_info = call_model(
+        base_url=base_url,
+        api_key=api_key,
+        auth_mode=auth_mode,
+        model=model,
+        system_prompt=system,
+        user_payload=json.dumps(user, ensure_ascii=False),
+        timeout=timeout,
+        max_tokens=max_tokens,
+        json_mode=False,
+        thinking_mode=thinking_mode,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        request_attempts=2,
+    )
+    if telemetry is not None:
+        telemetry.append({"stage": stage, "block_id": block_id, **call_info})
+    emit_runtime_event(
+        f"{stage} {block_id} API response",
+        {"output": value, "telemetry": call_info},
+    )
     if not isinstance(value, dict):
         raise SegmentationError("API 顶层必须返回 JSON object")
     return value
@@ -672,6 +663,10 @@ def request_semantic_grouping_block(
             temperature=args.grouping_temperature,
         )
     except Exception as exc:
+        if isinstance(exc, SegmentationRequestError):
+            # Authentication, configuration and declared capability failures
+            # are task failures. A content repair request cannot correct them.
+            raise
         # Invalid JSON from the primary call is a repairable block failure,
         # not a fatal pipeline failure. Keep the block in the repair loop.
         initial_error = exc
@@ -692,7 +687,7 @@ def request_semantic_grouping_block(
     frozen_groups: list[dict[str, Any]] = []
     frozen_cuts: set[int] = set()
     first, last = int(units[left].index), int(units[right].index)
-    repair_attempts = int(getattr(args, "repair_attempts", 0))
+    repair_attempts = min(1, max(0, int(getattr(args, "repair_attempts", 0))))
     for attempt in range(0, repair_attempts + 1):
         try:
             if frozen_groups:
@@ -760,6 +755,8 @@ def request_semantic_grouping_block(
                     temperature=getattr(args, "repair_temperature", 0.0),
                 )
             except Exception as repair_exc:
+                if isinstance(repair_exc, SegmentationRequestError):
+                    raise
                 # A malformed repair response is also recoverable. Leave an
                 # empty candidate for the next validation/final-release pass.
                 last_error = repair_exc

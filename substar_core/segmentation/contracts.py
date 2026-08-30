@@ -376,7 +376,7 @@ def build_segmentation_request(
             "japanese_hard_limit": int(settings.get("japanese_hard_limit", 25)),
             "korean_hard_limit": int(settings.get("korean_hard_limit", 32)),
             "sentence_boundary_policy": str(settings.get("sentence_boundary_policy", "unpunctuated")),
-            "repair_attempts": int(settings.get("segmentation_repair_attempts", 1)),
+            "repair_attempts": 1,
             "request_timeout_seconds": min(int(settings.get("translation_api_timeout_seconds", 300)), 3600),
             "task_timeout_seconds": int(settings.get("stage_timeout_seconds", 3600)),
             **(

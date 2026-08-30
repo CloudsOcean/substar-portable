@@ -73,7 +73,7 @@ test("reasoning choices always expose five canonical levels and provider mapping
   assert.match(source, /effort_selection_aliases/);
 });
 
-test("normal stages default to thinking Low while fallback stages prefer non-thinking", () => {
+test("normal stages default to thinking Low while repair stages prefer non-thinking", () => {
   assert.match(source, /"segmentation_repair", "translation_repair", "audit_repair"/);
   assert.match(source, /select\.value = preserveEffort && levels\.includes\(current\) \? current : "low"/);
   assert.match(source, /explicitlyConfiguredThinkingStages\.has\(stage\)/);

@@ -234,10 +234,22 @@ class TranslationTrack:
     provenance: ChangeProvenance
     original_text: str | None = None
     language: str | None = None
+    translation_status: str = "translated"
+    issue_code: str | None = None
+    editable: bool = True
 
     def __post_init__(self) -> None:
-        _require_text(self.target_text, "target_text")
-        if self.original_text is not None:
+        if self.translation_status not in {"translated", "manual_required"}:
+            raise DocumentValidationError(
+                f"unsupported translation status: {self.translation_status!r}"
+            )
+        if self.translation_status == "translated":
+            _require_text(self.target_text, "target_text")
+        elif not self.editable or self.issue_code != "translation_unresolved":
+            raise DocumentValidationError(
+                "manual_required translation must be editable and identify translation_unresolved"
+            )
+        if self.original_text is not None and self.original_text:
             _require_text(self.original_text, "target original_text")
 
     def to_dict(self) -> dict[str, Any]:
@@ -245,6 +257,9 @@ class TranslationTrack:
             "target_text": self.target_text,
             "original_text": self.original_text,
             "language": self.language,
+            "translation_status": self.translation_status,
+            "issue_code": self.issue_code,
+            "editable": self.editable,
             "provenance": self.provenance.to_dict(),
         }
 
@@ -254,6 +269,9 @@ class TranslationTrack:
             target_text=str(value["target_text"]),
             original_text=value.get("original_text"),
             language=value.get("language"),
+            translation_status=str(value.get("translation_status") or "translated"),
+            issue_code=(str(value["issue_code"]) if value.get("issue_code") else None),
+            editable=bool(value.get("editable", True)),
             provenance=ChangeProvenance.from_dict(value["provenance"]),
         )
 

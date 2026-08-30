@@ -359,6 +359,9 @@ body.editor-shell {
 .translation-progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--editor-purple), #5ed8eb); transition: width .45s ease; }
 .translation-task-panel.failed .translation-progress i { background: var(--editor-red); }
 .translation-task-panel.completed .translation-progress i { background: var(--editor-green); }
+.translation-task-panel.issues .translation-progress i { background: var(--editor-yellow); }
+.translation-task-panel.issues > div:first-child strong,
+.translation-task-panel.issues p { color: var(--editor-yellow); }
 .translation-task-panel > .task-dismiss { grid-area: close; }
 .task-dismiss { width: 23px; height: 23px; padding: 0; border-color: transparent; background: transparent; color: #7f8796; font-size: 15px; }
 .task-dismiss:hover { border-color: #3c424e; color: #eef0f5; }

@@ -33,8 +33,16 @@ test("exclusive task polling cannot overwrite translation's detailed task status
   );
   assert.match(
     editorJs,
-    /if \(locked && state\.editorAiTask && genericTaskOwnsPanel\)/,
+    /state\.editorAiTask\?\.state === "succeeded_with_issues"/,
   );
   assert.match(editorJs, /state\.editorAiTask\.display_error/);
   assert.match(editorJs, /已等待 \$\{Math\.round\(elapsedSeconds\)\} 秒/);
+});
+
+test("blank manual translation tracks still render editable rows", () => {
+  assert.match(editorJs, /const hasTarget = Boolean\(cue\.target\);/);
+  assert.doesNotMatch(
+    editorJs,
+    /const hasTarget = Boolean\(String\(cue\.target\?\.target_text \|\| ""\)\.trim\(\)\);/,
+  );
 });

@@ -42,7 +42,7 @@ from substar_core.media import (
     prepare_playback_media,
     smart_forward_snap,
 )
-from substar_core.stage2 import Stage2Error, call_translation_model
+from substar_core.stage2 import Stage2Error, Stage2RequestError, call_translation_model
 from substar_core.domain import (
     ChangeKind,
     ChangeProvenance,
@@ -145,6 +145,7 @@ class TranslationStartRequest(BaseModel):
     workers: int = Field(default=3, ge=1, le=256)
     source_language: Literal["Auto", "mixed", "zh-CN", "en", "ja", "ko"]
     target_language: Literal["zh-CN", "en", "ja", "ko"]
+    mapping_mode: Literal["one_to_one", "many_to_many"] = "many_to_many"
 
 
 class BatchReplacement(BaseModel):
@@ -410,7 +411,9 @@ def _write_editor_task(
         "error": error,
         "created_at": (previous.get("created_at") or now) if same_task else now,
         "updated_at": now,
-        "finished_at": now if status in {"completed", "failed", "cancelled"} else None,
+        "finished_at": now if status in {
+            "completed", "succeeded", "succeeded_with_issues", "failed", "cancelled"
+        } else None,
     }
     if ai_progress_value is not None:
         value["ai_progress"] = dict(ai_progress_value)
@@ -717,12 +720,24 @@ def list_editor_tasks() -> dict[str, Any]:
             display_name = load_task_info(directory, project_id)["display_name"]
         except (OSError, TypeError, ValueError):
             pass
-        translation = load_translation_status(directory)
+        try:
+            translation = load_translation_status(directory)
+        except (OSError, TypeError, ValueError, ProjectStoreError):
+            # One damaged or half-migrated project must not make the global
+            # task feed unusable for every healthy project.  The project
+            # remains available to its own integrity/error surfaces while
+            # the aggregate feed isolates it.
+            translation = None
         if translation and translation.get("state") in {
             "queued", "running", "cancelling", "failed", "interrupted"
         }:
             tasks.append({
                 **translation,
+                # The split-page task runtime consumes one canonical status
+                # field for every long-running task.  Translation's persisted
+                # detail contract calls the same value ``state``; expose both
+                # without forcing the client to guess by task kind.
+                "status": str(translation.get("state") or ""),
                 "kind": "translation",
                 "display_name": display_name,
             })
@@ -2073,11 +2088,24 @@ def _run_editor_ai_blocks(
                     f"{active_stage} returned an invalid response contract"
                 )
             return block_id, value, {
-                "attempt": attempt, "stage": active_stage, **request_metadata,
+                "attempt": attempt,
+                "stage": active_stage,
+                "primary_request_count": 1,
+                "repair_attempted": attempt > 1,
+                "repair_request_count": 1 if attempt > 1 else 0,
+                **request_metadata,
             }
         except Stage2Error as exc:
             return block_id, value, {
-                "attempt": attempt, "stage": active_stage, "error": str(exc),
+                "attempt": attempt,
+                "stage": active_stage,
+                "error": str(exc),
+                "terminal_error": (
+                    isinstance(exc, Stage2RequestError)
+                ),
+                "primary_request_count": 1,
+                "repair_attempted": attempt > 1,
+                "repair_request_count": 1 if attempt > 1 else 0,
             }
 
     if not blocks:
@@ -2092,13 +2120,16 @@ def _run_editor_ai_blocks(
                 progress_callback(len(primary_results), len(blocks))
 
     failed = [row for row in primary_results if row[2].get("error")]
+    terminal = [row for row in failed if row[2].get("terminal_error")]
+    if terminal:
+        raise Stage2Error(str(terminal[0][2]["error"]))
     if not retry_stage or not failed:
         if phase_callback is not None:
-            phase_callback("repairing", 0, 0, 0)
+            phase_callback("repair", 0, 0, 0)
         return primary_results
 
     if phase_callback is not None:
-        phase_callback("repairing", 0, len(failed), 0)
+        phase_callback("repair", 0, len(failed), 0)
     repaired: dict[str, tuple[str, dict[str, Any], dict[str, Any]]] = {}
     retry_items = [
         ((block_id, blocks[block_id]), (value, metadata))
@@ -2116,7 +2147,7 @@ def _run_editor_ai_blocks(
             repaired[row[0]] = row
             if phase_callback is not None:
                 accepted = sum(not item[2].get("error") for item in repaired.values())
-                phase_callback("repairing", len(repaired), len(failed), accepted)
+                phase_callback("repair", len(repaired), len(failed), accepted)
     return [repaired.get(row[0], row) for row in primary_results]
 
 
@@ -2322,10 +2353,15 @@ def ai_calibrate_project(project_id: str, payload: AiCalibrationRequest) -> dict
     try:
         with editor_ai_task_context(task["task_id"]):
             result = _ai_calibrate_project(project_id, payload, task["task_id"])
+        result_state = (
+            EditorAiTaskState.SUCCEEDED_WITH_ISSUES
+            if result.get("failed_blocks") or result.get("problem_cue_ids")
+            else EditorAiTaskState.SUCCEEDED
+        )
         finish_editor_ai_task(
             project_job_path(project_id),
             task["task_id"],
-            EditorAiTaskState.SUCCEEDED,
+            result_state,
             result_revision_id=_revision_id(result["revision"]),
         )
         return result
@@ -2854,7 +2890,7 @@ def _ai_calibrate_project(
         tracker["repair_accepted"] = accepted
         tracker["primary_accepted"] = tracker["planned"] - total
         if total:
-            write_calibration_progress("repairing")
+            write_calibration_progress("repair")
 
     write_calibration_progress("executing")
     results = _run_editor_ai_blocks(
@@ -3191,7 +3227,9 @@ def _ai_calibrate_project(
         ),
     )
     _write_editor_task(
-        project_id, "calibration", status="completed", progress=1.0,
+        project_id, "calibration",
+        status=("succeeded_with_issues" if failed_blocks or problem_cue_ids else "succeeded"),
+        progress=1.0,
         message=final_progress["message"], task_id=task_id,
         ai_progress_value=final_progress,
     )
@@ -3262,6 +3300,7 @@ def start_project_translation(
     except (OSError, TypeError, ValueError):
         pass
     settings["target_language_mode"] = payload.target_language
+    settings["translation_mapping_mode"] = payload.mapping_mode
     latest = open_project_store(project_id).load_latest()
     if latest is not None:
         source_text = " ".join(
@@ -3326,10 +3365,24 @@ def start_project_translation(
             detail={"code": "translation_start_rejected", "message": str(exc)},
         ) from exc
     except (ProjectStoreError, ProjectIntegrityError) as exc:
+        finish_editor_ai_task(
+            job_dir,
+            exclusive_task["task_id"],
+            EditorAiTaskState.FAILED,
+            error={"code": "translation_start_failed", "message": str(exc)[:2000]},
+        )
         raise HTTPException(
             status_code=404,
             detail={"code": "project_not_found", "message": str(exc)},
         ) from exc
+    except Exception as exc:
+        finish_editor_ai_task(
+            job_dir,
+            exclusive_task["task_id"],
+            EditorAiTaskState.FAILED,
+            error={"code": "translation_start_failed", "message": str(exc)[:2000]},
+        )
+        raise
 
 
 @router.get("/projects/{project_id}/translation")

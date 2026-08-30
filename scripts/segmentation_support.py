@@ -94,6 +94,18 @@ class SegmentationError(RuntimeError):
     pass
 
 
+class SegmentationRequestError(SegmentationError):
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def retryable(self) -> bool:
+        return self.status is None or self.status in {408, 425, 429} or (
+            self.status is not None and self.status >= 500
+        )
+
+
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8-sig")
 
@@ -150,17 +162,25 @@ def extract_json(text: str) -> dict[str, Any]:
 
 def response_text(body: dict[str, Any]) -> str:
     try:
-        content = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise SegmentationError("模型响应中找不到 choices[0].message.content") from exc
-    if isinstance(content, str):
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
         return content
     if isinstance(content, list):
-        return "".join(
+        combined = "".join(
             str(item.get("text", "")) if isinstance(item, dict) else str(item)
             for item in content
         )
-    return str(content)
+        if combined.strip():
+            return combined
+    if content not in (None, ""):
+        return str(content)
+    reasoning = message.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    raise SegmentationError("模型响应正文为空")
 
 
 def resolve_api_key(env_name: str) -> tuple[str, str]:
@@ -218,12 +238,21 @@ def call_model(
     started = time.perf_counter()
     body: dict[str, Any] | None = None
     last_request_error: requests.RequestException | None = None
-    total_attempts = max(1, min(4, int(request_attempts)))
+    total_attempts = max(1, min(3, int(request_attempts)))
+    transport_attempt_count = 0
+    idempotency_key = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     for attempt in range(1, total_attempts + 1):
+        transport_attempt_count = attempt
         try:
             response = requests.post(
                 endpoint(base_url),
-                headers={**auth_headers(api_key, auth_mode), "Content-Type": "application/json"},
+                headers={
+                    **auth_headers(api_key, auth_mode),
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": idempotency_key,
+                },
                 json=payload,
                 timeout=timeout,
             )
@@ -232,7 +261,11 @@ def call_model(
             break
         except requests.RequestException as exc:
             last_request_error = exc
-            if attempt < total_attempts:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            retryable = status is None or status in {408, 425, 429} or (
+                status is not None and status >= 500
+            )
+            if retryable and attempt < total_attempts:
                 time.sleep(min(6.0, attempt * 1.25))
                 continue
             error_response = getattr(exc, "response", None)
@@ -241,7 +274,9 @@ def call_model(
                 if error_response is not None
                 else ""
             )
-            raise SegmentationError(f"Stage 1 LLM 请求失败：{exc} {detail}") from exc
+            raise SegmentationRequestError(
+                f"Stage 1 LLM 请求失败：{exc} {detail}", status=status
+            ) from exc
         except ValueError as exc:
             raise SegmentationError("Stage 1 LLM 返回的 HTTP 内容不是 JSON") from exc
     if body is None:
@@ -271,6 +306,7 @@ def call_model(
         "effective_reasoning_effort": effective_effort if effective_thinking_mode == "enabled" else None,
         "duration_seconds": round(elapsed, 3),
         "finish_reason": finish_reason,
+        "transport_attempt_count": transport_attempt_count,
         "usage": usage,
         "cache_usage": {
             "hit_tokens": int(usage.get("prompt_cache_hit_tokens", 0) or 0),

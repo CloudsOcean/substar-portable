@@ -12,9 +12,11 @@ if str(ROOT) not in sys.path:
 
 from substar_core.artifacts import atomic_write_json, atomic_write_text  # noqa: E402
 from substar_core.ai_progress import ai_progress  # noqa: E402
-from substar_core.config import load_settings  # noqa: E402
+from substar_core.config import load_credentials, load_settings  # noqa: E402
+from substar_core.credential_store import resolve_model_provider_credential  # noqa: E402
 from substar_core.export import SubtitleExportMode, render_document_srt  # noqa: E402
 from substar_core.storage import ProjectStore  # noqa: E402
+from substar_core.model_providers import canonical_provider_id, infer_model_provider  # noqa: E402
 from substar_core.editor.translation.contextual import run_contextual_translation  # noqa: E402
 from substar_core.editor.translation.artifacts import (  # noqa: E402
     TRANSLATION_MANIFEST_FILENAME,
@@ -41,13 +43,18 @@ def main() -> int:
     if source_revision.revision_id != args.expected_revision_id:
         raise RuntimeError("翻译所基于的编辑版本已变化")
 
-    settings = load_settings(include_secret=True)
+    settings = load_settings(include_secret=False)
     if args.settings_file and args.settings_file.is_file():
         snapshot = json.loads(args.settings_file.read_text(encoding="utf-8"))
         if isinstance(snapshot, dict):
-            secret = settings.get("translation_api_key", "")
             settings.update(snapshot)
-            settings["translation_api_key"] = secret
+    provider_id = canonical_provider_id(
+        settings.get("active_model_provider")
+        or infer_model_provider(settings.get("translation_api_base_url"))
+    )
+    settings["translation_api_key"] = resolve_model_provider_credential(
+        load_credentials(), provider_id
+    )
     if not settings.get("translation_api_key"):
         raise RuntimeError("缺少翻译 API Key")
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -65,7 +72,7 @@ def main() -> int:
         tracker["repair_planned"] = max(
             tracker["repair_planned"], int(repair_planned)
         )
-        if phase == "repairing":
+        if phase == "repair":
             tracker["repair_completed"] = int(completed)
             tracker["completed"] = tracker["planned"]
         tracker["repair_accepted"] = max(

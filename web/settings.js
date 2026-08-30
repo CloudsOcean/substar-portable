@@ -204,11 +204,11 @@ function syncModelProvider(provider = null) {
 const stageDefinitions = {
   segmentation: [
     ["segmentation", "语义切分", "结合上下文生成更自然的字幕切点"],
-    ["segmentation_repair", "Fallback · 切分坏块修复", "任一切分块验收失败后单块重跑；模型允许时关闭思考"],
+    ["segmentation_repair", "修复 · 切分坏块", "任一切分块验收失败后仅对该块修复一次；模型允许时关闭思考"],
   ],
   translation: [
     ["translation", "字幕翻译", "结合上下文生成最终 Cue 译文"],
-    ["translation_repair", "Fallback · 翻译坏块修复", "只重跑未返回或验收失败的意义组；模型允许时关闭思考"],
+    ["translation_repair", "修复 · 翻译坏块", "只对未返回或验收失败的意义组修复一次；模型允许时关闭思考"],
   ],
   audit: [
     ["calibration", "AI 校准", "自动应用大小写、标点与确定性文本修复；默认思考 Low"],
