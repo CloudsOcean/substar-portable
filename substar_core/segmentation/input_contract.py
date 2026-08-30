@@ -53,14 +53,26 @@ def _display_fragments(raw_text: str, fragments: list[str]) -> list[str]:
     ]
 
 
-def build_segmentation_material_with_display_projection(
+def build_segmentation_material_with_reference_projection(
     source_transcript: str, evidence: Mapping[str, Any]
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     del source_transcript  # Raw ASR prose remains in recognition_evidence.json only.
     units: list[dict[str, Any]] = []
     display_projection: list[dict[str, Any]] = []
+    reference_suggestions: list[dict[str, Any]] = []
     for item in evidence.get("units", []):
         raw_text = str(item.get("text", item.get("word", "")) or "").strip()
+        if bool(item.get("reference_only")):
+            if raw_text:
+                reference_suggestions.append(
+                    {
+                        "reference_index": int(item.get("index", len(reference_suggestions))),
+                        "text": raw_text,
+                        "after_index": len(units) - 1,
+                        "before_index": len(units),
+                    }
+                )
+            continue
         text = _unpunctuated_word(raw_text)
         if not text:
             continue
@@ -92,7 +104,18 @@ def build_segmentation_material_with_display_projection(
         "units": units,
     }
     validate_segmentation_material(value)
-    return value, display_projection
+    return value, display_projection, reference_suggestions
+
+
+def build_segmentation_material_with_display_projection(
+    source_transcript: str, evidence: Mapping[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    material, projection, _suggestions = (
+        build_segmentation_material_with_reference_projection(
+            source_transcript, evidence
+        )
+    )
+    return material, projection
 
 
 def build_segmentation_material(

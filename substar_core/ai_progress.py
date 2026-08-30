@@ -18,7 +18,7 @@ _PHASE_BANDS: dict[str, tuple[float, float]] = {
 _PHASE_LABELS = {
     "planning": "准备任务",
     "executing": "模型处理",
-    "repairing": "Fallback 修复",
+    "repairing": "修复",
     "validating": "结果验收",
     "materializing": "生成可编辑结果",
     "publishing": "交付产物",

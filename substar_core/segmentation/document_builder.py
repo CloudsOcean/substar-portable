@@ -31,6 +31,7 @@ def validate_editor_document(document: EditorDocument) -> EditorDocument:
 def attach_semantic_reference_audit(
     document: EditorDocument,
     reference_report: Mapping[str, Any],
+    reference_suggestions: list[Mapping[str, Any]] | None = None,
 ) -> EditorDocument:
     """Attach reference differences after semantic grouping without changing cues."""
 
@@ -41,7 +42,9 @@ def attach_semantic_reference_audit(
     reference_rows = [
         raw
         for raw in reference_report.get("provenance", [])
-        if isinstance(raw, Mapping) and marker_key(raw.get("reference_text"))
+        if isinstance(raw, Mapping)
+        and not bool(raw.get("reference_only"))
+        and marker_key(raw.get("reference_text"))
     ]
     source_rows = [
         token for token in document.source_tokens if marker_key(token.text)
@@ -107,6 +110,102 @@ def attach_semantic_reference_audit(
                 "before": before,
                 "after": after,
                 "status": "applied",
+            }
+        )
+
+    insertion_anchor_by_gap: dict[tuple[int, int], str] = {}
+    source_to_display = {
+        source.index: display
+        for source in document.source_tokens
+        for display in document.display_tokens
+        if source.token_id in display.source_token_ids
+    }
+    for suggestion in reference_suggestions or []:
+        after_index = int(suggestion.get("after_index", -1))
+        before_index = int(suggestion.get("before_index", after_index + 1))
+        after_token = source_to_display.get(after_index)
+        before_token = source_to_display.get(before_index)
+        after_cue = next(
+            (
+                cue for cue in document.cues
+                if after_token is not None and after_token.token_id in cue.display_token_ids
+            ),
+            None,
+        )
+        before_cue = next(
+            (
+                cue for cue in document.cues
+                if before_token is not None and before_token.token_id in cue.display_token_ids
+            ),
+            None,
+        )
+        if before_cue is not None and before_cue is not after_cue:
+            cue = before_cue
+            anchor_id = None
+        else:
+            cue = after_cue or before_cue or document.cues[0]
+            anchor_id = (
+                insertion_anchor_by_gap.get((after_index, before_index))
+                or (after_token.token_id if after_token is not None else None)
+            )
+        reference_index = int(suggestion["reference_index"])
+        operation_id = f"op_reference_semantic_insert_{reference_index}"
+        document = apply_document_operation(
+            document,
+            {
+                "operation_id": operation_id,
+                "type": "insert",
+                "payload": {
+                    "cue_id": cue.cue_id,
+                    "after_token_id": anchor_id,
+                    "token": {
+                        "text": str(suggestion["text"]),
+                        "original_text": str(suggestion["text"]),
+                        "source_token_ids": [],
+                    },
+                    "provenance": {
+                        "kind": "manual",
+                        "operation": "reference_manuscript_insert",
+                        "actor": "reference-manuscript",
+                        "metadata": {
+                            "reference": True,
+                            "timing_source": "cue_inherited",
+                        },
+                    },
+                },
+            },
+        )
+        inserted = next(
+            token for token in document.display_tokens
+            if token.provenance.metadata.get("operation_id") == operation_id
+        )
+        insertion_anchor_by_gap[(after_index, before_index)] = inserted.token_id
+        document = apply_document_operation(
+            document,
+            {
+                "operation_id": f"{operation_id}_default_deleted",
+                "type": "delete",
+                "payload": {
+                    "token_ids": [inserted.token_id],
+                    "provenance": {
+                        "kind": "import",
+                        "operation": "reference_manuscript_insertions_default_deleted",
+                        "actor": "reference-manuscript",
+                        "metadata": {"reference": True},
+                    },
+                },
+            },
+        )
+        reference_changes.append(
+            {
+                "change_id": f"reference-insert-{reference_index}",
+                "type": "insert",
+                "token_ids": [inserted.token_id],
+                "source_indexes": [],
+                "before": "",
+                "after": str(suggestion["text"]),
+                "status": "deleted",
+                "timing_source": "cue_inherited",
             }
         )
 
@@ -310,6 +409,7 @@ def build_reference_script_document(
         )
 
     insertion_anchor_by_source: dict[int, str | None] = {}
+    reference_insertion_ids: list[str] = []
     for item in sorted(
         reference_report.get("insertions", []),
         key=lambda value: int(value["reference_index"]),
@@ -370,6 +470,7 @@ def build_reference_script_document(
             for token in document.display_tokens
             if token.provenance.metadata.get("operation_id") == operation_id
         )
+        reference_insertion_ids.append(inserted.token_id)
         insertion_anchor_by_source[source_index] = inserted.token_id
         reference_changes.append(
             {
@@ -379,10 +480,28 @@ def build_reference_script_document(
                 "source_indexes": [source_index] if source_index >= 0 else [],
                 "before": "",
                 "after": str(item["text"]),
-                "status": "applied",
+                "status": "deleted",
                 "timing_source": "reference_estimated",
                 "placement": placement,
             }
+        )
+
+    if reference_insertion_ids:
+        document = apply_document_operation(
+            document,
+            {
+                "operation_id": "op_reference_initial_insertions_deleted",
+                "type": "delete",
+                "payload": {
+                    "token_ids": reference_insertion_ids,
+                    "provenance": {
+                        "kind": "import",
+                        "operation": "reference_manuscript_insertions_default_deleted",
+                        "actor": "reference-manuscript",
+                        "metadata": {"reference": True},
+                    },
+                },
+            },
         )
 
     for item in reference_report.get("retained_source", []):

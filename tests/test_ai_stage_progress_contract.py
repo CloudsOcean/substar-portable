@@ -35,7 +35,7 @@ def test_common_progress_contract_is_monotonic_and_counted() -> None:
         row["progress"] for row in values
     )
     assert values[0]["message"] == "模型处理 0/4 块"
-    assert values[2]["message"] == "Fallback 修复 0/1 块 · 首轮通过 3/4"
+    assert values[2]["message"] == "修复 0/1 块 · 首轮通过 3/4"
     assert values[-1]["progress"] == 1.0
 
 

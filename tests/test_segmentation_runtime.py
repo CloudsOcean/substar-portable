@@ -713,7 +713,7 @@ class SegmentationRuntimeTests(unittest.TestCase):
         latest = ProjectStore.open(self.project / "project").load_latest()
         assert latest is not None
         rendered = " ".join(token.text for token in latest.document.source_tokens)
-        self.assertIn("Goodbye", rendered)
+        self.assertEqual(rendered, "Substar")
         audit = json.loads(
             (self.project / "segmentation" / "reference_match.json").read_text(
                 encoding="utf-8"

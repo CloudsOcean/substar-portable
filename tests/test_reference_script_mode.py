@@ -166,7 +166,7 @@ def test_reference_script_document_ignores_source_hard_limit_and_exports_script(
     assert "结束。" in rendered
 
 
-def test_reference_script_applies_reference_only_insertions() -> None:
+def test_reference_script_preserves_reference_only_insertions_as_deleted_suggestions() -> None:
     material, breaks, report = materialize_reference_script(
         "销量达到二十万（内部统计），你相信吗？",
         _asr_units("销量达到二十万你相信吗"),
@@ -180,7 +180,7 @@ def test_reference_script_applies_reference_only_insertions() -> None:
     )
 
     rendered = render_document_srt(document, SubtitleExportMode.SOURCE)
-    assert "（内部统计）" in rendered
+    assert "（内部统计）" not in rendered
     assert "你相信吗？" in rendered
     inserted = [
         token
@@ -188,7 +188,7 @@ def test_reference_script_applies_reference_only_insertions() -> None:
         if token.provenance.operation == "reference_manuscript_insert"
     ]
     assert inserted
-    assert all(token.state.value == "active" for token in inserted)
+    assert all(token.state.value == "deleted" for token in inserted)
     assert all(not token.source_token_ids for token in inserted)
     audit = document.changes[-1]
     assert audit.operation == "reference_manuscript_alignment"

@@ -1542,12 +1542,13 @@ def rename_workbench_split_job(
 
 def _translation_top_line_role(job_dir: Path) -> str:
     try:
-        state = relay_load_state(job_dir)
-        profile = relay_public_state(job_dir, state).get("profile", {})
-        role = str(profile.get("top_line_role", "source"))
-    except (OSError, RelayError, TypeError, ValueError):
-        role = "source"
-    return role if role in {"source", "target"} else "source"
+        revision = ProjectStore.open(job_dir / "project").load_latest()
+        if revision is None:
+            return "source"
+        display_order = revision.document.presentation.display_order.value
+    except (AttributeError, OSError, TypeError, ValueError):
+        return "source"
+    return "target" if display_order == "target_above_source" else "source"
 
 
 

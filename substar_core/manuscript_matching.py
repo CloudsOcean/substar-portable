@@ -396,6 +396,22 @@ def materialize_reference_alignment(
     if not source_values or not reference:
         raise ManuscriptMatchError("ASR 或参考文稿没有可匹配词元")
     mapping, changes, similarity = _reference_to_source_positions(source_values, reference)
+    reference_only_indexes: set[int] = set()
+    for change in changes:
+        reference_range = change.get("reference_token_range", [])
+        source_range = change.get("source_token_range", [])
+        if len(reference_range) != 2 or len(source_range) != 2:
+            continue
+        reference_start, reference_end = map(int, reference_range)
+        source_start, source_end = map(int, source_range)
+        source_count = max(0, source_end - source_start + 1)
+        kind = str(change.get("kind") or "")
+        if kind == "insert":
+            reference_only_indexes.update(range(reference_start, reference_end + 1))
+        elif kind == "replace":
+            reference_only_indexes.update(
+                range(reference_start + source_count, reference_end + 1)
+            )
     mapped_owners = [
         token_owners[max(0, min(len(token_owners) - 1, item))]
         for item in mapping
@@ -429,6 +445,7 @@ def materialize_reference_alignment(
                 else "reference_envelope_inherited"
             ),
             "reference_changed": source_values[mapping[ref_index]] != token.normalized,
+            "reference_only": ref_index in reference_only_indexes,
         }
         canonical_units.append(unit)
         provenance.append(
@@ -438,6 +455,7 @@ def materialize_reference_alignment(
                 "source_text": str(source.get("text", "")),
                 "reference_text": token.text,
                 "changed": bool(unit["reference_changed"]),
+                "reference_only": bool(unit["reference_only"]),
             }
         )
     canonical = dict(alignment)

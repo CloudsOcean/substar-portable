@@ -11,6 +11,7 @@ from substar_core.manuscript_matching import (
 from substar_core.segmentation.input_contract import (
     build_segmentation_material,
     build_segmentation_material_with_display_projection,
+    build_segmentation_material_with_reference_projection,
 )
 from substar_core.segmentation.document_builder import (
     apply_semantic_display_projection,
@@ -174,7 +175,9 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
         master, projected, _report = materialize_reference_alignment(
             "2,000 kilometres", alignment, "en"
         )
-        material = build_segmentation_material(master, projected)
+        material, _projection, suggestions = (
+            build_segmentation_material_with_reference_projection(master, projected)
+        )
 
         self.assertEqual(
             [unit["text"] for unit in material["units"]],
@@ -191,7 +194,9 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
         master, projected, report = materialize_reference_alignment(
             "kilometres — further east", alignment, "en"
         )
-        material = build_segmentation_material(master, projected)
+        material, _projection, suggestions = (
+            build_segmentation_material_with_reference_projection(master, projected)
+        )
         source_tokens = source_tokens_from_asr(
             material["units"], source_asset_id="asset-test"
         )
@@ -208,7 +213,7 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
             cue_layout={"display_breaks": []},
         )
 
-        marked = attach_semantic_reference_audit(document, report)
+        marked = attach_semantic_reference_audit(document, report, suggestions)
         audit = next(
             change
             for change in marked.changes
@@ -226,9 +231,11 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
             for token in marked.display_tokens
             if token.state.value == "active"
         }
-        self.assertTrue(
-            all(item["token_ids"][0] in active_ids for item in changes)
-        )
+        replacement = next(item for item in changes if item["type"] == "replace")
+        insertion = next(item for item in changes if item["type"] == "insert")
+        self.assertIn(replacement["token_ids"][0], active_ids)
+        self.assertNotIn(insertion["token_ids"][0], active_ids)
+        self.assertEqual(insertion["status"], "deleted")
         display_by_id = {token.token_id: token.text for token in marked.display_tokens}
         self.assertTrue(
             all(
@@ -308,7 +315,7 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
             )
         )
 
-    def test_reference_only_word_is_active_and_marked_as_insertion(self) -> None:
+    def test_reference_only_word_is_deleted_and_marked_as_insertion(self) -> None:
         units = [_unit(0, "甲"), _unit(1, "乙。")]
 
         material, breaks, report = materialize_reference_script(
@@ -321,7 +328,7 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
             reference_report=report,
         )
 
-        self.assertEqual(_active_cue_text(document), "甲新乙。")
+        self.assertEqual(_active_cue_text(document), "甲乙。")
         audit = next(
             change
             for change in document.changes
@@ -333,7 +340,12 @@ class ReferenceManuscriptPolicyTests(unittest.TestCase):
             if item["type"] == "insert"
         )
         self.assertEqual(insertion["after"], "新")
-        self.assertEqual(insertion["status"], "applied")
+        self.assertEqual(insertion["status"], "deleted")
+        token = next(
+            token for token in document.display_tokens
+            if token.token_id == insertion["token_ids"][0]
+        )
+        self.assertEqual(token.state.value, "deleted")
 
     def test_editor_rematch_marks_punctuation_removal(self) -> None:
         units = [

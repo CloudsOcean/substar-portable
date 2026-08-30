@@ -19,7 +19,7 @@ from substar_core.manuscript_matching import (
 )
 from substar_core.segmentation.input_contract import (
     build_segmentation_material,
-    build_segmentation_material_with_display_projection,
+    build_segmentation_material_with_reference_projection,
 )
 from substar_core.segmentation.contracts import segmentation_credential_ref
 from substar_core.transcription.contracts import (
@@ -197,7 +197,10 @@ def _json_object(path: Path, label: str) -> dict[str, Any]:
 
 def _effective_material(
     evidence: Mapping[str, Any], reference_path: Path | None, request: Mapping[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any], dict[str, Any], dict[str, Any],
+    list[dict[str, Any]], list[dict[str, Any]],
+]:
     alignment = recognition_source_from_evidence(evidence)
     master = str(evidence["master_text"]).strip()
     audit: dict[str, Any] = {
@@ -235,12 +238,12 @@ def _effective_material(
             "report": raw_audit,
         }
         if request["mode"] == "reference_script":
-            return material, alignment, audit, []
-        material, display_projection = (
-            build_segmentation_material_with_display_projection(master, alignment)
+            return material, alignment, audit, [], []
+        material, display_projection, reference_suggestions = (
+            build_segmentation_material_with_reference_projection(master, alignment)
         )
-        return material, alignment, audit, display_projection
-    return build_segmentation_material(master, alignment), alignment, audit, []
+        return material, alignment, audit, display_projection, reference_suggestions
+    return build_segmentation_material(master, alignment), alignment, audit, [], []
 
 
 def _semantic_candidate(
@@ -248,6 +251,7 @@ def _semantic_candidate(
     scratch: Path,
     reference_audit: Mapping[str, Any],
     display_projection: list[Mapping[str, Any]],
+    reference_suggestions: list[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], EditorDocument, dict[str, Any]]:
     raw_result = _json_object(
         scratch / "segmentation_algorithm_result.json", "algorithm result"
@@ -263,7 +267,9 @@ def _semantic_candidate(
         document = apply_semantic_display_projection(document, display_projection)
         report = reference_audit.get("report")
         if isinstance(report, Mapping):
-            document = attach_semantic_reference_audit(document, report)
+            document = attach_semantic_reference_audit(
+                document, report, reference_suggestions
+            )
     notices = []
     for row in raw_result.get("exceptions", []):
         if not isinstance(row, Mapping):
@@ -717,9 +723,13 @@ def run(command: WorkerCommand) -> int:
             progress=0.08,
             step="segmentation.input_prepare",
         )
-        material, effective_alignment, reference_audit, display_projection = _effective_material(
-            evidence, reference_path, request
-        )
+        (
+            material,
+            effective_alignment,
+            reference_audit,
+            display_projection,
+            reference_suggestions,
+        ) = _effective_material(evidence, reference_path, request)
         material_path = work_directory / "segmentation_material.json"
         atomic_write_json(material_path, material)
         atomic_write_json(artifact_directory / "reference_match.json", reference_audit)
@@ -839,7 +849,8 @@ def run(command: WorkerCommand) -> int:
                     _public_algorithm_error(stderr_path, int(return_code))
                 )
             candidate, document, validation = _semantic_candidate(
-                request, scratch, reference_audit, display_projection
+                request, scratch, reference_audit, display_projection,
+                reference_suggestions,
             )
         elif request["mode"] == "reference_script":
             emit(
