@@ -406,12 +406,17 @@
   function syncWorkflowControl() {
     const workflow = $("#splitWorkflowInput").value;
     const referenceMode = workflow === "reference_script";
-    $("#referenceRow").classList.toggle("hidden", !referenceMode);
+    const referenceEnabled = workflow === "one_step" || referenceMode;
+    $("#referenceRow").classList.toggle("hidden", !referenceEnabled);
     $("#referenceBreakSymbolsField").classList.toggle("hidden", !referenceMode);
+    $("#referenceRequirement").textContent = referenceMode ? "必选" : "选填";
+    $("#referenceHelp").textContent = referenceMode
+      ? "支持 TXT / DOCX / SRT；参考稿校正词元，并由尾部语义标点机械确定边界"
+      : "支持 TXT / DOCX / SRT；用于校正词元，不替代 AI 语义切分";
     $("#splitWorkflowHelp").textContent = referenceMode
-      ? "ASR 提供文字与时间证据，参考稿修正差异并提供标点断点"
+      ? "参考稿校正词元，并按有效尾部语义标点机械切分"
       : workflow === "one_step"
-        ? "由 AI 按语义和字符上限重新组织字幕"
+        ? "由 AI 根据无句界词级时间轴、语义和字符上限重新组织字幕；参考稿选填"
         : "直接使用听写结果的句级边界";
   }
 
@@ -1007,7 +1012,7 @@
     if (!state.settings) message.textContent = "正在读取已保存设置…";
     else if (state.submitting) message.textContent = "正在接收素材并创建任务…";
     else if (!state.videos.length) message.textContent = "选择一个或多个素材后即可开始";
-    else if (referenceMode && !state.references.length) message.textContent = "参考文稿辅助切分必须选择参考文稿";
+    else if (referenceMode && !state.references.length) message.textContent = "按参考稿标点切分必须选择参考文稿";
     else if (referenceMode && !symbols.length) message.textContent = "请填写至少一个切分符号";
     else message.textContent = state.videos.length > 1
       ? `${state.videos.length} 个素材已就绪，将分别创建项目`
@@ -1083,9 +1088,10 @@
 
   async function submitSingle(media, references) {
     const form = new FormData();
+    const workflow = $("#splitWorkflowInput").value;
     form.append("mode", "asr");
     form.append("media", media, media.name);
-    if ($("#splitWorkflowInput").value === "reference_script" && references.length) {
+    if (workflow !== "disabled" && references.length) {
       form.append("reference_document", references[0], references[0].name);
     }
     form.append("settings_json", JSON.stringify(automaticSettings()));
@@ -1102,8 +1108,8 @@
     form.append("mode", "asr");
     mediaFiles.forEach((file) => form.append("media", file, file.name));
     const mediaStems = new Set(mediaFiles.map((file) => file.name.replace(/\.[^.]+$/, "").toLocaleLowerCase()));
-    const referenceMode = $("#splitWorkflowInput").value === "reference_script";
-    const matchedReferences = referenceMode
+    const referenceEnabled = $("#splitWorkflowInput").value !== "disabled";
+    const matchedReferences = referenceEnabled
       ? references.filter((file) => mediaStems.has(file.name.replace(/\.[^.]+$/, "").toLocaleLowerCase()))
       : [];
     matchedReferences.forEach((file) => form.append("reference_documents", file, file.name));

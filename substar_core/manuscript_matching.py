@@ -38,7 +38,7 @@ class _LexicalSpan:
     lexical: str
 
 
-REFERENCE_TOKENIZER_VERSION = "unicode-script-v1"
+REFERENCE_TOKENIZER_VERSION = "unicode-script-v2"
 REFERENCE_BREAK_PRESETS = {
     "zh": "，。？！",
     "en": ".?!",
@@ -112,6 +112,33 @@ def _is_internal_connector(value: str) -> bool:
     return value in {"'", "’", "-", "‐", "‑", "‒", "–", "—"}
 
 
+_PROTECTED_LEXICAL_PATTERNS = (
+    re.compile(r"(?:https?://|www\.)[^\s<>\[\]{}\"“”]+", re.IGNORECASE),
+    re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"),
+    re.compile(r"[vV]?\d+(?:\.\d+){1,}(?:[%‰])?"),
+    re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:[%‰])?"),
+    re.compile(r"\d{1,2}:\d{2}(?::\d{2})?"),
+    re.compile(r"(?:[A-Za-z]\.){2,}"),
+)
+_OPAQUE_TRAILING_PUNCTUATION = ".,!?;:，。？！；："
+
+
+def _protected_lexical_end(value: str, index: int) -> int | None:
+    """Return the end of an opaque written token beginning at ``index``."""
+
+    for pattern in _PROTECTED_LEXICAL_PATTERNS:
+        match = pattern.match(value, index)
+        if match is None:
+            continue
+        end = match.end()
+        if pattern is _PROTECTED_LEXICAL_PATTERNS[0]:
+            while end > index and value[end - 1] in _OPAQUE_TRAILING_PUNCTUATION:
+                end -= 1
+        if end > index:
+            return end
+    return None
+
+
 def _lexical_spans(text: str, language: str | None = None) -> list[_LexicalSpan]:
     """Tokenize Unicode scripts while retaining exact display spans."""
 
@@ -121,6 +148,11 @@ def _lexical_spans(text: str, language: str | None = None) -> list[_LexicalSpan]
     index = 0
     while index < len(value):
         char = value[index]
+        protected_end = _protected_lexical_end(value, index)
+        if protected_end is not None:
+            spans.append(_LexicalSpan(index, protected_end, value[index:protected_end]))
+            index = protected_end
+            continue
         character_script = _character_script(char)
         if character_script and character_script != "hangul":
             end = index + 1
@@ -437,6 +469,32 @@ def normalize_break_symbols(value: str) -> str:
     return symbols
 
 
+def _trailing_punctuation(text: str, lexical: str) -> str:
+    """Return punctuation attached after lexical content, excluding its internals."""
+
+    rendered = str(text or "").rstrip()
+    needle = str(lexical or "")
+    position = rendered.rfind(needle)
+    if position < 0:
+        return ""
+    return rendered[position + len(needle) :]
+
+
+def _reference_token_has_break(token: ReferenceToken, symbols: str) -> bool:
+    return any(
+        symbol in _trailing_punctuation(token.text, token.lexical)
+        for symbol in symbols
+    )
+
+
+def _source_text_has_break(text: str, symbols: str, language: str | None) -> bool:
+    spans = _lexical_spans(str(text or ""), language)
+    if not spans:
+        return False
+    final = spans[-1]
+    return any(symbol in str(text)[final.end :] for symbol in symbols)
+
+
 def _timed_source_tokens(
     units: Iterable[dict[str, Any]], source_language: str | None = None
 ) -> list[dict[str, Any]]:
@@ -666,12 +724,12 @@ def materialize_reference_script(
     reference_boundaries = [
         index
         for index, token in enumerate(reference[:-1])
-        if any(symbol in token.text for symbol in symbols)
+        if _reference_token_has_break(token, symbols)
     ]
     asr_breaks = {
         index
         for index, token in enumerate(source[:-1])
-        if any(symbol in str(token["text"]) for symbol in symbols)
+        if _source_text_has_break(str(token["text"]), symbols, source_language)
     }
     resolved_reference_breaks: dict[int, int] = {}
     boundary_reconciliations: list[dict[str, int]] = []

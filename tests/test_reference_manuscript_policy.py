@@ -4,10 +4,22 @@ import unittest
 
 from substar_core.manuscript_matching import (
     editor_reference_operations,
+    materialize_reference_alignment,
     materialize_reference_script,
+    reference_tokens,
+)
+from substar_core.segmentation.input_contract import (
+    build_segmentation_material,
+    build_segmentation_material_with_display_projection,
 )
 from substar_core.segmentation.document_builder import (
+    apply_semantic_display_projection,
+    attach_semantic_reference_audit,
     build_reference_script_document,
+)
+from substar_core.contracts.editor_document import (
+    build_editor_document,
+    source_tokens_from_asr,
 )
 from substar_core.segmentation.worker import _reference_script_candidate
 
@@ -48,6 +60,184 @@ def _active_cue_texts(document: object) -> list[str]:
 
 
 class ReferenceManuscriptPolicyTests(unittest.TestCase):
+    def test_ai_material_hides_semantic_punctuation_but_projects_it_onto_tokens(self) -> None:
+        evidence = {
+            "units": [
+                _unit(0, "Hello,"),
+                _unit(1, "world."),
+                _unit(2, "TEUs ——"),
+                _unit(3, "2,000"),
+                _unit(4, "1.425"),
+            ]
+        }
+
+        material, projection = build_segmentation_material_with_display_projection(
+            "ignored", evidence
+        )
+
+        self.assertEqual(
+            [unit["text"] for unit in material["units"]],
+            ["Hello", "world", "TEUs", "2,000", "1.425"],
+        )
+        self.assertEqual(
+            [unit["text"] for unit in projection],
+            ["Hello,", "world.", "TEUs ——", "2,000", "1.425"],
+        )
+
+    def test_semantic_display_projection_restores_punctuation_without_moving_cues(self) -> None:
+        evidence = {
+            "units": [
+                _unit(0, "Hello,"),
+                _unit(1, "world."),
+                _unit(2, "TEUs ——"),
+                _unit(3, "2,000"),
+            ]
+        }
+        material, projection = build_segmentation_material_with_display_projection(
+            "ignored", evidence
+        )
+        source_tokens = source_tokens_from_asr(
+            material["units"], source_asset_id="asset-test"
+        )
+        document = build_editor_document(
+            source_tokens=source_tokens,
+            source_kind="asr",
+            source_asset_id="asset-test",
+            execution_plan={"blocks": [], "boundaries_after": [], "skipped_reason": None},
+            semantic_grouping={
+                "protections": [],
+                "meaning_groups": [],
+                "review_regions": [],
+            },
+            cue_layout={"display_breaks": [1]},
+        )
+        cue_ids = [cue.cue_id for cue in document.cues]
+        cue_times = [(cue.start, cue.end) for cue in document.cues]
+
+        restored = apply_semantic_display_projection(document, projection)
+
+        self.assertEqual(
+            [token.text for token in restored.display_tokens],
+            ["Hello,", "world.", "TEUs ——", "2,000"],
+        )
+        self.assertEqual([cue.cue_id for cue in restored.cues], cue_ids)
+        self.assertEqual([(cue.start, cue.end) for cue in restored.cues], cue_times)
+        audit = next(
+            change
+            for change in restored.changes
+            if change.operation == "reference_manuscript_display_projection"
+        )
+        self.assertFalse(audit.metadata["cue_boundaries_changed"])
+
+    def test_tokenizer_preserves_numeric_and_opaque_written_tokens(self) -> None:
+        tokens = reference_tokens(
+            "2,000 1.425 v1.2.3 12:30 U.S. test@example.com https://example.com/a",
+            "en",
+        )
+
+        self.assertEqual(
+            [token.lexical for token in tokens],
+            [
+                "2,000",
+                "1.425",
+                "v1.2.3",
+                "12:30",
+                "U.S.",
+                "test@example.com",
+                "https://example.com/a",
+            ],
+        )
+
+    def test_numeric_commas_do_not_create_reference_or_asr_breaks(self) -> None:
+        units = [
+            _unit(0, "2,000"),
+            _unit(1, "people"),
+            _unit(2, "arrived."),
+            _unit(3, "Today"),
+        ]
+
+        _material, breaks, report = materialize_reference_script(
+            "2,000 people arrived. Today", units, ",.", "en"
+        )
+
+        self.assertEqual(breaks, [2])
+        self.assertNotIn(0, report["asr_breaks"])
+
+    def test_reference_alignment_keeps_numeric_token_for_ai_material(self) -> None:
+        alignment = {
+            "units": [
+                _unit(0, "2000"),
+                _unit(1, "kilometres"),
+            ]
+        }
+
+        master, projected, _report = materialize_reference_alignment(
+            "2,000 kilometres", alignment, "en"
+        )
+        material = build_segmentation_material(master, projected)
+
+        self.assertEqual(
+            [unit["text"] for unit in material["units"]],
+            ["2,000", "kilometres"],
+        )
+
+    def test_semantic_reference_differences_survive_into_editor_markers(self) -> None:
+        alignment = {
+            "units": [
+                _unit(0, "kilometers"),
+                _unit(1, "east"),
+            ]
+        }
+        master, projected, report = materialize_reference_alignment(
+            "kilometres — further east", alignment, "en"
+        )
+        material = build_segmentation_material(master, projected)
+        source_tokens = source_tokens_from_asr(
+            material["units"], source_asset_id="asset-test"
+        )
+        document = build_editor_document(
+            source_tokens=source_tokens,
+            source_kind="asr",
+            source_asset_id="asset-test",
+            execution_plan={"blocks": [], "boundaries_after": [], "skipped_reason": None},
+            semantic_grouping={
+                "protections": [],
+                "meaning_groups": [],
+                "review_regions": [],
+            },
+            cue_layout={"display_breaks": []},
+        )
+
+        marked = attach_semantic_reference_audit(document, report)
+        audit = next(
+            change
+            for change in marked.changes
+            if change.operation == "reference_manuscript_alignment"
+        )
+        changes = audit.metadata["reference_changes"]
+
+        self.assertEqual(len(changes), 2)
+        self.assertEqual({item["type"] for item in changes}, {"replace", "insert"})
+        self.assertEqual(
+            {item["after"] for item in changes}, {"kilometres", "further"}
+        )
+        active_ids = {
+            token.token_id
+            for token in marked.display_tokens
+            if token.state.value == "active"
+        }
+        self.assertTrue(
+            all(item["token_ids"][0] in active_ids for item in changes)
+        )
+        display_by_id = {token.token_id: token.text for token in marked.display_tokens}
+        self.assertTrue(
+            all(
+                display_by_id[item["token_ids"][0]] == item["after"]
+                for item in changes
+            )
+        )
+        self.assertEqual(len(marked.cues), len(document.cues))
+
     def test_reference_removes_asr_only_punctuation_and_marks_replacement(self) -> None:
         units = [
             _unit(0, "项"),

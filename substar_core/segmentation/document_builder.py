@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import replace
+from difflib import SequenceMatcher
 from typing import Any, Mapping
 
 from substar_core.contracts.editor_document import (
@@ -24,6 +26,163 @@ def validate_editor_document(document: EditorDocument) -> EditorDocument:
     if historical:
         raise ValueError(f"historical editor lineage is not accepted: {historical}")
     return document
+
+
+def attach_semantic_reference_audit(
+    document: EditorDocument,
+    reference_report: Mapping[str, Any],
+) -> EditorDocument:
+    """Attach reference differences after semantic grouping without changing cues."""
+
+    def marker_key(value: object) -> str:
+        normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+        return "".join(char for char in normalized if char.isalnum())
+
+    reference_rows = [
+        raw
+        for raw in reference_report.get("provenance", [])
+        if isinstance(raw, Mapping) and marker_key(raw.get("reference_text"))
+    ]
+    source_rows = [
+        token for token in document.source_tokens if marker_key(token.text)
+    ]
+    matcher = SequenceMatcher(
+        None,
+        [marker_key(raw.get("reference_text")) for raw in reference_rows],
+        [marker_key(token.text) for token in source_rows],
+        autojunk=False,
+    )
+    source_by_reference_index: dict[int, Any] = {}
+    for reference_start, source_start, size in matcher.get_matching_blocks():
+        for offset in range(size):
+            source_by_reference_index[
+                int(reference_rows[reference_start + offset]["reference_index"])
+            ] = source_rows[source_start + offset]
+    display_by_source_id = {
+        source_id: token
+        for token in document.display_tokens
+        for source_id in token.source_token_ids
+    }
+    change_type_by_reference_index: dict[int, str] = {}
+    for raw in reference_report.get("changes", []):
+        if not isinstance(raw, Mapping):
+            continue
+        token_range = raw.get("reference_token_range")
+        if not isinstance(token_range, (list, tuple)) or len(token_range) != 2:
+            continue
+        start, end = int(token_range[0]), int(token_range[1])
+        if start > end:
+            continue
+        kind = str(raw.get("kind") or "replace")
+        source_range = raw.get("source_token_range")
+        source_count = 0
+        if isinstance(source_range, (list, tuple)) and len(source_range) == 2:
+            source_start, source_end = int(source_range[0]), int(source_range[1])
+            source_count = max(0, source_end - source_start + 1)
+        for offset, reference_index in enumerate(range(start, end + 1)):
+            change_type_by_reference_index[reference_index] = (
+                "insert" if kind == "replace" and offset >= source_count else kind
+            )
+
+    reference_changes: list[dict[str, Any]] = []
+    for raw in reference_report.get("provenance", []):
+        if not isinstance(raw, Mapping) or not bool(raw.get("changed")):
+            continue
+        reference_index = int(raw["reference_index"])
+        source_token = source_by_reference_index.get(reference_index)
+        if source_token is None:
+            continue
+        display_token = display_by_source_id.get(source_token.token_id)
+        if display_token is None:
+            continue
+        kind = change_type_by_reference_index.get(reference_index, "replace")
+        before = "" if kind == "insert" else str(raw.get("source_text") or "")
+        after = display_token.text
+        reference_changes.append(
+            {
+                "change_id": f"reference-{kind}-{reference_index}",
+                "type": "insert" if kind == "insert" else "replace",
+                "token_ids": [display_token.token_id],
+                "source_indexes": [source_token.index],
+                "before": before,
+                "after": after,
+                "status": "applied",
+            }
+        )
+
+    if not reference_changes:
+        return document
+    audit = ChangeProvenance(
+        kind=ChangeKind.IMPORT,
+        operation="reference_manuscript_alignment",
+        actor="reference-manuscript",
+        metadata={
+            "reference": True,
+            "mode": "semantic",
+            "similarity": float(reference_report.get("similarity", 0.0)),
+            "reference_changes": reference_changes,
+            "replacement_count": sum(
+                1 for item in reference_changes if item["type"] == "replace"
+            ),
+            "insertion_count": sum(
+                1 for item in reference_changes if item["type"] == "insert"
+            ),
+        },
+    )
+    return validate_editor_document(
+        replace(document, changes=(*document.changes, audit))
+    )
+
+
+def apply_semantic_display_projection(
+    document: EditorDocument,
+    projection: list[Mapping[str, Any]],
+) -> EditorDocument:
+    """Restore reference punctuation after AI has selected cue boundaries."""
+
+    text_by_source_index = {
+        int(row["index"]): str(row["text"]).strip()
+        for row in projection
+        if str(row.get("text") or "").strip()
+    }
+    source_index_by_id = {
+        token.token_id: token.index for token in document.source_tokens
+    }
+    changed_count = 0
+    display_tokens = []
+    for token in document.display_tokens:
+        projected_parts = [
+            text_by_source_index[source_index_by_id[source_id]]
+            for source_id in token.source_token_ids
+            if source_id in source_index_by_id
+            and source_index_by_id[source_id] in text_by_source_index
+        ]
+        projected = " ".join(projected_parts).strip()
+        if not projected or projected == token.text:
+            display_tokens.append(token)
+            continue
+        display_tokens.append(replace(token, text=projected))
+        changed_count += 1
+    if not changed_count:
+        return document
+    audit = ChangeProvenance(
+        kind=ChangeKind.IMPORT,
+        operation="reference_manuscript_display_projection",
+        actor="reference-manuscript",
+        metadata={
+            "reference": True,
+            "mode": "semantic",
+            "projected_token_count": changed_count,
+            "cue_boundaries_changed": False,
+        },
+    )
+    return validate_editor_document(
+        replace(
+            document,
+            display_tokens=tuple(display_tokens),
+            changes=(*document.changes, audit),
+        )
+    )
 
 
 def build_sentence_boundary_document(

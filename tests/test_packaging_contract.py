@@ -36,7 +36,7 @@ class PackagingContractTests(unittest.TestCase):
 
     def test_release_manifest_contains_no_projects_or_retired_capability(self) -> None:
         manifest = read_text("portable_manifest.json")
-        self.assertIn('"version": "1.0.12"', manifest)
+        self.assertIn('"version": "1.0.13"', manifest)
         self.assertIn('"package_layout": "transparent-source-runtime"', manifest)
         self.assertIn('"reference-script-v1"', manifest)
         self.assertIn('"advanced-ai-v1"', manifest)

@@ -11,8 +11,8 @@ from substar_core.language_layout import editor_token_fragments, layout_tokens
 
 SEGMENTATION_MATERIAL_SCHEMA = "substar.segmentation-material.v1"
 _GRAMMATICAL_EDGE_PUNCTUATION = re.compile(
-    r"^[\s\"“”‘’'《》〈〉「」『』（）()\[\]{}，。？！!?；;：:、….,]+|"
-    r"[\s\"“”‘’'《》〈〉「」『』（）()\[\]{}，。？！!?；;：:、….,]+$"
+    r"^[\s\"“”‘’'《》〈〉「」『』（）()\[\]{}，。？！!?；;：:、….,—–]+|"
+    r"[\s\"“”‘’'《》〈〉「」『』（）()\[\]{}，。？！!?；;：:、….,—–]+$"
 )
 
 
@@ -33,27 +33,57 @@ def _number(value: object, field: str) -> float:
     return float(value)
 
 
-def build_segmentation_material(
+def _display_fragments(raw_text: str, fragments: list[str]) -> list[str]:
+    """Project exact display punctuation onto analysis fragments."""
+
+    rendered = str(raw_text or "").strip()
+    if len(fragments) == 1:
+        return [rendered]
+    starts: list[int] = []
+    cursor = 0
+    for fragment in fragments:
+        position = rendered.find(fragment, cursor)
+        if position < 0:
+            return list(fragments)
+        starts.append(position)
+        cursor = position + len(fragment)
+    return [
+        rendered[0 if index == 0 else starts[index] : starts[index + 1] if index + 1 < len(starts) else len(rendered)].strip()
+        for index in range(len(starts))
+    ]
+
+
+def build_segmentation_material_with_display_projection(
     source_transcript: str, evidence: Mapping[str, Any]
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     del source_transcript  # Raw ASR prose remains in recognition_evidence.json only.
     units: list[dict[str, Any]] = []
+    display_projection: list[dict[str, Any]] = []
     for item in evidence.get("units", []):
-        text = _unpunctuated_word(item.get("text", item.get("word", "")))
+        raw_text = str(item.get("text", item.get("word", "")) or "").strip()
+        text = _unpunctuated_word(raw_text)
         if not text:
             continue
         fragments = editor_token_fragments(text) or [text]
+        projected_fragments = _display_fragments(raw_text, fragments)
         start = float(item["start"])
         end = max(start, float(item["end"]))
         width = (end - start) / len(fragments)
         for offset, fragment in enumerate(fragments):
+            material_index = len(units)
             units.append(
                 {
-                    "index": len(units),
+                    "index": material_index,
                     "start": start + offset * width,
                     "end": end if offset + 1 == len(fragments) else start + (offset + 1) * width,
                     "text": fragment,
                     "speaker_id": item.get("speaker_id"),
+                }
+            )
+            display_projection.append(
+                {
+                    "index": material_index,
+                    "text": projected_fragments[offset],
                 }
             )
     value = {
@@ -62,7 +92,16 @@ def build_segmentation_material(
         "units": units,
     }
     validate_segmentation_material(value)
-    return value
+    return value, display_projection
+
+
+def build_segmentation_material(
+    source_transcript: str, evidence: Mapping[str, Any]
+) -> dict[str, Any]:
+    material, _projection = build_segmentation_material_with_display_projection(
+        source_transcript, evidence
+    )
+    return material
 
 
 def validate_segmentation_material(value: object) -> dict[str, Any]:

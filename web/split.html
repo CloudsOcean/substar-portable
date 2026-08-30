@@ -55,8 +55,8 @@
 
         <div class="srt-row reference-row hidden" id="referenceRow">
           <div>
-            <strong>参考文稿 <em>必选</em></strong>
-            <span>支持 TXT / DOCX / SRT；批量任务按同名文件自动配对</span>
+            <strong>参考文稿 <em id="referenceRequirement">选填</em></strong>
+            <span id="referenceHelp">支持 TXT / DOCX / SRT；用于校正词元，不替代 AI 语义切分</span>
           </div>
           <input id="referenceInput" type="file" multiple accept=".txt,.docx,.srt,text/plain,application/x-subrip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
           <button class="secondary-button" type="button" id="chooseReferenceButton">选择参考文稿</button>
@@ -93,7 +93,7 @@
               <select id="splitWorkflowInput">
                 <option value="disabled">仅使用听写结果</option>
                 <option value="one_step">AI 辅助切分</option>
-                <option value="reference_script">参考文稿辅助切分</option>
+                <option value="reference_script">按参考稿标点切分</option>
               </select>
               <small id="splitWorkflowHelp">启用后生成适合逐词编辑的字幕草稿</small>
             </label>
@@ -231,6 +231,6 @@
       <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
     </form>
   </div>
-  <script src="/assets/split.js?v=20260828-qwen-copy-upload-1" defer></script>
+  <script src="/assets/split.js?v=20260830-reference-workflow-1" defer></script>
 </body>
 </html>

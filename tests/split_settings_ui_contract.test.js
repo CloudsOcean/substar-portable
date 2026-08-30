@@ -10,11 +10,11 @@ const splitCss = fs.readFileSync(path.join(root, "web", "split.css"), "utf8");
 const settingsHtml = fs.readFileSync(path.join(root, "web", "settings.html"), "utf8");
 const settingsJs = fs.readFileSync(path.join(root, "web", "settings.js"), "utf8");
 
-test("reference upload is conditional and its break input stays contained", () => {
+test("reference upload covers AI and punctuation workflows while break input stays contained", () => {
   assert.match(splitHtml, /class="[^"]*reference-row[^"]*hidden[^"]*" id="referenceRow"/);
-  assert.match(splitJs, /#referenceRow"\)\.classList\.toggle\("hidden", !referenceMode\)/);
-  assert.match(splitJs, /value === "reference_script" && references\.length/);
-  assert.match(splitJs, /const matchedReferences = referenceMode/);
+  assert.match(splitJs, /#referenceRow"\)\.classList\.toggle\("hidden", !referenceEnabled\)/);
+  assert.match(splitJs, /workflow !== "disabled" && references\.length/);
+  assert.match(splitJs, /const matchedReferences = referenceEnabled/);
   assert.match(splitCss, /select, input\[type="number"\], #referenceBreakSymbolsInput \{[^}]*box-sizing: border-box;[^}]*width: 100%;/s);
   assert.doesNotMatch(splitHtml, /任务配置已保留；多个素材将共用此配置/);
 });
