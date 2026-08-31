@@ -16,8 +16,8 @@
   },
   "sha256": {
     "media.wav": "fe82b4574c51dab8578a5d6f203bb8ae52ef15cbba192e0292814815b0190c6f",
-    "segmented.json": "aac2a770826a19ec4b6fbd56929aa5c2c4f980f14dedd312015a1a73cf066234",
-    "calibrated.json": "b80f5cae7771bf7f3ac1161ea75ca89663f9e740098df913963b860f8252b98e",
-    "translated.json": "f6bcde9e93c1567e443c09846d0999e28285f11dd8ca58190609bd77be5c27c7"
+    "segmented.json": "70203a250f5731a897ca53c16f7bde94ba2d557e4a8527186152e29604e7182b",
+    "calibrated.json": "9f9b0d54eb480e8cf20fad09b9eb4cc15fea85b8cc6ee425eec44bb0bd0e96d8",
+    "translated.json": "818f850ceb8ed57beb5d9df9c017c83176edfb2f62f4dce51d71aa1246524c93"
   }
 }
