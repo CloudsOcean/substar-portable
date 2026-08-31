@@ -13,7 +13,12 @@ router = APIRouter(include_in_schema=False)
 
 
 def _page(filename: str) -> HTMLResponse:
-    return HTMLResponse((WEB_DIR / filename).read_text(encoding="utf-8"))
+    # Portable upgrades keep the same localhost origin.  Prevent an old HTML
+    # shell from pinning schema-specific assets after the executable changes.
+    return HTMLResponse(
+        (WEB_DIR / filename).read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/", response_class=HTMLResponse)

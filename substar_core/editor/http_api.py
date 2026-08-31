@@ -13,6 +13,7 @@ import json
 import mimetypes
 import shutil
 import sys
+import time
 import uuid
 import wave
 import tempfile
@@ -703,6 +704,28 @@ def launch_tutorial_example(case_id: str) -> dict[str, Any]:
             "target_hard_limit": int(manifest["target_hard_limit"]),
         })
 
+    def register_creation() -> None:
+        """Keep packaged tutorials on the same current project shell as real jobs."""
+        atomic_write_json(job_dir / "project_creation.json", {
+            "schema_version": "substar.project-creation.v2",
+            "input_mode": "packaged_example",
+            "source_file": "audio_16k_mono.wav",
+            "reference_document": "",
+            "settings_overrides": {
+                "language": str(manifest["source_language"]),
+                "target_language_mode": str(manifest["target_language"]),
+                "english_hard_limit": int(manifest["source_hard_limit"]),
+                "chinese_hard_limit": int(manifest["target_hard_limit"]),
+                "segmentation_enabled": True,
+                "reference_script_mode": False,
+            },
+            "profile": {},
+            "recognition_profile": {},
+            "created_at": time.time(),
+            "tutorial_case_id": case_id,
+            "simulated": True,
+        })
+
     def materialize_media() -> None:
         media_name = str(manifest["assets"]["media"])
         media_source = (root / media_name).resolve()
@@ -731,6 +754,7 @@ def launch_tutorial_example(case_id: str) -> dict[str, Any]:
         revision = reset_tutorial_project(project_id)
         register_task_info()
         materialize_media()
+        register_creation()
         return {
             "schema_version": "substar.tutorial-launch.v1",
             "case_id": case_id,
@@ -765,13 +789,7 @@ def launch_tutorial_example(case_id: str) -> dict[str, Any]:
             "tutorial_example": {"case_id": case_id, "simulated": True},
         })
         register_task_info()
-        atomic_write_json(job_dir / "project_creation.json", {
-            "schema_version": "substar.project-creation.v1",
-            "input_mode": "packaged_example",
-            "source_file": "audio_16k_mono.wav",
-            "tutorial_case_id": case_id,
-            "simulated": True,
-        })
+        register_creation()
         atomic_write_json(job_dir / "tutorial_project.json", {
             "schema_version": "substar.tutorial-project.v2",
             "case_id": case_id,

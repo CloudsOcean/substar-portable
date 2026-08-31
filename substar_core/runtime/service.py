@@ -371,6 +371,11 @@ class TaskService:
             )
         )
 
+    def delete_task(self, task_id: str) -> dict[str, str]:
+        normalized = _required_text(task_id, "task_id")
+        self.store.delete_task(normalized)
+        return {"deleted": normalized}
+
     def complete_with_issues(
         self,
         task_id: str,

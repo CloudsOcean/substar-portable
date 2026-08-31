@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from substar_core.editor import http_api
@@ -27,6 +28,10 @@ def test_advanced_tutorial_commits_packaged_stages_without_provider_calls(tmp_pa
     assert task_info["source_hard_limit"] == 55
     assert task_info["target_hard_limit"] == 25
     assert (tmp_path / project_id / "audio_16k_mono.wav").is_file()
+    creation_path = tmp_path / project_id / "project_creation.json"
+    creation = json.loads(creation_path.read_text(encoding="utf-8"))
+    assert creation["schema_version"] == "substar.project-creation.v2"
+    assert creation["tutorial_case_id"] == "advanced-ai-v1"
     assert http_api.get_project_waveform(project_id, start=None, end=None, points=128)["peaks"]
 
     calibrated = http_api.apply_tutorial_stage(
@@ -68,6 +73,9 @@ def test_advanced_tutorial_commits_packaged_stages_without_provider_calls(tmp_pa
     (tmp_path / project_id / "audio_16k_mono.wav").unlink()
     http_api.launch_tutorial_example("advanced-ai-v1")
     assert (tmp_path / project_id / "audio_16k_mono.wav").is_file()
+    assert json.loads(creation_path.read_text(encoding="utf-8"))["schema_version"] == (
+        "substar.project-creation.v2"
+    )
 
 
 def test_packaged_tutorial_examples_are_independent_of_user_data():

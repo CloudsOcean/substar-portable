@@ -21,5 +21,18 @@ test("general settings retain editor shortcuts without obsolete export or dubbin
 });
 
 test("hotfix fingerprints the changed settings stylesheet", () => {
-  assert.match(html, /settings\.css\?v=20260828-model-controls-1/);
+  assert.match(html, /settings\.css\?v=20260831-unsaved-nav-1/);
+  assert.match(html, /settings\.js\?v=20260831-unsaved-nav-1/);
+});
+
+test("unsaved settings navigation offers save discard and stay actions", () => {
+  assert.match(html, /id="unsavedNavigationDialog"/);
+  assert.match(html, /data-unsaved-navigation="save"[^>]*>保存并前往/);
+  assert.match(html, /data-unsaved-navigation="discard"[^>]*>放弃更改并前往/);
+  assert.match(html, /data-unsaved-navigation="stay"[^>]*>留在此页/);
+  assert.match(js, /function hasUnsavedPageChanges/);
+  assert.match(js, /await saveAllBeforeNavigation\(\)/);
+  assert.match(js, /window\.location\.assign\(pendingNavigationUrl\)/);
+  assert.match(js, /\.app-header a\[href\]/);
+  assert.match(js, /target\.pathname === window\.location\.pathname/);
 });

@@ -6,6 +6,8 @@ let dirty = false;
 let editRevision = 0;
 let autoSaveTimer = null;
 let saveQueue = Promise.resolve();
+let pendingNavigationUrl = "";
+let navigationInProgress = false;
 const sensitiveAutoSaveFields = new Set(["api_key", "alignment_api_key", "translation_api_key"]);
 let recognitionProfiles = [];
 let runtimeIdentity = null;
@@ -620,7 +622,7 @@ function updatePromptDirtyState() {
 }
 
 async function savePromptComponent() {
-  if (!selectedPromptComponent) return;
+  if (!selectedPromptComponent) return true;
   $("#promptSaveButton").disabled = true;
   $("#promptReloadButton").disabled = true;
   $("#promptSaveMessage").textContent = "正在保存…";
@@ -645,9 +647,11 @@ async function savePromptComponent() {
     $("#promptInspectorCount").textContent = `${updated.characters.toLocaleString()} 字符`;
     $("#promptFileMeta").innerHTML = `<code>${escapeHtml(updated.path)}</code><span>SHA-256 · ${escapeHtml(updated.sha256.slice(0, 12))}</span>`;
     $("#promptSaveMessage").textContent = "已保存；后续读取将使用新版本";
+    return true;
   } catch (error) {
     $("#promptSaveMessage").textContent = `保存失败：${error.message}`;
     $("#promptSaveButton").disabled = false;
+    return false;
   } finally {
     $("#promptReloadButton").disabled = false;
   }
@@ -1236,6 +1240,35 @@ for (const definitions of Object.values(stageDefinitions)) {
   }
 }
 
+function hasUnsavedPageChanges() {
+  return dirty || promptHasUnsavedChanges();
+}
+
+function navigateToPendingTarget() {
+  if (!pendingNavigationUrl) return;
+  navigationInProgress = true;
+  window.location.assign(pendingNavigationUrl);
+}
+
+async function saveAllBeforeNavigation() {
+  clearTimeout(autoSaveTimer);
+  await saveQueue.catch(() => undefined);
+  if (dirty) {
+    await persistSettings({manual:true, revision:editRevision});
+  }
+  if (promptHasUnsavedChanges() && !(await savePromptComponent())) {
+    throw new Error("提示词保存失败，请修正后重试");
+  }
+  if (hasUnsavedPageChanges()) throw new Error("仍有修改尚未保存");
+}
+
+function openUnsavedNavigationDialog(url) {
+  const dialog = $("#unsavedNavigationDialog");
+  pendingNavigationUrl = url;
+  $("#unsavedNavigationStatus").textContent = "";
+  dialog.showModal();
+}
+
 for (const name of ["api_key", "qwen_cloud_base_url", "qwen_cloud_model", "qwen_cloud_region"]) {
   form.elements[name]?.addEventListener("input", () => {
     setProviderConnected("engine:qwen_cloud", false);
@@ -1297,11 +1330,6 @@ $("#promptSourceView")?.addEventListener("input", updatePromptDirtyState);
 $("#promptSaveButton")?.addEventListener("click", savePromptComponent);
 $("#promptReloadButton")?.addEventListener("click", () => {
   if (selectedPromptComponent) showPromptComponent(selectedPromptComponent.path, true);
-});
-window.addEventListener("beforeunload", (event) => {
-  if (!promptHasUnsavedChanges()) return;
-  event.preventDefault();
-  event.returnValue = "";
 });
 $(".test-api").addEventListener("click", testConnection);
 $("#refreshModelCatalog")?.addEventListener("click", discoverModels);
@@ -1373,6 +1401,45 @@ form.addEventListener("change", (event) => {
   }
 });
 form.addEventListener("submit", saveSettings);
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".app-header a[href]");
+  if (!link || navigationInProgress || !hasUnsavedPageChanges()) return;
+  const target = new URL(link.href, window.location.href);
+  const samePage = target.pathname === window.location.pathname && target.search === window.location.search;
+  if (target.origin !== window.location.origin || samePage) return;
+  event.preventDefault();
+  openUnsavedNavigationDialog(target.href);
+}, true);
+$("#unsavedNavigationDialog").addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-unsaved-navigation]")?.dataset.unsavedNavigation;
+  if (!action) return;
+  const dialog = $("#unsavedNavigationDialog");
+  if (action === "stay") {
+    pendingNavigationUrl = "";
+    dialog.close();
+    return;
+  }
+  if (action === "discard") {
+    clearTimeout(autoSaveTimer);
+    dirty = false;
+    if (selectedPromptComponent) loadedPromptText = $("#promptSourceView").value;
+    navigateToPendingTarget();
+    return;
+  }
+  const buttons = $$('[data-unsaved-navigation]', dialog);
+  buttons.forEach((button) => button.disabled = true);
+  $("#unsavedNavigationStatus").textContent = "正在保存…";
+  try {
+    await saveAllBeforeNavigation();
+    navigateToPendingTarget();
+  } catch (error) {
+    $("#unsavedNavigationStatus").textContent = `保存失败：${error.message}`;
+    buttons.forEach((button) => button.disabled = false);
+  }
+});
+$("#unsavedNavigationDialog").addEventListener("close", () => {
+  if (!navigationInProgress) pendingNavigationUrl = "";
+});
 const backgroundPreviewUrls = new Map();
 
 function setBackgroundCardPreview(card, record) {
@@ -1458,7 +1525,7 @@ window.addEventListener("pagehide", () => {
   for (const url of backgroundPreviewUrls.values()) URL.revokeObjectURL(url);
 });
 window.addEventListener("beforeunload", (event) => {
-  if (dirty) {
+  if (!navigationInProgress && hasUnsavedPageChanges()) {
     event.preventDefault();
     event.returnValue = "";
   }

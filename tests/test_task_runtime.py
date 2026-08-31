@@ -10,6 +10,7 @@ from substar_core.runtime import (
     IdempotencyConflictError,
     InvalidTaskError,
     RuntimeStore,
+    TaskNotFoundError,
     TaskOwnershipError,
     TaskService,
     TaskStateConflictError,
@@ -193,6 +194,21 @@ class TaskRuntimeTest(unittest.TestCase):
         self.assertEqual(completed["state"], "succeeded_with_issues")
         self.assertTrue(completed["needs_attention"])
         self.assertEqual(completed["result"]["problem_cue_ids"], ["cue-2"])
+
+    def test_finished_task_can_be_dismissed_without_touching_project_identity(self) -> None:
+        created = self.create_task(project_id="project-kept")
+        with self.assertRaisesRegex(TaskStateConflictError, "cancel it before deletion"):
+            self.service.delete_task(created["task_id"])
+
+        claimed = self.service.claim_next({"transcription"})
+        assert claimed is not None
+        self.service.complete(claimed["task_id"], claimed["attempt"], {"ok": True})
+        self.assertEqual(
+            self.service.delete_task(created["task_id"]),
+            {"deleted": created["task_id"]},
+        )
+        with self.assertRaisesRegex(TaskNotFoundError, "task does not exist"):
+            self.service.get_task(created["task_id"])
 
     def test_terminal_error_requires_the_frozen_public_envelope(self) -> None:
         created = self.create_task()

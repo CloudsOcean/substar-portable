@@ -1136,6 +1136,23 @@ class RuntimeStore:
                 ).fetchall()
         return [TaskArtifact.from_row(row) for row in rows]
 
+    def delete_task(self, task_id: str) -> None:
+        """Delete a non-active runtime projection, never canonical project data."""
+
+        with self._transaction() as connection:
+            row = self._task_row(connection, task_id)
+            state = coerce_state(row["state"])
+            if state in {TaskState.QUEUED, TaskState.RUNNING, TaskState.CANCELLING}:
+                raise TaskStateConflictError(
+                    f"task {task_id} is {state.value}; cancel it before deletion"
+                )
+            try:
+                connection.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+            except sqlite3.IntegrityError as exc:
+                raise TaskStateConflictError(
+                    f"task {task_id} is still referenced by another task"
+                ) from exc
+
     def events(
         self,
         *,

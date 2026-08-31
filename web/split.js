@@ -1244,12 +1244,19 @@
         }
       }
       const removableJob = job;
-      if (!disconnectedActive && removableJob && removableJob.workflow_mode !== "editor_task") {
+      if (!disconnectedActive && removableJob) {
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "queue-delete";
         remove.textContent = ["queued", "running"].includes(job.status) ? "取消" : "删除";
-        remove.addEventListener("click", () => deleteJob(removableJob, card, remove));
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (removableJob.workflow_mode === "editor_task") {
+            deleteEditorTask(removableJob, card, remove);
+          } else {
+            deleteJob(removableJob, card, remove);
+          }
+        });
         actions.append(remove);
       }
       detail.append(actions);
@@ -1326,6 +1333,32 @@
         removeRecentProjectCard(job.id);
       }
       toast(result.message || (result.recoverable_to ? "任务已移至回收区" : "任务已删除"));
+      window.setTimeout(refreshJobs, 220);
+    } catch (error) {
+      button.disabled = false;
+      toast(errorMessage(error));
+    }
+  }
+
+  async function deleteEditorTask(job, item, button) {
+    const taskId = String(job.runtime_task_id || "");
+    if (!taskId) return toast("任务标识缺失，请刷新后重试");
+    const running = ["queued", "running", "cancelling"].includes(job.status);
+    const prompt = running
+      ? `确定取消正在运行的“${routeLabel(job)}”吗？已交付的项目版本会保留。`
+      : `确定删除这张“${routeLabel(job)}”任务卡吗？项目版本和编辑成果会保留。`;
+    if (!window.confirm(prompt)) return;
+    button.disabled = true;
+    try {
+      if (running) {
+        await api(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, {method:"POST"});
+        toast("已请求取消任务");
+      } else {
+        await api(`/api/tasks/${encodeURIComponent(taskId)}`, {method:"DELETE"});
+        item.classList.add("removing");
+        window.setTimeout(() => item.remove(), 180);
+        toast("任务卡已删除，项目成果已保留");
+      }
       window.setTimeout(refreshJobs, 220);
     } catch (error) {
       button.disabled = false;
@@ -1466,6 +1499,7 @@
         }));
       const taskJobs = (editorTasks.tasks || []).map((task) => ({
         id:`editor:${task.project_id}:${task.task_id}`,
+        runtime_task_id:task.task_id,
         project_id:task.project_id,
         display_name:task.display_name || task.project_id,
         workflow_mode:"editor_task",

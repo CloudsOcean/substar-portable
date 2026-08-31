@@ -293,6 +293,13 @@ def retry_task(task_id: str, request: Request) -> JSONResponse:
     )
 
 
+@router.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, request: Request) -> JSONResponse:
+    """Dismiss a finished task card while preserving its project revisions."""
+
+    return _invoke(request, lambda: _service(request).delete_task(task_id))
+
+
 @router.get("/api/tasks/{task_id}/events")
 def task_events(task_id: str, request: Request) -> JSONResponse:
     query = request.query_params

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20260828-model-controls-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20260831-unsaved-nav-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260814-8" />
@@ -594,6 +594,19 @@
         </form>
       </section>
     </main>
-  <script src="/assets/settings.js?v=20260830-convergence-1"></script>
+    <dialog id="unsavedNavigationDialog" class="unsaved-navigation-dialog" aria-labelledby="unsavedNavigationTitle">
+      <div class="unsaved-navigation-copy">
+        <small>UNSAVED CHANGES</small>
+        <h2 id="unsavedNavigationTitle">保存当前修改？</h2>
+        <p>离开设置后，尚未保存的修改会丢失。请选择如何处理，再前往目标页面。</p>
+      </div>
+      <div class="unsaved-navigation-actions">
+        <button type="button" class="secondary" data-unsaved-navigation="stay">留在此页</button>
+        <button type="button" class="secondary danger" data-unsaved-navigation="discard">放弃更改并前往</button>
+        <button type="button" class="primary" data-unsaved-navigation="save">保存并前往</button>
+      </div>
+      <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
+    </dialog>
+  <script src="/assets/settings.js?v=20260831-unsaved-nav-1"></script>
   </body>
 </html>
