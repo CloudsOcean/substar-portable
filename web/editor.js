@@ -12,6 +12,8 @@
     projects:[],
     projectId:"",
     taskInfo:null,
+    llmOptions:null,
+    failedTaskKind:"",
     revision:null,
     view:null,
     selectedTokenIds:new Set(),
@@ -46,6 +48,7 @@
     hardIssueIndex:-1,
     searchIndex:-1,
     searchScope:"source",
+    searchReplaceUndo:null,
     aiChangeIndex:-1,
     referenceChangeIndex:-1,
     fontSize:14,
@@ -908,6 +911,9 @@
   function recordCommittedRevision(revision, provenance = null) {
     const previousRevisionId = state.revisions.find(item => item.is_latest)?.revision_id || null;
     const current = revisionMetadata(revision, provenance);
+    if (state.searchReplaceUndo && state.searchReplaceUndo.after !== current.revision_id) {
+      state.searchReplaceUndo = null;
+    }
     state.revisions = [
       current,
       ...state.revisions
@@ -1072,11 +1078,13 @@
     }
     if (!$("#taskInfoMenu").open || state.projectId !== projectId) return;
     state.taskInfo = info;
+    await loadProjectLlmOptions().catch(error => ordinaryError(`模型列表读取失败：${error.message}`));
     $("#taskInfoName").value = info.display_name || projectId;
     $("#taskInfoSourceLanguage").value = info.language === "zh-CN" ? "zh" : info.language;
     $("#taskInfoTargetLanguage").value = info.target_language_mode;
     $("#taskInfoSourceLimit").value = String(info.source_hard_limit);
     $("#taskInfoTargetLimit").value = String(info.target_hard_limit);
+    renderProjectModelSelect();
     requestAnimationFrame(() => {
       $("#taskInfoName").focus();
       $("#taskInfoName").select();
@@ -1107,6 +1115,7 @@
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
           glossary_id:String(state.taskInfo?.glossary_id || ""),
+          llm_provider_id:$("#taskInfoLlmProvider").value || "inherit",
           source_hard_limit:sourceLimit,
           target_hard_limit:targetLimit
         })
@@ -1185,11 +1194,19 @@
     $("#aiCalibrate")?.setAttribute("aria-disabled", String(!revision || locked));
     if ((!revision || locked) && $("#aiCalibrationMenu")?.open) $("#aiCalibrationMenu").open = false;
     ["#saveCheckpoint", "#toolSearch", "#toolReplace",
-      "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll",
+      "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace",
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",
       "#lowerPunctuationRemove", "#lowerPunctuationSpace", "#applyPunctuation",
       "#runAiCalibration", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
     ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked; });
+    ["#toolReplaceCurrent", "#toolReplaceAll"].forEach(selector => {
+      const node = $(selector);
+      if (node) node.disabled = node.disabled || state.operationPending;
+    });
+    $("#toolUndoReplace").disabled = !state.searchReplaceUndo
+      || state.searchReplaceUndo.projectId !== state.projectId
+      || state.searchReplaceUndo.after !== revision?.revision_id
+      || state.operationPending || locked;
     $("#autoSnapMenu")?.classList.toggle("disabled", !revision || locked);
     $("#autoSnapMenuSummary")?.setAttribute("aria-disabled", String(!revision || locked));
     $("#undoAutoSnap").disabled = !state.autoSnapUndo
@@ -1328,6 +1345,9 @@
         }
       } else {
         contract.findContiguousTokenMatches(tokens, query).forEach(match => {
+          const coveredText = String(match.combined_text || "");
+          const unmatchedEdges = `${coveredText.slice(0, Number(match.start_offset || 0))}${coveredText.slice(Number(match.end_offset ?? coveredText.length))}`;
+          if (/[\p{L}\p{N}]/u.test(unmatchedEdges)) return;
           matches.push({kind:"token", cue_id:cue.cue_id, ...match});
         });
       }
@@ -1380,6 +1400,7 @@
     panel.classList.toggle("failed", task?.state === "failed");
     panel.classList.toggle("issues", task?.state === "succeeded_with_issues");
     panel.classList.toggle("completed", ["succeeded", "succeeded_with_issues"].includes(task?.state));
+    renderTaskFailureRecovery(task?.state === "failed", "translation");
     const progress = Math.max(0, Math.min(100, Number(task?.progress || 0) * 100));
     $("#translationProgressBar").style.width = `${progress}%`;
     renderAiProgress(
@@ -1420,6 +1441,7 @@
     panel.classList.toggle("failed", status === "failed");
     panel.classList.toggle("completed", ["completed", "succeeded", "succeeded_with_issues"].includes(status));
     panel.classList.toggle("issues", status === "succeeded_with_issues");
+    renderTaskFailureRecovery(status === "failed", state.editorAiTask?.kind || "calibration");
     document.body.classList.toggle("translation-task-visible", !state.taskPanelDismissed);
     $("#translationTaskTitle").textContent = title;
     $("#translationProgressBar").style.width = `${Math.max(0, Math.min(100, progress))}%`;
@@ -1427,6 +1449,92 @@
       && state.editorAiTask?.kind === "calibration"
       ? state.editorAiTask?.ai_progress : null;
     renderAiProgress(aiProgress, progress, message);
+  }
+
+  function renderTaskFailureRecovery(failed, kind) {
+    const row = $("#taskFailureRecovery");
+    if (!row) return;
+    row.classList.toggle("hidden", !failed);
+    if (!failed) return;
+    state.failedTaskKind = kind === "translation" ? "translation" : "calibration";
+    const options = state.llmOptions?.options || [];
+    const select = $("#failedTaskModel");
+    select.replaceChildren(...options.map((item, index) => {
+      const option = document.createElement("option");
+      option.value = item.provider_id;
+      option.textContent = numberedModelLabel(item, index);
+      return option;
+    }));
+    const effective = state.llmOptions?.effective_provider_id;
+    if (options.some(item => item.provider_id === effective)) select.value = effective;
+    if (!options.length) {
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "没有已配置模型";
+      select.append(empty);
+    }
+    $("#retryFailedTask").disabled = !options.length;
+  }
+
+  async function saveProjectModelProvider(providerId) {
+    if (!state.taskInfo) throw new Error("任务信息尚未载入");
+    state.taskInfo = await api(projectPath("/task-info"), {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({...state.taskInfo, llm_provider_id:providerId})
+    });
+    await loadProjectLlmOptions();
+  }
+
+  async function retryFailedTask() {
+    const providerId = $("#failedTaskModel").value;
+    if (!providerId) return;
+    const button = $("#retryFailedTask");
+    button.disabled = true;
+    try {
+      await saveProjectModelProvider(providerId);
+      state.taskPanelDismissed = false;
+      if (state.failedTaskKind === "translation") await startTranslation();
+      else await runAiCalibration();
+    } catch (error) {
+      ordinaryError(`重试失败：${error.message}`);
+      button.disabled = false;
+    }
+  }
+
+  function numberedModelLabel(option, index) {
+    return `${String(index + 1).padStart(2, "0")} ${option.label} · ${option.model}`;
+  }
+
+  async function loadProjectLlmOptions() {
+    if (!state.projectId) return null;
+    state.llmOptions = await api(projectPath("/llm-options"));
+    return state.llmOptions;
+  }
+
+  function renderProjectModelSelect() {
+    const select = $("#taskInfoLlmProvider");
+    if (!select) return;
+    const options = state.llmOptions?.options || [];
+    const active = options.find(item => item.provider_id === state.llmOptions?.active_provider_id);
+    const inherit = document.createElement("option");
+    inherit.value = "inherit";
+    inherit.textContent = active
+      ? `跟随全局设置（${active.label} · ${active.model}）`
+      : "跟随全局设置";
+    select.replaceChildren(inherit, ...options.map((item, index) => {
+      const option = document.createElement("option");
+      option.value = item.provider_id;
+      option.textContent = numberedModelLabel(item, index);
+      return option;
+    }));
+    const selected = state.taskInfo?.llm_provider_id || "inherit";
+    if (selected !== "inherit" && !options.some(item => item.provider_id === selected)) {
+      const unavailable = document.createElement("option");
+      unavailable.value = selected;
+      unavailable.textContent = `${selected}（当前未配置）`;
+      select.append(unavailable);
+    }
+    select.value = selected;
   }
 
   const AI_PHASE_ORDER = [
@@ -2560,12 +2668,10 @@
   }
 
   async function replaceCurrentSearch() {
+    const beforeRevisionId = state.revision?.revision_id || "";
     const matches = searchMatches();
     const replacement = String($("#toolReplace")?.value || "");
-    if (!replacement.trim()) {
-      ordinaryError("请填写替换文字");
-      return;
-    }
+    const deleting = !replacement.trim();
     if (!matches.length) {
       ordinaryError(`没有找到${state.searchScope === "target" ? "译文" : "源语词元"}匹配`);
       return;
@@ -2579,42 +2685,50 @@
     const query = String($("#toolSearch")?.value || "").trim();
     if (match.kind === "target") {
       const current = String(cue.target?.target_text || "");
-      const next = replaceLiteralOnce(current, query, replacement);
+      const next = replaceLiteralOnce(current, query, deleting ? "" : replacement);
       if (next !== current) {
-        await sendOperation(contract.setTargetOperation(
+        const revision = await sendOperation(contract.setTargetOperation(
           state.revision, cue.cue_id, next,
           manualProvenance("search_replace_target"), {original_text:current}
         ));
+        rememberSearchReplaceUndo(beforeRevisionId, revision);
       }
       return;
     }
     const tokenIds = match.token_ids || [];
+    if (deleting) {
+      const revision = await sendOperation(contract.deleteOperation(
+        state.revision, {token_ids:tokenIds}, manualProvenance("search_delete")
+      ));
+      rememberSearchReplaceUndo(beforeRevisionId, revision);
+      return;
+    }
     if (tokenIds.length > 1) {
       const source = String(match.combined_text || "");
       const start = Number(match.start_offset || 0);
       const end = Number.isFinite(Number(match.end_offset)) ? Number(match.end_offset) : source.length;
       const next = `${source.slice(0, start)}${replacement}${source.slice(end)}`;
-      await sendOperation(contract.mergeOperation(
+      const revision = await sendOperation(contract.mergeOperation(
         state.revision, tokenIds, next,
         manualProvenance("search_replace_phrase")
       ));
+      rememberSearchReplaceUndo(beforeRevisionId, revision);
       return;
     }
     const token = state.view?.token_views.find(item => item.token_id === tokenIds[0]);
     if (!token) return;
     const next = replaceLiteralOnce(token.text, query, replacement);
-    await sendOperation(contract.replaceOperation(
+    const revision = await sendOperation(contract.replaceOperation(
       state.revision, token.token_id, next, manualProvenance("search_replace")
     ));
+    rememberSearchReplaceUndo(beforeRevisionId, revision);
   }
 
   async function replaceAllSearch() {
+    const beforeRevisionId = state.revision?.revision_id || "";
     const matches = searchMatches();
     const replacement = String($("#toolReplace")?.value || "");
-    if (!replacement.trim()) {
-      ordinaryError("请填写替换文字");
-      return;
-    }
+    const deleting = !replacement.trim();
     if (!matches.length) {
       ordinaryError(`没有找到${state.searchScope === "target" ? "译文" : "源语词元"}匹配`);
       return;
@@ -2626,7 +2740,7 @@
         const cue = state.view?.cue_views.find(item => item.cue_id === match.cue_id);
         if (!cue?.target) continue;
         const current = String(cue.target.target_text || "");
-        const next = replaceLiteralAll(current, query, replacement);
+        const next = replaceLiteralAll(current, query, deleting ? "" : replacement);
         if (next !== current) {
           operations.push(contract.setTargetOperation(
             state.revision, cue.cue_id, next,
@@ -2634,7 +2748,20 @@
           ));
         }
       }
-      if (operations.length) await Promise.all(operations.map(sendOperation));
+      if (operations.length) {
+        const revisions = await Promise.all(operations.map(sendOperation));
+        rememberSearchReplaceUndo(beforeRevisionId, revisions.filter(Boolean).at(-1));
+      }
+      return;
+    }
+    if (deleting) {
+      const tokenIds = [...new Set(matches.flatMap(match => match.token_ids || []))];
+      if (tokenIds.length) {
+        const revision = await sendOperation(contract.deleteOperation(
+          state.revision, {token_ids:tokenIds}, manualProvenance("search_delete_all")
+        ));
+        rememberSearchReplaceUndo(beforeRevisionId, revision);
+      }
       return;
     }
     const phraseMatches = matches.filter(match => (match.token_ids || []).length > 1);
@@ -2649,7 +2776,8 @@
           manualProvenance("search_replace_all_phrase")
         );
       });
-      await Promise.all(operations.map(sendOperation));
+      const revisions = await Promise.all(operations.map(sendOperation));
+      rememberSearchReplaceUndo(beforeRevisionId, revisions.filter(Boolean).at(-1));
       return;
     }
     const replacements = matches.map(match => {
@@ -2657,11 +2785,36 @@
       const next = replaceLiteralAll(token.text, query, replacement);
       return {token_id:match.token_ids[0], text:next, expected_text:token.text};
     });
-    await sendOperation(contract.batchReplaceOperation(
+    const revision = await sendOperation(contract.batchReplaceOperation(
       state.revision,
       replacements,
       manualProvenance("search_replace_all")
     ));
+    rememberSearchReplaceUndo(beforeRevisionId, revision);
+  }
+
+  function rememberSearchReplaceUndo(beforeRevisionId, revision) {
+    const afterRevisionId = revision?.revision_id || "";
+    if (!beforeRevisionId || !afterRevisionId || beforeRevisionId === afterRevisionId) return;
+    state.searchReplaceUndo = {
+      projectId:state.projectId,
+      before:beforeRevisionId,
+      after:afterRevisionId
+    };
+    renderHeader();
+  }
+
+  async function undoSearchReplace() {
+    const entry = state.searchReplaceUndo;
+    if (!entry || entry.projectId !== state.projectId
+      || entry.after !== state.revision?.revision_id || state.operationPending) return;
+    $("#toolUndoReplace").disabled = true;
+    const restored = await restoreRevision(entry.before);
+    if (restored) {
+      state.searchReplaceUndo = null;
+      ordinaryError("已撤销最近一次查找替换", "notice");
+    }
+    renderHeader();
   }
 
   function replaceLiteralOnce(text, query, replacement) {
@@ -3218,6 +3371,7 @@
     stopTranslationPoll();
     if (projectId !== state.projectId) {
       renderTranslationTask(null);
+      state.searchReplaceUndo = null;
     }
     ordinaryError("");
     state.projectId = projectId;
@@ -3229,12 +3383,14 @@
       hideEditorTutorialIntro();
       const resetRevision = resetTutorial && project?.tutorial_case_id
         ? await api(projectPath("/tutorial/reset"), {method:"POST"}) : null;
-      const [revision, taskInfo, mediaInfo] = await Promise.all([
+      const [revision, taskInfo, mediaInfo, llmOptions] = await Promise.all([
         resetRevision ? Promise.resolve(resetRevision) : api(projectPath()),
         api(projectPath("/task-info")),
-        api(projectPath("/media-info"))
+        api(projectPath("/media-info")),
+        api(projectPath("/llm-options"))
       ]);
       state.taskInfo = taskInfo;
+      state.llmOptions = llmOptions;
       applySubtitlePolicy(taskInfo);
       configureTranslationLanguageDefaults(taskInfo);
       state.mediaInfo = mediaInfo;
@@ -3960,6 +4116,7 @@
     observeEditorTutorialEvent("search", {query:$("#toolSearch").value.trim(), found:state.searchIndex >= 0});
   };
   $("#toolReplaceCurrent").onclick = replaceCurrentSearch;
+  $("#toolUndoReplace").onclick = undoSearchReplace;
   $("#toolReplaceAll").onclick = replaceAllSearch;
   $("#toolSearchScopeSource").onclick = () => setSearchScope("source");
   $("#toolSearchScopeTarget").onclick = () => setSearchScope("target");
@@ -4088,6 +4245,8 @@
     localStorage.setItem(calibrationInstructionKey(), event.target.value);
   });
   $("#runAiCalibration").onclick = () => { state.taskPanelDismissed = false; runAiCalibration(); };
+  $("#retryFailedTask").onclick = retryFailedTask;
+  $("#openModelSettings").onclick = () => { window.location.href = "/settings#api"; };
   ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"].forEach(selector => {
     $(selector).onclick = event => convertScript(event.currentTarget.dataset.scriptTarget);
   });

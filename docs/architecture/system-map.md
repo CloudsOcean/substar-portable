@@ -235,11 +235,11 @@ flowchart LR
 | `segmentation_finalizer` | `finalizer` | Revalidate registered segmentation artifacts against the same canonical projection, commit Revision 1 and publish the project atomically. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`segmentation_result`<br>`segmentation_candidate`<br>`recognition_evidence`<br>`editor_document`<br>`worker_completion` | `editor_revision`<br>`task_record` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`project_store` |
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
 | `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
-| `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
+| `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields, including the optional project-scoped LLM provider. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
 | `translation_service` | `model_orchestration` | Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/editor/translation/result_policy.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request` | `task_record`<br>`translation_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`scripts/run_calibration_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference` | `task_record`<br>`calibration_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
-| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
+| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
 | `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py` | `editor_operation`<br>`editor_revision` | `editor_revision` | `editor_domain`<br>`project_store` |
@@ -1396,7 +1396,7 @@ Expose project/revision/media endpoints and revision-bound editing, reference-ma
 
 Code:
 
-- `substar_core/editor/http_api.py` — `get_project`, `save_project_document`, `apply_project_operation`, `start_project_translation`, `ai_calibrate_project`
+- `substar_core/editor/http_api.py` — `get_project`, `save_project_document`, `apply_project_operation`, `get_project_llm_options`, `start_project_translation`, `ai_calibrate_project`
 
 Must not:
 
@@ -1408,6 +1408,7 @@ Invariants:
 
 - Every document mutation binds expected_revision_id
 - Task information changes never rewrite existing ASR, Cue topology, timing or translations
+- A project-selected LLM provider freezes its own endpoint, model and credential reference into each new calibration or translation task
 - Editor reference matching uses the canonical project source language or explicit Auto detection
 - Low-confidence editor reference matches remain advisory and do not mutate the revision
 - External prooftranslation applies only matching Cue and source hashes
@@ -1426,7 +1427,7 @@ Recovery: Reload the latest revision and durable AI operation state.
 
 Reuses: `latest verified revision`<br>`completed AI result`; restarts: `failed AI operation when user requests`; terminal behavior: Return structured conflict or task error.
 
-Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`
+Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`
 
 Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1436,7 +1437,7 @@ Change impact contracts: `editor_operation`<br>`task_record`<br>`editor_revision
 
 Layer: `application_service`
 
-Load, validate and atomically save the required v2 project task-information fields.
+Load, validate and atomically save the required v2 project task-information fields, including the optional project-scoped LLM provider.
 
 Code:
 
@@ -1451,6 +1452,7 @@ Must not:
 Invariants:
 
 - task_info.json is required and is the only runtime authority
+- Missing project provider selection resolves to inherit without migrating the schema
 - All fields are committed atomically
 - Unsupported project versions are rejected
 
@@ -1465,7 +1467,7 @@ Recovery: Reject invalid updates and retain the prior task_info.json.
 
 Reuses: `prior canonical task information`; restarts: —; terminal behavior: Return an explicit validation error without document mutation.
 
-Tests: `tests/test_project_exchange.py`, `tests/editor_reference_boundary_ui.test.js`
+Tests: `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_reference_boundary_ui.test.js`
 
 Change impact modules: `composition_root`<br>`editor_api`<br>`editor_ui`<br>`project_exchange_service`<br>`creation_projection`
 
@@ -1613,7 +1615,7 @@ Change impact contracts: `editor_revision`<br>`media_info`<br>`media_stream`
 
 Layer: `frontend`
 
-Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose applied and advisory reference differences, and submit revision-bound operations with consistent right-click Cue-boundary controls.
+Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements.
 
 Code:
 
@@ -1678,7 +1680,7 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`
+Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`
 
 Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -2053,7 +2055,7 @@ Validate, persist and expose non-secret settings, edition capabilities, data roo
 
 Code:
 
-- `substar_core/config.py` — `load_settings`, `save_settings`, `load_credentials`, `save_credentials_from_settings`
+- `substar_core/config.py` — `load_settings`, `settings_for_model_provider`, `save_settings`, `load_credentials`, `save_credentials_from_settings`
 - `substar_core/model_providers.py` — `provider_catalog`, `canonical_provider_id`, `infer_model_provider`
 - `substar_core/edition.py`
 - `substar_core/relay_profile.py`

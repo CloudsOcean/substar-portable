@@ -28,10 +28,11 @@ from substar_core.artifacts import atomic_write_json
 from substar_core.ai_progress import ai_progress
 from substar_core.model_routing import resolve_stage_request
 from substar_core.chinese_script import convert_chinese_script
-from substar_core.config import load_settings
+from substar_core.config import load_settings, settings_for_model_provider
 from substar_core.glossary import active_glossary, load_glossary, normalize_entry, save_glossary
 from substar_core.glossary_xlsx import XLSX_MEDIA_TYPE, glossary_xlsx_bytes
 from substar_core.prompt_registry import render_prompt, source_language_for_text
+from substar_core.model_providers import MODEL_PROVIDER_CATALOG
 from substar_core.manuscript_matching import (
     ManuscriptMatchError,
     editor_reference_operations,
@@ -127,6 +128,10 @@ class ProjectTaskInfoRequest(BaseModel):
     source_hard_limit: int = Field(ge=1, le=500)
     target_hard_limit: int = Field(ge=1, le=500)
     glossary_id: str = Field(default="", max_length=80)
+    llm_provider_id: Literal[
+        "inherit", "deepseek", "glm", "openai", "azure_openai", "deerapi",
+        "gemini", "siliconflow", "qwen", "custom",
+    ] = "inherit"
 
 
 class TranslationStartRequest(BaseModel):
@@ -930,6 +935,32 @@ def _runtime_ai_task_projection(
     }
 
 
+def _editor_ai_idempotency_key(kind: str, task_input: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        dict(task_input), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return f"{kind}:{sha256(encoded).hexdigest()}"
+
+
+def _retry_exact_failed_editor_task(
+    service: Any,
+    *,
+    project_id: str,
+    task_type: Literal["calibration", "translation"],
+    task_input: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    failed = service.list_tasks(
+        project_id=project_id, task_type=task_type, states=["failed"], limit=1
+    )
+    if not failed:
+        return None
+    prior_input = service.get_task_input(failed[0]["task_id"])
+    if prior_input != dict(task_input):
+        return None
+    retried = service.retry(failed[0]["task_id"])
+    return _runtime_ai_task_projection(retried, prior_input)
+
+
 @router.delete("/projects/{project_id}/ai-task")
 def cancel_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any]:
     tasks = request.app.state.task_service.list_tasks(
@@ -954,6 +985,54 @@ def get_project_task_info(project_id: str) -> dict[str, Any]:
         return load_task_info(job_dir, project_id)
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _project_llm_settings(project_id: str, *, include_secret: bool) -> dict[str, Any]:
+    settings = load_settings(include_secret=False)
+    info = load_task_info(project_job_path(project_id), project_id)
+    provider_id = str(info.get("llm_provider_id") or "inherit")
+    if provider_id == "inherit":
+        provider_id = str(settings.get("active_model_provider") or "deepseek")
+    return settings_for_model_provider(
+        provider_id, include_secret=include_secret, base_settings=settings
+    )
+
+
+@router.get("/projects/{project_id}/llm-options")
+def get_project_llm_options(project_id: str) -> dict[str, Any]:
+    open_project_store(project_id)
+    settings = load_settings(include_secret=False)
+    info = load_task_info(project_job_path(project_id), project_id)
+    profiles = settings.get("model_provider_profiles", {})
+    key_set = settings.get("model_provider_key_set", {})
+    options = []
+    for definition in MODEL_PROVIDER_CATALOG:
+        provider_id = str(definition["id"])
+        profile = profiles.get(provider_id, {}) if isinstance(profiles, dict) else {}
+        if not profile and provider_id == str(settings.get("active_model_provider") or ""):
+            profile = {
+                "model": settings.get("translation_api_model", ""),
+                "base_url": settings.get("translation_api_base_url", ""),
+            }
+        if not isinstance(profile, dict) or not key_set.get(provider_id):
+            continue
+        model = str(profile.get("model") or "").strip()
+        base_url = str(profile.get("base_url") or "").strip()
+        if not model or not base_url:
+            continue
+        options.append({
+            "provider_id": provider_id,
+            "label": str(definition["label"]),
+            "model": model,
+        })
+    selected = str(info.get("llm_provider_id") or "inherit")
+    active = str(settings.get("active_model_provider") or "deepseek")
+    return {
+        "selected_provider_id": selected,
+        "active_provider_id": active,
+        "effective_provider_id": active if selected == "inherit" else selected,
+        "options": options,
+    }
 
 
 @router.put("/projects/{project_id}/task-info")
@@ -2267,7 +2346,12 @@ def ai_calibrate_project(
         raise HTTPException(status_code=423, detail={
             "code": "editor_ai_task_locked", "message": "当前项目已有 AI 任务正在运行"
         })
-    settings = load_settings(include_secret=False)
+    try:
+        settings = _project_llm_settings(project_id, include_secret=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "project_llm_unavailable", "message": str(exc)
+        }) from exc
     try:
         settings.update(task_info_settings(load_task_info(project_job_path(project_id), project_id)))
     except (OSError, TypeError, ValueError):
@@ -2288,13 +2372,21 @@ def ai_calibrate_project(
         "settings": frozen_settings,
     }
     try:
+        retried = _retry_exact_failed_editor_task(
+            service,
+            project_id=project_id,
+            task_type="calibration",
+            task_input=task_input,
+        )
+        if retried is not None:
+            return retried
         task = service.create_task(
             "calibration",
             CALIBRATION_INPUT_SCHEMA,
             task_input,
             project_id=project_id,
             expected_revision_id=latest.revision_id,
-            idempotency_key=f"calibration:{latest.revision_id}:{sha256(payload.instruction.encode('utf-8')).hexdigest()}",
+            idempotency_key=_editor_ai_idempotency_key("calibration", task_input),
         )
         return _runtime_ai_task_projection(task, task_input)
     except Exception as exc:
@@ -3200,7 +3292,12 @@ def start_project_translation(
     project_id: str, payload: TranslationStartRequest, request: Request
 ) -> dict[str, Any]:
     job_dir = project_job_path(project_id)
-    settings = load_settings(include_secret=False)
+    try:
+        settings = _project_llm_settings(project_id, include_secret=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "code": "project_llm_unavailable", "message": str(exc)
+        }) from exc
     try:
         settings.update(task_info_settings(load_task_info(job_dir, project_id)))
     except (OSError, TypeError, ValueError):
@@ -3271,13 +3368,21 @@ def start_project_translation(
         "settings": frozen_settings,
     }
     try:
+        retried = _retry_exact_failed_editor_task(
+            task_service,
+            project_id=project_id,
+            task_type="translation",
+            task_input=task_input,
+        )
+        if retried is not None:
+            return retried
         task = task_service.create_task(
             "translation",
             TRANSLATION_INPUT_SCHEMA,
             task_input,
             project_id=project_id,
             expected_revision_id=payload.expected_revision_id,
-            idempotency_key=f"translation:{payload.expected_revision_id}:{payload.mapping_mode}",
+            idempotency_key=_editor_ai_idempotency_key("translation", task_input),
         )
         return _runtime_ai_task_projection(task, task_input)
     except Exception as exc:

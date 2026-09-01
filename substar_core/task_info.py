@@ -7,6 +7,7 @@ import re
 from typing import Any, Mapping
 
 from substar_core.artifacts import atomic_write_json
+from substar_core.model_providers import MODEL_PROVIDER_IDS
 TASK_INFO_SCHEMA = "substar.task-info.v2"
 TASK_INFO_FILENAME = "task_info.json"
 SOURCE_LANGUAGES = {"Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"}
@@ -37,6 +38,9 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     target_limit = int(value.get("target_hard_limit", 25))
     if not 1 <= source_limit <= 500 or not 1 <= target_limit <= 500:
         raise ValueError("行长必须是 1–500 的整数")
+    llm_provider_id = str(value.get("llm_provider_id") or "inherit").strip()
+    if llm_provider_id != "inherit" and llm_provider_id not in MODEL_PROVIDER_IDS:
+        raise ValueError("本任务使用的模型服务商无效")
     return {
         "schema_version": TASK_INFO_SCHEMA,
         "project_id": project_id,
@@ -44,6 +48,7 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
         "language": language,
         "target_language_mode": target,
         "glossary_id": str(value.get("glossary_id") or "").strip()[:80],
+        "llm_provider_id": llm_provider_id,
         "source_hard_limit": source_limit,
         "target_hard_limit": target_limit,
         "updated_at": str(value.get("updated_at") or datetime.now(timezone.utc).isoformat()),
@@ -75,6 +80,7 @@ def task_info_settings(info: Mapping[str, Any]) -> dict[str, Any]:
         "language": source,
         "target_language_mode": target,
         "glossary_id": str(info.get("glossary_id") or ""),
+        "llm_provider_id": str(info.get("llm_provider_id") or "inherit"),
         "source_hard_limit": int(info["source_hard_limit"]),
         "target_hard_limit": int(info["target_hard_limit"]),
     }

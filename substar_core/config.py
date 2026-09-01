@@ -414,6 +414,57 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     return constrain_settings(settings)
 
 
+def settings_for_model_provider(
+    provider_id: str,
+    *,
+    include_secret: bool = False,
+    base_settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project one saved provider profile onto every shared LLM stage."""
+    requested = str(provider_id or "").strip()
+    if requested not in MODEL_PROVIDER_IDS:
+        raise ValueError("模型服务商无效")
+    settings = dict(base_settings or load_settings(include_secret=False))
+    profiles = normalize_provider_profiles(settings.get("model_provider_profiles", {}))
+    profile = profiles.get(requested)
+    if not profile and requested == str(settings.get("active_model_provider") or ""):
+        profile = {
+            "base_url": settings.get("translation_api_base_url", ""),
+            "model": settings.get("translation_api_model", ""),
+            "auth_mode": settings.get("translation_api_auth_mode", "bearer"),
+            "timeout_seconds": settings.get("translation_api_timeout_seconds", 300),
+        }
+    if not profile:
+        raise ValueError("所选模型服务商尚未配置")
+    base_url = str(profile.get("base_url") or "").strip()
+    model = str(profile.get("model") or "").strip()
+    if not base_url or not model:
+        raise ValueError("所选模型服务商的地址或模型尚未配置")
+    settings.update(
+        active_model_provider=requested,
+        translation_api_base_url=base_url,
+        translation_api_model=model,
+        translation_api_auth_mode=str(profile.get("auth_mode") or "bearer"),
+        translation_api_timeout_seconds=int(profile.get("timeout_seconds") or 300),
+    )
+    for stage in (
+        "segmentation", "segmentation_repair", "translation",
+        "translation_repair", "calibration", "audit_repair",
+    ):
+        settings[f"stage_{stage}_model"] = model
+    credentials = load_credentials()
+    key = resolve_model_provider_credential(credentials, requested)
+    settings["translation_api_key_set"] = bool(key)
+    if include_secret:
+        settings["translation_api_key"] = key
+    else:
+        settings.pop("translation_api_key", None)
+    apply_declared_model_capabilities(settings)
+    from .edition import constrain_settings
+
+    return constrain_settings(settings)
+
+
 def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
     current = load_settings(include_secret=True)

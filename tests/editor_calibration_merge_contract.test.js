@@ -11,6 +11,6 @@ const html = fs.readFileSync(path.join(root, "web", "editor.html"), "utf8");
 assert.match(editor, /state\.editorAiTask = \{\.\.\.result, kind:"calibration"\}/);
 assert.match(editor, /startEditorAiTaskPoll\(\)/);
 assert.doesNotMatch(editor, /result\.merge_applied_count/);
-assert.match(html, /editor\.js\?v=20260831-v2-contract-1/);
+assert.match(html, /editor\.js\?v=20260901-v202-1/);
 
 console.log("editor_calibration_merge_contract: ok");

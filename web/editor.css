@@ -344,7 +344,7 @@ body.editor-shell {
 
 .cue-task-island { position: absolute; z-index: 12; right: 18px; bottom: 12px; width: min(560px, calc(100% - 36px)); overflow: hidden; border: 1px solid #343843; border-radius: 10px; background: rgba(16, 18, 24, .96); box-shadow: 0 12px 34px rgba(0, 0, 0, .45); backdrop-filter: blur(14px); }
 .cue-task-island:has(.translation-task-panel.hidden):has(.ordinary-error.hidden) { width: min(430px, calc(100% - 36px)); }
-.translation-task-panel { position: relative; min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; grid-template-areas: "head close" "progress close" "steps close" "message close"; align-items: center; column-gap: 10px; row-gap: 6px; padding: 9px 8px 9px 11px; background: linear-gradient(135deg, rgba(139, 66, 255, .08), rgba(80, 205, 235, .025)); }
+.translation-task-panel { position: relative; min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) 24px; grid-template-areas: "head close" "progress close" "steps close" "message close" "recovery recovery"; align-items: center; column-gap: 10px; row-gap: 6px; padding: 9px 8px 9px 11px; background: linear-gradient(135deg, rgba(139, 66, 255, .08), rgba(80, 205, 235, .025)); }
 .translation-task-panel > div:first-child { grid-area: head; display: flex; justify-content: space-between; gap: 7px; font-size: 10px; }
 .translation-task-panel > div:first-child strong { color: #ebe7f7; font-size: 11px; }
 .translation-task-panel span,
@@ -362,6 +362,10 @@ body.editor-shell {
 .translation-task-panel.issues .translation-progress i { background: var(--editor-yellow); }
 .translation-task-panel.issues > div:first-child strong,
 .translation-task-panel.issues p { color: var(--editor-yellow); }
+.task-failure-recovery { grid-area: recovery; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.task-failure-recovery select, .task-failure-recovery button { min-width: 0; height: 27px; border: 1px solid #3a404d; border-radius: 6px; background: #171a21; color: #e7e9ef; font-size: 9px; }
+.task-failure-recovery select { padding: 0 7px; }
+.task-failure-recovery button { padding: 0 9px; }
 .translation-task-panel > .task-dismiss { grid-area: close; }
 .task-dismiss { width: 23px; height: 23px; padding: 0; border-color: transparent; background: transparent; color: #7f8796; font-size: 15px; }
 .task-dismiss:hover { border-color: #3c424e; color: #eef0f5; }
@@ -482,6 +486,7 @@ body.hide-editor-translations .translation-track { display: none; }
 .task-info-popover { width: min(520px, calc(100vw - 28px)); display: grid; gap: 10px; padding: 14px; }
 .task-info-popover > label, .task-info-grid label { display: grid; gap: 5px; }
 .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.task-info-grid .task-info-model { grid-column: 1 / -1; }
 .task-info-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 .editor-tutorial-layer { position: fixed; inset: 0; z-index: 500; pointer-events: none; }

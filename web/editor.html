@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260830-convergence-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260901-v202-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
   <script src="/assets/theme/personalization.js?v=20260814-8"></script>
@@ -24,6 +24,7 @@
           <p>这些设置只影响当前任务后续的显示、校验与处理，不会重算已有字幕。</p>
           <label><span>任务名称</span><input id="taskInfoName" maxlength="120" autocomplete="off" required></label>
           <div class="task-info-grid">
+            <label class="task-info-model"><span>本任务使用的模型</span><select id="taskInfoLlmProvider"><option value="inherit">跟随全局设置</option></select></label>
             <label><span>原文语言</span><select id="taskInfoSourceLanguage"><option value="Auto">自动识别</option><option value="mixed">中英混合</option><option value="zh">中文</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韩文</option></select></label>
             <label><span>目标语言</span><select id="taskInfoTargetLanguage"><option value="zh-CN">中文</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韩文</option></select></label>
             <label><span>原文行长</span><input id="taskInfoSourceLimit" type="number" min="1" max="500" required></label>
@@ -122,7 +123,7 @@
       <details class="tool-accordion" data-tool-panel="search"><summary>查找与替换</summary><div class="tool-panel">
         <div class="search-scope-toggle" role="group" aria-label="查找范围"><button id="toolSearchScopeSource" class="active" type="button" data-search-scope="source" aria-pressed="true">源语</button><button id="toolSearchScopeTarget" type="button" data-search-scope="target" aria-pressed="false">译文</button></div>
         <input id="toolSearch" type="search" aria-label="查找字幕" placeholder="查找词元或译文" disabled><input id="toolReplace" type="text" aria-label="替换为" placeholder="替换为" disabled>
-        <div class="tool-button-pair"><button id="toolSearchNext" type="button" disabled>查找下一个</button><button id="toolReplaceCurrent" type="button" disabled>替换当前</button></div><button id="toolReplaceAll" type="button" disabled>全部替换</button><span id="toolSearchStatus" class="tool-status">查找范围：源语词元与译文</span>
+        <div class="tool-button-pair"><button id="toolSearchNext" type="button" disabled>查找下一个</button><button id="toolReplaceCurrent" type="button" disabled>替换当前</button></div><div class="tool-button-pair"><button id="toolUndoReplace" type="button" disabled>撤销</button><button id="toolReplaceAll" type="button" disabled>全部替换</button></div><span id="toolSearchStatus" class="tool-status">查找范围：源语词元与译文</span>
       </div></details>
       <details class="tool-accordion punctuation-tools" data-tool-panel="punctuation"><summary>标点处理</summary><div class="tool-panel">
         <strong>上行字幕</strong><input id="upperPunctuationRemove" type="text" placeholder="消除符号" disabled><input id="upperPunctuationSpace" type="text" placeholder="替换为空格" disabled>
@@ -168,6 +169,7 @@
           <div class="translation-progress"><i id="translationProgressBar"></i></div>
           <ol id="translationTaskSteps" class="translation-task-steps hidden" aria-label="AI 任务阶段"></ol>
           <p id="translationTaskMessage">等待启动</p>
+          <div id="taskFailureRecovery" class="task-failure-recovery hidden"><select id="failedTaskModel" aria-label="重试使用的模型"></select><button id="retryFailedTask" type="button">重试</button><button id="openModelSettings" type="button">设置</button></div>
           <button id="dismissTaskPanel" class="task-dismiss" type="button" title="取消当前任务" aria-label="取消当前任务">×</button>
         </section>
         <div id="ordinaryError" class="ordinary-error hidden" role="status">
@@ -285,6 +287,6 @@
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260831-v2-contract-1"></script>
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
-  <script src="/assets/editor.js?v=20260831-v2-contract-1"></script>
+  <script src="/assets/editor.js?v=20260901-v202-1"></script>
 </body>
 </html>
