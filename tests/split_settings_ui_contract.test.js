@@ -61,5 +61,5 @@ test("terminal editor task cards can be deleted without deleting their projects"
   assert.match(splitJs, /deleteEditorTask\(removableJob, card, remove\)/);
   assert.match(splitJs, /api\(`\/api\/tasks\/\$\{encodeURIComponent\(taskId\)\}`,[\s\S]*method:"DELETE"/);
   assert.match(splitJs, /项目版本和编辑成果会保留/);
-  assert.match(splitHtml, /split\.js\?v=20260831-v2-contract-1/);
+  assert.match(splitHtml, /split\.js\?v=20260901-task-draft-cleanup-1/);
 });

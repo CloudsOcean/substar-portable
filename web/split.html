@@ -109,7 +109,7 @@
             <div class="qwen-enhancement-body">
               <label class="qwen-field">
                 <span>节目内容与识别重点</span>
-                <textarea id="qwenAiBriefInput" rows="3" maxlength="4000" placeholder="描述本期节目内容、涉及领域，以及希望准确识别的人名、品牌、术语或外语词。&#10;直接点名的词语会作为超级热词。"></textarea>
+                <textarea id="qwenAiBriefInput" rows="3" maxlength="4000"></textarea>
               </label>
               <div class="qwen-assist-row">
                 <span id="qwenAssistStatus" aria-live="polite"></span>
@@ -118,11 +118,11 @@
               <div class="qwen-output-grid">
                 <label class="qwen-field">
                   <span>Qwen Prompt <em id="qwenPromptCount">0 / 400</em></span>
-                  <textarea id="qwenPromptInput" rows="5" maxlength="400" placeholder="向 Qwen 说明节目领域、人物与主题，有助于结合上下文消歧，并提高专名识别准确率。&#10;使用所选原文语言组织，但不会限制音频中出现其他语言。"></textarea>
+                  <textarea id="qwenPromptInput" rows="5" maxlength="400"></textarea>
                 </label>
                 <label class="qwen-field">
                   <span>临时热词 <em id="qwenHotwordCount">0 / 2000</em></span>
-                  <textarea id="qwenHotwordsInput" rows="5" placeholder="每行一个，可混合中英文或其他语言；可提高对应词语的识别准确率。&#10;无后缀默认权重 4；:5 是普通热词最高权重。&#10;:50 是必须重点命中的超级热词，最多 50 个。"></textarea>
+                  <textarea id="qwenHotwordsInput" rows="5"></textarea>
                 </label>
               </div>
               <div class="qwen-glossary-placeholder"><b>词库热词</b><span>接口已预留，暂不自动注入本次听写。</span></div>
@@ -230,6 +230,6 @@
       <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
     </form>
   </div>
-  <script src="/assets/split.js?v=20260831-v2-contract-1" defer></script>
+  <script src="/assets/split.js?v=20260901-task-draft-cleanup-1" defer></script>
 </body>
 </html>

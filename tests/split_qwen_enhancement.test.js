@@ -32,17 +32,26 @@ test("AI replaces prompt and merges generated hotwords without erasing user term
 
 test("AI brief and hotword guidance explain deterministic super weights", () => {
   assert.match(html, /节目内容与识别重点/);
-  assert.match(html, /直接点名的词语会作为超级热词/);
-  assert.match(html, /有助于结合上下文消歧，并提高专名识别准确率/);
-  assert.match(html, /可提高对应词语的识别准确率/);
-  assert.match(html, /:5 是普通热词最高权重/);
-  assert.match(html, /:50 是必须重点命中的超级热词/);
+  assert.doesNotMatch(html, /id="qwenAiBriefInput"[^>]*placeholder=/);
+  assert.doesNotMatch(html, /id="qwenPromptInput"[^>]*placeholder=/);
+  assert.doesNotMatch(html, /id="qwenHotwordsInput"[^>]*placeholder=/);
   assert.doesNotMatch(html, /<small>描述节目内容/);
   assert.doesNotMatch(html, /<small>使用所选原文语言/);
   assert.doesNotMatch(html, /<small>可混合中文/);
   assert.match(html, /id="qwenAssistStatus" aria-live="polite"><\/span>/);
   assert.match(html, /class="primary-button qwen-assist-button"/);
   assert.match(app, /prioritize_generated_qwen_hotwords/);
+});
+
+test("new builds ignore legacy browser drafts and clear media-specific fields after submission", () => {
+  assert.match(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v2"/);
+  assert.doesNotMatch(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v1"/);
+  assert.match(source, /function clearTaskSpecificFields\(\)/);
+  assert.match(source, /qwenAiBriefInput"\)\.value = ""/);
+  assert.match(source, /qwenPromptInput"\)\.value = ""/);
+  assert.match(source, /qwenHotwordsInput"\)\.value = ""/);
+  assert.match(source, /referenceBreakSymbolsInput"\)\.value = referenceBreakPreset/);
+  assert.match(source, /clearSubmission\(\)[\s\S]*?clearTaskSpecificFields\(\)/);
 });
 
 test("upload drop zone uses the media upload icon", () => {

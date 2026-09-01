@@ -7,7 +7,10 @@
   const ACTIVE_STATUSES = new Set(["queued", "running", "failed", "interrupted", "cancelled"]);
   const COMPLETE_STATUSES = new Set(["awaiting_edit", "completed"]);
   const MAIN_SPLIT_BRANCH = "A";
-  const TASK_CONFIG_STORAGE_KEY = "substar.split.task-config.v1";
+  // Task drafts contain media-specific prompt and punctuation choices.  Use a
+  // versioned key so a newly installed build never revives an older build's
+  // browser draft merely because both launch on 127.0.0.1:8769.
+  const TASK_CONFIG_STORAGE_KEY = "substar.split.task-config.v2";
   const TUTORIAL_STATUS_KEY = "substar.split.tutorial.v1";
   const TUTORIAL_AUDIO_URL = "/api/examples/tutorials/reference-script-v1/assets/media";
   const TUTORIAL_REFERENCE_URL = "/api/examples/tutorials/reference-script-v1/assets/reference";
@@ -989,7 +992,19 @@
     $("#videoFileChip").classList.add("hidden");
     $("#referenceFileName").textContent = "未添加";
     $("#referenceFileName").removeAttribute("title");
+    clearTaskSpecificFields();
     validateForm();
+  }
+
+  function clearTaskSpecificFields() {
+    $("#qwenAiBriefInput").value = "";
+    $("#qwenPromptInput").value = "";
+    $("#qwenHotwordsInput").value = "";
+    $("#referenceBreakSymbolsInput").value = referenceBreakPreset($("#languageInput").value);
+    syncQwenEnhancementCounts();
+    try {
+      localStorage.setItem(TASK_CONFIG_STORAGE_KEY, JSON.stringify(taskConfigFromControls()));
+    } catch (_) {}
   }
 
   function automaticSettings() {
