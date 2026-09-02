@@ -130,7 +130,7 @@
         <strong>下行字幕</strong><input id="lowerPunctuationRemove" type="text" placeholder="消除符号" disabled><input id="lowerPunctuationSpace" type="text" placeholder="替换为空格" disabled><button id="applyPunctuation" type="button" disabled>应用标点规则</button>
       </div></details>
       <details id="autoSnapMenu" class="tool-accordion auto-snap-menu" data-tool-panel="auto-snap"><summary id="autoSnapMenuSummary" aria-disabled="true">自动吸附</summary><div class="tool-panel auto-snap-popover">
-        <fieldset><legend>向前吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="forwardSnapMode" value="none"><span>不吸附</span></label><div class="auto-snap-option auto-snap-smart-option"><label class="auto-snap-mode-label"><input type="radio" name="forwardSnapMode" value="smart" checked><span>智能吸附</span></label><label class="auto-snap-parameter"><span>前置静音余量</span><input id="forwardSnapPreRoll" type="number" min="0" max="100" step="5" value="20" aria-label="向前吸附前置静音余量"><span class="auto-snap-unit">ms</span></label><label class="auto-snap-parameter"><span>灵敏度</span><input id="forwardSnapSensitivity" type="number" min="0" max="100" step="5" value="50" aria-label="向前吸附灵敏度"><span class="auto-snap-unit">%</span></label></div></div></fieldset>
+        <fieldset><legend>向前吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="forwardSnapMode" value="none"><span>不吸附</span></label><div class="auto-snap-option auto-snap-smart-option"><label class="auto-snap-mode-label"><input type="radio" name="forwardSnapMode" value="smart" checked><span>智能吸附</span></label><label class="auto-snap-parameter"><span>前置静音余量</span><input id="forwardSnapPreRoll" type="number" min="0" max="100" step="5" value="0" aria-label="向前吸附前置静音余量"><span class="auto-snap-unit">ms</span></label><label class="auto-snap-parameter"><span>灵敏度</span><input id="forwardSnapSensitivity" type="number" min="0" max="100" step="5" value="50" aria-label="向前吸附灵敏度"><span class="auto-snap-unit">%</span></label></div></div></fieldset>
         <fieldset><legend>向后吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="backwardSnapMode" value="none"><span>不吸附</span></label><label class="auto-snap-option auto-snap-threshold"><input type="radio" name="backwardSnapMode" value="threshold" checked><span>阈值</span><input id="snapThreshold" type="number" min="0" max="2000" step="25" value="500"><span class="auto-snap-unit">ms</span></label></div></fieldset>
         <div class="auto-snap-actions"><button id="applyAutoSnap" type="button" disabled>执行</button><button id="undoAutoSnap" type="button" disabled>撤销</button></div><p id="autoSnapStatus" class="muted">智能向前只在检测到可信起音时移动。</p>
       </div></details>
@@ -287,6 +287,6 @@
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260831-v2-contract-1"></script>
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
-  <script src="/assets/editor.js?v=20260901-v202-1"></script>
+  <script src="/assets/editor.js?v=20260902-v204-1"></script>
 </body>
 </html>

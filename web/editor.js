@@ -133,7 +133,7 @@
     $("#redoDocument").title = `重做（${state.shortcuts.redo}）`;
     const preRollStored = localStorage.getItem("substar.editor.forward-snap-pre-roll-ms");
     const preRoll = Math.max(0, Math.min(100,
-      preRollStored === null ? 20 : Number(preRollStored)
+      preRollStored === null ? 0 : Number(preRollStored)
     ));
     const sensitivityStored = localStorage.getItem("substar.editor.forward-snap-sensitivity");
     const sensitivity = Math.max(0, Math.min(100,

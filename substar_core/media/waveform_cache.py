@@ -93,10 +93,10 @@ def smart_forward_snap(
     cue_starts: Iterable[Mapping[str, Any]],
     *,
     search_window_ms: int = 1000,
-    pre_roll_ms: int = 20,
+    pre_roll_ms: int = 0,
     sensitivity: int = 50,
 ) -> dict[str, Any]:
-    """Return trustworthy local speech onsets with a small leading cushion."""
+    """Return trustworthy local speech onsets with an optional leading cushion."""
 
     search_seconds = max(0.1, min(1.0, int(search_window_ms) / 1000.0))
     pre_roll_seconds = max(0.0, min(0.1, int(pre_roll_ms) / 1000.0))

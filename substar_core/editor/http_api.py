@@ -171,7 +171,7 @@ class RestoreRevisionRequest(BaseModel):
 
 class SmartForwardSnapRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
-    pre_roll_ms: int = Field(default=20, ge=0, le=100)
+    pre_roll_ms: int = Field(default=0, ge=0, le=100)
     sensitivity: int = Field(default=50, ge=0, le=100)
 
 

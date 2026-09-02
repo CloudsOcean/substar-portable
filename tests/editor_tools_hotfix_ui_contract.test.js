@@ -22,7 +22,7 @@ test("release keeps the non-dubbing editor tool contract", () => {
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
     "editor.css":"20260901-v202-1",
-    "editor.js":"20260901-v202-1",
+    "editor.js":"20260902-v204-1",
     "editor_document.js":"20260831-v2-contract-1",
     "editor_timeline.js":"20260828-shortcuts-1",
     "editor_tutorial.js":"20260831-v2-contract-1",
@@ -33,6 +33,8 @@ test("hotfix fingerprints every changed editor asset", () => {
 });
 
 test("smart snap and multi-token search producers match their consumers", () => {
+  assert.match(html, /id="forwardSnapPreRoll"[^>]*value="0"/);
+  assert.match(js, /preRollStored === null \? 0 : Number\(preRollStored\)/);
   assert.match(js, /autoSnapOnce\(\{[\s\S]*forwardStarts/);
   assert.match(timeline, /function autoSnapPlan\(view, options = \{\}\)/);
   assert.match(documentContract, /function findContiguousTokenMatches/);
