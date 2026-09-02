@@ -335,6 +335,23 @@ class ProjectCreationApiTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200, deleted.text)
         self.assertFalse(project.exists())
 
+    def test_delete_reconciles_a_stale_running_projection(self) -> None:
+        media = wave_bytes(self.root / "stale-delete.wav")
+        created_response = asyncio.run(self.post(media))
+        self.assertEqual(created_response.status_code, 202, created_response.text)
+        job_id = created_response.json()["id"]
+        current = self.wait_job(job_id)
+        self.assertEqual(current["status"], "awaiting_edit", current)
+
+        with application.JOBS_LOCK:
+            application.JOBS[job_id].status = "running"
+            application._persist_job(application.JOBS[job_id])
+
+        deleted = asyncio.run(self.delete(job_id))
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted"], job_id)
+        self.assertFalse((self.projects / job_id).exists())
+
     def test_batch_idempotency_binds_order_members_and_settings(self) -> None:
         first_media = wave_bytes(self.root / "batch-a.wav")
         second_media = wave_bytes(self.root / "batch-b.wav")

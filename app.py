@@ -187,7 +187,7 @@ async def _application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Substar Workbench",
-    version="2.0.4",
+    version="2.0.5",
     lifespan=_application_lifespan,
 )
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
@@ -1471,6 +1471,14 @@ def delete_workbench_split_job(job_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail="切分任务不存在")
         if job.workflow_mode != "subtitle_creation":
             raise HTTPException(status_code=400, detail="该项目不是切分任务")
+    # A browser card can still contain the last running projection after the
+    # durable tasks have already settled. Reconcile before deciding whether
+    # this request is a cancellation or a recoverable project deletion.
+    _refresh_canonical_job_projection(job)
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="切分任务不存在")
         if job.status in {"queued", "running"}:
             job.cancel_requested = True
             job.message = "正在安全取消任务"
