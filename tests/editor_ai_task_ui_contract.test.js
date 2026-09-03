@@ -39,6 +39,17 @@ test("exclusive task polling cannot overwrite translation's detailed task status
   assert.match(editorJs, /已等待 \$\{Math\.round\(elapsedSeconds\)\} 秒/);
 });
 
+test("an active calibration or translation task dims every editor-writing command menu", () => {
+  assert.match(editorHtml, /id="scriptProjectionMenu" class="editor-command-menu"/);
+  assert.match(editorCss, /\.editor-command-menu\.disabled\s*\{[^}]*opacity:\s*\.36;[^}]*pointer-events:\s*none;/s);
+  for (const pair of [
+    '["#translationMenu", "#translationMenuSummary"]',
+    '["#aiCalibrationMenu", "#aiCalibrate"]',
+    '["#scriptProjectionMenu", "#scriptProjectionSummary"]',
+  ]) assert.ok(editorJs.includes(pair));
+  assert.match(editorJs, /const editingCommandDisabled = !revision \|\| locked;/);
+});
+
 test("blank manual translation tracks still render editable rows", () => {
   assert.match(editorJs, /const hasTarget = Boolean\(cue\.target\);/);
   assert.doesNotMatch(

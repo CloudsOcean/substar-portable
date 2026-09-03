@@ -12,27 +12,27 @@ def test_translation_progress_is_counted_monotonic_and_uses_short_repair_label(
 ) -> None:
     values = [
         ai_progress(
-            kind="translation", phase="executing", unit_label="个意义组",
+            kind="translation", phase="executing", unit_label="块",
             planned=4, completed=0,
         ),
         ai_progress(
-            kind="translation", phase="executing", unit_label="个意义组",
+            kind="translation", phase="executing", unit_label="块",
             planned=4, completed=4,
         ),
         ai_progress(
-            kind="translation", phase="repair", unit_label="个意义组",
+            kind="translation", phase="repair", unit_label="块",
             planned=4, completed=4, accepted=3, failed=1,
             repair_planned=1, repair_completed=1, repair_accepted=1,
         ),
         ai_progress(
-            kind="translation", phase="completed", unit_label="个意义组",
+            kind="translation", phase="completed", unit_label="块",
             planned=4, completed=4,
         ),
     ]
     assert [row["progress"] for row in values] == sorted(
         row["progress"] for row in values
     )
-    assert values[2]["message"] == "修复 1/1 个意义组 · 首轮通过 3/4"
+    assert values[2]["message"] == "修复 1/1 块 · 首轮通过 3/4"
     assert [row["label"] for row in values[2]["steps"]] == [
         "模型处理", "修复", "结果验收", "生成可编辑结果", "交付产物", "已交付",
     ]
@@ -174,6 +174,13 @@ def test_calibration_repairs_all_rejected_items_and_freezes_accepted_output(
     }
     assert [row["action_id"] for row in result[0][1]["actions"]] == [
         "accepted", "repaired-a", "repaired-b",
+    ]
+    assert result[0][2]["primary_error"] == (
+        "calibration returned an invalid response contract"
+    )
+    assert result[0][2]["primary_validation_issues"] == [
+        {"code": "invalid_action", "action_id": "rejected-a"},
+        {"code": "invalid_action", "action_id": "rejected-b"},
     ]
     # The rejected primary response is never cached; only the valid repair is.
     assert len(list(tmp_path.glob("*.json"))) == 1

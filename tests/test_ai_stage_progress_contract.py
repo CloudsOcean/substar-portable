@@ -32,8 +32,8 @@ def test_common_progress_contract_is_monotonic_and_counted() -> None:
     assert [row["progress"] for row in values] == sorted(
         row["progress"] for row in values
     )
-    assert values[0]["message"] == "模型处理 0/4 个校准块"
-    assert values[2]["message"] == "修复 0/1 个校准块 · 首轮通过 3/4"
+    assert values[0]["message"] == "模型处理 0/4 块"
+    assert values[2]["message"] == "修复 0/1 块 · 首轮通过 3/4"
     assert values[-1]["progress"] == 1.0
 
 
@@ -187,13 +187,13 @@ def test_translation_does_not_enter_an_empty_repair_phase() -> None:
 
 def test_translation_runtime_reads_unified_counted_progress() -> None:
     value = ai_progress(
-        kind="translation", phase="executing", unit_label="个意义组",
+        kind="translation", phase="executing", unit_label="块",
         planned=7, completed=3,
     )
     projected = progress_from_mapping({"ai_progress": value})
     assert projected is not None
     assert projected["progress"] == value["progress"]
-    assert projected["message"] == "模型处理 3/7 个意义组"
+    assert projected["message"] == "模型处理 3/7 块"
 
 
 @patch("substar_core.model_gateway.gateway.requests.post")

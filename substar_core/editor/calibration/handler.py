@@ -90,10 +90,12 @@ def build_calibration_handler(projects_root: Path, application_root: Path) -> Ta
         if revision is None or revision.revision_id != summary.get("result_revision_id"):
             raise InvalidTaskError("calibration result revision was not published")
         problems = list(summary.get("problem_cue_ids") or [])
+        problem_blocks = list(summary.get("problem_block_ids") or [])
         failures = list(summary.get("failed_blocks") or [])
         return {
             "result_revision_id": revision.revision_id,
             "problem_cue_ids": problems,
+            "problem_block_ids": problem_blocks,
             "failed_blocks": failures,
             "needs_attention": bool(problems or failures),
             "ai_progress": dict(summary.get("ai_progress") or {}),

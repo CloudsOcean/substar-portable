@@ -103,6 +103,20 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
         self.assertEqual(actions[0]["after_text"], "Tea,")
         self.assertEqual(rejected, [])
 
+    def test_noop_action_is_ignored_before_a_bad_token_binding_can_fail_block(self) -> None:
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                token_ids=["t2"],
+                before_text="the",
+                after_text="the",
+            )]},
+            self.owned,
+            self.token_map,
+            self.token_to_cue,
+        )
+        self.assertEqual(actions, [])
+        self.assertEqual(rejected, [])
+
     def test_case_only_replace_token_is_normalized_to_set_case(self) -> None:
         actions, rejected = _validated_calibration_contract_actions(
             {"actions": [action(

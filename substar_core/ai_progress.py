@@ -59,13 +59,14 @@ def ai_progress(
     repair_accepted = min(repair_completed, max(0, int(repair_accepted)))
     repair_failed = min(repair_completed, max(0, int(repair_failed)))
     resolved_unit_kind = str(unit_kind or {
-        "translation": "semantic_group",
+        "translation": "translation_block",
         "calibration": "calibration_block",
         "segmentation": "segmentation_block",
     }.get(str(kind), "work_unit"))
     canonical_label = {
         "semantic_group": "个意义组",
-        "calibration_block": "个校准块",
+        "translation_block": "块",
+        "calibration_block": "块",
         "segmentation_block": "块",
     }.get(resolved_unit_kind, str(unit_label))
 

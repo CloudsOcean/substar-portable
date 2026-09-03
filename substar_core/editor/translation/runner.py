@@ -51,6 +51,7 @@ def execute_translation(
         planned: int = 0,
         repair_planned: int = 0,
         repair_accepted: int = 0,
+        problem_count: int = 0,
     ) -> None:
         tracker["planned"] = max(tracker["planned"], int(planned))
         tracker["completed"] = max(tracker["completed"], int(completed))
@@ -63,7 +64,8 @@ def execute_translation(
         value = ai_progress(
             kind="translation",
             phase=phase,
-            unit_label="个意义组",
+            unit_label="块",
+            unit_kind="translation_block",
             planned=tracker["planned"],
             completed=tracker["completed"],
             accepted=primary_accepted,
@@ -72,6 +74,7 @@ def execute_translation(
             repair_completed=tracker["repair_completed"],
             repair_accepted=tracker["repair_accepted"],
             repair_failed=max(0, tracker["repair_completed"] - tracker["repair_accepted"]),
+            problem_count=problem_count,
         )
         atomic_write_json(
             artifact_directory / TRANSLATION_PROGRESS_FILENAME,
@@ -124,6 +127,11 @@ def execute_translation(
         },
     )
     problem_cue_ids = translation_problem_cue_ids(revision.document)
+    cue_block_ids = dict(result.get("cue_block_ids") or {})
+    problem_block_ids = sorted({
+        str(cue_block_ids.get(str(cue_id)) or "manual")
+        for cue_id in problem_cue_ids
+    })
     rows = source_rows(source_revision.document)
     atomic_write_json(
         artifact_directory / "result.json",
@@ -132,6 +140,7 @@ def execute_translation(
             "source_revision_id": expected_revision_id,
             "result_revision_id": revision.revision_id,
             "problem_cue_ids": problem_cue_ids,
+            "problem_block_ids": problem_block_ids,
             "source_rows": rows,
         },
     )
@@ -147,6 +156,7 @@ def execute_translation(
             "mapping_mode": result["mapping_mode"],
             "prompt": result["prompt"],
             "problem_cue_ids": problem_cue_ids,
+            "problem_block_ids": problem_block_ids,
         },
     )
     write_progress(
@@ -155,10 +165,12 @@ def execute_translation(
         planned=tracker["planned"],
         repair_planned=tracker["repair_planned"],
         repair_accepted=tracker["repair_accepted"],
+        problem_count=len(problem_block_ids),
     )
     return {
         "result_revision_id": revision.revision_id,
         "problem_cue_ids": problem_cue_ids,
+        "problem_block_ids": problem_block_ids,
         "planned": tracker["planned"],
         "repair_planned": tracker["repair_planned"],
         "repair_completed": tracker["repair_completed"],

@@ -180,12 +180,7 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
             block_id, value = future.result()
             results[block_id] = value
             if progress_callback is not None:
-                finished_group_count = sum(
-                    len(batch["groups"])
-                    for batch in batches
-                    if str(batch["block_id"]) in results
-                )
-                progress_callback(finished_group_count, sum(len(row["groups"]) for row in batches))
+                progress_callback(len(results), len(batches))
     rows = [
         row for batch in batches
         for row in results[str(batch["block_id"])]["response"].get("group_results", [])
@@ -482,8 +477,6 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
     }
     repair_enabled = True
     repair_record["repair_phase_entered"] = bool(repairable_invalid)
-    if progress_callback is not None and repairable_invalid:
-        progress_callback(0, len(repairable_invalid), 0)
     if repairable_invalid and repair_enabled:
         repair_results: dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {}
 
@@ -492,6 +485,8 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
             for group in repairable_invalid:
                 group_id = str(group["group_id"])
                 repair_blocks.setdefault(group_block_ids.get(group_id, group_id), []).append(group)
+            if progress_callback is not None:
+                progress_callback(0, len(repair_blocks), 0)
 
             def repair_block(block: tuple[str, list[dict[str, Any]]]) -> dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]]:
                 block_id, block_groups = block
@@ -550,13 +545,23 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
 
             workers = min(len(repair_blocks), max(1, int(settings.get("translation_workers", 8))))
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(repair_block, item) for item in repair_blocks.items()]
+                futures = {
+                    pool.submit(repair_block, item): item[0]
+                    for item in repair_blocks.items()
+                }
+                completed_block_ids: set[str] = set()
+                accepted_block_ids: set[str] = set()
                 for future in concurrent.futures.as_completed(futures):
-                    repair_results.update(future.result())
+                    block_id = futures[future]
+                    block_results = future.result()
+                    repair_results.update(block_results)
+                    completed_block_ids.add(block_id)
+                    if all(bool(row[0]) for row in block_results.values()):
+                        accepted_block_ids.add(block_id)
                     if progress_callback is not None:
                         progress_callback(
-                            len(repair_results), len(repairable_invalid),
-                            sum(bool(row[0]) for row in repair_results.values()),
+                            len(completed_block_ids), len(repair_blocks),
+                            len(accepted_block_ids),
                         )
 
         def repair(group: dict[str, Any]) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
@@ -590,6 +595,8 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
             return str(group["group_id"]), plan, records
 
         if not group_block_ids:
+            if progress_callback is not None:
+                progress_callback(0, len(repairable_invalid), 0)
             workers = min(
                 len(repairable_invalid), max(1, int(settings.get("translation_workers", 8)))
             )
@@ -926,7 +933,7 @@ def run_contextual_translation(
         direction += " 本任务是同语种字幕校订：保留原意与语言，只做自然表达和 Cue 分配。"
     batches = execution_block_batches(revision.document, groups)
     if progress_callback is not None:
-        progress_callback("executing", completed=0, planned=len(groups))
+        progress_callback("executing", completed=0, planned=len(batches))
     response, telemetry = call_block_batches(
         settings=settings,
         system_prompt=f"{prompt.text}\n\n{direction}\n\n{glossary}",
@@ -952,6 +959,14 @@ def run_contextual_translation(
         if execution_by_block.get(str(batch["block_id"]), {}).get("non_repairable")
         for group in batch["groups"]
     }
+    group_block_ids = {
+        str(group["group_id"]): str(batch["block_id"])
+        for batch in batches for group in batch["groups"]
+    }
+    cue_block_ids = {
+        str(cue["cue_id"]): str(batch["block_id"])
+        for batch in batches for group in batch["groups"] for cue in group["cues"]
+    }
     plans, repair = complete_results(
         settings=settings,
         repair_prompt=f"{repair_prompt.text}\n\n{direction}\n\n{glossary}",
@@ -961,25 +976,33 @@ def run_contextual_translation(
         non_repairable_group_ids=non_repairable_group_ids,
         cache_directory=work / "translation" / "block_cache",
         cache_scope="translation-contract-v3",
-        group_block_ids={
-            str(group["group_id"]): str(batch["block_id"])
-            for batch in batches for group in batch["groups"]
-        },
+        group_block_ids=group_block_ids,
         progress_callback=(
             (lambda done, total, accepted: progress_callback(
-                "repair", completed=done, planned=len(groups),
+                "repair", completed=done, planned=len(batches),
                 repair_planned=total, repair_accepted=accepted,
             )) if progress_callback is not None else None
         ),
     )
+    attempted_repair_block_ids = {
+        str(group_block_ids[str(group_id)])
+        for group_id in repair["model_repair"]["attempted_group_ids"]
+        if str(group_id) in group_block_ids
+    }
+    unresolved_repair_block_ids = {
+        str(group_block_ids[str(group_id)])
+        for group_id in repair["invalid_group_ids"]
+        if str(group_id) in group_block_ids
+        and str(group_block_ids[str(group_id)]) in attempted_repair_block_ids
+    }
+    accepted_repair_block_count = len(
+        attempted_repair_block_ids - unresolved_repair_block_ids
+    )
     if progress_callback is not None:
         progress_callback(
-            "validating", completed=len(groups), planned=len(groups),
-            repair_planned=len(repair["model_repair"]["attempted_group_ids"]),
-            repair_accepted=(
-                len(repair["model_repair"]["attempted_group_ids"])
-                - len(repair["invalid_group_ids"])
-            ),
+            "validating", completed=len(batches), planned=len(batches),
+            repair_planned=len(attempted_repair_block_ids),
+            repair_accepted=accepted_repair_block_count,
         )
     atomic_write_json(audit_dir / "contextual_translation_response.json", response)
     atomic_write_json(audit_dir / "contextual_translation_telemetry.json", telemetry)
@@ -995,12 +1018,9 @@ def run_contextual_translation(
     }
     if progress_callback is not None:
         progress_callback(
-            "materializing", completed=len(groups), planned=len(groups),
-            repair_planned=len(repair["model_repair"]["attempted_group_ids"]),
-            repair_accepted=(
-                len(repair["model_repair"]["attempted_group_ids"])
-                - len(repair["invalid_group_ids"])
-            ),
+            "materializing", completed=len(batches), planned=len(batches),
+            repair_planned=len(attempted_repair_block_ids),
+            repair_accepted=accepted_repair_block_count,
         )
     revision_id = _save_translation(
         work=work, plans=plans, settings=settings,
@@ -1008,4 +1028,9 @@ def run_contextual_translation(
         expected_revision_id=revision.revision_id,
         candidate_targets_by_cue=repair.get("candidate_targets_by_cue", {}),
     )
-    return {"revision_id": revision_id, "repair": repair, **metadata}
+    return {
+        "revision_id": revision_id,
+        "repair": repair,
+        "cue_block_ids": cue_block_ids,
+        **metadata,
+    }

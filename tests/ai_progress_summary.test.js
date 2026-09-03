@@ -40,6 +40,13 @@ test("problem cue ids are a fallback when old progress has no problem count", ()
   assert.equal(result.items[1].value, "0");
 });
 
+test("historic cue-level review counts are not relabelled as blocks", () => {
+  assert.equal(require("../web/ai_progress_summary.js").format({
+    kind:"calibration", unit_kind:"calibration_block", problem_unit_kind:"cue",
+    phase:"completed", units:{planned:8, completed:8}, problem_count:7,
+  }), "完成 8/8 块 · 需人工审核 7 条");
+});
+
 test("missing AI progress does not invent task counts", () => {
   assert.equal(summarize(null), null);
 });
@@ -62,10 +69,10 @@ test("segmentation translation and calibration use canonical task units", () => 
   );
   assert.equal(
     format({kind:"translation", phase:"completed", unit_label:"块", units, problem_count:3}),
-    "完成 8/8 个意义组 · 修复 1/2 个意义组 · 需人工审核 3 条",
+    "完成 8/8 块 · 修复 1/2 块 · 需人工审核 3 块",
   );
   assert.equal(
     format({kind:"calibration", phase:"completed", unit_label:"块", units, problem_count:3}),
-    "完成 8/8 个校准块 · 修复 1/2 个校准块 · 需人工审核 3 条",
+    "完成 8/8 块 · 修复 1/2 块 · 需人工审核 3 块",
   );
 });

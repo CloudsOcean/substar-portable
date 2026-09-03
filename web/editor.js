@@ -1189,10 +1189,17 @@
     $("#exportDocument").setAttribute("aria-disabled", String(!revision));
     $("#translateDocument").disabled = !revision || locked
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
-    $("#translationMenu").classList.toggle("disabled", !revision);
-    $("#aiCalibrationMenu")?.classList.toggle("disabled", !revision || locked);
-    $("#aiCalibrate")?.setAttribute("aria-disabled", String(!revision || locked));
-    if ((!revision || locked) && $("#aiCalibrationMenu")?.open) $("#aiCalibrationMenu").open = false;
+    const editingCommandDisabled = !revision || locked;
+    [
+      ["#translationMenu", "#translationMenuSummary"],
+      ["#aiCalibrationMenu", "#aiCalibrate"],
+      ["#scriptProjectionMenu", "#scriptProjectionSummary"],
+    ].forEach(([menuSelector, summarySelector]) => {
+      const menu = $(menuSelector);
+      menu?.classList.toggle("disabled", editingCommandDisabled);
+      $(summarySelector)?.setAttribute("aria-disabled", String(editingCommandDisabled));
+      if (editingCommandDisabled && menu?.open) menu.open = false;
+    });
     ["#saveCheckpoint", "#toolSearch", "#toolReplace",
       "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace",
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",

@@ -270,8 +270,10 @@ def run(command: WorkerCommand) -> int:
                 step = "transcription.audio_prepare"
             elif value < 0.26:
                 step = "transcription.provider_audio_encode"
-            elif value < 0.34:
+            elif value < 0.31:
                 step = "transcription.provider_upload"
+            elif value < 0.36:
+                step = "transcription.provider_submit"
             elif value < 0.80:
                 step = "transcription.provider_run"
             elif value < 0.98:

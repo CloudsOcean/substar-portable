@@ -30,17 +30,22 @@ test("AI replaces prompt and merges generated hotwords without erasing user term
   assert.match(source, /qwenPromptInput"\)\.value = String\(generated\.prompt/);
 });
 
-test("AI brief and hotword guidance explain deterministic super weights", () => {
+test("AI brief and hotword guidance restore examples without extra configuration chrome", () => {
   assert.match(html, /节目内容与识别重点/);
-  assert.doesNotMatch(html, /id="qwenAiBriefInput"[^>]*placeholder=/);
-  assert.doesNotMatch(html, /id="qwenPromptInput"[^>]*placeholder=/);
-  assert.doesNotMatch(html, /id="qwenHotwordsInput"[^>]*placeholder=/);
+  assert.match(html, /id="qwenAiBriefInput"[^>]*placeholder="描述本期节目内容/);
+  assert.match(html, /id="qwenPromptInput"[^>]*placeholder="向 Qwen 说明节目领域/);
+  assert.match(html, /id="qwenHotwordsInput"[^>]*placeholder="每行一个/);
+  assert.doesNotMatch(html, /qwenDeliverySummary|本次投递给 ASR/);
   assert.doesNotMatch(html, /<small>描述节目内容/);
   assert.doesNotMatch(html, /<small>使用所选原文语言/);
   assert.doesNotMatch(html, /<small>可混合中文/);
   assert.match(html, /id="qwenAssistStatus" aria-live="polite"><\/span>/);
   assert.match(html, /class="primary-button qwen-assist-button"/);
   assert.match(app, /prioritize_generated_qwen_hotwords/);
+});
+
+test("transcription progress exposes ASR submission as its own stage", () => {
+  assert.match(source, /"transcription\.provider_submit":"正在向 ASR 提交听写任务"/);
 });
 
 test("new builds ignore legacy browser drafts and clear media-specific fields after submission", () => {

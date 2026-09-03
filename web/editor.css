@@ -80,7 +80,7 @@ body.editor-shell {
 .pane-heading button:disabled,
 .editor-tool-sidebar button:disabled { opacity: .36; cursor: not-allowed; }
 .translation-command { border-color: #8b4be1 !important; background: #752dde !important; color: #fff !important; font-weight: 700; }
-.translation-menu.disabled { opacity: .36; pointer-events: none; }
+.editor-command-menu.disabled { opacity: .36; pointer-events: none; }
 .translation-popover { min-width: 176px !important; }
 .translation-popover label { color: #aeb4c1; font-size: 10px; }
 .translation-popover select { height: 32px; padding: 0 8px; font-size: 11px; }

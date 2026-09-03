@@ -186,6 +186,7 @@ def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch
         {"group_id": "g2", "cues": [_cue("c2", 1)]},
     ]
     calls = []
+    progress = []
 
     def repair_block(**kwargs):
         calls.append(kwargs["groups"])
@@ -207,12 +208,43 @@ def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch
         settings={"translation_workers": 2}, repair_prompt="repair",
         groups=groups, response={"group_results": []},
         group_block_ids={"g1": "b1", "g2": "b1"},
+        progress_callback=lambda done, total, accepted: progress.append(
+            (done, total, accepted)
+        ),
     )
 
     assert len(calls) == 1
     assert len(calls[0]) == 2
     assert {row["group_id"] for row in plans} == {"g1", "g2"}
     assert report["invalid_group_ids"] == []
+    assert progress == [(0, 1, 0), (1, 1, 1)]
+
+
+def test_translation_primary_progress_counts_execution_blocks(monkeypatch) -> None:
+    batches = [
+        {"block_id": "b1", "groups": [{"group_id": "g1"}, {"group_id": "g2"}]},
+        {"block_id": "b2", "groups": [{"group_id": "g3"}]},
+    ]
+    progress = []
+
+    monkeypatch.setattr(
+        contextual_translation,
+        "api_call",
+        lambda **kwargs: ({
+            "group_results": [
+                {"group_id": group["group_id"]} for group in kwargs["groups"]
+            ]
+        }, {}),
+    )
+
+    contextual_translation.call_block_batches(
+        settings={"translation_workers": 1},
+        system_prompt="translate",
+        batches=batches,
+        progress_callback=lambda done, total: progress.append((done, total)),
+    )
+
+    assert progress == [(1, 2), (2, 2)]
 
 
 def test_non_repairable_translation_failure_creates_no_repair_request(monkeypatch) -> None:

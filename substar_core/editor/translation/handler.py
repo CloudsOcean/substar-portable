@@ -117,22 +117,22 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
             **dict(summary),
         })
         problems = list(summary.get("problem_cue_ids") or [])
+        problem_blocks = list(summary.get("problem_block_ids") or [])
         return {
             "result_revision_id": revision.revision_id,
             "problem_cue_ids": problems,
+            "problem_block_ids": problem_blocks,
             "needs_attention": bool(problems),
             "mapping_mode": context.input_payload["mapping_mode"],
             "ai_progress": ai_progress(
                 kind="translation",
                 phase="completed",
-                unit_label="个意义组",
+                unit_label="块",
+                unit_kind="translation_block",
                 planned=int(summary.get("planned", 0) or 0),
                 completed=int(summary.get("planned", 0) or 0),
-                accepted=max(
-                    0,
-                    int(summary.get("planned", 0) or 0) - len(problems),
-                ),
-                failed=len(problems),
+                accepted=int(summary.get("planned", 0) or 0),
+                failed=0,
                 repair_planned=int(summary.get("repair_planned", 0) or 0),
                 repair_completed=int(summary.get("repair_completed", 0) or 0),
                 repair_accepted=int(summary.get("repair_accepted", 0) or 0),
@@ -141,7 +141,7 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
                     int(summary.get("repair_completed", 0) or 0)
                     - int(summary.get("repair_accepted", 0) or 0),
                 ),
-                problem_count=len(problems),
+                problem_count=len(problem_blocks),
             ),
         }
 

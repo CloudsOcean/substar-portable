@@ -54,6 +54,7 @@ _PROGRESS_MESSAGES = {
     "transcription.audio_prepare": "正在准备听写音频",
     "transcription.provider_audio_encode": "正在编码听写音频",
     "transcription.provider_upload": "正在上传听写音频",
+    "transcription.provider_submit": "正在向 ASR 提交听写任务",
     "transcription.provider_run": "云端正在进行词级听写",
     "transcription.evidence_normalize": "正在整理词级听写证据",
     "transcription.artifact_finalize": "正在校验听写产物",

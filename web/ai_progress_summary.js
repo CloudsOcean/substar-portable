@@ -37,11 +37,12 @@
     const units = progress.units || {};
     const unitLabel = ({
       semantic_group:"个意义组",
-      calibration_block:"个校准块",
+      translation_block:"块",
+      calibration_block:"块",
       segmentation_block:"块",
     })[String(progress.unit_kind || "")] || ({
-      translation:"个意义组",
-      calibration:"个校准块",
+      translation:"块",
+      calibration:"块",
       segmentation:"块",
     })[String(progress.kind || "")] || String(progress.unit_label || options.unitLabel || "").trim();
     const unit = unitLabel ? ` ${unitLabel}` : "";
@@ -62,7 +63,15 @@
         ? `修复中 ${summary.repairCompleted}/${summary.repairPlanned}${unit}`
         : `修复 ${units.repair_accepted == null ? summary.repairCompleted : repairAccepted}/${summary.repairPlanned}${unit}`);
     }
-    if (summary.problemCount) parts.push(`需人工审核 ${summary.problemCount} 条`);
+    if (summary.problemCount) {
+      const unitKind = String(progress.unit_kind || "");
+      const problemUnitKind = String(progress.problem_unit_kind || "");
+      const reviewUnit = problemUnitKind === "cue" ? "条"
+        : problemUnitKind === "block" ? "块"
+        : ["translation_block", "calibration_block"].includes(unitKind)
+          || (!unitKind && ["translation", "calibration"].includes(String(progress.kind || ""))) ? "块" : "条";
+      parts.push(`需人工审核 ${summary.problemCount} ${reviewUnit}`);
+    }
     return parts.join(" · ");
   }
 

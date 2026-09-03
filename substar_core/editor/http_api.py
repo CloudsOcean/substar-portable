@@ -916,27 +916,40 @@ def _runtime_ai_task_projection(
         "message": task.get("progress_message") or "",
         "kind": str(task.get("task_type") or ""),
         "unit_kind": (
-            "semantic_group" if task.get("task_type") == "translation"
+            "translation_block" if task.get("task_type") == "translation"
             else "calibration_block"
         ),
-        "unit_label": "个意义组" if task.get("task_type") == "translation" else "块",
+        "unit_label": "块",
         "units": {
             "planned": total,
             "completed": completed,
             "repair_planned": total if task.get("phase") == "repair" else 0,
             "repair_completed": completed if task.get("phase") == "repair" else 0,
         },
-        "problem_count": len(result.get("problem_cue_ids") or []),
+        "problem_count": len(
+            result.get("problem_block_ids") or result.get("problem_cue_ids") or []
+        ),
     }
     task_kind = str(task.get("task_type") or "")
     if task_kind in {"translation", "calibration"}:
         projected_progress["kind"] = task_kind
-        projected_progress["unit_kind"] = (
-            "semantic_group" if task_kind == "translation" else "calibration_block"
+        projected_progress.setdefault(
+            "unit_kind",
+            "translation_block" if task_kind == "translation" else "calibration_block",
         )
-        projected_progress["unit_label"] = (
-            "个意义组" if task_kind == "translation" else "个校准块"
+        projected_progress.setdefault(
+            "unit_label", "块"
         )
+        problem_block_ids = list(result.get("problem_block_ids") or [])
+        problem_cue_ids = list(result.get("problem_cue_ids") or [])
+        if problem_block_ids:
+            projected_progress["problem_count"] = len(problem_block_ids)
+            projected_progress["problem_unit_kind"] = "block"
+        elif terminal and problem_cue_ids:
+            # Older terminal results only persisted Cue ids. Keep that historic
+            # count honest instead of relabelling individual Cues as blocks.
+            projected_progress["problem_count"] = len(problem_cue_ids)
+            projected_progress["problem_unit_kind"] = "cue"
     return {
         **dict(task),
         "kind": task["task_type"],
@@ -948,6 +961,7 @@ def _runtime_ai_task_projection(
         "target_language": frozen.get("target_language"),
         "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
         "problem_cue_ids": list(result.get("problem_cue_ids") or []),
+        "problem_block_ids": list(result.get("problem_block_ids") or []),
         "ai_progress": projected_progress,
     }
 
@@ -2074,6 +2088,17 @@ def _run_editor_ai_blocks(
         )
         value: dict[str, Any] = {failure_key: []}
         validation_report: dict[str, Any] = {}
+        primary_failure_metadata: dict[str, Any] = {}
+        if rejected is not None:
+            rejected_metadata = rejected[1]
+            primary_failure_metadata = {
+                "primary_error": str(rejected_metadata.get("error") or ""),
+                "primary_validation_issues": [
+                    dict(row) for row in rejected_metadata
+                    .get("validation_report", {}).get("issues", [])
+                    if isinstance(row, Mapping)
+                ],
+            }
         try:
             if failure_injector is not None:
                 failure_injector(active_stage, block_id, attempt)
@@ -2159,6 +2184,7 @@ def _run_editor_ai_blocks(
                 "repair_attempted": attempt > 1,
                 "repair_request_count": 1 if attempt > 1 else 0,
                 "validation_report": validation_report,
+                **primary_failure_metadata,
                 **request_metadata,
             }
         except ModelGatewayError as exc:
@@ -2173,6 +2199,7 @@ def _run_editor_ai_blocks(
                 "repair_attempted": attempt > 1,
                 "repair_request_count": 1 if attempt > 1 else 0,
                 "validation_report": validation_report,
+                **primary_failure_metadata,
             }
 
     if not blocks:
@@ -2330,6 +2357,10 @@ def _validated_calibration_contract_actions(
             or not isinstance(action.get("affects_translation"), bool)
         ):
             reason = "action identity, kind, confidence, or disposition is invalid"
+        if not reason and before_text and after_text == before_text:
+            # A no-op cannot mutate project state. Ignore it before binding so
+            # a misplaced unchanged suggestion cannot fail the whole block.
+            continue
         if not reason and (
             not isinstance(token_ids, list) or not token_ids
             or len(set(str(item) for item in token_ids)) != len(token_ids)
@@ -3076,6 +3107,7 @@ def _ai_calibrate_project(
     desired_text: dict[str, str] = {}
     failed_blocks: list[str] = []
     problem_cue_ids: list[str] = []
+    problem_block_ids: set[str] = set()
     request_metadata: list[dict[str, Any]] = []
     calibration_audit_blocks: list[dict[str, Any]] = []
     accepted_contract_actions: list[dict[str, Any]] = []
@@ -3133,6 +3165,8 @@ def _ai_calibrate_project(
             if rejection.get("fatal"):
                 block_problem_cue_ids.update(str(cue["cue_id"]) for cue in owned_cues)
         problem_cue_ids.extend(sorted(block_problem_cue_ids))
+        if block_problem_cue_ids:
+            problem_block_ids.add(block_id)
         calibration_audit_blocks.append({
             "block_id": block_id,
             "owned_cue_ids": [str(cue["cue_id"]) for cue in owned_cues],
@@ -3177,6 +3211,8 @@ def _ai_calibrate_project(
             else:
                 lexical_count += 1
         problem_cue_ids.extend(sorted(block_problem_cue_ids))
+        if block_problem_cue_ids:
+            problem_block_ids.add(block_id)
 
     invalid_materialization = {
         token_id: text
@@ -3218,6 +3254,7 @@ def _ai_calibrate_project(
         "execution_blocks": request_metadata,
         "failed_blocks": failed_blocks,
         "calibration_problem_cue_ids": list(dict.fromkeys(problem_cue_ids)),
+        "calibration_problem_block_ids": sorted(problem_block_ids),
         "allowed_changes": "frozen_calibration_contract",
         "sentence_count": sentence_count,
         "filtered_count": filtered_count,
@@ -3371,6 +3408,7 @@ def _ai_calibrate_project(
         ],
         "failed_blocks": failed_blocks,
         "problem_cue_ids": list(dict.fromkeys(problem_cue_ids)),
+        "problem_block_ids": sorted(problem_block_ids),
         "checked_cues": len(cues),
         "block_count": len(blocks),
         "semantic_group_count": calibration_metadata["semantic_group_count"],
@@ -3400,10 +3438,10 @@ def _ai_calibrate_project(
         repair_completed=tracker["repair_planned"],
         repair_accepted=tracker["repair_accepted"],
         repair_failed=len(failed_blocks),
-        problem_count=len(set(problem_cue_ids)),
+        problem_count=len(problem_block_ids),
         detail=(
             f"替换 {len(replacements)} 项，合并 {len(merge_actions)} 项，"
-            f"{len(set(problem_cue_ids))} 条转人工"
+            f"{len(problem_block_ids)} 块转人工"
         ),
     )
     if progress_sink is not None:

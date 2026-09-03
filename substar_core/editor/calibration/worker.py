@@ -154,6 +154,7 @@ def run(command: WorkerCommand) -> int:
                 "result_revision_id": revision_id,
                 "failed_blocks": list(result.get("failed_blocks") or []),
                 "problem_cue_ids": list(result.get("problem_cue_ids") or []),
+                "problem_block_ids": list(result.get("problem_block_ids") or []),
                 "ai_progress": dict(result.get("ai_progress") or {}),
             },
         })
