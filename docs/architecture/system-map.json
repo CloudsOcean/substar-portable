@@ -891,16 +891,16 @@
     "model_stage_scheduler": {
       "title": "Prompt registry and per-stage model scheduler",
       "layer": "application",
-      "role": "Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway.",
+      "role": "Resolve versioned prompts, freeze primary/repair policy, and route JSON or Cue Script text-model requests through one provider-capability-aware gateway and deterministic finalizer.",
       "must_not": ["Use hard-coded models when a stage setting exists", "Assign reasoning effort to non-thinking mode", "Load prompts outside the frozen snapshot for creation tasks", "Expose registry route mutation through settings", "Accept a prompt save whose SHA-256 basis is stale"],
-      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/ai_progress.py", "symbols": ["ai_progress"]}, {"path": "substar_core/model_routing.py", "symbols": ["resolve_stage_request"]}, {"path": "substar_core/model_gateway/gateway.py", "symbols": ["call_json_model", "call_translation_model"]}],
+      "code": [{"path": "substar_core/stage_settings.py", "symbols": []}, {"path": "substar_core/prompt_registry.py", "symbols": []}, {"path": "substar_core/stage_progress.py", "symbols": []}, {"path": "substar_core/ai_progress.py", "symbols": ["ai_progress"]}, {"path": "substar_core/model_routing.py", "symbols": ["resolve_stage_request"]}, {"path": "substar_core/model_gateway/gateway.py", "symbols": ["call_json_model", "call_text_model", "call_translation_model"]}, {"path": "substar_core/cue_script.py", "symbols": ["render_segmentation_request", "parse_segmentation", "render_translation_request", "finalize_translation", "finalize_calibration"]}],
       "inputs": ["settings_snapshot", "model_stage_policy", "production_prompt_component"],
       "outputs": ["model_stage_policy", "production_prompt_component"],
       "calls": [],
       "invariants": ["Every production primary and repair call resolves through a named stage", "Provider, model, credential reference, thinking mode and reasoning effort are frozen in task input", "Provider capability mapping happens once", "Transport retries are bounded and distinct from the single semantic repair phase"],
       "failure_modes": ["Unknown stage", "Missing prompt", "Unsupported thinking mode", "Model setting absent"],
       "recovery": {"strategy": "Reject unresolved stage configuration before a provider call.", "reuses": ["frozen prompt snapshot", "saved stage policy"], "restarts": [], "terminal": "Return configuration error."},
-      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_glm_provider.py", "tests/test_ai_stage_progress_contract.py"],
+      "tests": ["tests/test_model_stage_scheduling.py", "tests/test_editor_ai_prompt_policy.py", "tests/test_prompt_catalog.py", "tests/test_glm_provider.py", "tests/test_ai_stage_progress_contract.py", "tests/test_cue_script.py"],
       "change_impact": {"modules": ["settings_ui", "settings_service", "segmentation_model_connector", "translation_service", "calibration_service"], "contracts": ["settings_snapshot", "model_stage_policy", "production_prompt_component"]}
     },
     "glossary_ui": {

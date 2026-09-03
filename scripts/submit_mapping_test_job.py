@@ -26,7 +26,7 @@ def main() -> None:
     })
     with media.open("rb") as handle:
         response = requests.post(
-            f"{base}/api/workbench/split-jobs",
+            f"{base}/api/project-creations",
             data={
                 "mode": "asr",
                 "settings_json": json.dumps(settings, ensure_ascii=False),

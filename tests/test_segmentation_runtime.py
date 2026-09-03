@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 import time
@@ -339,25 +340,28 @@ class SegmentationContractTests(unittest.TestCase):
         ]
 
         def repaired_response(**kwargs):
-            binding = kwargs["user"]["result_binding"]
             self.assertEqual(kwargs["stage"], "semantic_grouping_repair")
             self.assertEqual(kwargs["thinking_mode"], "enabled")
             self.assertEqual(kwargs["reasoning_effort"], "low")
             self.assertTrue(kwargs["system"].startswith("primary prompt\n\n"))
-            self.assertNotIn("program_validation_error", kwargs["user"])
-            tail = kwargs["conversation_tail"]
-            self.assertEqual([item["role"] for item in tail], ["assistant", "user"])
-            self.assertEqual(json.loads(tail[0]["content"]), {"invalid": True})
-            feedback = json.loads(tail[1]["content"])
-            self.assertIn("program_validation_error", feedback)
-            self.assertEqual(feedback["repair_attempt"], 1)
+            self.assertIn("SUBSTAR-CUE-SCRIPT/1", kwargs["user_text"])
+            self.assertIn("program_validation_error", kwargs["user_text"])
+            self.assertIn("Return a complete replacement Cue Script", kwargs["user_text"])
             self.assertEqual(
                 kwargs["telemetry_metadata"]["repair_mode"],
                 "full_same_prefix_all_issues",
             )
             return {
                 "schema_version": "substar.semantic-grouping-result.v1",
-                **binding,
+                "input_fingerprint": hashlib.sha256(json.dumps({
+                    "core_ownership": [10, 11],
+                    "rows": [
+                        {"index": 10, "start": 0.0, "end": 0.6, "text": "A" * 30, "speaker_id": None, "owner": True},
+                        {"index": 11, "start": 0.7, "end": 1.3, "text": "B" * 29, "speaker_id": None, "owner": True},
+                    ],
+                }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "block_id": "c0001",
+                "ownership": {"alignment_start": 10, "alignment_end": 11},
                 "meaning_groups": [
                     {
                         "alignment_start": 10,
@@ -392,7 +396,7 @@ class SegmentationContractTests(unittest.TestCase):
                 repair_temperature=0.0,
             )
             with patch(
-                "scripts.run_semantic_segmentation.model_json",
+                "scripts.run_semantic_segmentation.model_cue_script",
                 side_effect=repaired_response,
             ) as model_call:
                 row = request_semantic_grouping_block(

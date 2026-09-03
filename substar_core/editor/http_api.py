@@ -48,7 +48,13 @@ from substar_core.media import (
 from substar_core.model_gateway import (
     ModelGatewayError,
     ModelGatewayRequestError,
+    call_text_model,
     call_translation_model,
+)
+from substar_core.cue_script import (
+    finalize_calibration,
+    output_contract,
+    render_cue_request,
 )
 from substar_core.domain import (
     ChangeKind,
@@ -2064,6 +2070,8 @@ def _run_editor_ai_blocks(
     failure_injector: Any | None = None,
     cache_directory: Path | None = None,
     cache_scope: str = "",
+    request_renderer: Any | None = None,
+    response_finalizer: Any | None = None,
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
@@ -2120,13 +2128,21 @@ def _run_editor_ai_blocks(
                     ),
                     repair_attempt=attempt - 1,
                 )
+            wire_text = ""
+            wire_ledger: Any | None = None
+            if request_renderer is not None:
+                wire_text, wire_ledger = request_renderer(block_cues)
             cache_key = fingerprint({
                 "scope": cache_scope,
                 "stage": active_stage,
                 "model": str(route["model"]),
                 "system_prompt": active_system_prompt,
                 "request_group": request_group,
-                "schema": "calibration-actions.v3",
+                "wire_text": wire_text,
+                "schema": (
+                    "calibration-cue-script.v1"
+                    if request_renderer is not None else "calibration-actions.v3"
+                ),
             })
             cached = (
                 load_ai_block_cache(cache_directory, cache_key)
@@ -2135,6 +2151,79 @@ def _run_editor_ai_blocks(
             if cached is not None:
                 value = cached
                 request_metadata = {"cache_hit": True, "cache_key": cache_key}
+            elif request_renderer is not None and response_finalizer is not None:
+                raw_response, request_metadata = call_text_model(
+                    base_url=str(route["base_url"]),
+                    api_key=api_key,
+                    auth_mode=str(route["auth_mode"]),
+                    model=str(route["model"]),
+                    system_prompt=active_system_prompt,
+                    user_text=wire_text,
+                    timeout=min(600, int(settings.get("translation_api_timeout_seconds", 300))),
+                    thinking_mode=str(route["thinking_mode"]),
+                    reasoning_effort=str(route["reasoning_effort"]),
+                    request_attempts=(
+                        max(1, int(settings.get("http_retry_attempts", 2)) + 1)
+                        if retry_stage else 1
+                    ),
+                    max_tokens=int(route["max_tokens"]),
+                    temperature=float(route["temperature"]),
+                )
+                exchange_path = (
+                    cache_directory / "exchanges" / f"{time.time_ns()}_{cache_key}.json"
+                    if cache_directory is not None else None
+                )
+                if exchange_path is not None:
+                    atomic_write_json(exchange_path, {
+                        "schema_version": "substar.model-exchange.v1",
+                        "stage": active_stage,
+                        "block_id": block_id,
+                        "wire_protocol": "substar-cue-script.v1",
+                        "request_text": wire_text,
+                        "raw_model_response": raw_response,
+                        "transport_telemetry": request_metadata,
+                    })
+                try:
+                    value = response_finalizer(raw_response, wire_ledger)
+                except (TypeError, ValueError, KeyError) as exc:
+                    if exchange_path is not None:
+                        atomic_write_json(exchange_path, {
+                            "schema_version": "substar.model-exchange.v1",
+                            "stage": active_stage,
+                            "block_id": block_id,
+                            "wire_protocol": "substar-cue-script.v1",
+                            "request_text": wire_text,
+                            "raw_model_response": raw_response,
+                            "transport_telemetry": request_metadata,
+                            "finalizer_error": str(exc),
+                        })
+                    raise ModelGatewayError(
+                        f"{active_stage} Cue Script finalizer rejected output: {exc}"
+                    ) from exc
+                request_metadata = {
+                    **request_metadata,
+                    "wire_protocol": "substar-cue-script.v1",
+                    "wire_input_characters": len(wire_text),
+                    "wire_output_characters": len(raw_response),
+                    "raw_model_response": raw_response,
+                    "finalized_response": value,
+                    "cache_hit": False,
+                    "cache_key": cache_key,
+                }
+                if exchange_path is not None:
+                    atomic_write_json(exchange_path, {
+                        "schema_version": "substar.model-exchange.v1",
+                        "stage": active_stage,
+                        "block_id": block_id,
+                        "wire_protocol": "substar-cue-script.v1",
+                        "request_text": wire_text,
+                        "raw_model_response": raw_response,
+                        "finalized_response": value,
+                        "transport_telemetry": {
+                            key: item for key, item in request_metadata.items()
+                            if key not in {"raw_model_response", "finalized_response"}
+                        },
+                    })
             else:
                 value, request_metadata = call_translation_model(
                     base_url=str(route["base_url"]),
@@ -2157,7 +2246,10 @@ def _run_editor_ai_blocks(
                     **request_metadata, "cache_hit": False, "cache_key": cache_key,
                 }
             cache_value = dict(value)
-            if rejected is not None and failure_key == "actions":
+            if (
+                rejected is not None and failure_key == "actions"
+                and response_finalizer is None
+            ):
                 frozen = list(
                     rejected[1].get("validation_report", {})
                     .get("accepted_output", {}).get("actions", [])
@@ -2245,7 +2337,7 @@ def _run_editor_ai_blocks(
     return [repaired.get(row[0], row) for row in primary_results]
 
 
-_CALIBRATION_PUNCTUATION = ".,?!;:，。？！；：、…"
+_CALIBRATION_PUNCTUATION = ".,?!;:，。？！；：、…-—–"
 
 
 def _calibration_signature(text: str) -> str:
@@ -3013,6 +3105,8 @@ def _ai_calibrate_project(
     calibration_repair_prompt = render_prompt(
         "calibration_repair", variant=calibration_variant
     ).text
+    calibration_prompt += "\n\n" + output_contract("CALIBRATE")
+    calibration_repair_prompt += "\n\n" + output_contract("CALIBRATE")
     if calibration_glossary:
         glossary_section = (
             "\n\nAuthoritative glossary snapshot:\n"
@@ -3099,7 +3193,15 @@ def _ai_calibrate_project(
         progress_callback=primary_progress,
         phase_callback=phase_progress,
         cache_directory=project_job_path(project_id) / "calibration" / "block_cache",
-        cache_scope="calibration-contract-v3",
+        cache_scope="calibration-cue-script-v1-final",
+        request_renderer=lambda block_cues: render_cue_request(
+            block_cues,
+            task="CALIBRATE",
+            instructions=(
+                "Return every OWN Cue exactly once; use its local alias unchanged."
+            ),
+        ),
+        response_finalizer=lambda raw, ledger: finalize_calibration(raw, ledger),
     )
 
     write_calibration_progress("validating")

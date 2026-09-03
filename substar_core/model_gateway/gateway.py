@@ -76,14 +76,15 @@ def _extract_json(text: str) -> dict[str, Any]:
     return parsed
 
 
-def call_json_model(
+def call_text_model(
     *,
     base_url: str,
     api_key: str,
     auth_mode: str = "bearer",
     model: str,
     system_prompt: str,
-    user_payload: Mapping[str, Any],
+    user_payload: Mapping[str, Any] | None = None,
+    user_text: str | None = None,
     timeout: int,
     thinking_mode: str,
     reasoning_effort: str,
@@ -91,8 +92,8 @@ def call_json_model(
     max_tokens: int = 32768,
     temperature: float = 0.0,
     conversation_tail: Sequence[Mapping[str, Any]] | None = None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The only production transport for text-model JSON requests.
+) -> tuple[str, dict[str, Any]]:
+    """The production transport for raw text-model responses.
 
     Provider/model/key/thinking are frozen by the caller's task snapshot. This
     adapter applies provider capability mapping once, performs bounded
@@ -107,11 +108,17 @@ def call_json_model(
     effective_effort = reasoning_effort_for_request(
         base_url, model, requested_effort
     )
+    if user_text is None and user_payload is None:
+        raise ModelGatewayError("模型请求正文不可为空")
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": json.dumps(dict(user_payload), ensure_ascii=False),
+            "content": (
+                str(user_text)
+                if user_text is not None
+                else json.dumps(dict(user_payload or {}), ensure_ascii=False)
+            ),
         },
     ]
     for raw_message in conversation_tail or ():
@@ -192,7 +199,7 @@ def call_json_model(
         raise ModelGatewayError(
             f"模型输出达到当前 {payload['max_tokens']} token 上限"
         )
-    result = _extract_json(_response_text(body))
+    result = _response_text(body)
     usage = body.get("usage", {})
     usage = usage if isinstance(usage, dict) else {}
     prompt_details = usage.get("prompt_tokens_details", {})
@@ -223,6 +230,41 @@ def call_json_model(
             "cached_tokens": int(prompt_details.get("cached_tokens", 0) or 0),
         },
     }
+
+
+def call_json_model(
+    *,
+    base_url: str,
+    api_key: str,
+    auth_mode: str = "bearer",
+    model: str,
+    system_prompt: str,
+    user_payload: Mapping[str, Any],
+    timeout: int,
+    thinking_mode: str,
+    reasoning_effort: str,
+    request_attempts: int = 2,
+    max_tokens: int = 32768,
+    temperature: float = 0.0,
+    conversation_tail: Sequence[Mapping[str, Any]] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Compatibility wrapper for stages that still use a JSON model contract."""
+    text, telemetry = call_text_model(
+        base_url=base_url,
+        api_key=api_key,
+        auth_mode=auth_mode,
+        model=model,
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        timeout=timeout,
+        thinking_mode=thinking_mode,
+        reasoning_effort=reasoning_effort,
+        request_attempts=request_attempts,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        conversation_tail=conversation_tail,
+    )
+    return _extract_json(text), telemetry
 
 
 def call_translation_model(

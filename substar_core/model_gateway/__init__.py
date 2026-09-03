@@ -2,6 +2,7 @@ from .gateway import (
     ModelGatewayError,
     ModelGatewayRequestError,
     call_json_model,
+    call_text_model,
     call_translation_model,
 )
 
@@ -10,5 +11,6 @@ __all__ = [
     "ModelGatewayError",
     "ModelGatewayRequestError",
     "call_json_model",
+    "call_text_model",
     "call_translation_model",
 ]

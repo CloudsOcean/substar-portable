@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 from dataclasses import replace
 from pathlib import Path
+import time
 from typing import Any, Callable, Mapping
 
 from substar_core.artifacts import atomic_write_json
@@ -24,10 +25,24 @@ from substar_core.prompt_registry import (
 )
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
-from substar_core.model_gateway import ModelGatewayRequestError, call_translation_model
+from substar_core.cue_script import (
+    finalize_translation,
+    output_contract,
+    render_translation_request,
+)
+from substar_core.model_gateway import (
+    ModelGatewayRequestError,
+    call_text_model,
+)
 from substar_core.model_routing import resolve_stage_request
 from substar_core.storage import ProjectStore
 from substar_core.task_info import load_task_info
+
+
+def call_translation_model(*, groups: list[dict[str, Any]] | None = None,
+                           mapping_mode: str | None = None, **kwargs: Any):
+    """Compatibility injection seam; production transport is raw text."""
+    return call_text_model(**kwargs)
 
 
 def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -105,24 +120,29 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         {key: value for key, value in group.items() if not str(key).startswith("_")}
         for group in groups
     ]
+    wire_text, wire_ledger = render_translation_request(
+        prompt_groups, mapping_mode=mapping_mode
+    )
+    wire_system_prompt = system_prompt + "\n\n" + output_contract("TRANSLATE")
     cache_key = fingerprint({
         "scope": cache_scope,
         "stage": stage_name,
         "model": str(route["model"]),
-        "system_prompt": system_prompt,
+        "system_prompt": wire_system_prompt,
         "mapping_mode": mapping_mode,
         "groups": prompt_groups,
-        "schema": "translation-result.v3",
+        "schema": "translation-cue-script.v1",
     })
     cached = load_ai_block_cache(cache_directory, cache_key) if cache_directory else None
     if cached is not None and (cache_validator is None or cache_validator(cached)):
         return cached, {"cache_hit": True, "cache_key": cache_key}
-    response, telemetry = call_translation_model(
+    model_output, telemetry = call_translation_model(
         base_url=str(route["base_url"]),
         api_key=str(route["api_key"]),
         auth_mode=str(route["auth_mode"]),
         model=str(route["model"]),
-        system_prompt=system_prompt,
+        system_prompt=wire_system_prompt,
+        user_text=wire_text,
         groups=prompt_groups,
         mapping_mode=mapping_mode,
         timeout=int(settings.get("translation_api_timeout_seconds", 300)),
@@ -132,6 +152,61 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         max_tokens=int(route["max_tokens"]),
         temperature=float(route["temperature"]),
     )
+    # Older integrations may inject the former JSON seam. Keeping this branch
+    # costs production nothing and makes the wire-protocol migration reversible.
+    if isinstance(model_output, Mapping):
+        response = dict(model_output)
+        if cache_directory is not None and (
+            cache_validator is None or cache_validator(response)
+        ):
+            save_ai_block_cache(cache_directory, cache_key, response)
+        return response, {**telemetry, "cache_hit": False, "cache_key": cache_key}
+    raw_response = str(model_output)
+    exchange_path = None
+    if cache_directory is not None:
+        exchange_path = cache_directory / "exchanges" / f"{time.time_ns()}_{cache_key}.json"
+        atomic_write_json(exchange_path, {
+            "schema_version": "substar.model-exchange.v1",
+            "stage": stage_name,
+            "wire_protocol": "substar-cue-script.v1",
+            "request_text": wire_text,
+            "raw_model_response": raw_response,
+            "transport_telemetry": telemetry,
+        })
+    try:
+        response = finalize_translation(
+            raw_response, prompt_groups, wire_ledger, mapping_mode=mapping_mode
+        )
+    except (TypeError, ValueError, KeyError) as exc:
+        if exchange_path is not None:
+            atomic_write_json(exchange_path, {
+                "schema_version": "substar.model-exchange.v1",
+                "stage": stage_name,
+                "wire_protocol": "substar-cue-script.v1",
+                "request_text": wire_text,
+                "raw_model_response": raw_response,
+                "transport_telemetry": telemetry,
+                "finalizer_error": str(exc),
+            })
+        raise RuntimeError(f"翻译 Cue Script finalizer 拒绝模型输出：{exc}") from exc
+    telemetry = {
+        **telemetry,
+        "wire_protocol": "substar-cue-script.v1",
+        "wire_input_characters": len(wire_text),
+        "wire_output_characters": len(raw_response),
+        "raw_model_response": raw_response,
+        "finalized_response": response,
+    }
+    if exchange_path is not None:
+        atomic_write_json(exchange_path, {
+            "schema_version": "substar.model-exchange.v1",
+            "stage": stage_name,
+            "wire_protocol": "substar-cue-script.v1",
+            "request_text": wire_text,
+            "raw_model_response": raw_response,
+            "finalized_response": response,
+            "transport_telemetry": telemetry,
+        })
     if cache_directory is not None and (
         cache_validator is None or cache_validator(response)
     ):
@@ -506,15 +581,34 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
                         "frozen_accepted_output": {},
                         "repair_attempt": 1,
                     })
-                response_value, telemetry = api_call(
-                    settings=settings, system_prompt=repair_prompt,
-                    groups=payloads, stage_name="translation_repair",
-                    cache_directory=cache_directory, cache_scope=cache_scope,
-                    mapping_mode=mapping_mode,
-                    cache_validator=lambda value: _response_contract_valid(
-                        value, block_groups, mapping_mode
-                    ),
-                )
+                try:
+                    response_value, telemetry = api_call(
+                        settings=settings, system_prompt=repair_prompt,
+                        groups=payloads, stage_name="translation_repair",
+                        cache_directory=cache_directory, cache_scope=cache_scope,
+                        mapping_mode=mapping_mode,
+                        cache_validator=lambda value: _response_contract_valid(
+                            value, block_groups, mapping_mode
+                        ),
+                    )
+                except Exception as exc:
+                    # A malformed repair response is an unresolved block, not
+                    # a reason to discard valid translations from every other
+                    # concurrent block or fail the durable worker.
+                    return {
+                        str(group["group_id"]): (
+                            None,
+                            [{
+                                "attempt": 1,
+                                "block_id": block_id,
+                                "error": str(exc),
+                                "validation_errors": issues_by_group[str(group["group_id"])],
+                                "rejected_output": rows.get(str(group["group_id"])),
+                                "valid": False,
+                            }],
+                        )
+                        for group in block_groups
+                    }
                 repaired_rows = _result_rows(response_value)
                 repaired_occurrences = _result_row_occurrences(response_value)
                 return {
@@ -939,7 +1033,7 @@ def run_contextual_translation(
         system_prompt=f"{prompt.text}\n\n{direction}\n\n{glossary}",
         batches=batches,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-contract-v3",
+        cache_scope="translation-cue-script-v1",
         mapping_mode=mapping_mode,
         progress_callback=(
             (lambda done, total: progress_callback(
@@ -975,7 +1069,7 @@ def run_contextual_translation(
         mapping_mode=mapping_mode,
         non_repairable_group_ids=non_repairable_group_ids,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-contract-v3",
+        cache_scope="translation-cue-script-v1",
         group_block_ids=group_block_ids,
         progress_callback=(
             (lambda done, total, accepted: progress_callback(

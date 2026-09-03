@@ -250,7 +250,7 @@ flowchart LR
 | `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
 | `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
 | `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
-| `model_stage_scheduler` | `application` | Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
+| `model_stage_scheduler` | `application` | Resolve versioned prompts, freeze primary/repair policy, and route JSON or Cue Script text-model requests through one provider-capability-aware gateway and deterministic finalizer. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py`<br>`substar_core/cue_script.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
 | `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
@@ -2148,7 +2148,7 @@ Change impact contracts: `provider_test_request`<br>`credential_reference`<br>`s
 
 Layer: `application`
 
-Resolve versioned prompts, freeze primary/repair policy, and route every text-model JSON request through one provider-capability-aware gateway.
+Resolve versioned prompts, freeze primary/repair policy, and route JSON or Cue Script text-model requests through one provider-capability-aware gateway and deterministic finalizer.
 
 Code:
 
@@ -2157,7 +2157,8 @@ Code:
 - `substar_core/stage_progress.py`
 - `substar_core/ai_progress.py` — `ai_progress`
 - `substar_core/model_routing.py` — `resolve_stage_request`
-- `substar_core/model_gateway/gateway.py` — `call_json_model`, `call_translation_model`
+- `substar_core/model_gateway/gateway.py` — `call_json_model`, `call_text_model`, `call_translation_model`
+- `substar_core/cue_script.py` — `render_segmentation_request`, `parse_segmentation`, `render_translation_request`, `finalize_translation`, `finalize_calibration`
 
 Must not:
 
@@ -2185,7 +2186,7 @@ Recovery: Reject unresolved stage configuration before a provider call.
 
 Reuses: `frozen prompt snapshot`<br>`saved stage policy`; restarts: —; terminal behavior: Return configuration error.
 
-Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_prompt_catalog.py`, `tests/test_glm_provider.py`, `tests/test_ai_stage_progress_contract.py`
+Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_prompt_catalog.py`, `tests/test_glm_provider.py`, `tests/test_ai_stage_progress_contract.py`, `tests/test_cue_script.py`
 
 Change impact modules: `settings_ui`<br>`settings_service`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`
 

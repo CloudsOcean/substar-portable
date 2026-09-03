@@ -22,6 +22,12 @@ from substar_core.model_gateway import (  # noqa: E402
     ModelGatewayError,
     ModelGatewayRequestError,
     call_json_model,
+    call_text_model,
+)
+from substar_core.cue_script import (  # noqa: E402
+    output_contract,
+    parse_segmentation,
+    render_segmentation_request,
 )
 from substar_core.artifacts import atomic_write_json, atomic_write_text  # noqa: E402
 from substar_core.contracts.editor_document import (  # noqa: E402
@@ -432,6 +438,69 @@ def model_json(
     )
     if not isinstance(value, dict):
         raise SegmentationError("API 顶层必须返回 JSON object")
+    return value
+
+
+def model_cue_script(
+    *, model: str, base_url: str, api_key: str, system: str, user_text: str,
+    parser: Callable[[str], dict[str, Any]], timeout: int,
+    auth_mode: str = "bearer",
+    telemetry: list[dict[str, Any]] | None = None, stage: str = "", block_id: str = "",
+    thinking_mode: str = "enabled", reasoning_effort: str = "low",
+    max_tokens: int = 131072, temperature: float = 0.0,
+    telemetry_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    emit_runtime_event(
+        f"{stage} {block_id} API request",
+        {
+            "model": model,
+            "maxTokens": max_tokens,
+            "thinkingMode": thinking_mode,
+            "reasoningEffort": reasoning_effort if thinking_mode == "enabled" else None,
+            "wireProtocol": "substar-cue-script.v1",
+            "input": user_text,
+        },
+    )
+    raw, call_info = call_text_model(
+        base_url=base_url,
+        api_key=api_key,
+        auth_mode=auth_mode,
+        model=model,
+        system_prompt=system,
+        user_text=user_text,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        thinking_mode=thinking_mode,
+        reasoning_effort=reasoning_effort,
+        temperature=temperature,
+        request_attempts=2,
+    )
+    record = {
+        "stage": stage,
+        "block_id": block_id,
+        **dict(telemetry_metadata or {}),
+        **call_info,
+        "wire_protocol": "substar-cue-script.v1",
+        "wire_input_characters": len(user_text),
+        "wire_output_characters": len(raw),
+        "raw_model_response": raw,
+    }
+    if telemetry is not None:
+        telemetry.append(record)
+    try:
+        value = parser(raw)
+    except (TypeError, ValueError, KeyError) as exc:
+        record["finalizer_error"] = str(exc)
+        emit_runtime_event(
+            f"{stage} {block_id} API response rejected",
+            {"rawOutput": raw, "error": str(exc), "telemetry": call_info},
+        )
+        raise SegmentationError(f"Cue Script finalizer rejected output: {exc}") from exc
+    record["finalized_response"] = value
+    emit_runtime_event(
+        f"{stage} {block_id} API response",
+        {"rawOutput": raw, "finalizedOutput": value, "telemetry": call_info},
+    )
     return value
 
 
@@ -847,16 +916,21 @@ def request_semantic_grouping_block(
             "count_rule": "all_unicode_characters",
         },
     }
-    full_system_prompt = system_prompt + "\n\n" + glossary_prompt(glossary or [])
+    wire_text, wire_ledger = render_segmentation_request(request)
+    full_system_prompt = (
+        system_prompt + "\n\n" + glossary_prompt(glossary or [])
+        + "\n\n" + output_contract("SEGMENT")
+    )
     initial_error: Exception | None = None
     try:
-        value = cached_value or model_json(
+        value = cached_value or model_cue_script(
             model=args.grouping_model,
             base_url=args.base_url,
             api_key=args.api_key,
             auth_mode=args.auth_mode,
             system=full_system_prompt,
-            user=request,
+            user_text=wire_text,
+            parser=lambda raw: parse_segmentation(raw, wire_ledger, binding),
             timeout=args.timeout,
             telemetry=args.api_telemetry,
             stage="semantic_grouping",
@@ -871,7 +945,7 @@ def request_semantic_grouping_block(
             # Authentication, configuration and declared capability failures
             # are task failures. A content repair request cannot correct them.
             raise
-        # Invalid JSON from the primary call is a repairable block failure,
+        # Invalid Cue Script from the primary call is a repairable block failure,
         # not a fatal pipeline failure. Keep the block in the repair loop.
         initial_error = exc
         value = {}
@@ -959,28 +1033,25 @@ def request_semantic_grouping_block(
                 "Repair every issue in program_validation_issues in this single response. "
                 "Preserve the result binding, exceptions, meaning-group ranges, source tokens, "
                 "existing line breaks, and every unlisted group exactly. For cue_overflow, only "
-                "add line_breaks_after values from that issue's legal_candidates. Return only a "
-                "complete substar.semantic-grouping-result.v1 JSON object."
+                "move only the local Cue boundary identified by that issue to one of its "
+                "legal_candidates. Return only a complete replacement Cue Script."
             ),
         }
         try:
-            value = model_json(
+            repair_wire_text = (
+                wire_text
+                + "\n\nREPAIR FEEDBACK\n"
+                + json.dumps(repair_feedback, ensure_ascii=False, separators=(",", ":"))
+                + "\nReturn a complete replacement Cue Script, not a patch."
+            )
+            value = model_cue_script(
                 model=getattr(args, "repair_model", "") or args.grouping_model,
                 base_url=args.base_url,
                 api_key=args.api_key,
                 auth_mode=args.auth_mode,
                 system=full_system_prompt,
-                user=request,
-                conversation_tail=[
-                    {
-                        "role": "assistant",
-                        "content": json.dumps(original_value, ensure_ascii=False),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps(repair_feedback, ensure_ascii=False),
-                    },
-                ],
+                user_text=repair_wire_text,
+                parser=lambda raw: parse_segmentation(raw, wire_ledger, binding),
                 telemetry_metadata={
                     "repair_mode": "full_same_prefix_all_issues",
                     "validation_issue_count": len(overflow_issues),
