@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import requests
 
@@ -90,6 +90,7 @@ def call_json_model(
     request_attempts: int = 2,
     max_tokens: int = 32768,
     temperature: float = 0.0,
+    conversation_tail: Sequence[Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The only production transport for text-model JSON requests.
 
@@ -106,15 +107,23 @@ def call_json_model(
     effective_effort = reasoning_effort_for_request(
         base_url, model, requested_effort
     )
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": json.dumps(dict(user_payload), ensure_ascii=False),
+        },
+    ]
+    for raw_message in conversation_tail or ():
+        role = str(raw_message.get("role") or "").strip()
+        content = raw_message.get("content")
+        if role not in {"assistant", "user"} or not isinstance(content, str):
+            raise ModelGatewayError("模型续接消息必须是 assistant/user 文本")
+        messages.append({"role": role, "content": content})
+
     payload: dict[str, Any] = {
         "model": str(model),
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(dict(user_payload), ensure_ascii=False),
-            },
-        ],
+        "messages": messages,
         "max_tokens": max(1, int(max_tokens)),
         "stream": False,
     }

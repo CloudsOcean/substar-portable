@@ -390,6 +390,8 @@ def model_json(
     telemetry: list[dict[str, Any]] | None = None, stage: str = "", block_id: str = "",
     thinking_mode: str = "enabled", reasoning_effort: str = "low",
     max_tokens: int = 131072, temperature: float = 0.0,
+    conversation_tail: list[dict[str, str]] | None = None,
+    telemetry_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     emit_runtime_event(
         f"{stage} {block_id} API request",
@@ -399,6 +401,7 @@ def model_json(
             "thinkingMode": thinking_mode,
             "reasoningEffort": reasoning_effort if thinking_mode == "enabled" else None,
             "input": user,
+            "conversationTail": conversation_tail or [],
         },
     )
     value, call_info = call_json_model(
@@ -414,9 +417,15 @@ def model_json(
         reasoning_effort=reasoning_effort,
         temperature=temperature,
         request_attempts=2,
+        conversation_tail=conversation_tail,
     )
     if telemetry is not None:
-        telemetry.append({"stage": stage, "block_id": block_id, **call_info})
+        telemetry.append({
+            "stage": stage,
+            "block_id": block_id,
+            **dict(telemetry_metadata or {}),
+            **call_info,
+        })
     emit_runtime_event(
         f"{stage} {block_id} API response",
         {"output": value, "telemetry": call_info},
@@ -482,6 +491,129 @@ def semantic_grouping_binding(
         },
     }
     return payload, binding
+
+
+def semantic_grouping_overflow_issues(
+    value: dict[str, Any],
+    units: list[Any],
+    bounds: tuple[int, int],
+    chunk_number: int,
+    binding: dict[str, Any],
+    hard_limit: int,
+) -> list[dict[str, Any]]:
+    """Validate the block structure, then report every repairable Cue overflow."""
+    validate_semantic_grouping_result(
+        value, units, bounds, chunk_number, binding, 10**9
+    )
+    positions = {int(unit.index): position for position, unit in enumerate(units)}
+    issues: list[dict[str, Any]] = []
+    for group in value["meaning_groups"]:
+        group_start = int(group["alignment_start"])
+        group_end = int(group["alignment_end"])
+        cue_start = group_start
+        for raw_cue_end in group["line_breaks_after"]:
+            cue_end = int(raw_cue_end)
+            text = display_text(units, positions[cue_start], positions[cue_end])
+            matching_overflow = any(
+                isinstance(item, dict)
+                and item.get("code") == "indivisible_overflow"
+                and int(item.get("alignment_start", -1)) <= cue_start
+                and int(item.get("alignment_end", -1)) >= cue_end
+                for item in value.get("exceptions", [])
+            )
+            if len(text) > hard_limit and not matching_overflow:
+                legal_candidates = []
+                for candidate in range(cue_start, cue_end):
+                    left_text = display_text(
+                        units, positions[cue_start], positions[candidate]
+                    )
+                    right_text = display_text(
+                        units, positions[candidate + 1], positions[cue_end]
+                    )
+                    if len(left_text) <= hard_limit and len(right_text) <= hard_limit:
+                        legal_candidates.append({
+                            "line_break_after": candidate,
+                            "left_length": len(left_text),
+                            "right_length": len(right_text),
+                        })
+                issues.append({
+                    "code": "cue_overflow",
+                    "group_start": group_start,
+                    "group_end": group_end,
+                    "cue_start": cue_start,
+                    "cue_end": cue_end,
+                    "actual_length": len(text),
+                    "hard_limit": hard_limit,
+                    "text": text,
+                    "legal_candidates": legal_candidates,
+                })
+            cue_start = cue_end + 1
+    return issues
+
+
+def validate_overflow_repair_scope(
+    initial: dict[str, Any],
+    repaired: dict[str, Any],
+    issues: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Allow an overflow repair to add legal Cue boundaries and nothing else."""
+    for field in (
+        "schema_version", "input_fingerprint", "block_id", "ownership", "exceptions"
+    ):
+        if repaired.get(field) != initial.get(field):
+            raise SegmentationError(f"repair changed immutable field: {field}")
+    initial_groups = initial.get("meaning_groups")
+    repaired_groups = repaired.get("meaning_groups")
+    if not isinstance(initial_groups, list) or not isinstance(repaired_groups, list):
+        raise SegmentationError("repair meaning_groups is not an array")
+    if len(initial_groups) != len(repaired_groups):
+        raise SegmentationError("repair changed meaning-group count")
+
+    affected = {
+        (int(issue["group_start"]), int(issue["group_end"])) for issue in issues
+    }
+    allowed_by_group: dict[tuple[int, int], set[int]] = {}
+    for issue in issues:
+        key = (int(issue["group_start"]), int(issue["group_end"]))
+        allowed_by_group.setdefault(key, set()).update(
+            int(candidate["line_break_after"])
+            for candidate in issue["legal_candidates"]
+        )
+
+    preserved = 0
+    for original, candidate in zip(initial_groups, repaired_groups):
+        original_range = (
+            int(original["alignment_start"]), int(original["alignment_end"])
+        )
+        candidate_range = (
+            int(candidate["alignment_start"]), int(candidate["alignment_end"])
+        )
+        if candidate_range != original_range:
+            raise SegmentationError("repair changed meaning-group ranges or order")
+        if original_range not in affected:
+            if candidate != original:
+                raise SegmentationError(
+                    f"repair changed accepted group {original_range[0]}-{original_range[1]}"
+                )
+            preserved += 1
+            continue
+        original_breaks = {int(item) for item in original["line_breaks_after"]}
+        candidate_breaks = {int(item) for item in candidate["line_breaks_after"]}
+        if not original_breaks <= candidate_breaks:
+            raise SegmentationError(
+                f"repair removed an existing boundary in group {original_range}"
+            )
+        added = candidate_breaks - original_breaks
+        if not added or not added <= allowed_by_group.get(original_range, set()):
+            raise SegmentationError(
+                f"repair added a non-candidate boundary in group {original_range}"
+            )
+    return {
+        "reported_issue_count": len(issues),
+        "affected_group_count": len(affected),
+        "accepted_group_count": len(initial_groups) - len(affected),
+        "accepted_group_preserved_count": preserved,
+    }
 
 
 def validate_semantic_grouping_result(
@@ -691,8 +823,6 @@ def request_semantic_grouping_block(
     system_prompt: str, glossary: list[dict[str, Any]],
     progress: StageProgress | None = None,
     cached_value: dict[str, Any] | None = None,
-    *,
-    repair_prompt: str | None = None,
 ) -> tuple[
     int,
     list[dict[str, Any]],
@@ -717,6 +847,7 @@ def request_semantic_grouping_block(
             "count_rule": "all_unicode_characters",
         },
     }
+    full_system_prompt = system_prompt + "\n\n" + glossary_prompt(glossary or [])
     initial_error: Exception | None = None
     try:
         value = cached_value or model_json(
@@ -724,7 +855,7 @@ def request_semantic_grouping_block(
             base_url=args.base_url,
             api_key=args.api_key,
             auth_mode=args.auth_mode,
-            system=system_prompt + "\n\n" + glossary_prompt(glossary or []),
+            system=full_system_prompt,
             user=request,
             timeout=args.timeout,
             telemetry=args.api_telemetry,
@@ -756,98 +887,183 @@ def request_semantic_grouping_block(
             f"semantic grouping {block_id} 已复用中断前响应",
             {"stage": "semantic_grouping", "block_id": block_id},
         )
+    original_value = copy.deepcopy(value)
     last_error: Exception | None = initial_error
     frozen_groups: list[dict[str, Any]] = []
     frozen_cuts: set[int] = set()
     first, last = int(units[left].index), int(units[right].index)
     repair_attempts = min(1, max(0, int(getattr(args, "repair_attempts", 0))))
-    for attempt in range(0, repair_attempts + 1):
+    overflow_issues: list[dict[str, Any]] = []
+    try:
+        if initial_error is not None:
+            raise initial_error
+        overflow_issues = semantic_grouping_overflow_issues(
+            value, units, bounds, chunk_number, binding, args.hard_limit
+        )
+        if overflow_issues:
+            ranges = ", ".join(
+                f"{issue['cue_start']}-{issue['cue_end']} ({issue['actual_length']})"
+                for issue in overflow_issues
+            )
+            raise SegmentationError(
+                f"semantic grouping contains {len(overflow_issues)} Cue overflows: {ranges}"
+            )
+        spans, groups, corrections, cuts, exceptions = validate_semantic_grouping_result(
+            value, units, bounds, chunk_number, binding, args.hard_limit
+        )
+        if progress is not None:
+            progress.event("semantic_grouping", "accepted", block_id=block_id)
+        return chunk_number, spans, groups, corrections, cuts, exceptions
+    except Exception as exc:
+        last_error = exc
+
+    candidates, candidate_cuts = _salvage_semantic_groups(
+        value, units, bounds, chunk_number, binding, args.hard_limit
+    )
+    frozen_groups = _merge_frozen_groups(frozen_groups, candidates)
+    frozen_cuts.update(candidate_cuts)
+    if _groups_cover(frozen_groups, first, last):
+        return chunk_number, [], frozen_groups, [], frozen_cuts, []
+
+    scope_audit: dict[str, int] = {}
+    if repair_attempts:
+        repair_response_event_emitted = False
+        if progress is not None:
+            progress.plan("semantic_grouping_repair", 1, additive=True, block_ids=[block_id])
+            progress.event(
+                "semantic_grouping", "retry", block_id=block_id,
+                detail={
+                    "validation_error": str(last_error),
+                    "validation_issue_count": len(overflow_issues),
+                },
+            )
+            progress.event("semantic_grouping_repair", "sent", block_id=block_id)
+        emit_runtime_event(
+            f"切分修复 {block_id} 已发送",
+            {
+                "stage": "semantic_grouping_repair",
+                "block_id": block_id,
+                "attempt": 1,
+                "repair_mode": "full_same_prefix_all_issues",
+                "validation_error": str(last_error),
+                "validation_issues": overflow_issues,
+            },
+        )
+        repair_feedback = {
+            "task": "repair_semantic_grouping",
+            "repair_attempt": 1,
+            "program_validation_error": str(last_error),
+            "program_validation_issues": overflow_issues,
+            "accepted_groups_frozen": frozen_groups,
+            "instructions": (
+                "Repair every issue in program_validation_issues in this single response. "
+                "Preserve the result binding, exceptions, meaning-group ranges, source tokens, "
+                "existing line breaks, and every unlisted group exactly. For cue_overflow, only "
+                "add line_breaks_after values from that issue's legal_candidates. Return only a "
+                "complete substar.semantic-grouping-result.v1 JSON object."
+            ),
+        }
         try:
-            if frozen_groups:
-                raise SegmentationError("repair response must preserve previously accepted groups")
+            value = model_json(
+                model=getattr(args, "repair_model", "") or args.grouping_model,
+                base_url=args.base_url,
+                api_key=args.api_key,
+                auth_mode=args.auth_mode,
+                system=full_system_prompt,
+                user=request,
+                conversation_tail=[
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(original_value, ensure_ascii=False),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(repair_feedback, ensure_ascii=False),
+                    },
+                ],
+                telemetry_metadata={
+                    "repair_mode": "full_same_prefix_all_issues",
+                    "validation_issue_count": len(overflow_issues),
+                    "target_ranges": [
+                        [int(issue["group_start"]), int(issue["group_end"])]
+                        for issue in overflow_issues
+                    ],
+                },
+                timeout=args.timeout,
+                telemetry=args.api_telemetry,
+                stage="semantic_grouping_repair",
+                block_id=block_id,
+                thinking_mode=getattr(args, "repair_thinking_mode", "disabled"),
+                reasoning_effort=getattr(args, "repair_reasoning_effort", "low"),
+                max_tokens=getattr(args, "repair_max_tokens", 65536),
+                temperature=getattr(args, "repair_temperature", 0.0),
+            )
+            if progress is not None:
+                progress.event("semantic_grouping_repair", "response", block_id=block_id)
+                repair_response_event_emitted = True
+            emit_runtime_event(
+                f"切分修复 {block_id} 已返回",
+                {
+                    "stage": "semantic_grouping_repair",
+                    "block_id": block_id,
+                    "attempt": 1,
+                    "repair_mode": "full_same_prefix_all_issues",
+                },
+            )
+            if overflow_issues:
+                scope_audit = validate_overflow_repair_scope(
+                    original_value, value, overflow_issues
+                )
             spans, groups, corrections, cuts, exceptions = validate_semantic_grouping_result(
                 value, units, bounds, chunk_number, binding, args.hard_limit
             )
+            atomic_write_json(
+                args.output_dir / f"semantic_grouping_repair_{block_id}.json",
+                {
+                    "schema_version": "substar.segmentation-repair.v3",
+                    "block_id": block_id,
+                    "repair_mode": "full_same_prefix_all_issues",
+                    "repair_attempts": 1,
+                    "validation_issue_count": len(overflow_issues),
+                    "scope_validation": scope_audit,
+                    "accepted": True,
+                    "problem_cue_count": 0,
+                },
+            )
             if progress is not None:
                 progress.event("semantic_grouping", "accepted", block_id=block_id)
-            if attempt:
-                if progress is not None:
-                    progress.event("semantic_grouping_repair", "accepted", block_id=block_id)
-                emit_runtime_event(
-                    f"切分修复 {block_id} 验收通过",
-                    {"stage": "semantic_grouping_repair", "block_id": block_id, "attempt": attempt},
-                )
+                progress.event("semantic_grouping_repair", "accepted", block_id=block_id)
+            emit_runtime_event(
+                f"切分修复 {block_id} 验收通过",
+                {
+                    "stage": "semantic_grouping_repair",
+                    "block_id": block_id,
+                    "attempt": 1,
+                    "repair_mode": "full_same_prefix_all_issues",
+                    "validation_issue_count": len(overflow_issues),
+                },
+            )
             return chunk_number, spans, groups, corrections, cuts, exceptions
-        except Exception as exc:
-            last_error = exc
+        except Exception as repair_exc:
+            if isinstance(repair_exc, SegmentationRequestError):
+                raise
+            last_error = repair_exc
             candidates, candidate_cuts = _salvage_semantic_groups(
                 value, units, bounds, chunk_number, binding, args.hard_limit
             )
             frozen_groups = _merge_frozen_groups(frozen_groups, candidates)
             frozen_cuts.update(candidate_cuts)
-            if _groups_cover(frozen_groups, first, last):
-                return chunk_number, [], frozen_groups, [], frozen_cuts, []
-            if attempt >= repair_attempts:
-                break
-            repair_attempt = attempt + 1
-            if progress is not None:
-                progress.plan("semantic_grouping_repair", 1, additive=True, block_ids=[block_id])
-                progress.event(
-                    "semantic_grouping", "retry", block_id=block_id,
-                    detail={"validation_error": str(exc)},
-                )
-                progress.event("semantic_grouping_repair", "sent", block_id=block_id)
-            emit_runtime_event(
-                f"切分修复 {block_id} 已发送",
-                {
-                    "stage": "semantic_grouping_repair", "block_id": block_id,
-                    "attempt": repair_attempt, "validation_error": str(exc),
-                },
-            )
-            try:
-                value = model_json(
-                    model=getattr(args, "repair_model", "") or args.grouping_model,
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    auth_mode=args.auth_mode,
-                    system=(repair_prompt or system_prompt) + "\n\n" + glossary_prompt(glossary or []),
-                    user={
-                        **request,
-                        "rejected_output": value,
-                        "program_validation_error": str(exc),
-                        "accepted_groups_frozen": frozen_groups,
-                        "repair_attempt": repair_attempt,
-                    },
-                    timeout=args.timeout,
-                    telemetry=args.api_telemetry,
-                    stage="semantic_grouping_repair",
-                    block_id=block_id,
-                    thinking_mode=getattr(args, "repair_thinking_mode", "disabled"),
-                    reasoning_effort=getattr(args, "repair_reasoning_effort", "low"),
-                    max_tokens=getattr(args, "repair_max_tokens", 65536),
-                    temperature=getattr(args, "repair_temperature", 0.0),
-                )
-            except Exception as repair_exc:
-                if isinstance(repair_exc, SegmentationRequestError):
-                    raise
-                # A malformed repair response is also recoverable. Leave an
-                # empty candidate for the next validation/final-release pass.
-                last_error = repair_exc
-                value = {}
-                emit_runtime_event(
-                    f"切分修复 {block_id} 返回无效 JSON，继续保证交付",
-                    {
-                        "stage": "semantic_grouping_repair",
-                        "block_id": block_id,
-                        "attempt": repair_attempt,
-                        "error": str(repair_exc),
-                    },
-                )
-            if progress is not None:
+            if progress is not None and not repair_response_event_emitted:
                 progress.event("semantic_grouping_repair", "response", block_id=block_id)
             emit_runtime_event(
-                f"切分修复 {block_id} 已返回",
-                {"stage": "semantic_grouping_repair", "block_id": block_id, "attempt": repair_attempt},
+                f"切分修复 {block_id} 未通过完整验收，继续保证交付",
+                {
+                    "stage": "semantic_grouping_repair",
+                    "block_id": block_id,
+                    "attempt": 1,
+                    "repair_mode": "full_same_prefix_all_issues",
+                    "error": str(repair_exc),
+                },
             )
     # Delivery policy: preserve successful blocks exactly. An unresolved block
     # becomes one structurally contained problem Cue; the program must not
@@ -872,17 +1088,21 @@ def request_semantic_grouping_block(
                 "block_id": block_id,
                 "alignment_start": cursor,
                 "alignment_end": gap_end,
-                "detail": "首次切分与一次精确修复均未通过结构校验；保留为问题字幕。",
+                "detail": "首次切分与一次同前缀全量修复均未通过结构校验；保留为问题字幕。",
             })
         cursor = max(cursor, int(group["alignment_end"]) + 1)
     groups.sort(key=lambda row: int(row["alignment_start"]))
 
     repair_audit = {
-        "schema_version": "substar.segmentation-repair.v2",
+        "schema_version": "substar.segmentation-repair.v3",
         "block_id": block_id,
         "alignment_start": int(local_units[0].index),
         "alignment_end": int(local_units[-1].index),
+        "repair_mode": "full_same_prefix_all_issues",
         "repair_attempts": repair_attempts,
+        "validation_issue_count": len(overflow_issues),
+        "scope_validation": scope_audit,
+        "accepted": False,
         "validation_error": str(last_error),
         "accepted_group_count": len(frozen_groups),
         "problem_cue_count": len(exceptions),
@@ -1029,17 +1249,14 @@ def main(
         {"step": "render_prompts", "unit_count": len(units)},
     )
     semantic_grouping_prompt = render_prompt("semantic_grouping", variant=prompt_variant)
-    semantic_grouping_repair_prompt = render_prompt(
-        "semantic_grouping_repair", variant=prompt_variant
-    )
+    # Repair deliberately reuses the exact grouping prompt so the model sees
+    # the same cacheable system/user prefix before the rejected assistant turn.
+    semantic_grouping_repair_prompt = semantic_grouping_prompt
     boundary_evidence_prompt = render_prompt(
         "boundary_evidence", variant=args.sentence_boundary_policy
     )
     grouping_system_prompt = (
         semantic_grouping_prompt.text + "\n\n" + boundary_evidence_prompt.text
-    )
-    repair_system_prompt = (
-        semantic_grouping_repair_prompt.text + "\n\n" + boundary_evidence_prompt.text
     )
     rule_profile = grouping_system_prompt
     if args.glossary_snapshot is not None:
@@ -1156,7 +1373,7 @@ def main(
             futures.append(executor.submit(
                 request_semantic_grouping_block,
                 units, bounds, number, args, grouping_system_prompt, glossary,
-                progress, cached_value, repair_prompt=repair_system_prompt,
+                progress, cached_value,
             ))
         rows = [future.result() for future in concurrent.futures.as_completed(futures)]
     for _number, _spans, groups, _corrections, local_cuts, exceptions in sorted(rows):

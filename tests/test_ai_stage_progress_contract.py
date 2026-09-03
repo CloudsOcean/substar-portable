@@ -228,3 +228,44 @@ def test_segmentation_shared_caller_enforces_glm_thinking_low(post: Mock) -> Non
     assert "temperature" not in payload
     assert telemetry["requested_thinking_mode"] == "disabled"
     assert telemetry["effective_thinking_mode"] == "enabled"
+
+
+@patch("substar_core.model_gateway.gateway.requests.post")
+def test_shared_caller_appends_repair_turn_without_changing_request_prefix(post: Mock) -> None:
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.content = json.dumps({
+        "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+        "usage": {},
+    }).encode("utf-8")
+    post.return_value = response
+    user_payload = {"task": "semantic_grouping", "result_binding": {"block_id": "c0001"}}
+    rejected = '{"invalid":true}'
+    feedback = '{"program_validation_issues":[{"code":"cue_overflow"}]}'
+
+    call_json_model(
+        base_url="https://example.invalid/v1",
+        api_key="test-key",
+        model="contract-test",
+        system_prompt="frozen system prompt",
+        user_payload=user_payload,
+        conversation_tail=[
+            {"role": "assistant", "content": rejected},
+            {"role": "user", "content": feedback},
+        ],
+        timeout=30,
+        max_tokens=128,
+        thinking_mode="disabled",
+        reasoning_effort="low",
+        request_attempts=1,
+    )
+
+    messages = post.call_args.kwargs["json"]["messages"]
+    assert messages[:2] == [
+        {"role": "system", "content": "frozen system prompt"},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+    ]
+    assert messages[2:] == [
+        {"role": "assistant", "content": rejected},
+        {"role": "user", "content": feedback},
+    ]

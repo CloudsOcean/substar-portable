@@ -331,8 +331,18 @@ class SegmentationContractTests(unittest.TestCase):
             self.assertEqual(kwargs["stage"], "semantic_grouping_repair")
             self.assertEqual(kwargs["thinking_mode"], "enabled")
             self.assertEqual(kwargs["reasoning_effort"], "low")
-            self.assertIn("program_validation_error", kwargs["user"])
-            self.assertEqual(kwargs["user"]["repair_attempt"], 1)
+            self.assertTrue(kwargs["system"].startswith("primary prompt\n\n"))
+            self.assertNotIn("program_validation_error", kwargs["user"])
+            tail = kwargs["conversation_tail"]
+            self.assertEqual([item["role"] for item in tail], ["assistant", "user"])
+            self.assertEqual(json.loads(tail[0]["content"]), {"invalid": True})
+            feedback = json.loads(tail[1]["content"])
+            self.assertIn("program_validation_error", feedback)
+            self.assertEqual(feedback["repair_attempt"], 1)
+            self.assertEqual(
+                kwargs["telemetry_metadata"]["repair_mode"],
+                "full_same_prefix_all_issues",
+            )
             return {
                 "schema_version": "substar.semantic-grouping-result.v1",
                 **binding,
@@ -381,7 +391,6 @@ class SegmentationContractTests(unittest.TestCase):
                     "primary prompt",
                     [],
                     cached_value={"invalid": True},
-                    repair_prompt="repair prompt",
                 )
 
         _number, _spans, groups, _corrections, cuts, exceptions = row
