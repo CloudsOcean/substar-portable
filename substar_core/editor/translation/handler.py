@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
+from substar_core.ai_progress import ai_progress
 from substar_core.credential_store import model_provider_credential_ref
 from substar_core.artifacts import atomic_write_json
 from substar_core.editor.translation.artifacts import TRANSLATION_INPUT_SCHEMA
@@ -93,6 +94,7 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
             ),
             "completed_units": int(message.data.get("completed", 0) or 0),
             "total_units": int(message.data.get("total", 0) or 0),
+            "progress_payload": dict(message.data.get("ai_progress") or {}),
         }
 
     def finalize(context: TaskWorkContext, completion: WorkerCompletion) -> Mapping[str, Any]:
@@ -120,6 +122,27 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
             "problem_cue_ids": problems,
             "needs_attention": bool(problems),
             "mapping_mode": context.input_payload["mapping_mode"],
+            "ai_progress": ai_progress(
+                kind="translation",
+                phase="completed",
+                unit_label="个意义组",
+                planned=int(summary.get("planned", 0) or 0),
+                completed=int(summary.get("planned", 0) or 0),
+                accepted=max(
+                    0,
+                    int(summary.get("planned", 0) or 0) - len(problems),
+                ),
+                failed=len(problems),
+                repair_planned=int(summary.get("repair_planned", 0) or 0),
+                repair_completed=int(summary.get("repair_completed", 0) or 0),
+                repair_accepted=int(summary.get("repair_accepted", 0) or 0),
+                repair_failed=max(
+                    0,
+                    int(summary.get("repair_completed", 0) or 0)
+                    - int(summary.get("repair_accepted", 0) or 0),
+                ),
+                problem_count=len(problems),
+            ),
         }
 
     return TaskHandler(

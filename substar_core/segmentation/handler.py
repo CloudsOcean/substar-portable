@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from substar_core.ai_progress import ai_progress
 from substar_core.artifacts import atomic_write_json
 from substar_core.domain import (
     ChangeKind,
@@ -24,6 +25,7 @@ from substar_core.runtime.registry import TaskHandler, TaskWorkContext, WorkerLa
 from substar_core.runtime.supervisor import WorkerCompletion
 from substar_core.runtime.worker_protocol import WorkerMessage
 from substar_core.storage import ProjectStore
+from substar_core.task_info import load_task_info, save_task_info
 from substar_core.transcription.contracts import (
     recognition_source_from_evidence,
     validate_recognition_evidence,
@@ -36,6 +38,7 @@ from .contracts import (
     SEGMENTATION_MANIFEST_SCHEMA,
     SEGMENTATION_RESULT_SCHEMA,
     SEGMENTATION_VALIDATION_SCHEMA,
+    resolve_segmentation_language,
     sha256_file,
     sha256_tree,
     segmentation_credential_ref,
@@ -287,6 +290,7 @@ def build_segmentation_handler(
         if step not in _PROGRESS_MESSAGES:
             raise InvalidTaskError("segmentation worker progress step is unsupported")
         display_message = _PROGRESS_MESSAGES[step]
+        progress_payload = None
         if step == "segmentation.semantic_grouping":
             planned = int(message.data.get("planned", 0) or 0)
             if planned > 0:
@@ -299,6 +303,24 @@ def build_segmentation_handler(
                     display_message += f" · 修复中 {repairing} 块"
                 if failed:
                     display_message += f" · 待人工 {failed} 块"
+                progress_payload = ai_progress(
+                    kind="segmentation",
+                    phase="repair" if repairing else "executing",
+                    unit_label="块",
+                    planned=planned,
+                    completed=completed,
+                    accepted=max(0, completed - failed),
+                    failed=failed,
+                    repair_planned=int(message.data.get("repair_planned", 0) or 0),
+                    repair_completed=int(message.data.get("repair_completed", 0) or 0),
+                    repair_accepted=int(message.data.get("repair_accepted", 0) or 0),
+                    repair_failed=max(
+                        0,
+                        int(message.data.get("repair_completed", 0) or 0)
+                        - int(message.data.get("repair_accepted", 0) or 0),
+                    ),
+                    problem_count=failed,
+                )
         return {
             "progress": float(message.progress or 0.0),
             "message": display_message,
@@ -318,6 +340,7 @@ def build_segmentation_handler(
                 int(message.data.get("planned", 0) or 0)
                 if step == "segmentation.semantic_grouping" else None
             ),
+            "progress_payload": progress_payload,
         }
 
     def finalize(
@@ -413,6 +436,11 @@ def build_segmentation_handler(
             raise InvalidTaskError("segmentation finalizer source evidence changed")
         expected_master = str(evidence["master_text"]).strip()
         expected_alignment = recognition_source_from_evidence(evidence)
+        language_resolution = resolve_segmentation_language(request, expected_master)
+        effective_language = str(language_resolution["resolved_language"])
+        effective_break_symbols = str(
+            language_resolution["resolved_reference_break_symbols"]
+        )
         if request["reference_document"] is not None:
             reference_path = _contained(
                 project, request["reference_document"]["relative_path"]
@@ -425,8 +453,8 @@ def build_segmentation_handler(
                     materialize_reference_script(
                         reference_text,
                         expected_alignment.get("units", []),
-                        str(request["constraints"]["reference_break_symbols"]),
-                        str(request.get("language") or "Auto"),
+                        effective_break_symbols,
+                        effective_language,
                     )
                 )
             else:
@@ -434,7 +462,7 @@ def build_segmentation_handler(
                     materialize_reference_alignment(
                         reference_text,
                         expected_alignment,
-                        str(request.get("language") or "Auto"),
+                        effective_language,
                     )
                 )
             if reference_match.get("report") != expected_report:
@@ -499,6 +527,19 @@ def build_segmentation_handler(
             "attempt": completion.attempt,
         }
         atomic_write_json(publish_root / "editor_revision.json", pointer)
+        if (project / "task_info.json").is_file():
+            task_info = load_task_info(project, str(context.task["project_id"]))
+            save_task_info(
+                project,
+                str(context.task["project_id"]),
+                {
+                    **task_info,
+                    "language": effective_language,
+                    "source_hard_limit": int(
+                        language_resolution["resolved_hard_limit"]
+                    ),
+                },
+            )
         return {
             "schema_version": SEGMENTATION_RESULT_SCHEMA,
             "candidate": {

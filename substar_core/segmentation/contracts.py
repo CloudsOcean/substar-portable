@@ -12,6 +12,7 @@ from substar_core.model_routing import resolve_stage_request
 
 from substar_core.glossary import normalize_entry
 from substar_core.manuscript_matching import reference_break_symbols_for_language
+from substar_core.prompt_registry import normalize_source_language, source_language_analysis
 from substar_core.runtime.model import InvalidTaskError
 
 
@@ -25,6 +26,44 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _TASK_ID = re.compile(r"^tsk_[0-9a-f]{32}$")
 _THINKING = {"enabled", "disabled"}
 _EFFORT = {"low", "medium", "high", "max", "xhigh"}
+
+
+def resolve_segmentation_language(
+    request: Mapping[str, Any], source_text: str
+) -> dict[str, Any]:
+    """Resolve the one language policy shared by every block in a task."""
+
+    constraints = request.get("constraints", {})
+    threshold = int(constraints.get("language_ratio_threshold_percent", 20))
+    analysis = source_language_analysis(source_text, threshold)
+    selection = str(request.get("language") or "Auto")
+    automatic = selection.strip().lower() in {"", "auto", "automatic"}
+    detected = str(analysis["resolved_language"])
+    resolved = detected if automatic else normalize_source_language(selection)
+    limits = {
+        "en": "english_hard_limit",
+        "zh-CN": "chinese_hard_limit",
+        "ja": "japanese_hard_limit",
+        "ko": "korean_hard_limit",
+        "mixed": "mixed_hard_limit",
+    }
+    limit_key = limits.get(resolved, "english_hard_limit")
+    break_symbols = str(constraints.get("reference_break_symbols") or "")
+    presets = {
+        reference_break_symbols_for_language(language)
+        for language in ("Auto", "zh-CN", "en", "ja", "ko", "mixed")
+    }
+    if request.get("mode") == "reference_script" and automatic and break_symbols in presets:
+        break_symbols = reference_break_symbols_for_language(resolved)
+    return {
+        **analysis,
+        "source_language_selection": selection,
+        "automatic": automatic,
+        "detected_language": detected,
+        "resolved_language": resolved,
+        "resolved_hard_limit": int(constraints.get(limit_key, 55)),
+        "resolved_reference_break_symbols": break_symbols,
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -228,6 +267,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "english_hard_limit",
         "chinese_hard_limit",
         "mixed_hard_limit",
+        "language_ratio_threshold_percent",
         "japanese_hard_limit",
         "korean_hard_limit",
         "sentence_boundary_policy",
@@ -238,8 +278,11 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
     actual_constraint_fields = (
         frozenset(constraints) if isinstance(constraints, Mapping) else frozenset()
     )
+    legacy_constraint_fields = constraint_fields - {"language_ratio_threshold_percent"}
     if actual_constraint_fields not in {
+        frozenset(legacy_constraint_fields),
         frozenset(constraint_fields),
+        frozenset({*legacy_constraint_fields, "reference_break_symbols"}),
         frozenset({*constraint_fields, "reference_break_symbols"}),
     }:
         raise InvalidTaskError("segmentation constraints fields are invalid")
@@ -282,6 +325,13 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "grouping": _model_policy(provider["grouping"], "provider.grouping"),
         "repair": _model_policy(provider["repair"], "provider.repair"),
     }
+    if "language_ratio_threshold_percent" in actual_constraint_fields:
+        normalized_constraints["language_ratio_threshold_percent"] = _integer(
+            constraints["language_ratio_threshold_percent"],
+            "constraints.language_ratio_threshold_percent",
+            0,
+            100,
+        )
     provider_id = canonical_provider_id(provider["id"])
     endpoint_provider = infer_model_provider(normalized_provider["base_url"])
     if endpoint_provider != "custom" and provider_id != endpoint_provider:
@@ -372,6 +422,9 @@ def build_segmentation_request(
             "english_hard_limit": int(settings.get("english_hard_limit", 55)),
             "chinese_hard_limit": int(settings.get("chinese_hard_limit", 24)),
             "mixed_hard_limit": int(settings.get("mixed_hard_limit", 25)),
+            "language_ratio_threshold_percent": int(
+                settings.get("language_ratio_threshold_percent", 20)
+            ),
             "japanese_hard_limit": int(settings.get("japanese_hard_limit", 25)),
             "korean_hard_limit": int(settings.get("korean_hard_limit", 32)),
             "sentence_boundary_policy": str(settings.get("sentence_boundary_policy", "unpunctuated")),

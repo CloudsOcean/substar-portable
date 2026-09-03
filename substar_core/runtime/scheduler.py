@@ -490,10 +490,11 @@ class TaskScheduler:
                         "phase": None,
                         "completed_units": None,
                         "total_units": None,
+                        "progress_payload": None,
                     }
                 )
                 required = {"progress", "message", "step", "wait_reason"}
-                optional = {"phase", "completed_units", "total_units"}
+                optional = {"phase", "completed_units", "total_units", "progress_payload"}
                 if not required.issubset(update) or set(update) - required - optional:
                     raise TaskRuntimeError(
                         "task handler returned an invalid progress projection"
@@ -512,6 +513,7 @@ class TaskScheduler:
                     phase=update.get("phase"),
                     completed_units=update.get("completed_units"),
                     total_units=update.get("total_units"),
+                    progress_payload=update.get("progress_payload"),
                 )
             elif message.message_type is WorkerMessageType.ARTIFACT:
                 relative_path, digest, byte_size = self._verify_worker_artifact(

@@ -7,7 +7,9 @@ import json
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
-from typing import Any, BinaryIO, Iterable, Mapping
+import queue
+import threading
+from typing import Any, BinaryIO, Iterable, Iterator, Mapping
 import uuid
 import zipfile
 
@@ -113,7 +115,7 @@ def _active_route_block(
     source_hard_limit: int, target_hard_limit: int,
     glossary: Iterable[Mapping[str, Any]] = (),
 ) -> str:
-    language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文", "mixed": "中英混合"}
+    language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文", "mixed": "混合"}
     block = "\n".join((
         "# 本项目的活动参数",
         f"源语言：{language_names.get(source_language, source_language)}（{source_language}）",
@@ -844,6 +846,141 @@ def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, rev
                 archive.write(path, name)
             else:
                 archive.writestr(name, content or b"")
+
+
+class _StreamingZipWriter:
+    """A non-seekable file object that forwards ZIP bytes to a consumer."""
+
+    def __init__(self, chunks: "queue.Queue[bytes | BaseException | None]", cancelled: threading.Event) -> None:
+        self._chunks = chunks
+        self._cancelled = cancelled
+        self._position = 0
+
+    def writable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    def tell(self) -> int:
+        return self._position
+
+    def flush(self) -> None:
+        return None
+
+    def write(self, value: bytes | bytearray | memoryview) -> int:
+        content = bytes(value)
+        if not content:
+            return 0
+        while not self._cancelled.is_set():
+            try:
+                self._chunks.put(content, timeout=0.25)
+                self._position += len(content)
+                return len(content)
+            except queue.Full:
+                continue
+        raise BrokenPipeError("subtitle project download was cancelled")
+
+
+def _subtitle_project_entries(
+    *, job_dir: Path, revision: Any
+) -> list[tuple[str, Path | None, bytes | None]]:
+    document_bytes = json.dumps(
+        revision.document.to_dict(), ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    entries: list[tuple[str, Path | None, bytes | None]] = [
+        ("document/latest.json", None, document_bytes)
+    ]
+    candidates = [job_dir / "audio_16k_mono.wav"]
+    input_dir = job_dir / "input"
+    if input_dir.is_dir():
+        candidates.extend(path for path in input_dir.iterdir() if path.is_file())
+    for name in (
+        "run_manifest.json", "task_info.json",
+        "reference_alignment.json", "reference_script_alignment.json",
+    ):
+        candidates.append(job_dir / name)
+    for folder in ("calibration", "review"):
+        root = job_dir / folder
+        if root.is_dir():
+            candidates.extend(path for path in root.rglob("*") if path.is_file())
+    seen: set[Path] = set()
+    for path in candidates:
+        if not path.is_file() or path in seen:
+            continue
+        seen.add(path)
+        entries.append((f"project/{path.relative_to(job_dir).as_posix()}", path, None))
+    return entries
+
+
+def stream_subtitle_project(
+    *, project_id: str, job_dir: Path, revision: Any
+) -> Iterator[bytes]:
+    """Stream a portable project without first building a potentially huge temp ZIP."""
+
+    chunks: "queue.Queue[bytes | BaseException | None]" = queue.Queue(maxsize=8)
+    cancelled = threading.Event()
+    entries = _subtitle_project_entries(job_dir=job_dir, revision=revision)
+
+    def produce() -> None:
+        writer = _StreamingZipWriter(chunks, cancelled)
+        manifest_files: list[dict[str, Any]] = []
+        try:
+            with zipfile.ZipFile(
+                writer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+            ) as archive:
+                for name, path, content in entries:
+                    size = path.stat().st_size if path else len(content or b"")
+                    digest = hashlib.sha256()
+                    compression = zipfile.ZIP_STORED if size >= 64 * 1024 * 1024 else zipfile.ZIP_DEFLATED
+                    info = zipfile.ZipInfo(name)
+                    info.compress_type = compression
+                    with archive.open(info, "w", force_zip64=size >= zipfile.ZIP64_LIMIT) as destination:
+                        if path:
+                            with path.open("rb") as source:
+                                for block in iter(lambda: source.read(1024 * 1024), b""):
+                                    digest.update(block)
+                                    destination.write(block)
+                        else:
+                            block = content or b""
+                            digest.update(block)
+                            destination.write(block)
+                    manifest_files.append({
+                        "path": name,
+                        "size": size,
+                        "sha256": digest.hexdigest(),
+                    })
+                manifest = {
+                    "schema_version": EXCHANGE_SCHEMA,
+                    "source_project_id": project_id,
+                    "document_id": revision.document.document_id,
+                    "revision_id": revision.revision_id,
+                    "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "files": manifest_files,
+                }
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
+        except BaseException as exc:
+            if not cancelled.is_set():
+                chunks.put(exc)
+        finally:
+            if not cancelled.is_set():
+                chunks.put(None)
+
+    worker = threading.Thread(target=produce, name="subtitle-project-export", daemon=True)
+    worker.start()
+    try:
+        while True:
+            item = chunks.get()
+            if item is None:
+                break
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:
+        cancelled.set()
 
 
 def _safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:

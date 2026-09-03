@@ -294,6 +294,7 @@ class TaskService:
         phase: str | None = None,
         completed_units: int | None = None,
         total_units: int | None = None,
+        progress_payload: Mapping[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         return self._public(
@@ -308,6 +309,7 @@ class TaskService:
                 phase=phase,
                 completed_units=completed_units,
                 total_units=total_units,
+                progress_payload=progress_payload,
                 request_id=(
                     _required_text(request_id, "request_id")
                     if request_id is not None

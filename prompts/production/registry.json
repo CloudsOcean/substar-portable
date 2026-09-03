@@ -47,43 +47,71 @@
     "contextual_translation": {
       "title": "上下文翻译",
       "category": "translation",
-      "description": "整组理解后进行多对多意义单元翻译与 Cue 分配。",
-      "version": "2026-08-18.7",
+      "description": "由公共规则、执行阶段、映射模式和语言规则组合生成翻译提示词。",
+      "version": "2026-09-03.1",
+      "shared": ["translation/common/base.md", "translation/common/primary.md"],
+      "default_mode": "many_to_many",
+      "modes": {
+        "one_to_one": ["translation/mode/one_to_one.md"],
+        "many_to_many": ["translation/common/contextual_translation.md"]
+      },
+      "mode_variants": {
+        "many_to_many": {
+          "en_to_zh": ["cases/contextual_translation_en_to_zh.constructed.md"],
+          "zh_to_en": ["cases/contextual_translation_zh_to_en.constructed.md"],
+          "zh_to_ja": ["cases/contextual_translation_zh_to_ja.constructed.md"],
+          "zh_to_ko": ["cases/contextual_translation_zh_to_ko.constructed.md"],
+          "en_to_ja": ["cases/contextual_translation_en_to_ja.constructed.md"],
+          "en_to_ko": ["cases/contextual_translation_en_to_ko.constructed.md"],
+          "ja_to_zh": ["cases/contextual_translation_ja_to_zh.constructed.md"],
+          "ja_to_en": ["cases/contextual_translation_ja_to_en.constructed.md"],
+          "ja_to_ko": ["cases/contextual_translation_ja_to_ko.constructed.md"],
+          "ko_to_zh": ["cases/contextual_translation_ko_to_zh.constructed.md"],
+          "ko_to_en": ["cases/contextual_translation_ko_to_en.constructed.md"],
+          "ko_to_ja": ["cases/contextual_translation_ko_to_ja.constructed.md"]
+        }
+      },
       "variants": {
-        "en_to_zh": ["translation/common/contextual_translation.md", "translation/en_to_zh/rules.md", "cases/contextual_translation_en_to_zh.constructed.md"],
-        "zh_to_en": ["translation/common/contextual_translation.md", "translation/zh_to_en/rules.md", "cases/contextual_translation_zh_to_en.constructed.md"],
-        "zh_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_zh_to_ja.constructed.md"],
-        "zh_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_zh_to_ko.constructed.md"],
-        "en_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_en_to_ja.constructed.md"],
-        "en_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_en_to_ko.constructed.md"],
-        "ja_to_zh": ["translation/common/contextual_translation.md", "translation/target/zh.md", "cases/contextual_translation_ja_to_zh.constructed.md"],
-        "ja_to_en": ["translation/common/contextual_translation.md", "translation/target/en.md", "cases/contextual_translation_ja_to_en.constructed.md"],
-        "ja_to_ko": ["translation/common/contextual_translation.md", "translation/ko/rules.md", "cases/contextual_translation_ja_to_ko.constructed.md"],
-        "ko_to_zh": ["translation/common/contextual_translation.md", "translation/target/zh.md", "cases/contextual_translation_ko_to_zh.constructed.md"],
-        "ko_to_en": ["translation/common/contextual_translation.md", "translation/target/en.md", "cases/contextual_translation_ko_to_en.constructed.md"],
-        "ko_to_ja": ["translation/common/contextual_translation.md", "translation/ja/rules.md", "cases/contextual_translation_ko_to_ja.constructed.md"],
-        "generic": ["translation/common/contextual_translation.md"]
+        "en_to_zh": ["translation/en_to_zh/rules.md"],
+        "zh_to_en": ["translation/zh_to_en/rules.md"],
+        "zh_to_ja": ["translation/ja/rules.md"],
+        "zh_to_ko": ["translation/ko/rules.md"],
+        "en_to_ja": ["translation/ja/rules.md"],
+        "en_to_ko": ["translation/ko/rules.md"],
+        "ja_to_zh": ["translation/target/zh.md"],
+        "ja_to_en": ["translation/target/en.md"],
+        "ja_to_ko": ["translation/ko/rules.md"],
+        "ko_to_zh": ["translation/target/zh.md"],
+        "ko_to_en": ["translation/target/en.md"],
+        "ko_to_ja": ["translation/ja/rules.md"],
+        "generic": ["translation/common/generic_language.md"]
       }
     },
     "contextual_translation_repair": {
       "title": "上下文翻译修复",
       "category": "translation",
-      "description": "保留已接受译文，只重做缺失或无效意义组。",
-      "version": "2026-08-18.2",
+      "description": "使用同一映射模式契约，只修复缺失或无效翻译组。",
+      "version": "2026-09-03.1",
+      "shared": ["translation/common/base.md", "translation/common/repair.md"],
+      "default_mode": "many_to_many",
+      "modes": {
+        "one_to_one": ["translation/mode/one_to_one.md"],
+        "many_to_many": ["translation/common/contextual_translation.md"]
+      },
       "variants": {
-        "en_to_zh": ["translation/common/contextual_translation_repair.md", "translation/en_to_zh/rules.md"],
-        "zh_to_en": ["translation/common/contextual_translation_repair.md", "translation/zh_to_en/rules.md"],
-        "zh_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
-        "zh_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
-        "en_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
-        "en_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
-        "ja_to_zh": ["translation/common/contextual_translation_repair.md", "translation/target/zh.md"],
-        "ja_to_en": ["translation/common/contextual_translation_repair.md", "translation/target/en.md"],
-        "ja_to_ko": ["translation/common/contextual_translation_repair.md", "translation/ko/rules.md"],
-        "ko_to_zh": ["translation/common/contextual_translation_repair.md", "translation/target/zh.md"],
-        "ko_to_en": ["translation/common/contextual_translation_repair.md", "translation/target/en.md"],
-        "ko_to_ja": ["translation/common/contextual_translation_repair.md", "translation/ja/rules.md"],
-        "generic": ["translation/common/contextual_translation_repair.md"]
+        "en_to_zh": ["translation/en_to_zh/rules.md"],
+        "zh_to_en": ["translation/zh_to_en/rules.md"],
+        "zh_to_ja": ["translation/ja/rules.md"],
+        "zh_to_ko": ["translation/ko/rules.md"],
+        "en_to_ja": ["translation/ja/rules.md"],
+        "en_to_ko": ["translation/ko/rules.md"],
+        "ja_to_zh": ["translation/target/zh.md"],
+        "ja_to_en": ["translation/target/en.md"],
+        "ja_to_ko": ["translation/ko/rules.md"],
+        "ko_to_zh": ["translation/target/zh.md"],
+        "ko_to_en": ["translation/target/en.md"],
+        "ko_to_ja": ["translation/ja/rules.md"],
+        "generic": ["translation/common/generic_language.md"]
       }
     },
     "external_ai_prooftranslation": {
@@ -118,6 +146,14 @@
       "category": "editor",
       "description": "应用大小写、标点、专名与确定性 ASR 修正。",
       "version": "2026-08-28.1",
+      "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
+    },
+    "calibration_repair": {
+      "title": "源文 AI 校准修复",
+      "category": "editor",
+      "description": "保留已验收动作，一次修复校准块内全部契约错误。",
+      "version": "2026-09-03.1",
+      "shared": ["calibration/repair.md"],
       "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
     }
   }

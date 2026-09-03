@@ -104,6 +104,79 @@ def test_calibration_reports_primary_and_repair_block_counts() -> None:
     assert repair_payload["program_validation_error"] == (
         "injected invalid primary block"
     )
+    assert "program_validation_errors" in repair_payload
+    assert "frozen_accepted_output" in repair_payload
+
+
+def test_calibration_repairs_all_rejected_items_and_freezes_accepted_output(
+    tmp_path,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_call(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {"actions": [
+                {"action_id": "accepted"},
+                {"action_id": "rejected-a"},
+                {"action_id": "rejected-b"},
+            ]}, {}
+        return {"actions": [
+            {"action_id": "repaired-a"},
+            {"action_id": "repaired-b"},
+        ]}, {}
+
+    def validate(_block_id, value):
+        ids = [row.get("action_id") for row in value.get("actions", [])]
+        if ids == ["accepted", "repaired-a", "repaired-b"]:
+            return {
+                "valid": True,
+                "issues": [],
+                "accepted_output": {"actions": list(value["actions"])},
+            }
+        return {
+            "valid": False,
+            "issues": [
+                {"code": "invalid_action", "action_id": "rejected-a"},
+                {"code": "invalid_action", "action_id": "rejected-b"},
+            ],
+            "accepted_output": {"actions": [{"action_id": "accepted"}]},
+        }
+
+    settings = {
+        "translation_api_key": "test-key",
+        "translation_api_base_url": "https://example.invalid",
+        "translation_api_model": "model",
+        "stage_calibration_model": "model",
+        "stage_audit_repair_model": "repair-model",
+        "translation_workers": 1,
+    }
+    with patch.object(http_api, "call_translation_model", side_effect=fake_call):
+        result = http_api._run_editor_ai_blocks(
+            settings=settings,
+            system_prompt="primary prompt",
+            repair_system_prompt="repair prompt",
+            blocks={"b1": []},
+            failure_key="actions",
+            stage_name="calibration",
+            retry_stage="audit_repair",
+            response_validator=validate,
+            cache_directory=tmp_path,
+            cache_scope="contract-v3-test",
+        )
+
+    assert len(calls) == 2
+    assert calls[0]["system_prompt"] == "primary prompt"
+    assert calls[1]["system_prompt"] == "repair prompt"
+    repair_payload = calls[1]["groups"][0]
+    assert repair_payload["frozen_accepted_output"] == {
+        "actions": [{"action_id": "accepted"}]
+    }
+    assert [row["action_id"] for row in result[0][1]["actions"]] == [
+        "accepted", "repaired-a", "repaired-b",
+    ]
+    # The rejected primary response is never cached; only the valid repair is.
+    assert len(list(tmp_path.glob("*.json"))) == 1
 
 
 def test_calibration_does_not_repair_authentication_failures() -> None:

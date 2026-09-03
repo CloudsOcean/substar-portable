@@ -32,4 +32,6 @@ test("creation calibration and translation retain independent task cards", () =>
   assert.match(source, /id:`editor:\$\{task\.project_id\}:\$\{task\.task_id\}`/);
   assert.match(source, /ai_progress:task\.ai_progress \|\| null/);
   assert.match(source, /job\.ai_progress\?\.progress \?\? job\.progress/);
+  assert.match(source, /SubstarAiProgressSummary\?\.format/);
+  assert.doesNotMatch(styles, /\.queue-ai-counts/);
 });

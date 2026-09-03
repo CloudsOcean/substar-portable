@@ -29,7 +29,7 @@ def execute_translation(
     artifact_directory: Path,
     expected_revision_id: str,
     settings: Mapping[str, Any],
-    progress_callback: Callable[[str, int, int, int, int], None] | None = None,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     store = ProjectStore.open(project_root / "project")
     source_revision = store.load_latest()
@@ -90,13 +90,7 @@ def execute_translation(
             },
         )
         if progress_callback is not None:
-            progress_callback(
-                phase,
-                tracker["completed"],
-                tracker["planned"],
-                tracker["repair_completed"],
-                tracker["repair_planned"],
-            )
+            progress_callback(value)
 
     write_progress("planning")
     result = run_contextual_translation(
@@ -168,4 +162,5 @@ def execute_translation(
         "planned": tracker["planned"],
         "repair_planned": tracker["repair_planned"],
         "repair_completed": tracker["repair_completed"],
+        "repair_accepted": tracker["repair_accepted"],
     }

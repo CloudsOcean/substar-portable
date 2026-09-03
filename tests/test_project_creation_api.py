@@ -131,12 +131,18 @@ class ProjectCreationApiTests(unittest.TestCase):
                 files={"media": ("教程音频.wav", media, "audio/wav")},
             )
 
-    async def post_reference(self, media: bytes) -> httpx.Response:
-        settings = json.loads(self.settings("en"))
+    async def post_reference(
+        self,
+        media: bytes,
+        *,
+        language: str = "en",
+        break_symbols: str = ",.",
+    ) -> httpx.Response:
+        settings = json.loads(self.settings(language))
         settings.update(
             {
                 "reference_script_mode": True,
-                "reference_break_symbols": ",.",
+                "reference_break_symbols": break_symbols,
             }
         )
         transport = httpx.ASGITransport(app=application.app)
@@ -298,6 +304,41 @@ class ProjectCreationApiTests(unittest.TestCase):
         )
         self.assertIn("Substar,", srt)
         self.assertIn("works.", srt)
+
+    def test_auto_reference_mode_uses_post_asr_language_symbols_and_limit(self) -> None:
+        media = wave_bytes(self.root / "reference-auto.wav")
+        response = asyncio.run(
+            self.post_reference(
+                media,
+                language="Auto",
+                break_symbols="，。？！.?!",
+            )
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+        created = response.json()
+        current = self.wait_job(created["id"])
+        self.assertEqual(current["status"], "awaiting_edit", current)
+        project = self.projects / created["id"]
+        request = json.loads(
+            (project / "segmentation" / "segmentation_request.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        candidate = json.loads(
+            (project / "segmentation" / "segmentation_candidate.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        task_info = json.loads((project / "task_info.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(request["language"], "Auto")
+        self.assertEqual(request["constraints"]["reference_break_symbols"], "，。？！.?!")
+        self.assertEqual(candidate["provenance"]["source_language_selection"], "Auto")
+        self.assertEqual(candidate["provenance"]["source_language"], "en")
+        self.assertEqual(candidate["provenance"]["break_symbols"], ".?!")
+        self.assertEqual(candidate["provenance"]["resolved_hard_limit"], 55)
+        self.assertEqual(task_info["language"], "en")
+        self.assertEqual(task_info["source_hard_limit"], 55)
 
     def test_cancel_preserves_project_until_separate_delete(self) -> None:
         self.scheduler.shutdown(grace_seconds=0.1, timeout_seconds=5.0)

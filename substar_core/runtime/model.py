@@ -210,6 +210,7 @@ class TaskRecord:
     attempt: int
     progress: float
     progress_message: str | None
+    progress_payload: dict[str, Any] | None
     step: str | None
     phase: str | None
     completed_units: int
@@ -243,6 +244,7 @@ class TaskRecord:
             attempt=int(row["attempt"]),
             progress=float(row["progress"]),
             progress_message=row["progress_message"],
+            progress_payload=decode_json_object(row["progress_payload_json"]),
             step=row["step"],
             phase=row["phase"],
             completed_units=int(row["completed_units"]),
@@ -280,6 +282,7 @@ class TaskRecord:
             "attempt": self.attempt,
             "progress": self.progress,
             "progress_message": self.progress_message,
+            "progress_payload": self.progress_payload,
             "step": self.step,
             "phase": self.phase,
             "completed_units": self.completed_units,

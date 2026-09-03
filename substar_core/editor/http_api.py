@@ -20,12 +20,13 @@ import tempfile
 import zipfile
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from substar_core.artifacts import atomic_write_json
 from substar_core.ai_progress import ai_progress
+from substar_core.ai_block_cache import fingerprint, load_ai_block_cache, save_ai_block_cache
 from substar_core.model_routing import resolve_stage_request
 from substar_core.chinese_script import convert_chinese_script
 from substar_core.config import load_settings, settings_for_model_provider
@@ -91,11 +92,11 @@ from substar_core.project_exchange import (
     external_generation_files,
     external_prooftranslation_files,
     external_split_files,
-    export_subtitle_project,
     import_subtitle_project,
     inspect_external_generation_checkpoint,
     inspect_external_prooftranslation,
     inspect_external_split,
+    stream_subtitle_project,
     write_bytes_zip,
 )
 from substar_core.task_info import load_task_info, save_task_info, task_info_settings
@@ -626,11 +627,10 @@ def list_editor_tasks(request: Request) -> dict[str, Any]:
             display_name = load_task_info(project_job_path(project_id), project_id)["display_name"]
         except (OSError, TypeError, ValueError, HTTPException):
             pass
+        projection = _runtime_ai_task_projection(task)
         tasks.append({
-            **task,
+            **projection,
             "status": task["state"],
-            "kind": task["task_type"],
-            "message": task.get("progress_message") or "",
             "display_name": display_name,
         })
     tasks.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
@@ -906,6 +906,37 @@ def _runtime_ai_task_projection(
         ),
         "repair": "repair",
     }.get(runtime_phase, runtime_phase)
+    live_progress = task.get("progress_payload")
+    result_progress = result.get("ai_progress")
+    terminal = str(task.get("state") or "") in {
+        "succeeded", "succeeded_with_issues", "failed", "cancelled",
+    }
+    projected_progress = dict(result_progress) if terminal and isinstance(result_progress, Mapping) else dict(live_progress) if isinstance(live_progress, Mapping) else dict(result_progress) if isinstance(result_progress, Mapping) else {
+        "phase": display_phase,
+        "message": task.get("progress_message") or "",
+        "kind": str(task.get("task_type") or ""),
+        "unit_kind": (
+            "semantic_group" if task.get("task_type") == "translation"
+            else "calibration_block"
+        ),
+        "unit_label": "个意义组" if task.get("task_type") == "translation" else "块",
+        "units": {
+            "planned": total,
+            "completed": completed,
+            "repair_planned": total if task.get("phase") == "repair" else 0,
+            "repair_completed": completed if task.get("phase") == "repair" else 0,
+        },
+        "problem_count": len(result.get("problem_cue_ids") or []),
+    }
+    task_kind = str(task.get("task_type") or "")
+    if task_kind in {"translation", "calibration"}:
+        projected_progress["kind"] = task_kind
+        projected_progress["unit_kind"] = (
+            "semantic_group" if task_kind == "translation" else "calibration_block"
+        )
+        projected_progress["unit_label"] = (
+            "个意义组" if task_kind == "translation" else "个校准块"
+        )
     return {
         **dict(task),
         "kind": task["task_type"],
@@ -917,21 +948,7 @@ def _runtime_ai_task_projection(
         "target_language": frozen.get("target_language"),
         "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
         "problem_cue_ids": list(result.get("problem_cue_ids") or []),
-        "ai_progress": {
-            "phase": display_phase,
-            "message": task.get("progress_message") or "",
-            "units": {
-                "planned": total,
-                "completed": completed,
-                "repair_planned": total if task.get("phase") == "repair" else 0,
-                "repair_completed": completed if task.get("phase") == "repair" else 0,
-            },
-            "steps": [
-                {"label": "模型处理"}, {"label": "修复"},
-                {"label": "结果验收"}, {"label": "生成可编辑结果"},
-                {"label": "交付"},
-            ],
-        },
+        "ai_progress": projected_progress,
     }
 
 
@@ -2022,6 +2039,7 @@ def _run_editor_ai_blocks(
     *,
     settings: Mapping[str, Any],
     system_prompt: str,
+    repair_system_prompt: str | None = None,
     blocks: Mapping[str, list[dict[str, Any]]],
     failure_key: str,
     stage_name: str,
@@ -2030,6 +2048,8 @@ def _run_editor_ai_blocks(
     progress_callback: Any | None = None,
     phase_callback: Any | None = None,
     failure_injector: Any | None = None,
+    cache_directory: Path | None = None,
+    cache_scope: str = "",
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
@@ -2047,7 +2067,13 @@ def _run_editor_ai_blocks(
     ) -> tuple[str, dict[str, Any], dict[str, Any]]:
         block_id, block_cues = item
         route = resolve_stage_request(settings, active_stage)
+        active_system_prompt = (
+            str(repair_system_prompt)
+            if rejected is not None and repair_system_prompt
+            else system_prompt
+        )
         value: dict[str, Any] = {failure_key: []}
+        validation_report: dict[str, Any] = {}
         try:
             if failure_injector is not None:
                 failure_injector(active_stage, block_id, attempt)
@@ -2061,14 +2087,36 @@ def _run_editor_ai_blocks(
                     program_validation_error=str(
                         rejected_metadata.get("error") or "invalid response contract"
                     ),
+                    program_validation_errors=list(
+                        rejected_metadata.get("validation_report", {}).get("issues", [])
+                    ),
+                    frozen_accepted_output=dict(
+                        rejected_metadata.get("validation_report", {}).get("accepted_output", {})
+                    ),
                     repair_attempt=attempt - 1,
                 )
-            value, request_metadata = call_translation_model(
+            cache_key = fingerprint({
+                "scope": cache_scope,
+                "stage": active_stage,
+                "model": str(route["model"]),
+                "system_prompt": active_system_prompt,
+                "request_group": request_group,
+                "schema": "calibration-actions.v3",
+            })
+            cached = (
+                load_ai_block_cache(cache_directory, cache_key)
+                if cache_directory is not None else None
+            )
+            if cached is not None:
+                value = cached
+                request_metadata = {"cache_hit": True, "cache_key": cache_key}
+            else:
+                value, request_metadata = call_translation_model(
                     base_url=str(route["base_url"]),
                     api_key=api_key,
                     auth_mode=str(route["auth_mode"]),
                     model=str(route["model"]),
-                    system_prompt=system_prompt,
+                    system_prompt=active_system_prompt,
                     groups=[request_group],
                     timeout=min(600, int(settings.get("translation_api_timeout_seconds", 300))),
                     thinking_mode=str(route["thinking_mode"]),
@@ -2079,19 +2127,38 @@ def _run_editor_ai_blocks(
                     ),
                     max_tokens=int(route["max_tokens"]),
                     temperature=float(route["temperature"]),
-            )
-            if response_validator is not None and not response_validator(
-                block_id, value
-            ):
-                raise ModelGatewayError(
-                    f"{active_stage} returned an invalid response contract"
                 )
+                request_metadata = {
+                    **request_metadata, "cache_hit": False, "cache_key": cache_key,
+                }
+            cache_value = dict(value)
+            if rejected is not None and failure_key == "actions":
+                frozen = list(
+                    rejected[1].get("validation_report", {})
+                    .get("accepted_output", {}).get("actions", [])
+                )
+                repaired = list(value.get("actions", []))
+                value = {**value, "actions": [*frozen, *repaired]}
+            if response_validator is not None:
+                validation = response_validator(block_id, value)
+                if isinstance(validation, Mapping):
+                    validation_report = dict(validation)
+                    valid = bool(validation_report.get("valid"))
+                else:
+                    valid = bool(validation)
+                if not valid:
+                    raise ModelGatewayError(
+                        f"{active_stage} returned an invalid response contract"
+                    )
+            if cached is None and cache_directory is not None:
+                save_ai_block_cache(cache_directory, cache_key, cache_value)
             return block_id, value, {
                 "attempt": attempt,
                 "stage": active_stage,
                 "primary_request_count": 1,
                 "repair_attempted": attempt > 1,
                 "repair_request_count": 1 if attempt > 1 else 0,
+                "validation_report": validation_report,
                 **request_metadata,
             }
         except ModelGatewayError as exc:
@@ -2105,6 +2172,7 @@ def _run_editor_ai_blocks(
                 "primary_request_count": 1,
                 "repair_attempted": attempt > 1,
                 "repair_request_count": 1 if attempt > 1 else 0,
+                "validation_report": validation_report,
             }
 
     if not blocks:
@@ -2158,6 +2226,11 @@ def _calibration_signature(text: str) -> str:
         char.casefold() for char in text
         if char not in _CALIBRATION_PUNCTUATION
     )
+
+
+def _calibration_alnum_signature(text: str) -> str:
+    """Compare token content while ignoring case, separators, and punctuation."""
+    return "".join(char.casefold() for char in str(text) if char.isalnum())
 
 
 def _calibration_attach_mark(text: str, mark: str) -> str:
@@ -2227,8 +2300,12 @@ def _validated_calibration_contract_actions(
     if not isinstance(raw_actions, list):
         return accepted, [{"code": "invalid_actions", "fatal": True}]
     positions = {token_id: index for index, token_id in enumerate(owned_token_ids)}
+    shadow_text = {
+        token_id: str(token_map[token_id].text)
+        for token_id in owned_token_ids if token_id in token_map
+    }
+    merged_token_ids: set[str] = set()
     seen_action_ids: set[str] = set()
-    occupied_apply_tokens: set[str] = set()
     for item_index, raw in enumerate(raw_actions):
         reason = ""
         if not isinstance(raw, Mapping) or set(raw) != _CALIBRATION_ACTION_FIELDS:
@@ -2260,6 +2337,8 @@ def _validated_calibration_contract_actions(
         ):
             reason = "token_ids are not wholly owned by this block"
         normalized_ids = [str(item) for item in token_ids] if isinstance(token_ids, list) else []
+        if not reason and any(token_id in merged_token_ids for token_id in normalized_ids):
+            reason = "action targets a token consumed by an earlier merge_span"
         if not reason:
             indexes = [positions[token_id] for token_id in normalized_ids]
             if indexes != list(range(indexes[0], indexes[0] + len(indexes))):
@@ -2267,12 +2346,51 @@ def _validated_calibration_contract_actions(
         expected_before = ""
         if not reason:
             expected_before = " ".join(
-                str(token_map[token_id].text) for token_id in normalized_ids
+                shadow_text[token_id] for token_id in normalized_ids
             )
         if not reason and (not before_text or before_text != expected_before or not after_text):
             reason = "before_text does not reproduce the bound source tokens"
         if not reason and kind in {"set_case", "set_punctuation", "replace_token"} and len(normalized_ids) != 1:
             reason = f"{kind} must target one token"
+        if (
+            not reason
+            and kind == "replace_token"
+            and not any(char.isspace() for char in after_text)
+        ):
+            if (
+                _calibration_signature(after_text) == _calibration_signature(before_text)
+                and _calibration_suffix(after_text) == _calibration_suffix(before_text)
+            ):
+                action["kind"] = "set_case"
+                action["affects_translation"] = False
+                kind = "set_case"
+            elif _calibration_core(after_text) == _calibration_core(before_text):
+                action["kind"] = "set_punctuation"
+                action["affects_translation"] = False
+                kind = "set_punctuation"
+        if (
+            not reason
+            and kind == "replace_token"
+            and any(char.isspace() for char in after_text)
+        ):
+            # A display token must remain one written unit.  Preserve a useful
+            # model suggestion for review, but never pretend that it can be
+            # materialized by the current token-preserving operation contract.
+            action["disposition"] = "review"
+            disposition = "review"
+        if (
+            not reason
+            and kind == "replace_span"
+            and len(normalized_ids) >= 2
+            and len(after_text.split()) == 1
+            and len({token_to_cue_id.get(token_id) for token_id in normalized_ids}) == 1
+            and token_to_cue_id.get(normalized_ids[0]) is not None
+        ):
+            # A same-Cue many-to-one replacement has an unambiguous topology:
+            # it is a merge, even if the model selected the adjacent label.
+            action["kind"] = "merge_span"
+            action["affects_translation"] = True
+            kind = "merge_span"
         if not reason and kind == "set_case" and (
             any(char.isspace() for char in after_text)
             or _calibration_signature(after_text) != _calibration_signature(before_text)
@@ -2284,8 +2402,27 @@ def _validated_calibration_contract_actions(
             or _calibration_core(after_text) != _calibration_core(before_text)
         ):
             reason = "set_punctuation may change only light punctuation"
-        if not reason and kind == "replace_span" and len(after_text.split()) != len(normalized_ids):
+        if (
+            not reason
+            and kind == "replace_span"
+            and disposition == "apply"
+            and len(after_text.split()) != len(normalized_ids)
+        ):
             reason = "replace_span must preserve token count"
+        if not reason and kind == "merge_span":
+            # A topology change necessarily invalidates the Cue translation.
+            # This is derived from the action kind, so normalize a mistaken
+            # model flag instead of rejecting an otherwise valid merge.
+            action["affects_translation"] = True
+            if (
+                disposition == "apply"
+                and _calibration_alnum_signature(after_text)
+                != _calibration_alnum_signature(before_text)
+            ):
+                # A merge may change casing, punctuation and token boundaries,
+                # but must not silently delete or invent lexical content.
+                action["disposition"] = "review"
+                disposition = "review"
         if not reason and kind == "merge_span" and (
             len(normalized_ids) < 2
             or len({token_to_cue_id.get(token_id) for token_id in normalized_ids}) != 1
@@ -2293,9 +2430,10 @@ def _validated_calibration_contract_actions(
             or after_text.strip() != after_text
             or not after_text
             or any(char.isspace() for char in after_text)
-            or action.get("affects_translation") is not True
         ):
             reason = "merge_span must merge contiguous tokens in one Cue into one token"
+        if not reason and after_text == before_text:
+            reason = "action must change the bound text"
         if not reason and (
             not isinstance(evidence, list) or not evidence
             or any(
@@ -2307,8 +2445,6 @@ def _validated_calibration_contract_actions(
             )
         ):
             reason = "evidence is missing or invalid"
-        if not reason and disposition == "apply" and occupied_apply_tokens.intersection(normalized_ids):
-            reason = "multiple apply actions target the same token"
         if reason:
             rejected.append({
                 "code": "invalid_action", "fatal": False,
@@ -2317,7 +2453,16 @@ def _validated_calibration_contract_actions(
             continue
         seen_action_ids.add(action_id)
         if disposition == "apply":
-            occupied_apply_tokens.update(normalized_ids)
+            if kind == "replace_span":
+                for token_id, text in zip(
+                    normalized_ids, after_text.split(), strict=True
+                ):
+                    shadow_text[token_id] = text
+            elif kind == "merge_span":
+                shadow_text[normalized_ids[0]] = after_text
+                merged_token_ids.update(normalized_ids)
+            else:
+                shadow_text[normalized_ids[0]] = after_text
         accepted.append({**action, "token_ids": normalized_ids})
     return accepted, rejected
 
@@ -2497,20 +2642,23 @@ def export_external_ai_generation(project_id: str) -> FileResponse:
 def export_subtitle_project_package(
     project_id: str,
     export_sequence: int = Query(default=1, ge=1, le=999999),
-) -> FileResponse:
+) -> StreamingResponse:
     revision = open_project_store(project_id).load_latest()
     if revision is None:
         raise HTTPException(status_code=404, detail="项目还没有文档版本")
     get_project_task_info(project_id)
-    return _commit_binary_export(
-        _named_export(project_id, "字幕工程", export_sequence, "zip"),
-        "subtitle-project",
-        lambda path: export_subtitle_project(
-            path,
+    filename = _named_export(project_id, "字幕工程", export_sequence, "zip")
+    return StreamingResponse(
+        stream_subtitle_project(
             project_id=project_id,
             job_dir=project_job_path(project_id),
             revision=revision,
         ),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "X-Substar-Artifact-Type": "subtitle-project",
+        },
     )
 
 
@@ -2817,31 +2965,38 @@ def _ai_calibrate_project(
         }
         for row in active_glossary(_project_glossary_id(project_id))
     ]
+    calibration_variant = (
+        "zh"
+        if source_language_for_text(
+            " ".join(
+                str(token["text"])
+                for cue in cues
+                for token in cue["tokens"]
+            )
+        ) == "zh-CN"
+        else "en"
+    )
     calibration_prompt = render_prompt(
-        "calibration",
-        variant=(
-            "zh"
-            if source_language_for_text(
-                " ".join(
-                    str(token["text"])
-                    for cue in cues
-                    for token in cue["tokens"]
-                )
-            ) == "zh-CN"
-            else "en"
-        ),
+        "calibration", variant=calibration_variant
+    ).text
+    calibration_repair_prompt = render_prompt(
+        "calibration_repair", variant=calibration_variant
     ).text
     if calibration_glossary:
-        calibration_prompt += (
+        glossary_section = (
             "\n\nAuthoritative glossary snapshot:\n"
             + json.dumps(calibration_glossary, ensure_ascii=False, separators=(",", ":"))
         )
+        calibration_prompt += glossary_section
+        calibration_repair_prompt += glossary_section
     if payload.instruction.strip():
-        calibration_prompt += (
+        instruction_section = (
             "\n\n用户本次补充校准要求：\n"
             + payload.instruction.strip()
             + "\n补充要求只能在既有校准动作契约允许的范围内执行；不得改变 Cue 时间或结构。"
         )
+        calibration_prompt += instruction_section
+        calibration_repair_prompt += instruction_section
     tracker = {
         "planned": len(blocks), "completed": 0,
         "primary_accepted": 0, "repair_planned": 0,
@@ -2853,7 +3008,7 @@ def _ai_calibrate_project(
         for token in cue["tokens"]
     }
 
-    def valid_calibration_block(block_id: str, value: Any) -> bool:
+    def valid_calibration_block(block_id: str, value: Any) -> dict[str, Any]:
         owned_cues = [
             cue for cue in blocks.get(block_id, []) if cue["editable"]
         ]
@@ -2861,10 +3016,14 @@ def _ai_calibrate_project(
             str(token["token_id"])
             for cue in owned_cues for token in cue["tokens"]
         ]
-        _actions, rejections = _validated_calibration_contract_actions(
+        actions, rejections = _validated_calibration_contract_actions(
             value, token_ids, token_map, token_to_cue_id
         )
-        return not any(bool(row.get("fatal")) for row in rejections)
+        return {
+            "valid": not rejections,
+            "issues": [dict(row) for row in rejections],
+            "accepted_output": {"actions": [dict(row) for row in actions]},
+        }
 
     def write_calibration_progress(phase: str, *, detail: str = "") -> None:
         value = ai_progress(
@@ -2900,6 +3059,7 @@ def _ai_calibrate_project(
     results = _run_editor_ai_blocks(
         settings=settings,
         system_prompt=calibration_prompt,
+        repair_system_prompt=calibration_repair_prompt,
         blocks=request_blocks,
         failure_key="actions",
         stage_name="calibration",
@@ -2907,6 +3067,8 @@ def _ai_calibrate_project(
         response_validator=valid_calibration_block,
         progress_callback=primary_progress,
         phase_callback=phase_progress,
+        cache_directory=project_job_path(project_id) / "calibration" / "block_cache",
+        cache_scope="calibration-contract-v3",
     )
 
     write_calibration_progress("validating")
@@ -2928,12 +3090,22 @@ def _ai_calibrate_project(
             for cue in owned_cues for token in cue["tokens"]
         ]
         if metadata.get("error"):
-            actions: list[dict[str, Any]] = []
-            validation_rejections = [{
-                "code": "model_request_failed",
-                "fatal": True,
-                "detail": str(metadata.get("error")),
-            }]
+            validation_report = metadata.get("validation_report", {})
+            actions = [
+                dict(row) for row in validation_report
+                .get("accepted_output", {}).get("actions", [])
+                if isinstance(row, Mapping)
+            ]
+            validation_rejections = [
+                dict(row) for row in validation_report.get("issues", [])
+                if isinstance(row, Mapping)
+            ]
+            if not validation_rejections:
+                validation_rejections = [{
+                    "code": "model_request_failed",
+                    "fatal": True,
+                    "detail": str(metadata.get("error")),
+                }]
             failed_blocks.append(block_id)
         else:
             actions, validation_rejections = _validated_calibration_contract_actions(
@@ -2969,8 +3141,6 @@ def _ai_calibrate_project(
             "accepted_actions": actions,
             "filtered_actions": validation_rejections,
         })
-        if metadata.get("error"):
-            continue
         for action in actions:
             kind = str(action["kind"])
             if action["disposition"] == "review":
@@ -3008,6 +3178,16 @@ def _ai_calibrate_project(
                 lexical_count += 1
         problem_cue_ids.extend(sorted(block_problem_cue_ids))
 
+    invalid_materialization = {
+        token_id: text
+        for token_id, text in desired_text.items()
+        if not text or text.strip() != text or any(char.isspace() for char in text)
+    }
+    if invalid_materialization:
+        raise RuntimeError(
+            "AI calibration validation/materialization contract drift: "
+            + ", ".join(sorted(invalid_materialization))
+        )
     replacements = [
         BatchReplacement(
             token_id=token_id,
@@ -3016,9 +3196,6 @@ def _ai_calibrate_project(
         )
         for token_id, text in desired_text.items()
         if text != token_map[token_id].text
-        and text.strip() == text
-        and text
-        and not any(char.isspace() for char in text)
     ]
     applied_case_count = sum(
         _calibration_core(item.text)
@@ -3231,6 +3408,7 @@ def _ai_calibrate_project(
     )
     if progress_sink is not None:
         progress_sink(final_progress)
+    result["ai_progress"] = final_progress
     return result
 
 

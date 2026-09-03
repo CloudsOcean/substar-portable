@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260901-v202-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260903-counts-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
   <script src="/assets/theme/personalization.js?v=20260814-8"></script>
@@ -25,7 +25,7 @@
           <label><span>任务名称</span><input id="taskInfoName" maxlength="120" autocomplete="off" required></label>
           <div class="task-info-grid">
             <label class="task-info-model"><span>本任务使用的模型</span><select id="taskInfoLlmProvider"><option value="inherit">跟随全局设置</option></select></label>
-            <label><span>原文语言</span><select id="taskInfoSourceLanguage"><option value="Auto">自动识别</option><option value="mixed">中英混合</option><option value="zh">中文</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韩文</option></select></label>
+            <label><span>原文语言</span><select id="taskInfoSourceLanguage"><option value="Auto">自动识别</option><option value="mixed">混合</option><option value="zh">中文</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韩文</option></select></label>
             <label><span>目标语言</span><select id="taskInfoTargetLanguage"><option value="zh-CN">中文</option><option value="en">英文</option><option value="ja">日文</option><option value="ko">韩文</option></select></label>
             <label><span>原文行长</span><input id="taskInfoSourceLimit" type="number" min="1" max="500" required></label>
             <label><span>译文行长</span><input id="taskInfoTargetLimit" type="number" min="1" max="500" required></label>
@@ -42,7 +42,7 @@
           <label for="translationSourceLanguage">原始语言</label>
           <select id="translationSourceLanguage">
             <option value="Auto">自动识别</option>
-            <option value="mixed">中英混合</option>
+            <option value="mixed">混合</option>
             <option value="zh-CN">中文</option>
             <option value="en">英文</option>
             <option value="ja">日文</option>
@@ -167,7 +167,7 @@
         <section id="translationTaskPanel" class="translation-task-panel hidden" role="status" aria-live="polite">
           <div><strong id="translationTaskTitle">字幕翻译</strong><span id="translationTaskPercent">0%</span></div>
           <div class="translation-progress"><i id="translationProgressBar"></i></div>
-          <ol id="translationTaskSteps" class="translation-task-steps hidden" aria-label="AI 任务阶段"></ol>
+          <div id="translationTaskSteps" class="translation-task-summary hidden" aria-label="AI 任务处理进度"></div>
           <p id="translationTaskMessage">等待启动</p>
           <div id="taskFailureRecovery" class="task-failure-recovery hidden"><select id="failedTaskModel" aria-label="重试使用的模型"></select><button id="retryFailedTask" type="button">重试</button><button id="openModelSettings" type="button">设置</button></div>
           <button id="dismissTaskPanel" class="task-dismiss" type="button" title="取消当前任务" aria-label="取消当前任务">×</button>
@@ -277,8 +277,8 @@
 
   <script src="/assets/editor_cue_ordering.js?v=20260809-cue-order-1"></script>
   <script src="/assets/editor_language.js?v=20260822-virtual-line-3"></script>
-  <script src="/assets/editor_document.js?v=20260831-v2-contract-1"></script>
-  <script src="/assets/editor_document_store.js?v=20260831-v2-contract-1"></script>
+  <script src="/assets/editor_document.js?v=20260903-delivery-1"></script>
+  <script src="/assets/editor_document_store.js?v=20260903-delivery-1"></script>
   <script src="/assets/editor_operation_queue.js?v=20260809-refactor-final-1"></script>
   <script src="/assets/editor_waveform_cache.js?v=20260809-refactor-final-1"></script>
   <script src="/assets/editor_timeline.js?v=20260828-shortcuts-1"></script>
@@ -287,6 +287,7 @@
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260831-v2-contract-1"></script>
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
-  <script src="/assets/editor.js?v=20260902-v204-1"></script>
+  <script src="/assets/ai_progress_summary.js?v=20260903-counts-1"></script>
+  <script src="/assets/editor.js?v=20260903-counts-1"></script>
 </body>
 </html>

@@ -86,6 +86,9 @@
             target_text:text,
             original_text:String(payload.original_text || cue.target?.original_text || text),
             language:String(payload.language || cue.target?.language || "zh-CN"),
+            translation_status:"translated",
+            issue_code:null,
+            editable:true,
             provenance
           } : null;
         }

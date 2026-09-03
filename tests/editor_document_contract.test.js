@@ -62,3 +62,31 @@ test("canonical segmentation groups are accepted by the editor", () => {
 test("historical stage labels are rejected by the canonical editor", () => {
   assert.throws(() => validateDocument(documentWithGroupOrigin("stage1")), /origin is unsupported/);
 });
+
+test("guaranteed-delivery manual translations may remain blank and editable", () => {
+  const document = documentWithGroupOrigin("segmentation");
+  document.cues[0].target = {
+    target_text:"",
+    original_text:"",
+    language:"zh-CN",
+    translation_status:"manual_required",
+    issue_code:"translation_unresolved",
+    editable:true,
+    provenance:provenance(),
+  };
+  assert.doesNotThrow(() => validateDocument(document));
+});
+
+test("ordinary translated tracks must still contain text", () => {
+  const document = documentWithGroupOrigin("segmentation");
+  document.cues[0].target = {
+    target_text:"",
+    original_text:"",
+    language:"zh-CN",
+    translation_status:"translated",
+    issue_code:null,
+    editable:true,
+    provenance:provenance(),
+  };
+  assert.throws(() => validateDocument(document), /target_text must be non-empty text/);
+});

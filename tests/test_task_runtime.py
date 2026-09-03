@@ -47,7 +47,7 @@ class TaskRuntimeTest(unittest.TestCase):
             }
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             journal = connection.execute("PRAGMA journal_mode").fetchone()[0]
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
         self.assertEqual(journal.lower(), "wal")
         self.assertTrue(
             {
@@ -103,6 +103,35 @@ class TaskRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(InvalidTaskError, "legacy runtime database"):
             RuntimeStore(legacy)
 
+    def test_runtime_v3_is_migrated_without_dropping_tasks(self) -> None:
+        database = Path(self.temporary.name) / "runtime-v3.sqlite3"
+        with closing(sqlite3.connect(database)) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );
+                INSERT INTO schema_migrations VALUES (3, 'v2_task_runtime', 'old');
+                CREATE TABLE tasks (task_id TEXT PRIMARY KEY);
+                INSERT INTO tasks VALUES ('keep-me');
+                PRAGMA user_version=3;
+                """
+            )
+
+        RuntimeStore(database)
+
+        with closing(sqlite3.connect(database)) as connection:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(tasks)")
+            }
+            task_id = connection.execute("SELECT task_id FROM tasks").fetchone()[0]
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+        self.assertEqual(version, 4)
+        self.assertEqual(task_id, "keep-me")
+        self.assertIn("progress_payload_json", columns)
+
     def test_create_and_idempotent_replay_return_schema_projection(self) -> None:
         first = self.create_task(
             idempotency_key="upload-action-1", request_id="req-create-1"
@@ -141,9 +170,15 @@ class TaskRuntimeTest(unittest.TestCase):
             message="Recognition submitted",
             step="recognition_wait",
             wait_reason="provider_processing",
+            progress_payload={
+                "schema_version": "substar.ai-stage-progress.v2",
+                "phase": "executing",
+                "units": {"planned": 4, "completed": 2},
+            },
         )
         self.assertEqual(progressed["progress"], 0.4)
         self.assertEqual(progressed["step"], "recognition_wait")
+        self.assertEqual(progressed["progress_payload"]["units"]["completed"], 2)
 
         with self.assertRaises(TaskStateConflictError):
             self.service.record_progress(created["task_id"], 1, 0.3)

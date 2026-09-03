@@ -75,6 +75,7 @@ def build_calibration_handler(projects_root: Path, application_root: Path) -> Ta
             ),
             "completed_units": int(message.data.get("completed", 0) or 0),
             "total_units": int(message.data.get("total", 0) or 0),
+            "progress_payload": dict(message.data.get("ai_progress") or {}),
         }
 
     def finalize(context: TaskWorkContext, completion: WorkerCompletion) -> Mapping[str, Any]:
@@ -95,6 +96,7 @@ def build_calibration_handler(projects_root: Path, application_root: Path) -> Ta
             "problem_cue_ids": problems,
             "failed_blocks": failures,
             "needs_attention": bool(problems or failures),
+            "ai_progress": dict(summary.get("ai_progress") or {}),
         }
 
     return TaskHandler(

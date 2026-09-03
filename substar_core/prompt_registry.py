@@ -40,18 +40,31 @@ class RenderedPrompt:
     text: str
     files: tuple[str, ...]
     sha256: str
+    mode: str | None = None
 
     def metadata(self) -> dict[str, Any]:
-        return {
+        value = {
             "key": self.key,
             "variant": self.variant,
             "version": self.version,
             "files": list(self.files),
             "sha256": self.sha256,
         }
+        if self.mode:
+            value["mode"] = self.mode
+        return value
 
 
-def source_language_for_text(text: str) -> str:
+def source_language_analysis(
+    text: str, language_ratio_threshold_percent: int | float = 20
+) -> dict[str, Any]:
+    """Resolve one project language from all language-bearing characters.
+
+    The threshold is the combined share of every language except the most-used
+    language. Japanese keeps the established rule that Han characters belong
+    to Japanese when Kana is present, because Kanji cannot be distinguished
+    from Chinese by Unicode script alone.
+    """
     value = text or ""
     counts = {
         "zh-CN": len(HAN_RE.findall(value)),
@@ -63,18 +76,49 @@ def source_language_for_text(text: str) -> str:
     if counts["ja"]:
         counts["ja"] += counts["zh-CN"]
         counts["zh-CN"] = 0
-    if counts["zh-CN"] and counts["en"]:
-        return "mixed"
-    return max(counts, key=counts.get) if any(counts.values()) else "en"
+    threshold = max(0.0, min(100.0, float(language_ratio_threshold_percent)))
+    total = sum(counts.values())
+    primary = max(counts, key=counts.get) if total else "en"
+    primary_count = counts[primary] if total else 0
+    other_count = total - primary_count
+    other_ratio = (other_count * 100.0 / total) if total else 0.0
+    resolved = primary if other_ratio <= threshold else "mixed"
+    return {
+        "resolved_language": resolved,
+        "primary_language": primary,
+        "language_character_counts": counts,
+        "language_character_count": total,
+        "other_language_character_count": other_count,
+        "other_language_ratio_percent": round(other_ratio, 4),
+        "language_ratio_threshold_percent": threshold,
+    }
 
 
-def source_language_for_units(units: Iterable[Any]) -> str:
-    return source_language_for_text(
-        " ".join(str(getattr(unit, "text", "") or "") for unit in units)
+def source_language_for_text(
+    text: str, language_ratio_threshold_percent: int | float = 20
+) -> str:
+    return str(
+        source_language_analysis(text, language_ratio_threshold_percent)[
+            "resolved_language"
+        ]
     )
 
 
-def normalize_source_language(value: str | None, units: Iterable[Any] | None = None) -> str:
+def source_language_for_units(
+    units: Iterable[Any], language_ratio_threshold_percent: int | float = 20
+) -> str:
+    return source_language_for_text(
+        " ".join(str(getattr(unit, "text", "") or "") for unit in units),
+        language_ratio_threshold_percent,
+    )
+
+
+def normalize_source_language(
+    value: str | None,
+    units: Iterable[Any] | None = None,
+    *,
+    language_ratio_threshold_percent: int | float = 20,
+) -> str:
     """Resolve the user-facing source-language choice used by segmentation.
 
     ``Auto`` is the only value that uses content inference.  ``mixed`` is an
@@ -98,7 +142,13 @@ def normalize_source_language(value: str | None, units: Iterable[Any] | None = N
         "en-zh": "mixed",
     }
     if raw in {"", "auto", "automatic"}:
-        return source_language_for_units(units or []) if units is not None else "Auto"
+        return (
+            source_language_for_units(
+                units or [], language_ratio_threshold_percent
+            )
+            if units is not None
+            else "Auto"
+        )
     return aliases.get(raw, str(value).strip() or "Auto")
 
 
@@ -125,7 +175,9 @@ def _registry() -> dict[str, Any]:
     return value
 
 
-def render_prompt(key: str, *, variant: str = "default") -> RenderedPrompt:
+def render_prompt(
+    key: str, *, variant: str = "default", mode: str | None = None
+) -> RenderedPrompt:
     registry = _registry()
     entries = registry.get("prompts", {})
     entry = entries.get(key) if isinstance(entries, dict) else None
@@ -139,6 +191,33 @@ def render_prompt(key: str, *, variant: str = "default") -> RenderedPrompt:
         files = variants.get("generic") if isinstance(variants, dict) else None
     if not isinstance(files, list) or not files:
         raise PromptRegistryError(f"提示词 {key} 缺少变体：{variant}")
+
+    shared = entry.get("shared", [])
+    modes = entry.get("modes", {})
+    if not isinstance(shared, list):
+        raise PromptRegistryError(f"提示词 {key} 的公共组件无效")
+    selected_mode = str(mode or entry.get("default_mode") or "").strip() or None
+    mode_files: list[str] = []
+    if modes:
+        if not isinstance(modes, dict) or selected_mode not in modes:
+            raise PromptRegistryError(
+                f"提示词 {key} 缺少模式：{selected_mode or '<未指定>'}"
+            )
+        raw_mode_files = modes[selected_mode]
+        if not isinstance(raw_mode_files, list) or not raw_mode_files:
+            raise PromptRegistryError(f"提示词 {key} 的模式组件无效：{selected_mode}")
+        mode_files = [str(item) for item in raw_mode_files]
+    mode_variants = entry.get("mode_variants", {})
+    mode_variant_files: list[str] = []
+    if isinstance(mode_variants, dict) and selected_mode:
+        by_variant = mode_variants.get(selected_mode, {})
+        if isinstance(by_variant, dict):
+            raw_mode_variant_files = by_variant.get(variant, [])
+            if isinstance(raw_mode_variant_files, list):
+                mode_variant_files = [str(item) for item in raw_mode_variant_files]
+    files = [
+        *map(str, shared), *mode_files, *map(str, files), *mode_variant_files,
+    ]
 
     resolved: list[str] = []
     parts: list[str] = []
@@ -161,6 +240,7 @@ def render_prompt(key: str, *, variant: str = "default") -> RenderedPrompt:
         text=text,
         files=tuple(resolved),
         sha256=digest,
+        mode=selected_mode,
     )
 
 
@@ -170,7 +250,23 @@ def _registered_component_paths(registry: dict[str, Any]) -> set[str]:
     if not isinstance(entries, dict):
         return paths
     for entry in entries.values():
-        variants = entry.get("variants", {}) if isinstance(entry, dict) else {}
+        if not isinstance(entry, dict):
+            continue
+        paths.update(str(item).replace("\\", "/") for item in entry.get("shared", []))
+        modes = entry.get("modes", {})
+        if isinstance(modes, dict):
+            for files in modes.values():
+                if isinstance(files, list):
+                    paths.update(str(item).replace("\\", "/") for item in files)
+        mode_variants = entry.get("mode_variants", {})
+        if isinstance(mode_variants, dict):
+            for variants in mode_variants.values():
+                if not isinstance(variants, dict):
+                    continue
+                for files in variants.values():
+                    if isinstance(files, list):
+                        paths.update(str(item).replace("\\", "/") for item in files)
+        variants = entry.get("variants", {})
         if not isinstance(variants, dict):
             continue
         for files in variants.values():
@@ -208,6 +304,31 @@ def prompt_catalog() -> dict[str, Any]:
     for key, raw in entries.items():
         if not isinstance(raw, dict) or not isinstance(raw.get("variants"), dict):
             raise PromptRegistryError(f"提示词清单项无效：{key}")
+        shared = [str(item).replace("\\", "/") for item in raw.get("shared", [])]
+        modes = {
+            str(mode): [str(item).replace("\\", "/") for item in files]
+            for mode, files in raw.get("modes", {}).items()
+            if isinstance(files, list)
+        } if isinstance(raw.get("modes", {}), dict) else {}
+        mode_variants = raw.get("mode_variants", {})
+        for relative in shared:
+            usage.setdefault(relative, []).append({"family": str(key), "variant": "shared"})
+        for mode, files in modes.items():
+            for relative in files:
+                usage.setdefault(relative, []).append({"family": str(key), "variant": f"mode:{mode}"})
+        if isinstance(mode_variants, dict):
+            for mode, by_variant in mode_variants.items():
+                if not isinstance(by_variant, dict):
+                    continue
+                for mode_variant, files in by_variant.items():
+                    if not isinstance(files, list):
+                        continue
+                    for relative in files:
+                        normalized = str(relative).replace("\\", "/")
+                        usage.setdefault(normalized, []).append({
+                            "family": str(key),
+                            "variant": f"mode:{mode}/{mode_variant}",
+                        })
         variants = []
         for variant, raw_files in raw["variants"].items():
             if not isinstance(raw_files, list) or not raw_files:
@@ -223,6 +344,10 @@ def prompt_catalog() -> dict[str, Any]:
             "category": str(raw.get("category") or "other"),
             "description": str(raw.get("description") or ""),
             "version": str(raw.get("version") or "1"),
+            "shared": shared,
+            "modes": modes,
+            "mode_variants": mode_variants,
+            "default_mode": raw.get("default_mode"),
             "variants": variants,
         })
     production_root = (PROMPT_ROOT / "production").resolve()

@@ -6,7 +6,7 @@ import shutil
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from substar_core.editor.calibration.handler import (
     CALIBRATION_INPUT_SCHEMA,
@@ -29,6 +29,23 @@ def _configure_stdio_utf8() -> None:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _active_progress_units(value: Mapping[str, Any]) -> tuple[int, int]:
+    """Project the common AI progress contract onto Runtime's active counter."""
+
+    units = value.get("units")
+    units = units if isinstance(units, Mapping) else {}
+    phase = str(value.get("phase") or "executing")
+    if phase == "repair":
+        return (
+            int(units.get("repair_completed", 0) or 0),
+            int(units.get("repair_planned", 0) or 0),
+        )
+    return (
+        int(units.get("completed", 0) or 0),
+        int(units.get("planned", 0) or 0),
+    )
 
 
 def run(command: WorkerCommand) -> int:
@@ -72,8 +89,7 @@ def run(command: WorkerCommand) -> int:
         def project_progress(value: Any) -> None:
             value = dict(value or {})
             phase = str(value.get("phase") or "executing")
-            completed = int(value.get("completed", 0) or 0)
-            total = int(value.get("planned", 0) or 0)
+            completed, total = _active_progress_units(value)
             fraction = completed / total if total else 0.0
             progress_value = {
                 "executing": 0.05 + 0.70 * fraction,
@@ -85,7 +101,12 @@ def run(command: WorkerCommand) -> int:
             }.get(phase, float(value.get("progress", 0.02)))
             emit(
                 WorkerMessageType.PROGRESS,
-                {"phase": phase, "completed": completed, "total": total},
+                {
+                    "phase": phase,
+                    "completed": completed,
+                    "total": total,
+                    "ai_progress": value,
+                },
                 progress=min(1.0, progress_value),
                 step=f"calibration.{phase}",
             )
@@ -133,6 +154,7 @@ def run(command: WorkerCommand) -> int:
                 "result_revision_id": revision_id,
                 "failed_blocks": list(result.get("failed_blocks") or []),
                 "problem_cue_ids": list(result.get("problem_cue_ids") or []),
+                "ai_progress": dict(result.get("ai_progress") or {}),
             },
         })
         return 0

@@ -65,14 +65,16 @@ Allowed evidence kinds are `glossary`, `reference_document`, `document_consisten
 Binding rules:
 
 - `token_ids` must contain only editable token IDs, in document order.
-- `before_text` must reproduce the current referenced token text exactly, including case and attached punctuation, joined by one ordinary space for a span.
+- Actions execute in array order. `before_text` must reproduce the referenced text at that point in the sequence exactly, including case and attached punctuation, and must reflect changes made by earlier accepted actions; use one ordinary space for a span.
 - `after_text` must preserve punctuation that is not intentionally being changed. For example, replacing token `T,` with the word `Tea` requires `before_text="T,"` and `after_text="Tea,"`.
 - `set_case`, `set_punctuation`, and `replace_token` target exactly one token.
 - `replace_span` targets contiguous tokens and preserves the same number of space-separated tokens.
 - `merge_span` targets at least two contiguous tokens owned by one Cue. Its `after_text` is one non-empty token with no whitespace. Use it only when the source fragments are unambiguously one written unit; never use it to rewrite a phrase or cross a Cue boundary. Set `affects_translation=true`.
-- Except for the explicitly allowed same-Cue `merge_span`, do not insert or delete tokens. Never return empty replacement text, add leading/trailing whitespace, or put spaces inside a single-token replacement.
+- An applied `merge_span` must preserve every letter and digit from the source span; it may change only case, punctuation, and joining. If lexical content would be added, removed, or respelled, use `disposition=review`.
+- Always use the narrowest action kind: `set_case` for case-only changes and `set_punctuation` for light-punctuation-only changes. Do not encode either as `replace_token`.
+- Except for the explicitly allowed same-Cue `merge_span`, do not insert or delete tokens. Never return empty replacement text, add leading/trailing whitespace, or put spaces inside an applied single-token replacement. If the correct repair requires splitting one glued token into multiple words, return the `replace_token` only as `disposition=review`; never mark that suggestion as `apply`.
 - Do not emit a no-op whose `after_text` equals `before_text`.
-- Each `action_id` must be unique. Do not emit competing `apply` actions for the same token.
+- Each `action_id` must be unique. A token may receive multiple sequential actions, such as `set_case` followed by `set_punctuation`; the later action must bind to the earlier action's output. Do not emit actions whose ordered preconditions conflict.
 - Set `affects_translation=true` for lexical replacements and for any correction that can change meaning; otherwise use `false`.
 
 Before returning, silently verify that every action is bound to the exact current text, targets only editable tokens, preserves token count, uses an allowed enum value, includes concrete evidence, and is valid JSON. Return no analysis, Markdown, or prose outside the JSON object.

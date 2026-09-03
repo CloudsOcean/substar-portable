@@ -21,7 +21,10 @@ from substar_core.segmentation.input_contract import (
     build_segmentation_material,
     build_segmentation_material_with_reference_projection,
 )
-from substar_core.segmentation.contracts import segmentation_credential_ref
+from substar_core.segmentation.contracts import (
+    resolve_segmentation_language,
+    segmentation_credential_ref,
+)
 from substar_core.transcription.contracts import (
     recognition_source_from_evidence,
     validate_recognition_evidence,
@@ -99,6 +102,7 @@ def semantic_segmentation_arguments(
     progress_path: Path,
     glossary_path: Path,
     request: dict[str, Any],
+    source_language_selection: str | None = None,
 ) -> list[str]:
     """Return arguments for the in-process semantic algorithm entrypoint.
 
@@ -132,10 +136,16 @@ def semantic_segmentation_arguments(
         "--english-hard-limit", str(constraints["english_hard_limit"]),
         "--chinese-hard-limit", str(constraints["chinese_hard_limit"]),
         "--mixed-hard-limit", str(constraints["mixed_hard_limit"]),
+        "--language-ratio-threshold-percent", str(
+            constraints.get("language_ratio_threshold_percent", 20)
+        ),
         "--japanese-hard-limit", str(constraints["japanese_hard_limit"]),
         "--korean-hard-limit", str(constraints["korean_hard_limit"]),
         "--target-hard-limit", str(constraints["chinese_hard_limit"]),
         "--source-language", request["language"],
+        "--source-language-selection", str(
+            source_language_selection or request["language"]
+        ),
         "--timeout", str(constraints["request_timeout_seconds"]),
         "--progress-file", str(progress_path),
         "--source-kind", "asr",
@@ -325,7 +335,10 @@ def _semantic_candidate(
         "notices": notices,
         "validation": validation,
         "provenance": {
+            "source_language_selection": provenance.get("source_language_selection"),
             "source_language": provenance.get("source_language"),
+            "language_detection": provenance.get("language_detection"),
+            "resolved_hard_limit": provenance.get("resolved_hard_limit"),
             "sentence_boundary_policy": provenance.get("sentence_boundary_policy"),
             "prompt": prompt_audit(
                 provenance.get("semantic_grouping_prompt"), "semantic_grouping"
@@ -504,7 +517,14 @@ def _reference_script_candidate(
         "notices": notices,
         "validation": validation,
         "provenance": {
+            "source_language_selection": audit.get(
+                "language_resolution", {}
+            ).get("source_language_selection"),
             "source_language": request.get("language"),
+            "language_detection": audit.get("language_resolution"),
+            "resolved_hard_limit": audit.get(
+                "language_resolution", {}
+            ).get("resolved_hard_limit"),
             "sentence_boundary_policy": "reference_primary_asr_timing",
             "break_symbols": request["constraints"]["reference_break_symbols"],
             "alignment_quality": quality,
@@ -700,6 +720,25 @@ def run(command: WorkerCommand) -> int:
             raise ValueError("recognition evidence belongs to a different transcription input")
         if evidence["media"]["sha256"] != request["transcription"]["media_sha256"]:
             raise ValueError("recognition evidence belongs to different media")
+        language_resolution = resolve_segmentation_language(
+            request, str(evidence.get("master_text") or "")
+        )
+        effective_request = {
+            **request,
+            "language": language_resolution["resolved_language"],
+            "constraints": {
+                **request["constraints"],
+                **(
+                    {
+                        "reference_break_symbols": language_resolution[
+                            "resolved_reference_break_symbols"
+                        ]
+                    }
+                    if request["mode"] == "reference_script"
+                    else {}
+                ),
+            },
+        }
         prompt_sha256, prompt_count = sha256_tree(prompt_root)
         if (
             prompt_sha256 != request["prompt_snapshot"]["sha256"]
@@ -729,7 +768,11 @@ def run(command: WorkerCommand) -> int:
             reference_audit,
             display_projection,
             reference_suggestions,
-        ) = _effective_material(evidence, reference_path, request)
+        ) = _effective_material(evidence, reference_path, effective_request)
+        reference_audit = {
+            **reference_audit,
+            "language_resolution": language_resolution,
+        }
         material_path = work_directory / "segmentation_material.json"
         atomic_write_json(material_path, material)
         atomic_write_json(artifact_directory / "reference_match.json", reference_audit)
@@ -753,7 +796,8 @@ def run(command: WorkerCommand) -> int:
                 scratch=scratch,
                 progress_path=progress_path,
                 glossary_path=glossary_path,
-                request=request,
+                request=effective_request,
+                source_language_selection=str(request.get("language") or "Auto"),
             )
             stdout_path = work_directory / "algorithm.stdout.log"
             stderr_path = work_directory / "algorithm.stderr.log"
@@ -766,7 +810,7 @@ def run(command: WorkerCommand) -> int:
 
             previous_key = os.environ.get("SUBSTAR_MODEL_API_KEY")
             previous_prompt_root = os.environ.get("SUBSTAR_PROMPT_ROOT")
-            last_semantic_report: tuple[int, int, int, int, int] | None = None
+            last_semantic_report: tuple[int, ...] | None = None
 
             def report_semantic_progress(snapshot: dict[str, Any]) -> None:
                 nonlocal last_semantic_report
@@ -789,7 +833,18 @@ def run(command: WorkerCommand) -> int:
                     for block in (blocks.values() if isinstance(blocks, Mapping) else [])
                     if isinstance(block, Mapping) and block.get("status") == "repairing"
                 )
-                signature = (planned, responses, completed, repairing, failed)
+                repair_row = stages.get("semantic_grouping_repair")
+                repair_row = repair_row if isinstance(repair_row, Mapping) else {}
+                repair_planned = max(0, int(repair_row.get("planned", 0)))
+                repair_accepted = max(0, int(repair_row.get("accepted", 0)))
+                repair_failed = max(0, int(repair_row.get("failed", 0)))
+                repair_completed = min(
+                    repair_planned, repair_accepted + repair_failed
+                )
+                signature = (
+                    planned, responses, completed, repairing, failed,
+                    repair_planned, repair_completed, repair_accepted,
+                )
                 if signature == last_semantic_report:
                     return
                 last_semantic_report = signature
@@ -806,6 +861,9 @@ def run(command: WorkerCommand) -> int:
                         "completed": completed,
                         "repairing": repairing,
                         "failed": failed,
+                        "repair_planned": repair_planned,
+                        "repair_completed": repair_completed,
+                        "repair_accepted": repair_accepted,
                     },
                     progress=value,
                     step="segmentation.semantic_grouping",
@@ -852,6 +910,15 @@ def run(command: WorkerCommand) -> int:
                 request, scratch, reference_audit, display_projection,
                 reference_suggestions,
             )
+            candidate["provenance"] = {
+                **candidate["provenance"],
+                "source_language_selection": language_resolution[
+                    "source_language_selection"
+                ],
+                "source_language": language_resolution["resolved_language"],
+                "language_detection": language_resolution,
+                "resolved_hard_limit": language_resolution["resolved_hard_limit"],
+            }
         elif request["mode"] == "reference_script":
             emit(
                 WorkerMessageType.PROGRESS,
@@ -860,7 +927,7 @@ def run(command: WorkerCommand) -> int:
                 step="segmentation.cue_layout",
             )
             candidate, document, validation = _reference_script_candidate(
-                request, material, effective_alignment, reference_audit
+                effective_request, material, effective_alignment, reference_audit
             )
         else:
             emit(

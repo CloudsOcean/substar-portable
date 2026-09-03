@@ -1302,7 +1302,10 @@
     const entry = entries[state[indexKey]];
     state.selectedTokenIds = entry.token_id ? new Set([entry.token_id]) : new Set();
     state.selectionAnchorTokenId = entry.token_id || null;
-    selectCue(entry.cue_id, true);
+    // Locator buttons are explicit navigation commands: keep the matching Cue
+    // visible as well as seeking the media and timeline. This also materializes
+    // an off-window Cue before centering it in the virtualized list.
+    selectCue(entry.cue_id, true, true);
     renderNavigators();
     refreshTokenSelectionUi();
   }
@@ -1406,7 +1409,8 @@
     renderAiProgress(
       task?.ai_progress,
       progress,
-      task?.display_error || task?.error?.message || task?.message || "等待启动"
+      task?.display_error || task?.error?.message || task?.message || "等待启动",
+      task?.problem_cue_ids || []
     );
     button.disabled = !state.revision || ["queued", "running", "cancelling"].includes(task?.state);
     const sourceLanguageSelect = $("#translationSourceLanguage");
@@ -1428,9 +1432,11 @@
     $("#translationMenuSummary").textContent = running ? "AI 翻译中…" : "AI 翻译";
     if (["succeeded", "succeeded_with_issues"].includes(task?.state)) {
       const staleCount = task.stale_cue_ids?.length || 0;
-      $("#translationTaskMessage").textContent = staleCount
-        ? `翻译已过期：${staleCount} 条源文在翻译后发生变化`
-        : `${task.message || "翻译完成"}${task.target_language ? ` · 目标语言 ${task.target_language}` : ""}`;
+      const taskMessage = $("#translationTaskMessage");
+      if (staleCount) {
+        taskMessage.textContent = `翻译已过期：${staleCount} 条源文在翻译后发生变化`;
+        taskMessage.classList.remove("hidden");
+      }
     }
   }
 
@@ -1448,7 +1454,7 @@
     const aiProgress = ["running", "cancelling", "succeeded", "succeeded_with_issues"].includes(status)
       && state.editorAiTask?.kind === "calibration"
       ? state.editorAiTask?.ai_progress : null;
-    renderAiProgress(aiProgress, progress, message);
+    renderAiProgress(aiProgress, progress, message, state.editorAiTask?.problem_cue_ids || []);
   }
 
   function renderTaskFailureRecovery(failed, kind) {
@@ -1537,39 +1543,24 @@
     select.value = selected;
   }
 
-  const AI_PHASE_ORDER = [
-    "executing", "repair", "validating", "materializing", "publishing", "completed"
-  ];
-
-  function renderAiProgress(aiProgress, percent, fallbackMessage) {
+  function renderAiProgress(aiProgress, percent, fallbackMessage, problemCueIds = []) {
     const counter = $("#translationTaskPercent");
     const message = $("#translationTaskMessage");
     const steps = $("#translationTaskSteps");
-    if (!aiProgress?.phase || !aiProgress?.units) {
+    const summary = window.SubstarAiProgressSummary?.summarize(aiProgress, {problemCueIds});
+    if (!summary) {
       counter.textContent = `${Math.round(percent)}%`;
       message.textContent = fallbackMessage;
+      message.classList.remove("hidden");
       steps.classList.add("hidden");
       steps.replaceChildren();
       return;
     }
-    const units = aiProgress.units;
-    if (["repair", "repairing"].includes(aiProgress.phase) && Number(units.repair_planned || 0) > 0) {
-      counter.textContent = `${units.repair_completed}/${units.repair_planned}`;
-    } else if (Number(units.planned || 0) > 0) {
-      counter.textContent = `${units.completed}/${units.planned}`;
-    } else {
-      counter.textContent = `${Math.round(percent)}%`;
-    }
+    counter.textContent = `${Math.round(percent)}%`;
     message.textContent = aiProgress.message || fallbackMessage;
-    const activeIndex = AI_PHASE_ORDER.indexOf(aiProgress.phase);
-    steps.replaceChildren(...(aiProgress.steps || []).map((row, index) => {
-      const item = document.createElement("li");
-      item.textContent = row.label;
-      item.classList.toggle("done", index < activeIndex || aiProgress.phase === "completed");
-      item.classList.toggle("active", index === activeIndex && aiProgress.phase !== "completed");
-      return item;
-    }));
-    steps.classList.toggle("hidden", !steps.childElementCount);
+    message.classList.add("hidden");
+    steps.textContent = window.SubstarAiProgressSummary.format(aiProgress, {problemCueIds});
+    steps.classList.toggle("hidden", !steps.textContent);
   }
 
   async function cancelOrDismissTaskPanel() {
@@ -2236,10 +2227,10 @@
     if (scroll && cue && !isEditingText) centerCueInList(cue);
   }
 
-  function selectCue(cueId, seek = false) {
+  function selectCue(cueId, seek = false, scroll = false) {
     if (seek) syncPlaybackFollowAfterSeek();
     else suspendPlaybackFollow();
-    activateCue(cueId, {seek, scroll:false, revealTimeline:true, centerTimeline:seek});
+    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek});
   }
 
   function orderedSelectableTokenIds() {

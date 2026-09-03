@@ -29,6 +29,7 @@ from substar_core.segmentation.worker import (
     _public_algorithm_error,
     semantic_segmentation_arguments,
 )
+from substar_core.segmentation.contracts import canonical_sha256
 from substar_core.segmentation.input_contract import (
     SEGMENTATION_MATERIAL_SCHEMA,
     build_segmentation_material,
@@ -90,6 +91,9 @@ class SegmentationContractTests(unittest.TestCase):
     def test_request_is_strict_fingerprinted_and_secret_free(self) -> None:
         request = self.request()
         self.assertEqual(validate_segmentation_request(request), request)
+        self.assertEqual(
+            request["constraints"]["language_ratio_threshold_percent"], 20
+        )
         validate_schema(request, "segmentation-request.schema.json")
         rendered = json.dumps(request, ensure_ascii=False)
         self.assertNotIn("api_key", rendered.casefold())
@@ -99,6 +103,14 @@ class SegmentationContractTests(unittest.TestCase):
         changed["constraints"]["target_seconds"] += 1
         with self.assertRaisesRegex(InvalidTaskError, "fingerprint"):
             validate_segmentation_request(changed)
+
+    def test_request_accepts_legacy_constraints_without_language_ratio(self) -> None:
+        request = self.request()
+        request["constraints"].pop("language_ratio_threshold_percent")
+        unsigned = {key: value for key, value in request.items() if key != "input_fingerprint"}
+        request["input_fingerprint"] = canonical_sha256(unsigned)
+
+        self.assertEqual(validate_segmentation_request(request), request)
 
     def test_request_rejects_absolute_snapshot_path(self) -> None:
         request = self.request()

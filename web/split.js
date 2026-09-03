@@ -10,7 +10,7 @@
   // Task drafts contain media-specific prompt and punctuation choices.  Use a
   // versioned key so a newly installed build never revives an older build's
   // browser draft merely because both launch on 127.0.0.1:8769.
-  const TASK_CONFIG_STORAGE_KEY = "substar.split.task-config.v2";
+  const TASK_CONFIG_STORAGE_KEY = "substar.split.task-config.v3";
   const TUTORIAL_STATUS_KEY = "substar.split.tutorial.v1";
   const TUTORIAL_AUDIO_URL = "/api/examples/tutorials/reference-script-v1/assets/media";
   const TUTORIAL_REFERENCE_URL = "/api/examples/tutorials/reference-script-v1/assets/reference";
@@ -389,6 +389,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
+      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       qwen_ai_brief: $("#qwenAiBriefInput").value,
@@ -456,9 +457,13 @@
     }
   }
 
+  function syncLanguageRatioThreshold() {
+    $("#languageRatioThresholdValue").value = `${Number($("#languageRatioThresholdInput").value)}%`;
+  }
+
   const TUTORIAL_CONTROL_IDS = [
     "languageInput", "targetLanguageInput", "glossaryInput", "splitWorkflowInput", "referenceBreakSymbolsInput",
-    "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "japaneseLimitInput", "koreanLimitInput",
+    "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "languageRatioThresholdInput", "japaneseLimitInput", "koreanLimitInput",
   ];
 
   const TUTORIAL_STEPS = [
@@ -812,6 +817,8 @@
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
     $("#chineseLimitInput").value = effective.chinese_hard_limit || 25;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
+    $("#languageRatioThresholdInput").value = effective.language_ratio_threshold_percent ?? 20;
+    syncLanguageRatioThreshold();
     $("#japaneseLimitInput").value = effective.japanese_hard_limit || 25;
     $("#koreanLimitInput").value = effective.korean_hard_limit || 32;
     $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
@@ -901,7 +908,9 @@
   });
 
   function taskPhase(job) {
-    return String(job.ai_progress?.message || "")
+    return window.SubstarAiProgressSummary?.format(job.ai_progress, {
+      problemCueIds: job.problem_cue_ids || [],
+    }) || String(job.ai_progress?.message || "")
       || TASK_STEP_LABELS[String(job.step || "")]
       || humanStatus(job);
   }
@@ -1029,6 +1038,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
+      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       context: $("#qwenPromptInput").value,
@@ -1524,6 +1534,7 @@
         message:task.message || "",
         error:task.error || "",
         ai_progress:task.ai_progress || null,
+        problem_cue_ids:task.problem_cue_ids || [],
         created_at:task.created_at,
       }));
       renderQueue([...taskJobs, ...state.jobs]);
@@ -1609,9 +1620,10 @@
     markSettingsDirty();
   });
   $("#languageInput").addEventListener("change", syncReferenceBreakPreset);
+  $("#languageRatioThresholdInput").addEventListener("input", syncLanguageRatioThreshold);
   for (const selector of [
     "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
-    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
+    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#languageRatioThresholdInput", "#japaneseLimitInput", "#koreanLimitInput",
     "#chunkSecondsInput", "#workersInput", "#retryInput",
     "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {

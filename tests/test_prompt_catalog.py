@@ -16,10 +16,10 @@ def test_prompt_catalog_projects_only_registered_production_components() -> None
     assert catalog["routes_read_only"] is True
     assert catalog["components_editable"] is True
     assert catalog["stats"] == {
-        "families": 9,
-        "variants": 44,
-        "components": 38,
-        "core_components": 22,
+        "families": 10,
+        "variants": 46,
+        "components": 43,
+        "core_components": 27,
         "cases": 16,
     }
     assert [item["id"] for item in catalog["categories"]] == [
@@ -38,6 +38,9 @@ def test_prompt_component_reads_registered_content_and_rejects_hidden_assets() -
     assert component["kind"] == "template"
     assert "N:1" in component["text"]
     assert len(component["sha256"]) == 64
+
+    one_to_one = prompt_component("translation/mode/one_to_one.md")
+    assert "one_to_one" in one_to_one["text"]
 
     with pytest.raises(PromptRegistryError, match="未注册"):
         prompt_component("experimental/merged_split.md")

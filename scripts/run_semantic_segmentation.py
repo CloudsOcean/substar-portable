@@ -36,7 +36,7 @@ from substar_core.glossary import active_glossary, glossary_prompt  # noqa: E402
 from substar_core.prompt_registry import (  # noqa: E402
     normalize_source_language,
     render_prompt,
-    source_language_for_units,
+    source_language_analysis,
 )
 from substar_core.language_layout import layout_tokens  # noqa: E402
 from substar_core.storage import ProjectStore  # noqa: E402
@@ -1174,10 +1174,12 @@ def main(
     parser.add_argument("--english-hard-limit", type=int, default=55)
     parser.add_argument("--chinese-hard-limit", type=int, default=24)
     parser.add_argument("--mixed-hard-limit", type=int, default=25)
+    parser.add_argument("--language-ratio-threshold-percent", type=int, default=20)
     parser.add_argument("--japanese-hard-limit", type=int, default=25)
     parser.add_argument("--korean-hard-limit", type=int, default=32)
     parser.add_argument("--target-hard-limit", type=int, default=24)
     parser.add_argument("--source-language", default="Auto")
+    parser.add_argument("--source-language-selection", default="")
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--progress-file", type=Path)
     parser.add_argument("--project-store-dir", type=Path)
@@ -1223,7 +1225,24 @@ def main(
         return 0
     args.output_dir.mkdir(parents=True, exist_ok=True)
     progress = StageProgress(args.progress_file, on_update=progress_callback)
-    source_language = normalize_source_language(args.source_language, units)
+    source_language_selection = args.source_language_selection or args.source_language
+    language_analysis = source_language_analysis(
+        " ".join(str(getattr(unit, "text", "") or "") for unit in units),
+        args.language_ratio_threshold_percent,
+    )
+    source_language = normalize_source_language(
+        source_language_selection,
+        units,
+        language_ratio_threshold_percent=args.language_ratio_threshold_percent,
+    )
+    language_analysis = {
+        **language_analysis,
+        "source_language_selection": source_language_selection,
+        "automatic": str(source_language_selection).strip().lower()
+        in {"", "auto", "automatic"},
+        "detected_language": language_analysis["resolved_language"],
+        "resolved_language": source_language,
+    }
     prompt_variant = {
         "zh-CN": "zh",
         "en": "en",
@@ -1435,7 +1454,10 @@ def main(
         "exceptions": exceptions,
         "validation": _direct_report(result, repaired=False, attempts=0),
         "provenance": {
+            "source_language_selection": source_language_selection,
             "source_language": source_language,
+            "language_detection": language_analysis,
+            "resolved_hard_limit": args.hard_limit,
             "sentence_boundary_policy": args.sentence_boundary_policy,
             "semantic_grouping_prompt": semantic_grouping_prompt.metadata(),
             "semantic_grouping_repair_prompt": semantic_grouping_repair_prompt.metadata(),

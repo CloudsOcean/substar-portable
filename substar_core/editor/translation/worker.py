@@ -75,9 +75,15 @@ def run(command: WorkerCommand) -> int:
 
     emit(WorkerMessageType.READY, {"worker": "translation"})
     try:
-        def progress(phase: str, completed: int, total: int, repair_completed: int, repair_total: int):
-            active_completed = repair_completed if phase == "repair" else completed
-            active_total = repair_total if phase == "repair" else total
+        def progress(ai_progress: dict[str, Any]):
+            phase = str(ai_progress.get("phase") or "executing")
+            units = dict(ai_progress.get("units") or {})
+            active_completed = int(
+                units.get("repair_completed" if phase == "repair" else "completed", 0) or 0
+            )
+            active_total = int(
+                units.get("repair_planned" if phase == "repair" else "planned", 0) or 0
+            )
             fraction = (active_completed / active_total) if active_total else 0.0
             base = {
                 "planning": 0.02,
@@ -94,6 +100,7 @@ def run(command: WorkerCommand) -> int:
                     "phase": phase,
                     "completed": active_completed,
                     "total": active_total,
+                    "ai_progress": ai_progress,
                 },
                 progress=min(1.0, base),
                 step=f"translation.{phase}",

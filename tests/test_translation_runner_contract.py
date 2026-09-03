@@ -89,7 +89,7 @@ def test_translation_finalizer_resolves_new_cues_through_source_lineage() -> Non
     }
 
 
-def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> None:
+def test_unresolved_translation_preserves_model_candidate_but_is_not_accepted() -> None:
     provenance = ChangeProvenance(
         kind=ChangeKind.SOURCE,
         operation="translation-unresolved-test",
@@ -136,7 +136,7 @@ def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> Non
     }
 
     candidate, report = contextual_translation.materialize_presentation(
-        document, [plan], "zh-CN"
+        document, [plan], "zh-CN", {cues[1].cue_id: "待人工确认的候选译文"}
     )
 
     unresolved = next(
@@ -145,12 +145,14 @@ def test_unresolved_translation_is_editable_but_not_counted_as_accepted() -> Non
     )
     assert unresolved.cue_id == cues[1].cue_id
     assert unresolved.target is not None
-    assert unresolved.target.target_text == ""
+    assert unresolved.target.target_text == "待人工确认的候选译文"
     assert unresolved.target.translation_status == "manual_required"
     assert unresolved.target.issue_code == "translation_unresolved"
     assert unresolved.target.editable is True
     assert unresolved.mapping["requires_manual_translation"] is True
+    assert unresolved.mapping["candidate_preserved"] is True
     assert report["unresolved_source_cue_ids"] == [cues[1].cue_id]
+    assert report["preserved_candidate_cue_ids"] == [cues[1].cue_id]
     assert translated_text_by_source_cue(candidate) == {
         cues[0].cue_id: "已翻译",
     }
@@ -178,6 +180,41 @@ def test_translation_repair_is_exactly_one_request_per_failed_group(monkeypatch)
     assert report["model_repair"]["groups"][0]["repair_request_count"] == 1
 
 
+def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch) -> None:
+    groups = [
+        {"group_id": "g1", "cues": [_cue("c1", 0)]},
+        {"group_id": "g2", "cues": [_cue("c2", 1)]},
+    ]
+    calls = []
+
+    def repair_block(**kwargs):
+        calls.append(kwargs["groups"])
+        return {
+            "group_results": [
+                {"group_id": group["group_id"]} for group in kwargs["groups"]
+            ]
+        }, {}
+
+    monkeypatch.setattr(contextual_translation, "api_call", repair_block)
+    monkeypatch.setattr(
+        contextual_translation, "_presentation_plan",
+        lambda group, row, _mapping_mode="many_to_many": (
+            {"group_id": group["group_id"]} if row else None
+        ),
+    )
+
+    plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 2}, repair_prompt="repair",
+        groups=groups, response={"group_results": []},
+        group_block_ids={"g1": "b1", "g2": "b1"},
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 2
+    assert {row["group_id"] for row in plans} == {"g1", "g2"}
+    assert report["invalid_group_ids"] == []
+
+
 def test_non_repairable_translation_failure_creates_no_repair_request(monkeypatch) -> None:
     group = {"group_id": "g1", "cues": [_cue("c1", 0)]}
     calls = 0
@@ -203,6 +240,30 @@ def test_non_repairable_translation_failure_creates_no_repair_request(monkeypatc
     assert report["invalid_group_ids"] == ["g1"]
 
 
+def test_provider_wide_translation_transport_failure_is_not_false_delivery() -> None:
+    batches = [
+        {"block_id": "b1", "groups": []},
+        {"block_id": "b2", "groups": []},
+    ]
+    failures = {
+        "b1": {"error": "network unavailable", "non_repairable": True},
+        "b2": {"error": "network unavailable", "non_repairable": True},
+    }
+    try:
+        contextual_translation._reject_provider_wide_translation_failure(
+            batches, failures
+        )
+    except RuntimeError as exc:
+        assert "所有执行块均请求失败" in str(exc)
+    else:
+        raise AssertionError("a provider-wide outage must fail the task")
+
+    contextual_translation._reject_provider_wide_translation_failure(
+        batches,
+        {**failures, "b2": {"response": {"group_results": []}}},
+    )
+
+
 def test_one_to_one_mode_freezes_one_source_cue_per_model_group(monkeypatch) -> None:
     groups = [{
         "group_id": "meaning-1",
@@ -226,6 +287,87 @@ def test_one_to_one_mode_freezes_one_source_cue_per_model_group(monkeypatch) -> 
     assert [[cue["cue_id"] for cue in row["cues"]] for row in result] == [
         ["c1"], ["c2"],
     ]
+
+
+def test_one_to_one_contract_accepts_only_direct_text_for_its_own_cue() -> None:
+    group = {"group_id": "line:c1", "cues": [_cue("c1", 0)]}
+    accepted = _presentation_plan(
+        group,
+        {"group_id": "line:c1", "cue_id": "c1", "target_text": "译文"},
+        "one_to_one",
+    )
+    assert accepted is not None
+    assert accepted["meaning_units"][0]["target_text"] == "译文"
+
+    assert _presentation_plan(
+        group,
+        {"group_id": "line:c1", "cue_id": "c2", "target_text": "串组译文"},
+        "one_to_one",
+    ) is None
+    assert _presentation_plan(
+        group,
+        {
+            "group_id": "line:c1",
+            "meaning_units": [{
+                "meaning_unit_id": "u1", "target_text": "旧结构",
+                "source_evidence_cue_ids": ["c1"],
+            }],
+            "cue_assignments": [{"cue_id": "c1", "meaning_unit_id": "u1"}],
+        },
+        "one_to_one",
+    ) is None
+
+
+def test_rejected_single_cue_binding_still_preserves_its_nonempty_candidate() -> None:
+    group = {"group_id": "line:c1", "cues": [_cue("c1", 0)]}
+    _plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 1},
+        repair_prompt="repair",
+        groups=[group],
+        response={
+            "group_results": [{
+                "group_id": "line:c1",
+                "meaning_units": [{
+                    "meaning_unit_id": "u1",
+                    "target_text": "可保留的中文候选",
+                    "source_evidence_cue_ids": ["foreign-cue"],
+                }],
+                "cue_assignments": [{
+                    "cue_id": "foreign-cue", "meaning_unit_id": "u1",
+                }],
+            }]
+        },
+        mapping_mode="one_to_one",
+        non_repairable_group_ids={"line:c1"},
+    )
+
+    assert report["invalid_group_ids"] == ["line:c1"]
+    assert report["candidate_targets_by_cue"] == {
+        "c1": "可保留的中文候选"
+    }
+
+
+def test_invalid_translation_response_is_not_written_to_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        contextual_translation,
+        "call_translation_model",
+        lambda **_kwargs: ({"group_results": []}, {"model": "test"}),
+    )
+    response, telemetry = contextual_translation.api_call(
+        settings={
+            "translation_api_base_url": "https://example.invalid",
+            "translation_api_key": "secret",
+            "translation_api_model": "test",
+        },
+        system_prompt="prompt",
+        groups=[{"group_id": "g1", "cues": [_cue("c1", 0)]}],
+        cache_directory=tmp_path,
+        cache_scope="test",
+        cache_validator=lambda _value: False,
+    )
+    assert response == {"group_results": []}
+    assert telemetry["cache_hit"] is False
+    assert list(tmp_path.glob("*.json")) == []
 
 
 def test_staleness_indexes_rematerialized_cues_by_source_lineage() -> None:
@@ -445,7 +587,9 @@ def test_translation_preserves_success_and_repairs_failed_groups_independently(m
 
 
 def test_main_translation_prompt_uses_target_language_boundaries() -> None:
-    prompt = render_prompt("contextual_translation", variant="en_to_zh").text
+    prompt = render_prompt(
+        "contextual_translation", variant="en_to_zh", mode="many_to_many"
+    ).text
     assert "拒绝上限，不是推荐长度、填充目标或合并标准" in prompt
     assert "即使合并后的文本仍未超过 `hard_limit`" in prompt
     assert "母语字幕编辑者是否会自然期待显示文字向前推进" in prompt
@@ -455,3 +599,17 @@ def test_main_translation_prompt_uses_target_language_boundaries() -> None:
     assert "中国网友也表示 / 路易威登不够了解中国市场" in prompt
     assert "许多用户已纷纷给出新的标志方案" in prompt
     assert "c1 我们必须结束这场争端 / c2 恢复正常贸易" not in prompt
+
+
+def test_one_to_one_prompt_has_a_distinct_direct_output_contract() -> None:
+    prompt = render_prompt(
+        "contextual_translation", variant="en_to_zh", mode="one_to_one"
+    )
+    assert prompt.mode == "one_to_one"
+    assert '"cue_id":"cue_1","target_text"' in prompt.text
+    assert '"meaning_units":[' not in prompt.text
+    assert '"cue_assignments":[' not in prompt.text
+    assert "不得把相邻两条合成同一译文" in prompt.text
+    assert "不得为了调整目标语语序" in prompt.text
+    assert "`none`" in prompt.text
+    assert "`across the board`" in prompt.text

@@ -27,7 +27,7 @@ from .model import (
 )
 
 
-RUNTIME_SCHEMA_VERSION = 3
+RUNTIME_SCHEMA_VERSION = 4
 
 
 def utc_now() -> str:
@@ -144,7 +144,7 @@ class RuntimeStore:
                     f"runtime database schema {current} is newer than supported "
                     f"schema {RUNTIME_SCHEMA_VERSION}"
                 )
-            if current not in (0, RUNTIME_SCHEMA_VERSION):
+            if current not in (0, 3, RUNTIME_SCHEMA_VERSION):
                 raise InvalidTaskError(
                     "legacy runtime database is unsupported; v2 requires a fresh runtime-v2.sqlite3"
                 )
@@ -170,6 +170,7 @@ class RuntimeStore:
                         attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
                         progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
                         progress_message TEXT,
+                        progress_payload_json TEXT,
                         step TEXT,
                         phase TEXT,
                         completed_units INTEGER NOT NULL DEFAULT 0 CHECK (completed_units >= 0),
@@ -257,8 +258,20 @@ class RuntimeStore:
                     CREATE INDEX IF NOT EXISTS task_artifacts_task_idx
                         ON task_artifacts(task_id, attempt, created_at);
                     INSERT OR IGNORE INTO schema_migrations(version, name, applied_at)
-                        VALUES ({RUNTIME_SCHEMA_VERSION}, 'v2_task_runtime', '{applied_at}');
+                        VALUES ({RUNTIME_SCHEMA_VERSION}, 'structured_ai_progress', '{applied_at}');
                     PRAGMA user_version={RUNTIME_SCHEMA_VERSION};
+                    COMMIT;
+                    """
+                )
+            elif current == 3:
+                applied_at = utc_now().replace("'", "''")
+                connection.executescript(
+                    f"""
+                    BEGIN IMMEDIATE;
+                    ALTER TABLE tasks ADD COLUMN progress_payload_json TEXT;
+                    INSERT INTO schema_migrations(version, name, applied_at)
+                        VALUES (4, 'structured_ai_progress', '{applied_at}');
+                    PRAGMA user_version=4;
                     COMMIT;
                     """
                 )
@@ -575,7 +588,7 @@ class RuntimeStore:
             )
             connection.execute(
                 "UPDATE tasks SET state='running', attempt=?, progress=0, "
-                "progress_message=NULL, step=NULL, phase=NULL, completed_units=0, "
+                "progress_message=NULL, progress_payload_json=NULL, step=NULL, phase=NULL, completed_units=0, "
                 "total_units=0, repair_phase_entered=0, needs_attention=0, "
                 "wait_reason=NULL, updated_at=?, "
                 "started_at=?, finished_at=NULL, cancel_requested_at=NULL, "
@@ -681,6 +694,7 @@ class RuntimeStore:
         phase: str | None = None,
         completed_units: int | None = None,
         total_units: int | None = None,
+        progress_payload: Mapping[str, Any] | None = None,
         request_id: str | None = None,
     ) -> TaskRecord:
         if not 0.0 <= float(progress) <= 1.0:
@@ -700,13 +714,18 @@ class RuntimeStore:
                 )
             completed = int(row["completed_units"]) if completed_units is None else int(completed_units)
             total = int(row["total_units"]) if total_units is None else int(total_units)
+            payload_json = (
+                row["progress_payload_json"]
+                if progress_payload is None
+                else canonical_json(progress_payload)
+            )
             if completed < 0 or total < 0 or (total and completed > total):
                 raise InvalidTaskError("unit progress is invalid")
             connection.execute(
-                "UPDATE tasks SET progress=?, progress_message=?, step=?, phase=?, "
+                "UPDATE tasks SET progress=?, progress_message=?, progress_payload_json=?, step=?, phase=?, "
                 "completed_units=?, total_units=?, wait_reason=?, updated_at=?, "
                 "row_version=row_version+1 WHERE task_id=?",
-                (float(progress), message, step, phase, completed, total, wait_reason, now, task_id),
+                (float(progress), message, payload_json, step, phase, completed, total, wait_reason, now, task_id),
             )
             event_type = "task.waiting" if wait_reason else "task.progress"
             self._event(
@@ -724,6 +743,7 @@ class RuntimeStore:
                     "phase": phase,
                     "completed_units": completed,
                     "total_units": total,
+                    "progress_payload": dict(progress_payload) if progress_payload is not None else None,
                     "wait_reason": wait_reason,
                 },
             )
@@ -798,7 +818,7 @@ class RuntimeStore:
             next_attempt = max(1, task.attempt + 1)
             connection.execute(
                 "UPDATE tasks SET state='queued', attempt=?, progress=0, "
-                "progress_message=NULL, step=NULL, wait_reason=NULL, updated_at=?, "
+                "progress_message=NULL, progress_payload_json=NULL, step=NULL, wait_reason=NULL, updated_at=?, "
                 "started_at=NULL, finished_at=NULL, cancel_requested_at=NULL, "
                 "owner_instance_id=NULL, lease_expires_at=NULL, result_json=NULL, "
                 "error_json=NULL, row_version=row_version+1 WHERE task_id=?",

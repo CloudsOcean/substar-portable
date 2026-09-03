@@ -68,6 +68,7 @@ def _default_worker_event(
         "phase": None,
         "completed_units": None,
         "total_units": None,
+        "progress_payload": None,
     }
 
 

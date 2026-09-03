@@ -102,9 +102,23 @@
 
   function validateTranslationTrack(value, label) {
     const target = requireObject(value, label);
-    requireText(target.target_text, `${label}.target_text`);
+    const status = String(target.translation_status || "translated");
+    if (status === "translated") {
+      requireText(target.target_text, `${label}.target_text`);
+    } else if (status === "manual_required") {
+      if (typeof target.target_text !== "string") {
+        throw new Error(`${label}.target_text must be text`);
+      }
+      if (target.editable !== true || target.issue_code !== "translation_unresolved") {
+        throw new Error(`${label} manual_required track must be editable and identify translation_unresolved`);
+      }
+    } else {
+      throw new Error(`${label}.translation_status is unsupported`);
+    }
     if (target.original_text !== null && target.original_text !== undefined) {
-      requireText(target.original_text, `${label}.original_text`);
+      if (typeof target.original_text !== "string") {
+        throw new Error(`${label}.original_text must be text`);
+      }
     }
     validateProvenance(target.provenance, `${label}.provenance`);
   }

@@ -41,6 +41,7 @@ def ai_progress(
     repair_failed: int = 0,
     problem_count: int = 0,
     detail: str = "",
+    unit_kind: str | None = None,
 ) -> dict[str, Any]:
     """Return the common, monotonic presentation contract for model tasks."""
 
@@ -57,6 +58,16 @@ def ai_progress(
     )
     repair_accepted = min(repair_completed, max(0, int(repair_accepted)))
     repair_failed = min(repair_completed, max(0, int(repair_failed)))
+    resolved_unit_kind = str(unit_kind or {
+        "translation": "semantic_group",
+        "calibration": "calibration_block",
+        "segmentation": "segmentation_block",
+    }.get(str(kind), "work_unit"))
+    canonical_label = {
+        "semantic_group": "个意义组",
+        "calibration_block": "个校准块",
+        "segmentation_block": "块",
+    }.get(resolved_unit_kind, str(unit_label))
 
     low, high = _PHASE_BANDS[phase]
     if phase == "executing":
@@ -70,10 +81,10 @@ def ai_progress(
     progress = low + (high - low) * fraction
 
     if phase == "executing" and planned:
-        message = f"{_PHASE_LABELS[phase]} {completed}/{planned} {unit_label}"
+        message = f"{_PHASE_LABELS[phase]} {completed}/{planned} {canonical_label}"
     elif phase == "repair" and repair_planned:
         message = (
-            f"{_PHASE_LABELS[phase]} {repair_completed}/{repair_planned} {unit_label}"
+            f"{_PHASE_LABELS[phase]} {repair_completed}/{repair_planned} {canonical_label}"
             f" · 首轮通过 {accepted}/{planned}"
         )
     else:
@@ -86,7 +97,8 @@ def ai_progress(
         "kind": str(kind),
         "phase": phase,
         "phase_label": _PHASE_LABELS[phase],
-        "unit_label": str(unit_label),
+        "unit_kind": resolved_unit_kind,
+        "unit_label": canonical_label,
         "progress": round(max(0.0, min(1.0, progress)), 6),
         "message": message,
         "units": {

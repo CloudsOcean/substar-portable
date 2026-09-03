@@ -56,10 +56,19 @@ test("recent-task export menus open upward without card clipping", () => {
   assert.match(splitCss, /\.export-menu-panel \{[^}]*bottom: calc\(100% \+ 7px\);[^}]*z-index: 30;/s);
 });
 
+test("language ratio threshold is a persisted 0-100 slider defaulting to twenty percent", () => {
+  assert.match(splitHtml, /id="languageRatioThresholdInput" type="range" min="0" max="100" step="1" value="20"/);
+  assert.match(splitHtml, /id="languageRatioThresholdValue"[^>]*>20%<\/output>/);
+  assert.match(splitJs, /language_ratio_threshold_percent: Number\(\$\("#languageRatioThresholdInput"\)\.value\)/);
+  assert.match(splitJs, /effective\.language_ratio_threshold_percent \?\? 20/);
+  assert.match(splitJs, /#languageRatioThresholdInput"\)\.addEventListener\("input", syncLanguageRatioThreshold\)/);
+  assert.doesNotMatch(splitHtml, /中英混合/);
+});
+
 test("terminal editor task cards can be deleted without deleting their projects", () => {
   assert.match(splitJs, /runtime_task_id:task\.task_id/);
   assert.match(splitJs, /deleteEditorTask\(removableJob, card, remove\)/);
   assert.match(splitJs, /api\(`\/api\/tasks\/\$\{encodeURIComponent\(taskId\)\}`,[\s\S]*method:"DELETE"/);
   assert.match(splitJs, /项目版本和编辑成果会保留/);
-  assert.match(splitHtml, /split\.js\?v=20260901-task-draft-cleanup-1/);
+  assert.match(splitHtml, /split\.js\?v=20260903-language-ratio-counts-1/);
 });

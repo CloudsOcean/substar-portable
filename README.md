@@ -16,7 +16,7 @@
 
 最终得到的不是一份“生成完就尽量别碰”的 SRT，而是一份可以继续拆、合、改、查、校对和交付的字幕工作稿。
 
-当前版本：**2.0.5** · Windows 10/11 x64 透明便携版
+当前版本：**2.0.6** · Windows 10/11 x64 透明便携版
 
 [下载最新版本](https://github.com/CloudsOcean/substar-portable/releases/latest)
 

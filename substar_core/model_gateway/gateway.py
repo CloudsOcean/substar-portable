@@ -225,8 +225,13 @@ def call_json_model(
     }
 
 
-def call_translation_model(*, groups: list[dict[str, Any]], **kwargs: Any):
+def call_translation_model(
+    *, groups: list[dict[str, Any]], mapping_mode: str | None = None, **kwargs: Any
+):
+    user_payload: dict[str, Any] = {"groups": groups}
+    if mapping_mode:
+        user_payload["mapping_mode"] = str(mapping_mode)
     return call_json_model(
-        user_payload={"groups": groups},
+        user_payload=user_payload,
         **kwargs,
     )

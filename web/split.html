@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260828-qwen-copy-upload-1">
+  <link rel="stylesheet" href="/assets/split.css?v=20260903-language-ratio-counts-1">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
@@ -71,8 +71,8 @@
             <label>
               <span>原文语言</span>
               <select id="languageInput">
-                <option value="mixed">中英混合</option>
                 <option value="Auto">自动识别</option>
+                <option value="mixed">混合</option>
                 <option value="zh">中文</option>
                 <option value="en">英文</option>
                 <option value="ja">日文</option>
@@ -132,7 +132,12 @@
           <details class="language-limit-settings">
             <summary>字符数上限设置 <span>按原文与目标语言自动选用硬上限</span></summary>
             <div class="parameter-grid language-limit-grid">
-              <label><span>中英混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
+              <label class="language-ratio-field">
+                <span>语言比例阈值 <output id="languageRatioThresholdValue" for="languageRatioThresholdInput">20%</output></span>
+                <input id="languageRatioThresholdInput" type="range" min="0" max="100" step="1" value="20">
+                <small>其他语言占比不超过该值时按主要语言处理；超过时按混合处理</small>
+              </label>
+              <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
               <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
               <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
               <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
@@ -230,6 +235,7 @@
       <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
     </form>
   </div>
-  <script src="/assets/split.js?v=20260901-task-draft-cleanup-1" defer></script>
+  <script src="/assets/ai_progress_summary.js?v=20260903-counts-1" defer></script>
+  <script src="/assets/split.js?v=20260903-language-ratio-counts-1" defer></script>
 </body>
 </html>

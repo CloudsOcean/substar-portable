@@ -353,7 +353,7 @@ def validate_draft(
             if language in {"mixed", "mixed_zh", "mixed_en"}:
                 hard_limit = mixed_hard_limit
                 code_prefix = "mixed"
-                label = "中英混合源文"
+                label = "混合源文"
             elif language in {"zh", "mixed_zh"}:
                 hard_limit = chinese_hard_limit
                 code_prefix = "chinese"

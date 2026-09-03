@@ -52,6 +52,7 @@
     "attempt": { "type": "integer", "minimum": 0 },
     "progress": { "type": "number", "minimum": 0, "maximum": 1 },
     "progress_message": { "type": ["string", "null"] },
+    "progress_payload": { "type": ["object", "null"] },
     "step": { "type": ["string", "null"] },
     "phase": { "type": ["string", "null"] },
     "completed_units": { "type": "integer", "minimum": 0 },

@@ -103,6 +103,128 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
         self.assertEqual(actions[0]["after_text"], "Tea,")
         self.assertEqual(rejected, [])
 
+    def test_case_only_replace_token_is_normalized_to_set_case(self) -> None:
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="replace_token",
+                before_text="russia",
+                after_text="Russia",
+                affects_translation=True,
+            )]},
+            self.owned,
+            self.token_map,
+            self.token_to_cue,
+        )
+
+        self.assertEqual(actions[0]["kind"], "set_case")
+        self.assertFalse(actions[0]["affects_translation"])
+        self.assertEqual(rejected, [])
+
+    def test_glued_token_split_is_preserved_for_review_not_applied(self) -> None:
+        token_map = {"t1": SimpleNamespace(text="america,well")}
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="replace_token",
+                before_text="america,well",
+                after_text="America. Well",
+                affects_translation=True,
+            )]},
+            ["t1"],
+            token_map,
+            {"t1": "cue-1"},
+        )
+
+        self.assertEqual(actions[0]["after_text"], "America. Well")
+        self.assertEqual(actions[0]["disposition"], "review")
+        self.assertEqual(rejected, [])
+
+    def test_merge_span_derives_translation_invalidation(self) -> None:
+        token_map = {
+            "t1": SimpleNamespace(text="U"),
+            "t2": SimpleNamespace(text="s"),
+        }
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="merge_span",
+                token_ids=["t1", "t2"],
+                before_text="U s",
+                after_text="U.S.",
+                affects_translation=False,
+            )]},
+            ["t1", "t2"],
+            token_map,
+            {"t1": "cue-1", "t2": "cue-1"},
+        )
+
+        self.assertTrue(actions[0]["affects_translation"])
+        self.assertEqual(rejected, [])
+
+    def test_non_conserving_applied_merge_is_downgraded_to_review(self) -> None:
+        token_map = {
+            "t1": SimpleNamespace(text="us"),
+            "t2": SimpleNamespace(text="state"),
+        }
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="merge_span",
+                token_ids=["t1", "t2"],
+                before_text="us state",
+                after_text="U.S.",
+                disposition="apply",
+                affects_translation=True,
+            )]},
+            ["t1", "t2"],
+            token_map,
+            {"t1": "cue-1", "t2": "cue-1"},
+        )
+
+        self.assertEqual(actions[0]["kind"], "merge_span")
+        self.assertEqual(actions[0]["disposition"], "review")
+        self.assertEqual(rejected, [])
+
+    def test_same_cue_many_to_one_replace_span_is_normalized_to_merge(self) -> None:
+        token_map = {
+            "t1": SimpleNamespace(text="Al"),
+            "t2": SimpleNamespace(text="jalani"),
+        }
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="replace_span",
+                token_ids=["t1", "t2"],
+                before_text="Al jalani",
+                after_text="al-Julani",
+                disposition="review",
+                affects_translation=True,
+            )]},
+            ["t1", "t2"],
+            token_map,
+            {"t1": "cue-1", "t2": "cue-1"},
+        )
+
+        self.assertEqual(actions[0]["kind"], "merge_span")
+        self.assertEqual(actions[0]["disposition"], "review")
+        self.assertTrue(actions[0]["affects_translation"])
+        self.assertEqual(rejected, [])
+
+    def test_non_materialized_review_span_can_change_token_count(self) -> None:
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [action(
+                kind="replace_span",
+                token_ids=["t1", "t2"],
+                before_text="russia people",
+                after_text="the Russian people",
+                disposition="review",
+                affects_translation=True,
+            )]},
+            self.owned,
+            self.token_map,
+            self.token_to_cue,
+        )
+
+        self.assertEqual(actions[0]["disposition"], "review")
+        self.assertEqual(actions[0]["kind"], "replace_span")
+        self.assertEqual(rejected, [])
+
     def test_chinese_light_punctuation_is_valid(self) -> None:
         token_map = {"t1": SimpleNamespace(text="结束")}
         actions, rejected = _validated_calibration_contract_actions(
@@ -145,6 +267,44 @@ class EditorAiCalibrationProtocolTests(unittest.TestCase):
 
         self.assertEqual(actions, [])
         self.assertIn("only light punctuation", rejected[0]["detail"])
+
+    def test_same_token_can_receive_ordered_case_then_punctuation_actions(self) -> None:
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [
+                action(action_id="case", after_text="Russia"),
+                action(
+                    action_id="punctuation",
+                    kind="set_punctuation",
+                    before_text="Russia",
+                    after_text="Russia.",
+                ),
+            ]},
+            self.owned,
+            self.token_map,
+            self.token_to_cue,
+        )
+
+        self.assertEqual([row["action_id"] for row in actions], ["case", "punctuation"])
+        self.assertEqual(rejected, [])
+
+    def test_later_action_must_bind_to_the_prior_action_result(self) -> None:
+        actions, rejected = _validated_calibration_contract_actions(
+            {"actions": [
+                action(action_id="case", after_text="Russia"),
+                action(
+                    action_id="punctuation",
+                    kind="set_punctuation",
+                    before_text="russia",
+                    after_text="russia.",
+                ),
+            ]},
+            self.owned,
+            self.token_map,
+            self.token_to_cue,
+        )
+
+        self.assertEqual([row["action_id"] for row in actions], ["case"])
+        self.assertIn("bound source tokens", rejected[0]["detail"])
 
     def test_saved_revision_payload_id_is_read_as_a_mapping(self) -> None:
         self.assertEqual(_revision_id({"revision_id": "rev_after_save"}), "rev_after_save")
@@ -199,3 +359,21 @@ def test_runtime_projection_does_not_synthesize_another_task_identity() -> None:
         "phase": "primary",
     }
     assert http_api._runtime_ai_task_projection(task)["task_id"] == task["task_id"]
+
+
+def test_terminal_projection_prefers_final_result_progress() -> None:
+    task = {
+        "task_id": "tsk_" + "d" * 32,
+        "task_type": "translation",
+        "state": "succeeded_with_issues",
+        "phase": "delivery",
+        "progress_payload": {"phase": "completed", "problem_count": 0},
+        "result": {
+            "problem_cue_ids": ["cue-1"],
+            "ai_progress": {"phase": "completed", "problem_count": 1},
+        },
+    }
+
+    projected = http_api._runtime_ai_task_projection(task)
+
+    assert projected["ai_progress"]["problem_count"] == 1

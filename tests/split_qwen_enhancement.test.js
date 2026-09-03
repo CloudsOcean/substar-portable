@@ -44,8 +44,8 @@ test("AI brief and hotword guidance explain deterministic super weights", () => 
 });
 
 test("new builds ignore legacy browser drafts and clear media-specific fields after submission", () => {
-  assert.match(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v2"/);
-  assert.doesNotMatch(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v1"/);
+  assert.match(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v3"/);
+  assert.doesNotMatch(source, /TASK_CONFIG_STORAGE_KEY = "substar\.split\.task-config\.v[12]"/);
   assert.match(source, /function clearTaskSpecificFields\(\)/);
   assert.match(source, /qwenAiBriefInput"\)\.value = ""/);
   assert.match(source, /qwenPromptInput"\)\.value = ""/);

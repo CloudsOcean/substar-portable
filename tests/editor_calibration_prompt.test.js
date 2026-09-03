@@ -17,6 +17,7 @@ assert.match(js, /ordinaryError\(`已保存：\$\{result\.filename}`, "completed
 assert.match(css, /\.ordinary-error\.notice/);
 assert.match(css, /\.translation-task-panel[\s\S]*?grid-template-areas:[^;]*"head close" "progress close" "steps close" "message close"/);
 assert.match(html, /id="translationTaskSteps"/);
-assert.match(js, /function renderAiProgress[\s\S]*?repair_completed[\s\S]*?repair_planned/);
+assert.match(html, /ai_progress_summary\.js/);
+assert.match(js, /function renderAiProgress[\s\S]*?SubstarAiProgressSummary\?\.summarize/);
 
 console.log("editor_calibration_prompt: ok");

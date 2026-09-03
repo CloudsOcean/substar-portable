@@ -70,6 +70,7 @@
         "english_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "chinese_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "mixed_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "language_ratio_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},
         "japanese_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "korean_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "sentence_boundary_policy": {"enum": ["reference", "reconstruct", "unpunctuated"]},

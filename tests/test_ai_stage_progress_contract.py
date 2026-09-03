@@ -32,8 +32,8 @@ def test_common_progress_contract_is_monotonic_and_counted() -> None:
     assert [row["progress"] for row in values] == sorted(
         row["progress"] for row in values
     )
-    assert values[0]["message"] == "模型处理 0/4 块"
-    assert values[2]["message"] == "修复 0/1 块 · 首轮通过 3/4"
+    assert values[0]["message"] == "模型处理 0/4 个校准块"
+    assert values[2]["message"] == "修复 0/1 个校准块 · 首轮通过 3/4"
     assert values[-1]["progress"] == 1.0
 
 
@@ -134,7 +134,7 @@ def test_translation_repairs_only_invalid_groups_and_reports_repair_denominator(
     groups = [{"group_id": "g1"}, {"group_id": "g2"}]
     progress: list[tuple[int, int, int]] = []
 
-    def fake_plan(group, row):
+    def fake_plan(group, row, _mapping_mode="many_to_many"):
         return {"group_id": group["group_id"]} if row else None
 
     def fake_repair(**kwargs):

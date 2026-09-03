@@ -187,7 +187,7 @@ async def _application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Substar Workbench",
-    version="2.0.5",
+    version="2.0.6",
     lifespan=_application_lifespan,
 )
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
@@ -626,6 +626,7 @@ class Job:
     status: str = "queued"
     message: str = "等待处理"
     progress: float = 0.0
+    ai_progress: dict[str, Any] | None = None
     error: str = ""
     files: list[dict[str, Any]] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
@@ -696,6 +697,7 @@ class Job:
             "status": self.status,
             "message": public_message,
             "progress": round(self.progress, 4),
+            "ai_progress": self.ai_progress,
             "error": self.error,
             "files": [
                 {**item, "url": f'/api/project-creations/{self.id}/files/{item["name"]}'}
@@ -955,13 +957,19 @@ def _refresh_canonical_job_projection(job: Job) -> None:
         editor_ready=_editor_ready(job.job_dir),
         cancel_requested=job.cancel_requested,
     )
+    next_ai_progress = (
+        dict(segmentation["progress_payload"])
+        if isinstance(segmentation.get("progress_payload"), Mapping)
+        else None
+    )
     with JOBS_LOCK:
         changed = any(
             getattr(job, field) != projection[field]
             for field in ("status", "progress", "message", "error")
-        )
+        ) or job.ai_progress != next_ai_progress
         job.status = str(projection["status"])
         job.progress = float(projection["progress"])
+        job.ai_progress = next_ai_progress
         job.message = str(projection["message"])
         job.error = str(projection["error"])
         if job.status == "awaiting_edit":
@@ -1211,6 +1219,7 @@ def _automatic_settings_from_payload(
         "english_hard_limit",
         "chinese_hard_limit",
         "mixed_hard_limit",
+        "language_ratio_threshold_percent",
         "japanese_hard_limit",
         "korean_hard_limit",
         "recognition_profile_id",
@@ -1317,6 +1326,12 @@ def _automatic_settings_from_payload(
     mixed_hard_limit = bounded_int(
         "mixed_hard_limit", int(saved.get("mixed_hard_limit", 25)), 1, 200
     )
+    language_ratio_threshold_percent = bounded_int(
+        "language_ratio_threshold_percent",
+        int(saved.get("language_ratio_threshold_percent", 20)),
+        0,
+        100,
+    )
     japanese_hard_limit = bounded_int(
         "japanese_hard_limit", int(saved["japanese_hard_limit"]), 1, 100
     )
@@ -1391,6 +1406,7 @@ def _automatic_settings_from_payload(
         ],
         "chinese_hard_limit": chinese_hard_limit,
         "mixed_hard_limit": mixed_hard_limit,
+        "language_ratio_threshold_percent": language_ratio_threshold_percent,
         "japanese_hard_limit": japanese_hard_limit,
         "korean_hard_limit": korean_hard_limit,
         "reference_script_mode": reference_script_mode,
@@ -1732,7 +1748,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
         raise HTTPException(status_code=400, detail="请先配置并测试当前 AI 服务")
     language_names = {
         "zh": "中文", "en": "英文", "ja": "日文", "ko": "韩文",
-        "mixed": "中英混合", "Auto": "用户说明所使用的语言",
+        "mixed": "混合", "Auto": "用户说明所使用的语言",
     }
     source_language = language_names.get(
         payload.source_language, payload.source_language or "用户说明所使用的语言"
@@ -2776,6 +2792,11 @@ def _restore_persisted_jobs(wanted_id: str = "") -> None:
                     status=str(value.get("status", "completed")),
                     message=str(value.get("message", "")),
                     progress=float(value.get("progress", 0)),
+                    ai_progress=(
+                        dict(value["ai_progress"])
+                        if isinstance(value.get("ai_progress"), Mapping)
+                        else None
+                    ),
                     error=str(value.get("error", "")),
                     files=files,
                     created_at=float(value.get(
