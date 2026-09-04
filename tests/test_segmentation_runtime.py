@@ -344,11 +344,11 @@ class SegmentationContractTests(unittest.TestCase):
             self.assertEqual(kwargs["thinking_mode"], "enabled")
             self.assertEqual(kwargs["reasoning_effort"], "low")
             self.assertTrue(kwargs["system"].startswith("primary prompt\n\n"))
-            self.assertIn("SUBSTAR-CUE-SCRIPT/1", kwargs["user_text"])
+            self.assertIn("RETURN_FORMAT\tC###<TAB>W####[-W####]", kwargs["user_text"])
             self.assertIn("PROGRAM VALIDATION", kwargs["user_text"])
             self.assertIn("BASE_SHA256", kwargs["user_text"])
             self.assertIn("ERROR\tW0001-W0002", kwargs["user_text"])
-            self.assertIn("Return all OWN ranges in one response", kwargs["user_text"])
+            self.assertIn("Return the complete OWN block once", kwargs["user_text"])
             self.assertEqual(
                 kwargs["telemetry_metadata"]["repair_mode"],
                 "full_block_single_patch",
@@ -420,7 +420,7 @@ class SegmentationContractTests(unittest.TestCase):
         self.assertEqual(cuts, {10})
         self.assertEqual(exceptions, [])
 
-    def test_repair_finalizer_inserts_unambiguous_hard_limit_break(self) -> None:
+    def test_repair_finalizer_rejects_overflow_without_inserting_a_boundary(self) -> None:
         from scripts.run_semantic_segmentation import request_semantic_grouping_block
 
         units = [
@@ -471,12 +471,11 @@ class SegmentationContractTests(unittest.TestCase):
                 (Path(temporary) / "semantic_grouping_repair_c0001.json").read_text("utf-8")
             )
 
-        self.assertEqual(row[4], {10})
-        self.assertEqual(row[5], [])
-        self.assertEqual(
-            audit["scope_validation"][0]["finalizer_hard_limit_splits"][0]["line_breaks_after"],
-            [10, 11],
-        )
+        self.assertEqual(row[4], set())
+        self.assertEqual(len(row[5]), 1)
+        self.assertEqual(row[5][0]["code"], "semantic_grouping_unresolved")
+        self.assertFalse(audit["accepted"])
+        self.assertEqual(audit["primary_finalizer_hard_limit_splits"], [])
 
     def test_hard_limit_finalizer_balances_equally_natural_boundaries(self) -> None:
         from scripts.run_semantic_segmentation import _minimum_hard_limit_breaks
@@ -572,8 +571,7 @@ class SegmentationContractTests(unittest.TestCase):
                 "schema_version": "substar.semantic-grouping-result.v1",
                 **binding,
                 "meaning_groups": [
-                    {"alignment_start": 1, "alignment_end": 1, "line_breaks_after": [1]},
-                    {"alignment_start": 3, "alignment_end": 3, "line_breaks_after": [3]},
+                    {"alignment_start": 0, "alignment_end": 4, "line_breaks_after": [4]},
                 ],
                 "exceptions": [],
             }
@@ -598,12 +596,48 @@ class SegmentationContractTests(unittest.TestCase):
                 )
 
         assert len(requests) == 1
-        assert "ERROR\tW0002-W0002" in requests[0]["user_text"]
-        assert "ERROR\tW0004-W0004" in requests[0]["user_text"]
-        assert requests[0]["telemetry_metadata"]["target_ranges"] == [[1, 1], [3, 3]]
+        assert "ERROR\tW0001-W0005\tmissing_or_invalid_segmentation" in requests[0]["user_text"]
+        assert "FROZEN\t" not in requests[0]["user_text"]
+        assert requests[0]["telemetry_metadata"]["target_ranges"] == [[0, 4]]
         assert [(group["alignment_start"], group["alignment_end"]) for group in row[2]] == [
-            (0, 0), (1, 1), (2, 2), (3, 3), (4, 4),
+            (0, 4),
         ]
+
+
+    def test_error_patch_replaces_only_rejected_cue_ranges(self) -> None:
+        from scripts.run_semantic_segmentation import compile_segmentation_error_patch
+        from substar_core.cue_script import render_segmentation_request
+
+        rows = [
+            {"index": index, "start": index, "end": index + 0.1, "text": f"w{index}", "owner": True}
+            for index in range(10, 16)
+        ]
+        _wire, ledger = render_segmentation_request({
+            "rows": rows,
+            "active_output_profile": {"source_language": "en", "hard_limit": 8},
+        })
+        binding = {
+            "input_fingerprint": "f" * 64,
+            "block_id": "c0001",
+            "ownership": {"alignment_start": 10, "alignment_end": 15},
+        }
+        original = {
+            "meaning_groups": [
+                {"alignment_start": 10, "alignment_end": 11, "line_breaks_after": [11]},
+                {"alignment_start": 12, "alignment_end": 15, "line_breaks_after": [15]},
+            ]
+        }
+        patched = compile_segmentation_error_patch(
+            "C001\tW0003-W0004\nC002\tW0005-W0006",
+            ledger,
+            binding,
+            original,
+            [{"cue_start": 12, "cue_end": 15}],
+        )
+        assert [
+            (group["alignment_start"], group["alignment_end"])
+            for group in patched["meaning_groups"]
+        ] == [(10, 11), (12, 13), (14, 15)]
 
 
 class SegmentationRuntimeTests(unittest.TestCase):

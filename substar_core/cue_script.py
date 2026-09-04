@@ -12,9 +12,9 @@ HEADER = "SUBSTAR-CUE-SCRIPT/1"
 OUTPUT_CONTRACTS = {
     "SEGMENT": """
 AUTHORITATIVE OUTPUT CONTRACT:
-Return only SUBSTAR-CUE-SCRIPT/1 text; no JSON, Markdown, commentary, token IDs, or internal IDs.
-Use CUE<TAB>Cue alias<TAB>word span. Write W0001 for one word or W0002-W0004 for an inclusive multi-word range.
-Cover every OWN word exactly once, consecutively and in order. Never return CONTEXT words. Finish with END.
+Return only two-column boundary rows; no header, END, JSON, Markdown, commentary, source text, token IDs, or internal IDs.
+Use Cue alias<TAB>word span, for example `C001<TAB>W0001-W0004`. Write W0001 for one word. For each row, look up its starting token's MAX_END field and choose an ending alias no later than that ceiling.
+Cover every OWN word exactly once, consecutively and in order. Never return CONTEXT words.
 """.strip(),
     "CALIBRATE": """
 AUTHORITATIVE OUTPUT CONTRACT:
@@ -95,39 +95,66 @@ def alias_rows(rows: Iterable[Mapping[str, Any]], prefix: str) -> tuple[dict[str
 class SegmentationLedger:
     words: dict[str, Mapping[str, Any]]
     aliases_by_index: dict[int, str]
+    max_end_by_alias: dict[str, str]
 
 
 def render_segmentation_request(request: Mapping[str, Any]) -> tuple[str, SegmentationLedger]:
     rows = [dict(row) for row in request.get("rows", []) if isinstance(row, Mapping)]
+    hard_limit = int(request.get("active_output_profile", {}).get("hard_limit", 0) or 0)
     words: dict[str, Mapping[str, Any]] = {}
     aliases_by_index: dict[int, str] = {}
+    max_end_by_alias: dict[str, str] = {}
+    aliases = [f"W{number:04d}" for number in range(1, len(rows) + 1)]
+    rendered = [str(row.get("text", "")).replace("\t", " ").replace("\n", " ") for row in rows]
     lines = [
         "TASK\tSEGMENT",
         f"LANGUAGE\t{request.get('active_output_profile', {}).get('source_language', 'Auto')}",
-        f"HARD_LIMIT\t{request.get('active_output_profile', {}).get('hard_limit', '')}",
+        f"HARD_LIMIT\t{hard_limit}",
         "TOKENS",
     ]
     for number, row in enumerate(rows, start=1):
-        alias = f"W{number:04d}"
+        alias = aliases[number - 1]
         words[alias] = row
         aliases_by_index[int(row["index"])] = alias
+        visible_length = 0
+        maximum_end = number - 1
+        for candidate in range(number - 1, len(rows)):
+            candidate_length = len(rendered[candidate]) + (1 if candidate > number - 1 else 0)
+            if hard_limit > 0 and visible_length + candidate_length > hard_limit:
+                break
+            visible_length += candidate_length
+            maximum_end = candidate
+        max_end_by_alias[alias] = aliases[maximum_end]
         lines.append(
             "\t".join((
                 alias,
                 "OWN" if bool(row.get("owner")) else "CONTEXT",
+                f"MAX_END={aliases[maximum_end]}",
                 str(row.get("start", "")),
                 str(row.get("end", "")),
-                str(row.get("text", "")).replace("\t", " ").replace("\n", " "),
+                rendered[number - 1],
             ))
         )
+    owned_runs: list[tuple[str, str]] = []
+    run_start: str | None = None
+    run_end: str | None = None
+    for number, row in enumerate(rows):
+        alias = aliases[number]
+        if bool(row.get("owner")):
+            run_start = run_start or alias
+            run_end = alias
+        elif run_start is not None and run_end is not None:
+            owned_runs.append((run_start, run_end))
+            run_start = run_end = None
+    if run_start is not None and run_end is not None:
+        owned_runs.append((run_start, run_end))
+    for owned_start, owned_end in owned_runs:
+        lines.append(f"OWN_RANGE\t{owned_start}-{owned_end}")
     lines.extend((
         "RETURN",
-        f"{HEADER}\tSEGMENT",
-        "CUE\tC001\tW0001",
-        "CUE\tC002\tW0002-W0004",
-        "END",
+        "RETURN_FORMAT\tC###<TAB>W####[-W####]",
     ))
-    return "\n".join(lines), SegmentationLedger(words, aliases_by_index)
+    return "\n".join(lines), SegmentationLedger(words, aliases_by_index, max_end_by_alias)
 
 
 def parse_segmentation(
@@ -135,20 +162,23 @@ def parse_segmentation(
     require_all: bool = True,
 ) -> dict[str, Any]:
     """Compile C/W rows; legacy five-column rows remain read-compatible."""
-    rows = records(raw, "SEGMENT", strict=require_all)
+    rows = records(raw, "SEGMENT", strict=False)
     issues: list[str] = []
     parsed: list[tuple[str, str, int, int]] = []
     expected_cue = 1
     for number, fields in enumerate(rows, start=1):
-        if len(fields) not in {3, 4, 5} or fields[0] != "CUE":
-            if require_all:
-                issues.append(f"第 {number} 条必须是三字段 CUE 记录")
-            continue
         cue = f"C{expected_cue:03d}"
-        # v1 experimental output carried a G column. It is deliberately
-        # ignored here so old cached responses remain readable without letting
-        # G influence the new Cue boundary contract.
-        word_range = fields[3] if len(fields) == 5 else fields[2]
+        if len(fields) >= 2 and re.fullmatch(r"C\d+", fields[0], re.IGNORECASE):
+            # Current minimal protocol: C is only an ordinal; W owns binding.
+            word_range = fields[1]
+        elif len(fields) in {3, 4, 5} and fields[0] == "CUE":
+            # Backward compatibility for archived three/four/five-column rows.
+            # The legacy G and CHECK_MAX fields never own binding.
+            word_range = fields[3] if len(fields) == 5 else fields[2]
+        else:
+            if require_all:
+                issues.append(f"第 {number} 条必须是 C序号<TAB>W范围")
+            continue
         # C labels are presentation ordinals; W ranges carry the binding.
         # Providers occasionally continue a global counter or decorate the
         # ordinal with its owned range (for example C480 or C168-175-01).

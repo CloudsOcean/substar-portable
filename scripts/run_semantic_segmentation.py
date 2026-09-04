@@ -25,8 +25,10 @@ from substar_core.model_gateway import (  # noqa: E402
     call_text_model,
 )
 from substar_core.cue_script import (  # noqa: E402
+    CueScriptError,
     output_contract,
     parse_segmentation,
+    records,
     render_segmentation_request,
 )
 from substar_core.artifacts import atomic_write_json, atomic_write_text  # noqa: E402
@@ -1087,6 +1089,93 @@ def _frozen_segmentation_value(
     }
 
 
+def compile_segmentation_error_patch(
+    raw: str,
+    ledger: Any,
+    binding: Mapping[str, Any],
+    original: Mapping[str, Any],
+    issues: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Replace only rejected Cue ranges; accepted model boundaries stay frozen."""
+    parsed: list[tuple[int, int]] = []
+    errors: list[str] = []
+    for number, fields in enumerate(records(raw, "SEGMENT", strict=False), start=1):
+        if len(fields) >= 2 and re.fullmatch(r"C\d+", fields[0], re.IGNORECASE):
+            word_range = fields[1]
+        elif len(fields) in {3, 4, 5} and fields[0] == "CUE":
+            word_range = fields[3] if len(fields) == 5 else fields[2]
+        else:
+            errors.append(f"第 {number} 条必须是 C序号<TAB>W范围")
+            continue
+        match = re.fullmatch(r"(W\d{4})(?:-(W\d{4}))?", word_range)
+        first_alias = match.group(1) if match else ""
+        last_alias = (match.group(2) or first_alias) if match else ""
+        if not match or first_alias not in ledger.words or last_alias not in ledger.words:
+            errors.append(f"第 {number} 条 W 范围无效")
+            continue
+        start = int(ledger.words[first_alias]["index"])
+        end = int(ledger.words[last_alias]["index"])
+        if start > end:
+            errors.append(f"第 {number} 条 W 范围倒序")
+            continue
+        parsed.append((start, end))
+    if errors:
+        raise CueScriptError(errors)
+
+    issue_ranges = sorted(
+        (int(issue["cue_start"]), int(issue["cue_end"])) for issue in issues
+    )
+    replacements: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    row_cursor = 0
+    for issue_start, issue_end in issue_ranges:
+        cursor = issue_start
+        replacement: list[tuple[int, int]] = []
+        while row_cursor < len(parsed) and parsed[row_cursor][0] <= issue_end:
+            start, end = parsed[row_cursor]
+            if start != cursor or end > issue_end:
+                raise CueScriptError([
+                    f"补丁未连续覆盖错误范围 {issue_start}-{issue_end}"
+                ])
+            replacement.append((start, end))
+            cursor = end + 1
+            row_cursor += 1
+        if cursor != issue_end + 1 or not replacement:
+            raise CueScriptError([
+                f"补丁未完整覆盖错误范围 {issue_start}-{issue_end}"
+            ])
+        replacements[(issue_start, issue_end)] = replacement
+    if row_cursor != len(parsed):
+        raise CueScriptError(["补丁包含错误范围之外的 W 范围"])
+
+    original_cues: list[tuple[int, int]] = []
+    for group in original.get("meaning_groups", []):
+        cue_start = int(group["alignment_start"])
+        for cue_end_raw in group.get("line_breaks_after", []):
+            cue_end = int(cue_end_raw)
+            original_cues.append((cue_start, cue_end))
+            cue_start = cue_end + 1
+    merged: list[tuple[int, int]] = []
+    for cue_range in original_cues:
+        merged.extend(replacements.get(cue_range, [cue_range]))
+    if set(replacements) - set(original_cues):
+        raise CueScriptError(["错误范围无法绑定到首轮 Cue"])
+    return {
+        "schema_version": "substar.semantic-grouping-result.v1",
+        "input_fingerprint": str(binding.get("input_fingerprint", "")),
+        "block_id": str(binding.get("block_id", "")),
+        "ownership": dict(binding.get("ownership", {})),
+        "meaning_groups": [
+            {
+                "alignment_start": start,
+                "alignment_end": end,
+                "line_breaks_after": [end],
+            }
+            for start, end in merged
+        ],
+        "exceptions": [],
+    }
+
+
 def request_semantic_grouping_block(
     units: list[Any], bounds: tuple[int, int], chunk_number: int, args: Any,
     system_prompt: str, glossary: list[dict[str, Any]],
@@ -1171,18 +1260,10 @@ def request_semantic_grouping_block(
             {"stage": "semantic_grouping", "block_id": block_id},
         )
     original_value = copy.deepcopy(value)
+    # The finalizer is deliberately forbidden from inserting Cue boundaries.
+    # Exact lengths are supplied to the model; an over-limit response must be
+    # repaired by the model so syntax, discourse and timing remain authoritative.
     primary_finalizer_splits: list[dict[str, Any]] = []
-    if isinstance(value, Mapping):
-        # Line length is a deterministic display constraint. Satisfy every
-        # unambiguous legal split before asking the model to repair semantics.
-        try:
-            value, primary_finalizer_splits = _finalize_repair_hard_limits(
-                value, units, args.hard_limit
-            )
-        except (KeyError, TypeError, ValueError):
-            # Malformed primary structure remains a repairable block failure;
-            # the deterministic helper must never turn it into a fatal task.
-            value = copy.deepcopy(original_value)
     last_error: Exception | None = initial_error
     frozen_groups: list[dict[str, Any]] = []
     frozen_cuts: set[int] = set()
@@ -1212,17 +1293,21 @@ def request_semantic_grouping_block(
     except Exception as exc:
         last_error = exc
 
-    candidates, candidate_cuts = _salvage_semantic_groups(
-        value, units, bounds, chunk_number, binding, args.hard_limit
-    )
-    frozen_groups = _merge_frozen_groups(frozen_groups, candidates)
-    frozen_cuts.update(candidate_cuts)
-    if _groups_cover(frozen_groups, first, last):
-        return chunk_number, [], frozen_groups, [], frozen_cuts, []
-
     scope_audit: list[dict[str, Any]] = []
+    repair_mode = "disabled"
     if repair_attempts:
-        repair_scopes = _uncovered_alignment_scopes(frozen_groups, first, last)
+        patch_only = bool(overflow_issues and original_value.get("meaning_groups"))
+        repair_scopes = (
+            [
+                (int(issue["cue_start"]), int(issue["cue_end"]))
+                for issue in overflow_issues
+            ]
+            if patch_only else [(first, last)]
+        )
+        repair_mode = (
+            "rejected_ranges_single_patch" if patch_only
+            else "full_block_single_patch"
+        )
         if progress is not None:
             progress.plan(
                 "semantic_grouping_repair", 1, additive=True,
@@ -1240,117 +1325,172 @@ def request_semantic_grouping_block(
             json.dumps(original_value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         repair_request = copy.deepcopy(request)
-        owned_indexes = {
-            index for scope_start, scope_end in repair_scopes
-            for index in range(scope_start, scope_end + 1)
-        }
+        owned_indexes = (
+            {
+                index
+                for issue in overflow_issues
+                for index in range(int(issue["cue_start"]), int(issue["cue_end"]) + 1)
+            }
+            if patch_only
+            else {
+                index for scope_start, scope_end in repair_scopes
+                for index in range(scope_start, scope_end + 1)
+            }
+        )
         for row in repair_request.get("rows", []):
             if isinstance(row, dict):
                 row["owner"] = int(row["index"]) in owned_indexes
         repair_wire, repair_ledger = render_segmentation_request(repair_request)
-        scope_rows = [
-            f"ERROR\t{repair_ledger.aliases_by_index[start]}-"
-            f"{repair_ledger.aliases_by_index[end]}\tmissing_or_invalid_segmentation"
-            for start, end in repair_scopes
-        ]
-        frozen_rows = [
-            f"FROZEN\t{repair_ledger.aliases_by_index[int(group['alignment_start'])]}-"
-            f"{repair_ledger.aliases_by_index[int(group['alignment_end'])]}"
-            for group in frozen_groups
-        ]
-        repair_wire_text = "\n".join((
-            repair_wire,
-            "",
-            "PROGRAM VALIDATION",
-            f"BASE_SHA256\t{base_hash}",
-            *scope_rows,
-            *frozen_rows,
-            f"VALIDATION\t{str(last_error)}",
-            "PATCH RULE\tReturn all OWN ranges in one response. CONTEXT/FROZEN ranges are read-only and will be restored by the finalizer.",
-        ))
-        try:
-            repair_value = model_cue_script(
-                model=getattr(args, "repair_model", "") or args.grouping_model,
-                base_url=args.base_url,
-                api_key=args.api_key,
-                auth_mode=args.auth_mode,
-                system=full_repair_system_prompt,
-                user_text=repair_wire_text,
-                parser=lambda raw: parse_segmentation(
-                    raw, repair_ledger, binding, require_all=False
+        def repair_error_rows(issues: list[dict[str, Any]]) -> list[str]:
+            rendered: list[str] = []
+            for issue in issues:
+                start = int(issue["cue_start"])
+                end = int(issue["cue_end"])
+                rendered.append("\t".join((
+                    "ERROR",
+                    f"{repair_ledger.aliases_by_index[start]}-{repair_ledger.aliases_by_index[end]}",
+                    "cue_overflow",
+                    f"ACTUAL={int(issue['actual_length'])}",
+                    f"MAX={int(issue['hard_limit'])}",
+                    f"AT_LEAST_CUES={max(2, math.ceil(int(issue['actual_length']) / int(issue['hard_limit'])))}",
+                    f"MUST_END_NO_LATER_THAN={repair_ledger.max_end_by_alias[repair_ledger.aliases_by_index[start]]}",
+                    "CUT_GUIDANCE=then_repeat_from_the_next_start_using_its_MAX_END",
+                )))
+            return rendered
+
+        round_issues = list(overflow_issues)
+        round_error: Exception | None = last_error
+        for repair_round in range(1, repair_attempts + 1):
+            scope_rows = repair_error_rows(round_issues)
+            if not scope_rows:
+                scope_rows.append("\t".join((
+                    "ERROR",
+                    f"{repair_ledger.aliases_by_index[first]}-{repair_ledger.aliases_by_index[last]}",
+                    "missing_or_invalid_segmentation",
+                )))
+            repair_wire_text = "\n".join((
+                repair_wire,
+                "",
+                "PROGRAM VALIDATION",
+                f"REPAIR_ROUND\t{repair_round}/{repair_attempts}",
+                f"BASE_SHA256\t{base_hash}",
+                *scope_rows,
+                f"VALIDATION\t{str(round_error)}",
+                (
+                    "PATCH RULE\tReturn only replacement rows for every OWN_RANGE. "
+                    "Cover each rejected range exactly once and do not return CONTEXT. "
+                    "Accepted first-pass Cue ranges are frozen and the finalizer will fill them back."
+                    if patch_only else
+                    "PATCH RULE\tReturn the complete OWN block once. CONTEXT is read-only."
                 ),
-                telemetry_metadata={
-                    "repair_mode": "full_block_single_patch",
-                    "base_sha256": base_hash,
-                    "target_ranges": [list(scope) for scope in repair_scopes],
-                    "validation_issue_count": len(repair_scopes),
-                },
-                timeout=args.timeout,
-                telemetry=args.api_telemetry,
-                stage="semantic_grouping_repair",
-                block_id=block_id,
-                thinking_mode=getattr(args, "repair_thinking_mode", "disabled"),
-                reasoning_effort=getattr(args, "repair_reasoning_effort", "low"),
-                max_tokens=getattr(args, "repair_max_tokens", 65536),
-                temperature=getattr(args, "repair_temperature", 0.0),
-            )
-            repair_value, finalizer_splits = _finalize_repair_hard_limits(
-                repair_value, units, args.hard_limit
-            )
-            candidates, candidate_cuts = _salvage_semantic_groups(
-                repair_value, units, bounds, chunk_number, binding, args.hard_limit
-            )
-            candidates = [
-                group for group in candidates
-                if any(
-                    start <= int(group["alignment_start"])
-                    and int(group["alignment_end"]) <= end
-                    for start, end in repair_scopes
+            ))
+            if progress is not None:
+                if repair_round > 1:
+                    progress.plan(
+                        "semantic_grouping_repair", 1, additive=True,
+                        block_ids=[block_id],
+                    )
+                progress.event("semantic_grouping_repair", "sent", block_id=block_id)
+            repair_value: dict[str, Any] | None = None
+            try:
+                repair_value = model_cue_script(
+                    model=getattr(args, "repair_model", "") or args.grouping_model,
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    auth_mode=args.auth_mode,
+                    system=(
+                        "\n\n".join((
+                            full_system_prompt,
+                            "REPAIR OVERRIDE: Return only two-column replacement rows for every OWN_RANGE. "
+                            "Do not repeat CONTEXT or accepted first-pass ranges."
+                        ))
+                        if patch_only else full_repair_system_prompt
+                    ),
+                    user_text=repair_wire_text,
+                    parser=(
+                        (lambda raw: compile_segmentation_error_patch(
+                            raw, repair_ledger, binding, original_value, overflow_issues
+                        ))
+                        if patch_only else
+                        (lambda raw: parse_segmentation(
+                            raw, repair_ledger, binding, require_all=True
+                        ))
+                    ),
+                    telemetry_metadata={
+                        "repair_mode": repair_mode,
+                        "repair_round": repair_round,
+                        "base_sha256": base_hash,
+                        "target_ranges": [list(scope) for scope in repair_scopes],
+                        "validation_issue_count": len(scope_rows),
+                    },
+                    timeout=args.timeout,
+                    telemetry=args.api_telemetry,
+                    stage="semantic_grouping_repair",
+                    block_id=block_id,
+                    thinking_mode=getattr(args, "repair_thinking_mode", "disabled"),
+                    reasoning_effort=getattr(args, "repair_reasoning_effort", "low"),
+                    max_tokens=getattr(args, "repair_max_tokens", 65536),
+                    temperature=getattr(args, "repair_temperature", 0.0),
                 )
-            ]
-            candidate_cuts = {
-                cut for cut in candidate_cuts
-                if any(start <= cut <= end for start, end in repair_scopes)
-            }
-            frozen_groups = _merge_frozen_groups(frozen_groups, candidates)
-            frozen_cuts.update(candidate_cuts)
-            if not _groups_cover(frozen_groups, first, last):
-                raise SegmentationError("块级修复没有覆盖全部 OWN 范围")
-            scope_audit.append({
-                "scope_id": block_id,
-                "target_ranges": [list(scope) for scope in repair_scopes],
-                "accepted": True,
-                "finalizer_hard_limit_splits": finalizer_splits,
-            })
-            if progress is not None:
-                progress.event("semantic_grouping_repair", "response", block_id=block_id)
-                progress.event("semantic_grouping_repair", "accepted", block_id=block_id)
-        except Exception as repair_exc:
-            if isinstance(repair_exc, SegmentationRequestError):
-                raise
-            last_error = repair_exc
-            scope_audit.append({
-                "scope_id": block_id,
-                "target_ranges": [list(scope) for scope in repair_scopes],
-                "accepted": False,
-                "error": str(repair_exc),
-            })
-            if progress is not None:
-                progress.event("semantic_grouping_repair", "response", block_id=block_id)
-                progress.event("semantic_grouping_repair", "failed", block_id=block_id)
+                round_issues = semantic_grouping_overflow_issues(
+                    repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                )
+                if round_issues:
+                    raise SegmentationError(
+                        f"repair round {repair_round} returned {len(round_issues)} Cue overflows"
+                    )
+                spans, candidates, corrections, candidate_cuts, exceptions = validate_semantic_grouping_result(
+                    repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                )
+                frozen_groups = list(candidates)
+                frozen_cuts = set(candidate_cuts)
+                scope_audit.append({
+                    "scope_id": block_id,
+                    "repair_round": repair_round,
+                    "target_ranges": [list(scope) for scope in repair_scopes],
+                    "accepted": True,
+                    "finalizer_hard_limit_splits": [],
+                })
+                if progress is not None:
+                    progress.event("semantic_grouping_repair", "response", block_id=block_id)
+                    progress.event("semantic_grouping_repair", "accepted", block_id=block_id)
+                break
+            except Exception as repair_exc:
+                if isinstance(repair_exc, SegmentationRequestError):
+                    raise
+                round_error = repair_exc
+                if repair_value is not None and not round_issues:
+                    try:
+                        round_issues = semantic_grouping_overflow_issues(
+                            repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                        )
+                    except Exception:
+                        round_issues = []
+                scope_audit.append({
+                    "scope_id": block_id,
+                    "repair_round": repair_round,
+                    "target_ranges": [list(scope) for scope in repair_scopes],
+                    "accepted": False,
+                    "error": str(repair_exc),
+                })
+                if progress is not None:
+                    progress.event("semantic_grouping_repair", "response", block_id=block_id)
+                    if repair_round < repair_attempts:
+                        progress.event("semantic_grouping_repair", "retry", block_id=block_id)
+                    else:
+                        progress.event("semantic_grouping_repair", "failed", block_id=block_id)
+        last_error = round_error
         if _groups_cover(frozen_groups, first, last):
-            final_value = _frozen_segmentation_value(frozen_groups, frozen_cuts, binding)
-            spans, groups, corrections, cuts, exceptions = validate_semantic_grouping_result(
-                final_value, units, bounds, chunk_number, binding, args.hard_limit
-            )
+            groups = frozen_groups
+            cuts = frozen_cuts
             atomic_write_json(
                 args.output_dir / f"semantic_grouping_repair_{block_id}.json",
                 {
                     "schema_version": "substar.segmentation-repair.v4",
                     "block_id": block_id,
-                    "repair_mode": "full_block_single_patch",
+                    "repair_mode": repair_mode,
                     "base_sha256": base_hash,
-                    "repair_attempts": 1,
+                    "repair_attempts": repair_attempts,
                     "primary_finalizer_hard_limit_splits": primary_finalizer_splits,
                     "scope_validation": scope_audit,
                     "accepted": True,
@@ -1393,7 +1533,7 @@ def request_semantic_grouping_block(
         "block_id": block_id,
         "alignment_start": int(local_units[0].index),
         "alignment_end": int(local_units[-1].index),
-        "repair_mode": "full_block_single_patch",
+        "repair_mode": repair_mode,
         "repair_attempts": repair_attempts,
         "primary_finalizer_hard_limit_splits": primary_finalizer_splits,
         "validation_issue_count": len(overflow_issues),

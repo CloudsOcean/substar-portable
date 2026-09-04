@@ -1233,7 +1233,7 @@ Ask the configured model for compact C/W Cue ranges, deterministically bind loca
 
 Code:
 
-- `scripts/run_semantic_segmentation.py` — `main`, `request_semantic_grouping_block`, `validate_semantic_grouping_result`, `_salvage_semantic_groups`, `build_plan_from_cuts`
+- `scripts/run_semantic_segmentation.py` — `main`, `request_semantic_grouping_block`, `compile_segmentation_error_patch`, `validate_semantic_grouping_result`, `_salvage_semantic_groups`, `build_plan_from_cuts`
 
 Must not:
 

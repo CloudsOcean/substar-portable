@@ -599,7 +599,7 @@
       "layer": "model_orchestration",
       "role": "Ask the configured model for compact C/W Cue ranges, deterministically bind local aliases to the immutable word ledger, freeze valid ranges, repair every rejected range in one full-block patch and register unresolved gaps.",
       "must_not": ["Reorder, delete or rewrite source tokens", "Replace valid model output with deterministic semantic content", "Roll back valid groups because another group failed"],
-      "code": [{"path": "scripts/run_semantic_segmentation.py", "symbols": ["main", "request_semantic_grouping_block", "validate_semantic_grouping_result", "_salvage_semantic_groups", "build_plan_from_cuts"]}],
+      "code": [{"path": "scripts/run_semantic_segmentation.py", "symbols": ["main", "request_semantic_grouping_block", "compile_segmentation_error_patch", "validate_semantic_grouping_result", "_salvage_semantic_groups", "build_plan_from_cuts"]}],
       "inputs": ["segmentation_material", "segmentation_request", "model_text_exchange"],
       "outputs": ["semantic_grouping_result", "editor_document"],
       "calls": ["segmentation_model_connector"],

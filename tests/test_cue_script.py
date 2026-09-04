@@ -24,7 +24,10 @@ def test_segmentation_script_compiles_to_frozen_contract() -> None:
         "active_output_profile": {"source_language": "en", "hard_limit": 55},
     }
     wire, ledger = render_segmentation_request(request)
-    assert "CUE\tC001\tW0001" in wire
+    assert "OWN_RANGE\tW0001-W0006" in wire
+    assert "W0001\tOWN\tMAX_END=W0006\t10\t10.1\twe" in wire
+    assert "RETURN_FORMAT\tC###<TAB>W####[-W####]" in wire
+    assert "CHECK_MAX" not in wire
     assert "one-word preview" not in wire
     binding = {
         "input_fingerprint": "fingerprint",
@@ -46,6 +49,26 @@ def test_segmentation_script_compiles_to_frozen_contract() -> None:
         {"alignment_start": 10, "alignment_end": 12, "line_breaks_after": [12]},
         {"alignment_start": 13, "alignment_end": 15, "line_breaks_after": [15]},
     ]
+
+
+def test_segmentation_minimal_two_column_rows_compile() -> None:
+    request = {
+        "rows": [
+            {"index": index, "start": index, "end": index + 0.1, "text": text, "owner": True}
+            for index, text in enumerate(("one", "two", "three"), start=20)
+        ],
+        "active_output_profile": {"source_language": "en", "hard_limit": 55},
+    }
+    _wire, ledger = render_segmentation_request(request)
+    result = parse_segmentation(
+        "C001\tW0001\nC002\tW0002-W0003",
+        ledger,
+        {"ownership": {"alignment_start": 20, "alignment_end": 22}},
+    )
+    assert [
+        (row["alignment_start"], row["alignment_end"])
+        for row in result["meaning_groups"]
+    ] == [(20, 20), (21, 22)]
 
 
 def test_segmentation_script_rejects_incomplete_ownership() -> None:
