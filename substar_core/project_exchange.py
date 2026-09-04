@@ -30,6 +30,7 @@ from substar_core.semantic_execution import validate_presentation_plan
 from substar_core.segmentation.execution_planner import execution_block_plan
 from substar_core.export import SubtitleExportMode, render_document_srt
 from substar_core.prompt_registry import (
+    calibration_variant,
     normalize_source_language,
     opposite_language,
     render_prompt,
@@ -133,13 +134,6 @@ def _active_route_block(
     return block
 
 
-def _calibration_variant(source_language: str) -> str:
-    # This is deliberately identical to the editor calibration route.  The
-    # current production calibration contract has Chinese and non-Chinese
-    # variants; adding another external-only route would create prompt drift.
-    return "zh" if source_language == "zh-CN" else "en"
-
-
 def _prompt_bundle(*, orchestration_key: str, source_language: str,
                    translation_route: str | None = None) -> tuple[dict[str, Any], str]:
     orchestration = render_prompt(orchestration_key)
@@ -151,7 +145,7 @@ def _prompt_bundle(*, orchestration_key: str, source_language: str,
         snapshots["segmentation"] = render_prompt("semantic_grouping", variant=split_variant)
     else:
         snapshots["calibration"] = render_prompt(
-            "calibration", variant=_calibration_variant(source_language)
+            "calibration", variant=calibration_variant(source_language)
         )
         snapshots["translation"] = render_prompt(
             "contextual_translation", variant=translation_route or "generic"
@@ -482,7 +476,7 @@ def external_generation_files(
     prompts = {
         "prompts/01_split.md": render_prompt("semantic_grouping", variant=split_variant).text,
         "prompts/02_calibration.md": render_prompt(
-            "calibration", variant=_calibration_variant(source)
+            "calibration", variant=calibration_variant(source)
         ).text,
         "prompts/03_translation.md": render_prompt(
             "contextual_translation", variant=route

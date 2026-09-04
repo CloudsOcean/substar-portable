@@ -79,10 +79,9 @@ class SemanticGroupingContractTests(unittest.TestCase):
 
     def test_prompt_treats_hard_limit_as_ceiling_not_length_target(self) -> None:
         prompt = render_prompt("semantic_grouping", variant="en")
-        self.assertEqual("2026-08-19.1", prompt.version)
-        self.assertIn("only a rejection ceiling", prompt.text)
+        self.assertEqual("2026-09-04.3", prompt.version)
+        self.assertIn("rejection ceiling", prompt.text)
         self.assertIn("not a preferred length", prompt.text)
-        self.assertIn("A Cue may be substantially shorter", prompt.text)
         self.assertIn("never move the boundary later merely to make the Cue longer", prompt.text)
         self.assertNotIn("Choose the latest legal boundary", prompt.text)
 
@@ -92,8 +91,10 @@ class SemanticGroupingContractTests(unittest.TestCase):
         self.assertIn("relative `that/which`", prompt)
         self.assertIn("a preposition stays with its minimal object", prompt)
         self.assertIn("a phrasal-verb particle stays with its verb", prompt)
-        self.assertIn("If the appeal is unsuccessful / Molly Tea", prompt)
-        self.assertIn("They are jumping in / to provide new options", prompt)
+        self.assertIn("Do not fill to the limit", prompt)
+        self.assertIn("carry / out an inspection", prompt)
+        self.assertNotIn("meaning group", prompt.casefold())
+        self.assertNotIn("JSON only", prompt)
 
     def test_collects_all_overflows_and_accepts_only_candidate_break_additions(self) -> None:
         units = [

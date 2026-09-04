@@ -30,9 +30,20 @@ from substar_core.ai_block_cache import fingerprint, load_ai_block_cache, save_a
 from substar_core.model_routing import resolve_stage_request
 from substar_core.chinese_script import convert_chinese_script
 from substar_core.config import load_settings, settings_for_model_provider
-from substar_core.glossary import active_glossary, load_glossary, normalize_entry, save_glossary
+from substar_core.glossary import (
+    active_glossary,
+    glossary_prompt,
+    load_glossary,
+    normalize_entry,
+    save_glossary,
+)
 from substar_core.glossary_xlsx import XLSX_MEDIA_TYPE, glossary_xlsx_bytes
-from substar_core.prompt_registry import render_prompt, source_language_for_text
+from substar_core.prompt_registry import (
+    calibration_variant,
+    normalize_source_language,
+    render_prompt,
+    source_language_for_text,
+)
 from substar_core.model_providers import MODEL_PROVIDER_CATALOG
 from substar_core.manuscript_matching import (
     ManuscriptMatchError,
@@ -53,6 +64,7 @@ from substar_core.model_gateway import (
 )
 from substar_core.cue_script import (
     finalize_calibration,
+    finalize_calibration_candidate,
     output_contract,
     render_cue_request,
 )
@@ -2072,6 +2084,7 @@ def _run_editor_ai_blocks(
     cache_scope: str = "",
     request_renderer: Any | None = None,
     response_finalizer: Any | None = None,
+    repair_scope_builder: Any | None = None,
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
@@ -2088,6 +2101,11 @@ def _run_editor_ai_blocks(
         rejected: tuple[dict[str, Any], dict[str, Any]] | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, Any]]:
         block_id, block_cues = item
+        active_block_cues = (
+            repair_scope_builder(block_cues, rejected)
+            if rejected is not None and repair_scope_builder is not None
+            else block_cues
+        )
         route = resolve_stage_request(settings, active_stage)
         active_system_prompt = (
             str(repair_system_prompt)
@@ -2096,6 +2114,8 @@ def _run_editor_ai_blocks(
         )
         value: dict[str, Any] = {failure_key: []}
         validation_report: dict[str, Any] = {}
+        request_metadata: dict[str, Any] = {}
+        raw_response_for_cache: str | None = None
         primary_failure_metadata: dict[str, Any] = {}
         if rejected is not None:
             rejected_metadata = rejected[1]
@@ -2111,7 +2131,7 @@ def _run_editor_ai_blocks(
             if failure_injector is not None:
                 failure_injector(active_stage, block_id, attempt)
             request_group: dict[str, Any] = {
-                "block_id": block_id, "cues": block_cues,
+                "block_id": block_id, "cues": active_block_cues,
             }
             if rejected is not None:
                 rejected_value, rejected_metadata = rejected
@@ -2131,16 +2151,28 @@ def _run_editor_ai_blocks(
             wire_text = ""
             wire_ledger: Any | None = None
             if request_renderer is not None:
-                wire_text, wire_ledger = request_renderer(block_cues)
+                wire_text, wire_ledger = request_renderer(
+                    active_block_cues,
+                    {
+                        **request_group,
+                        "raw_model_response": (
+                            str(rejected[1].get("raw_model_response") or "")
+                            if rejected is not None else ""
+                        ),
+                    } if rejected is not None else None,
+                )
             cache_key = fingerprint({
                 "scope": cache_scope,
                 "stage": active_stage,
                 "model": str(route["model"]),
                 "system_prompt": active_system_prompt,
-                "request_group": request_group,
                 "wire_text": wire_text,
+                "thinking_mode": str(route["thinking_mode"]),
+                "reasoning_effort": str(route["reasoning_effort"]),
+                "max_tokens": int(route["max_tokens"]),
+                "temperature": float(route["temperature"]),
                 "schema": (
-                    "calibration-cue-script.v1"
+                    "calibration-cue-script.v2-raw-cache"
                     if request_renderer is not None else "calibration-actions.v3"
                 ),
             })
@@ -2148,7 +2180,16 @@ def _run_editor_ai_blocks(
                 load_ai_block_cache(cache_directory, cache_key)
                 if cache_directory is not None else None
             )
-            if cached is not None:
+            if cached is not None and request_renderer is not None and response_finalizer is not None and isinstance(cached.get("_raw_model_response"), str):
+                raw_response_for_cache = str(cached["_raw_model_response"])
+                value = response_finalizer(raw_response_for_cache, wire_ledger)
+                request_metadata = {
+                    "cache_hit": True, "cache_key": cache_key,
+                    "wire_protocol": "substar-cue-script.v2",
+                    "raw_model_response": raw_response_for_cache,
+                    "finalized_response": value,
+                }
+            elif cached is not None:
                 value = cached
                 request_metadata = {"cache_hit": True, "cache_key": cache_key}
             elif request_renderer is not None and response_finalizer is not None:
@@ -2169,6 +2210,7 @@ def _run_editor_ai_blocks(
                     max_tokens=int(route["max_tokens"]),
                     temperature=float(route["temperature"]),
                 )
+                raw_response_for_cache = str(raw_response)
                 exchange_path = (
                     cache_directory / "exchanges" / f"{time.time_ns()}_{cache_key}.json"
                     if cache_directory is not None else None
@@ -2178,7 +2220,9 @@ def _run_editor_ai_blocks(
                         "schema_version": "substar.model-exchange.v1",
                         "stage": active_stage,
                         "block_id": block_id,
-                        "wire_protocol": "substar-cue-script.v1",
+                        "wire_protocol": "substar-cue-script.v2",
+                        "system_prompt": active_system_prompt,
+                        "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                         "request_text": wire_text,
                         "raw_model_response": raw_response,
                         "transport_telemetry": request_metadata,
@@ -2191,7 +2235,9 @@ def _run_editor_ai_blocks(
                             "schema_version": "substar.model-exchange.v1",
                             "stage": active_stage,
                             "block_id": block_id,
-                            "wire_protocol": "substar-cue-script.v1",
+                            "wire_protocol": "substar-cue-script.v2",
+                            "system_prompt": active_system_prompt,
+                            "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                             "request_text": wire_text,
                             "raw_model_response": raw_response,
                             "transport_telemetry": request_metadata,
@@ -2202,7 +2248,7 @@ def _run_editor_ai_blocks(
                     ) from exc
                 request_metadata = {
                     **request_metadata,
-                    "wire_protocol": "substar-cue-script.v1",
+                    "wire_protocol": "substar-cue-script.v2",
                     "wire_input_characters": len(wire_text),
                     "wire_output_characters": len(raw_response),
                     "raw_model_response": raw_response,
@@ -2215,7 +2261,9 @@ def _run_editor_ai_blocks(
                         "schema_version": "substar.model-exchange.v1",
                         "stage": active_stage,
                         "block_id": block_id,
-                        "wire_protocol": "substar-cue-script.v1",
+                        "wire_protocol": "substar-cue-script.v2",
+                        "system_prompt": active_system_prompt,
+                        "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                         "request_text": wire_text,
                         "raw_model_response": raw_response,
                         "finalized_response": value,
@@ -2245,10 +2293,13 @@ def _run_editor_ai_blocks(
                 request_metadata = {
                     **request_metadata, "cache_hit": False, "cache_key": cache_key,
                 }
-            cache_value = dict(value)
+            cache_value = (
+                {"_raw_model_response": raw_response_for_cache}
+                if raw_response_for_cache is not None and request_renderer is not None
+                else dict(value)
+            )
             if (
                 rejected is not None and failure_key == "actions"
-                and response_finalizer is None
             ):
                 frozen = list(
                     rejected[1].get("validation_report", {})
@@ -2267,6 +2318,10 @@ def _run_editor_ai_blocks(
                     raise ModelGatewayError(
                         f"{active_stage} returned an invalid response contract"
                     )
+            elif request_renderer is not None and value.get("_cue_script_issues"):
+                raise ModelGatewayError(
+                    f"{active_stage} Cue Script still has unresolved aliases"
+                )
             if cached is None and cache_directory is not None:
                 save_ai_block_cache(cache_directory, cache_key, cache_value)
             return block_id, value, {
@@ -2292,6 +2347,7 @@ def _run_editor_ai_blocks(
                 "repair_request_count": 1 if attempt > 1 else 0,
                 "validation_report": validation_report,
                 **primary_failure_metadata,
+                **request_metadata,
             }
 
     if not blocks:
@@ -2413,7 +2469,14 @@ def _validated_calibration_contract_actions(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     accepted: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
-    if not isinstance(value, Mapping) or set(value) != {"actions"}:
+    allowed_response_fields = {
+        "actions", "_cue_script_issues", "_covered_cue_ids",
+    }
+    if (
+        not isinstance(value, Mapping)
+        or "actions" not in value
+        or not set(value) <= allowed_response_fields
+    ):
         return accepted, [{"code": "invalid_response", "fatal": True}]
     raw_actions = value.get("actions")
     if not isinstance(raw_actions, list):
@@ -3077,7 +3140,7 @@ def _ai_calibrate_project(
             progress_sink(done_progress)
         return {"revision": latest.to_dict(), "corrections": [], "failed_blocks": []}
 
-    blocks = _editor_ai_group_blocks(cues)
+    blocks = _editor_ai_blocks(cues)
     request_blocks = _calibration_model_blocks(blocks)
     settings = dict(settings_snapshot or load_settings(include_secret=True))
     calibration_glossary = [
@@ -3088,32 +3151,29 @@ def _ai_calibrate_project(
         }
         for row in active_glossary(_project_glossary_id(project_id))
     ]
-    calibration_variant = (
-        "zh"
-        if source_language_for_text(
+    configured_source_language = str(settings.get("language") or "Auto")
+    resolved_source_language = (
+        source_language_for_text(
             " ".join(
                 str(token["text"])
                 for cue in cues
                 for token in cue["tokens"]
             )
-        ) == "zh-CN"
-        else "en"
+        )
+        if configured_source_language.strip().lower() in {"", "auto", "automatic"}
+        else normalize_source_language(configured_source_language)
     )
+    calibration_prompt_variant = calibration_variant(resolved_source_language)
     calibration_prompt = render_prompt(
-        "calibration", variant=calibration_variant
+        "calibration", variant=calibration_prompt_variant
     ).text
     calibration_repair_prompt = render_prompt(
-        "calibration_repair", variant=calibration_variant
+        "calibration_repair", variant=calibration_prompt_variant
     ).text
-    calibration_prompt += "\n\n" + output_contract("CALIBRATE")
-    calibration_repair_prompt += "\n\n" + output_contract("CALIBRATE")
     if calibration_glossary:
-        glossary_section = (
-            "\n\nAuthoritative glossary snapshot:\n"
-            + json.dumps(calibration_glossary, ensure_ascii=False, separators=(",", ":"))
-        )
-        calibration_prompt += glossary_section
-        calibration_repair_prompt += glossary_section
+        glossary_section = glossary_prompt(calibration_glossary, include_target=False)
+        calibration_prompt += "\n\n" + glossary_section
+        calibration_repair_prompt += "\n\n" + glossary_section
     if payload.instruction.strip():
         instruction_section = (
             "\n\n用户本次补充校准要求：\n"
@@ -3122,6 +3182,10 @@ def _ai_calibrate_project(
         )
         calibration_prompt += instruction_section
         calibration_repair_prompt += instruction_section
+    # Keep the machine grammar last so neither glossary data nor a bounded
+    # user instruction can accidentally shadow the output protocol.
+    calibration_prompt += "\n\n" + output_contract("CALIBRATE")
+    calibration_repair_prompt += "\n\n" + output_contract("CALIBRATE")
     tracker = {
         "planned": len(blocks), "completed": 0,
         "primary_accepted": 0, "repair_planned": 0,
@@ -3144,11 +3208,49 @@ def _ai_calibrate_project(
         actions, rejections = _validated_calibration_contract_actions(
             value, token_ids, token_map, token_to_cue_id
         )
+        if isinstance(value, Mapping):
+            rejections.extend(
+                dict(row) for row in value.get("_cue_script_issues", [])
+                if isinstance(row, Mapping)
+            )
         return {
             "valid": not rejections,
             "issues": [dict(row) for row in rejections],
             "accepted_output": {"actions": [dict(row) for row in actions]},
         }
+
+    def calibration_repair_scope(
+        block_cues: list[dict[str, Any]],
+        rejected: tuple[dict[str, Any], dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        issues = rejected[1].get("validation_report", {}).get("issues", [])
+        missing = {
+            str(issue.get("cue_id") or "")
+            for issue in issues if isinstance(issue, Mapping)
+            and str(issue.get("cue_id") or "")
+        }
+        editable_indexes = [
+            index for index, cue in enumerate(block_cues)
+            if cue.get("editable") and (
+                not missing or str(cue.get("cue_id")) in missing
+            )
+        ]
+        if not editable_indexes:
+            editable_indexes = [
+                index for index, cue in enumerate(block_cues) if cue.get("editable")
+            ]
+        if not editable_indexes:
+            return block_cues
+        # Keep the complete original execution block as context. Only the
+        # failed Cue aliases remain OWN; every accepted primary binding is
+        # explicitly read-only and is merged back by the finalizer.
+        return [
+            {
+                **cue,
+                "editable": index in editable_indexes,
+            }
+            for index, cue in enumerate(block_cues)
+        ]
 
     def write_calibration_progress(phase: str, *, detail: str = "") -> None:
         value = ai_progress(
@@ -3193,15 +3295,17 @@ def _ai_calibrate_project(
         progress_callback=primary_progress,
         phase_callback=phase_progress,
         cache_directory=project_job_path(project_id) / "calibration" / "block_cache",
-        cache_scope="calibration-cue-script-v1-final",
-        request_renderer=lambda block_cues: render_cue_request(
+        cache_scope="calibration-cue-script-v3-block-patch",
+        request_renderer=lambda block_cues, repair_feedback=None: render_cue_request(
             block_cues,
             task="CALIBRATE",
             instructions=(
                 "Return every OWN Cue exactly once; use its local alias unchanged."
             ),
+            repair_feedback=repair_feedback,
         ),
-        response_finalizer=lambda raw, ledger: finalize_calibration(raw, ledger),
+        response_finalizer=lambda raw, ledger: finalize_calibration_candidate(raw, ledger),
+        repair_scope_builder=calibration_repair_scope,
     )
 
     write_calibration_progress("validating")

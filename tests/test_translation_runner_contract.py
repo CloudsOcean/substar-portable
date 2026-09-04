@@ -23,6 +23,7 @@ from substar_core.editor.translation.result_policy import (
     source_hashes_by_lineage,
     translated_text_by_source_cue,
 )
+from substar_core.cue_script import output_contract
 from substar_core.prompt_registry import render_prompt
 
 
@@ -31,6 +32,18 @@ def test_translation_runner_imports_the_canonical_export_module() -> None:
     assert TRANSLATION_REVISION_FILENAME == "revision.json"
     assert TRANSLATION_SUBTITLE_FILENAME == "bilingual.srt"
     assert TRANSLATION_PROGRESS_FILENAME == "progress.json"
+
+
+def test_translation_system_prompt_omits_empty_glossary_and_is_shared_by_repair() -> None:
+    assert contextual_translation._translation_system_prompt(
+        "primary", "direction", []
+    ) == "primary\n\ndirection"
+    assert contextual_translation._translation_system_prompt(
+        "repair", "direction", [{
+            "source": "ASR", "standard_source": "ASR", "aliases": [],
+            "target": "识别", "do_not_translate": False,
+        }]
+    ).startswith("repair\n\ndirection\n\n")
 
 
 def test_unrepaired_translation_units_remain_problem_cues_without_discarding_accepted_work() -> None:
@@ -191,9 +204,17 @@ def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch
     def repair_block(**kwargs):
         calls.append(kwargs["groups"])
         return {
-            "group_results": [
-                {"group_id": group["group_id"]} for group in kwargs["groups"]
-            ]
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": [cue["cue_id"]], "target_text": "译文"}
+                for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_covered_cue_ids": [
+                cue["cue_id"] for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_cue_script_issues": [],
         }, {}
 
     monkeypatch.setattr(contextual_translation, "api_call", repair_block)
@@ -207,6 +228,7 @@ def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch
     plans, report = contextual_translation.complete_results(
         settings={"translation_workers": 2}, repair_prompt="repair",
         groups=groups, response={"group_results": []},
+        mapping_mode="one_to_one",
         group_block_ids={"g1": "b1", "g2": "b1"},
         progress_callback=lambda done, total, accepted: progress.append(
             (done, total, accepted)
@@ -218,6 +240,189 @@ def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch
     assert {row["group_id"] for row in plans} == {"g1", "g2"}
     assert report["invalid_group_ids"] == []
     assert progress == [(0, 1, 0), (1, 1, 1)]
+
+
+def test_translation_repair_splits_large_failed_block(monkeypatch) -> None:
+    groups = [
+        {"group_id": f"g{index}", "cues": [_cue(f"c{index}", index)]}
+        for index in range(7)
+    ]
+    calls = []
+
+    def repair_block(**kwargs):
+        calls.append(kwargs["groups"])
+        return {
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": [cue["cue_id"]], "target_text": "译文"}
+                for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_covered_cue_ids": [
+                cue["cue_id"] for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_cue_script_issues": [],
+        }, {}
+
+    monkeypatch.setattr(contextual_translation, "api_call", repair_block)
+    monkeypatch.setattr(
+        contextual_translation, "_presentation_plan",
+        lambda group, row, _mapping_mode="many_to_many": (
+            {"group_id": group["group_id"]} if row else None
+        ),
+    )
+    plans, report = contextual_translation.complete_results(
+        settings={
+            "translation_workers": 2,
+            "translation_repair_max_groups": 3,
+            "translation_repair_max_cues": 12,
+        },
+        repair_prompt="repair",
+        groups=groups,
+        response={"group_results": []},
+        mapping_mode="one_to_one",
+        group_block_ids={group["group_id"]: "b1" for group in groups},
+    )
+
+    assert [len(call) for call in calls] == [7]
+    assert len(plans) == 7
+    assert report["invalid_group_ids"] == []
+
+
+def test_many_to_many_translation_repairs_each_local_scope_independently(monkeypatch) -> None:
+    groups = [
+        {"group_id": "g1", "cues": [_cue("c1", 0)]},
+        {"group_id": "g2", "cues": [_cue("c2", 1)]},
+    ]
+    calls = []
+
+    def repair_block(**kwargs):
+        calls.append(kwargs["groups"])
+        return {
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": [cue["cue_id"]], "target_text": "译文"}
+                for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_covered_cue_ids": [
+                cue["cue_id"] for group in kwargs["groups"] for cue in group["cues"]
+                if cue.get("editable", True)
+            ],
+            "_cue_script_issues": [],
+        }, {}
+
+    monkeypatch.setattr(contextual_translation, "api_call", repair_block)
+    monkeypatch.setattr(
+        contextual_translation, "_presentation_plan",
+        lambda group, row, _mapping_mode="many_to_many": (
+            {"group_id": group["group_id"]} if row else None
+        ),
+    )
+
+    plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 2}, repair_prompt="repair",
+        groups=groups, response={"group_results": []},
+        mapping_mode="many_to_many",
+        group_block_ids={"g1": "b1", "g2": "b1"},
+    )
+
+    assert [len(call) for call in calls] == [2]
+    assert {row["group_id"] for row in plans} == {"g1", "g2"}
+    assert report["invalid_group_ids"] == []
+
+
+def test_translation_block_patch_freezes_valid_aliases_and_repairs_only_gap(monkeypatch) -> None:
+    groups = [
+        {"group_id": f"g{index}", "cues": [_cue(f"c{index}", index)]}
+        for index in range(1, 5)
+    ]
+    calls = []
+
+    def repair(**kwargs):
+        calls.append(kwargs["groups"])
+        return {
+            "group_results": [],
+            "_wire_units": [{"cue_ids": ["c2"], "target_text": "二"}],
+            "_covered_cue_ids": ["c2"],
+            "_cue_script_issues": [],
+        }, {}
+
+    monkeypatch.setattr(contextual_translation, "api_call", repair)
+    plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 2}, repair_prompt="repair",
+        groups=groups,
+        response={
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": ["c1"], "target_text": "一"},
+                {"cue_ids": ["c3"], "target_text": "三"},
+                {"cue_ids": ["c4"], "target_text": "四"},
+            ],
+            "_cue_script_issues": [{
+                "code": "missing_cue_translation", "cue_id": "c2",
+                "detail": "C002 missing",
+            }],
+        },
+        mapping_mode="one_to_one",
+        group_block_ids={
+            "g1": "b1", "g2": "b1", "g3": "b1", "g4": "b2",
+        },
+    )
+
+    assert len(calls) == 1
+    assert [
+        cue.get("editable") for group in calls[0] for cue in group["cues"]
+    ] == [False, True, False]
+    assert calls[0][0]["program_validation_errors"][0]["cue_id"] == "c2"
+    assert {plan["group_id"] for plan in plans} == {"g1", "g2", "g3", "g4"}
+    assert set(
+        report["model_repair"]["groups"][0]["attempts"][0]["frozen_cue_ids"]
+    ) == {"c1", "c3"}
+    assert report["invalid_group_ids"] == []
+
+
+def test_translation_length_repairs_are_aggregated_once_per_source_block(monkeypatch) -> None:
+    groups = [
+        {"group_id": "g1", "cues": [_cue("c1", 0)]},
+        {"group_id": "g2", "cues": [_cue("c2", 1)]},
+    ]
+    calls = []
+
+    def repair(**kwargs):
+        calls.append(kwargs["groups"])
+        return {
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": ["c1"], "target_text": "短一"},
+                {"cue_ids": ["c2"], "target_text": "短二"},
+            ],
+            "_covered_cue_ids": ["c1", "c2"],
+            "_cue_script_issues": [],
+        }, {}
+
+    monkeypatch.setattr(contextual_translation, "api_call", repair)
+    plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 2}, repair_prompt="repair",
+        groups=groups,
+        response={
+            "group_results": [],
+            "_wire_units": [
+                {"cue_ids": ["c1"], "target_text": "超" * 30},
+                {"cue_ids": ["c2"], "target_text": "长" * 30},
+            ],
+            "_cue_script_issues": [],
+        },
+        mapping_mode="one_to_one",
+        group_block_ids={"g1": "b1", "g2": "b1"},
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0][0]["program_validation_errors"]) == 2
+    assert "_repair_context" not in calls[0][0]
+    assert [plan["meaning_units"][0]["target_text"] for plan in plans] == ["短一", "短二"]
+    assert report["model_repair"]["groups"][0]["repair_kind"] == "target_over_limit"
 
 
 def test_translation_primary_progress_counts_execution_blocks(monkeypatch) -> None:
@@ -299,7 +504,7 @@ def test_provider_wide_translation_transport_failure_is_not_false_delivery() -> 
 def test_one_to_one_mode_freezes_one_source_cue_per_model_group(monkeypatch) -> None:
     groups = [{
         "group_id": "meaning-1",
-        "semantic_group_ids": ["semantic-1"],
+        "execution_block_id": "block-1",
         "cues": [
             {"cue_id": "c1", "source_text": "first"},
             {"cue_id": "c2", "source_text": "second"},
@@ -400,6 +605,42 @@ def test_invalid_translation_response_is_not_written_to_cache(tmp_path, monkeypa
     assert response == {"group_results": []}
     assert telemetry["cache_hit"] is False
     assert list(tmp_path.glob("*.json")) == []
+
+
+def test_translation_raw_wire_cache_rebinds_aliases_to_current_project_ids(
+    tmp_path, monkeypatch,
+) -> None:
+    calls = 0
+
+    def model(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return "C001\t译文", {"model": "test"}
+
+    monkeypatch.setattr(contextual_translation, "call_translation_model", model)
+    settings = {
+        "translation_api_base_url": "https://example.invalid",
+        "translation_api_key": "secret",
+        "translation_api_model": "test",
+    }
+    first, first_telemetry = contextual_translation.api_call(
+        settings=settings, system_prompt="prompt",
+        groups=[{"group_id": "old-group", "cues": [_cue("old-cue", 0)]}],
+        mapping_mode="one_to_one", cache_directory=tmp_path,
+        cache_scope="raw-cache-rebind-test",
+    )
+    second, second_telemetry = contextual_translation.api_call(
+        settings=settings, system_prompt="prompt",
+        groups=[{"group_id": "new-group", "cues": [_cue("new-cue", 0)]}],
+        mapping_mode="one_to_one", cache_directory=tmp_path,
+        cache_scope="raw-cache-rebind-test",
+    )
+
+    assert calls == 1
+    assert first_telemetry["cache_hit"] is False
+    assert second_telemetry["cache_hit"] is True
+    assert first["group_results"][0]["cue_id"] == "old-cue"
+    assert second["group_results"][0]["cue_id"] == "new-cue"
 
 
 def test_staleness_indexes_rematerialized_cues_by_source_lineage() -> None:
@@ -622,15 +863,11 @@ def test_main_translation_prompt_uses_target_language_boundaries() -> None:
     prompt = render_prompt(
         "contextual_translation", variant="en_to_zh", mode="many_to_many"
     ).text
-    assert "拒绝上限，不是推荐长度、填充目标或合并标准" in prompt
+    assert "C 别名是唯一绑定依据" in prompt
+    assert "C001+C002" in prompt
     assert "即使合并后的文本仍未超过 `hard_limit`" in prompt
-    assert "母语字幕编辑者是否会自然期待显示文字向前推进" in prompt
-    assert "具有明确关系标记的自然目标语从句" in prompt
-    assert "由源文上下文唯一确定的成分" in prompt
-    assert "不能因为整句未超限就直接决定 `1-1-1`" in prompt
-    assert "中国网友也表示 / 路易威登不够了解中国市场" in prompt
-    assert "许多用户已纷纷给出新的标志方案" in prompt
-    assert "c1 我们必须结束这场争端 / c2 恢复正常贸易" not in prompt
+    assert "JSON" in output_contract("TRANSLATE")
+    assert "group_id" not in prompt
 
 
 def test_one_to_one_prompt_has_a_distinct_direct_output_contract() -> None:
@@ -638,10 +875,8 @@ def test_one_to_one_prompt_has_a_distinct_direct_output_contract() -> None:
         "contextual_translation", variant="en_to_zh", mode="one_to_one"
     )
     assert prompt.mode == "one_to_one"
-    assert '"cue_id":"cue_1","target_text"' in prompt.text
-    assert '"meaning_units":[' not in prompt.text
-    assert '"cue_assignments":[' not in prompt.text
+    assert "每行只能包含一个 C 别名" in prompt.text
+    assert "JSON" in output_contract("TRANSLATE")
     assert "不得把相邻两条合成同一译文" in prompt.text
     assert "不得为了调整目标语语序" in prompt.text
-    assert "`none`" in prompt.text
-    assert "`across the board`" in prompt.text
+    assert "否定词" in prompt.text

@@ -80,7 +80,7 @@ flowchart LR
   end
   subgraph layer_model_orchestration["model_orchestration"]
     calibration_service["AI calibration service"]
-    semantic_segmentation_algorithm["Semantic grouping algorithm"]
+    semantic_segmentation_algorithm["Semantic Cue boundary algorithm"]
     translation_service["Editor translation service"]
   end
   subgraph layer_optional_capability["optional_capability"]
@@ -230,14 +230,14 @@ flowchart LR
 | `segmentation_input_contract` | `contract` | Derive one unpunctuated, reindexed editor timeline from immutable recognition evidence, expanding CJK blocks by character and retaining alphabetic words. | `substar_core/segmentation/input_contract.py` | `recognition_evidence` | `segmentation_material` | — |
 | `segmentation_worker` | `worker` | Build canonical material, run semantic grouping, deterministic reference-script alignment, or artifact recovery, validate candidates and emit every artifact before result. | `substar_core/segmentation/worker.py`<br>`scripts/run_segmentation_worker.py` | `worker_command`<br>`segmentation_request`<br>`recognition_evidence`<br>`segmentation_material`<br>`credential_reference` | `worker_message`<br>`semantic_grouping_result`<br>`segmentation_candidate`<br>`segmentation_result`<br>`editor_document` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`worker_protocol` |
 | `execution_planner` | `domain_service` | Choose deterministic approximately 90-second processing seams bounded to 75--100 seconds; bootstrap split uses observable timing evidence, while downstream stages replan only at accepted AI meaning-group boundaries. | `substar_core/segmentation/execution_planner.py` | `segmentation_material` | `segmentation_candidate` | — |
-| `semantic_segmentation_algorithm` | `model_orchestration` | Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan. | `scripts/run_semantic_segmentation.py` | `segmentation_material`<br>`segmentation_request` | `semantic_grouping_result`<br>`editor_document` | `segmentation_model_connector` |
-| `segmentation_model_connector` | `provider_connector` | Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint. | `substar_core/model_gateway/gateway.py`<br>`substar_core/openai_compat.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result` | — |
+| `semantic_segmentation_algorithm` | `model_orchestration` | Ask the configured model for compact C/W Cue ranges, deterministically bind local aliases to the immutable word ledger, freeze valid ranges, repair every rejected range in one full-block patch and register unresolved gaps. | `scripts/run_semantic_segmentation.py` | `segmentation_material`<br>`segmentation_request`<br>`model_text_exchange` | `semantic_grouping_result`<br>`editor_document` | `segmentation_model_connector` |
+| `segmentation_model_connector` | `provider_connector` | Render the frozen task/language prompt, append one authoritative Cue Script grammar, apply stage-specific model scheduling and call the active cloud OpenAI-compatible text endpoint. | `substar_core/model_gateway/gateway.py`<br>`substar_core/openai_compat.py`<br>`substar_core/cue_script.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result`<br>`model_text_exchange` | — |
 | `segmentation_finalizer` | `finalizer` | Revalidate registered segmentation artifacts against the same canonical projection, commit Revision 1 and publish the project atomically. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`segmentation_result`<br>`segmentation_candidate`<br>`recognition_evidence`<br>`editor_document`<br>`worker_completion` | `editor_revision`<br>`task_record` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`project_store` |
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
 | `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
 | `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields, including the optional project-scoped LLM provider. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
-| `translation_service` | `model_orchestration` | Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request` | `task_record`<br>`translation_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
-| `calibration_service` | `model_orchestration` | Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/http_api.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`scripts/run_calibration_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference` | `task_record`<br>`calibration_result`<br>`editor_revision` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
+| `translation_service` | `model_orchestration` | Run revision-bound translation through Task Runtime, expose only local Cue aliases to the provider, deterministically compile text rows to the frozen delivery contract and materialize translated or blank editable targets for every Cue. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request`<br>`model_text_exchange` | `task_record`<br>`translation_result`<br>`editor_revision`<br>`model_text_exchange` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
+| `calibration_service` | `model_orchestration` | Ask for complete corrected text under request-local Cue aliases, deterministically align it to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/http_api.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`prompts/production/calibration/ja.md`<br>`prompts/production/calibration/ko.md`<br>`prompts/production/calibration/mixed.md`<br>`scripts/run_calibration_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`model_text_exchange` | `task_record`<br>`calibration_result`<br>`editor_revision`<br>`model_text_exchange` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
 | `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
@@ -250,7 +250,7 @@ flowchart LR
 | `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
 | `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
 | `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
-| `model_stage_scheduler` | `application` | Resolve versioned prompts, freeze primary/repair policy, and route JSON or Cue Script text-model requests through one provider-capability-aware gateway and deterministic finalizer. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py`<br>`substar_core/cue_script.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component` | — |
+| `model_stage_scheduler` | `application` | Resolve versioned semantic prompts, append one authoritative compact Cue Script grammar, freeze primary/repair policy, archive exact provider-visible exchanges and route text-model requests through one provider-capability-aware gateway and deterministic finalizer. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py`<br>`substar_core/cue_script.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component`<br>`model_text_exchange` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
 | `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
@@ -295,6 +295,7 @@ flowchart LR
 | `provider_test_request` | `substar_core/api_testing.py` | domain validation | `settings_ui` | `provider_test_service` |
 | `model_stage_policy` | `substar_core/stage_settings.py` | domain validation | `settings_ui`<br>`settings_service`<br>`provider_test_service`<br>`model_stage_scheduler` | `model_stage_scheduler` |
 | `production_prompt_component` | `substar_core/prompt_registry.py` | domain validation | `composition_root`<br>`settings_ui`<br>`model_stage_scheduler` | `composition_root`<br>`settings_ui`<br>`model_stage_scheduler` |
+| `model_text_exchange` | `substar_core/cue_script.py` | domain validation | `segmentation_model_connector`<br>`translation_service`<br>`calibration_service`<br>`model_stage_scheduler` | `semantic_segmentation_algorithm`<br>`translation_service`<br>`calibration_service` |
 | `glossary_snapshot` | `substar_core/glossary.py` | domain validation | `glossary_ui`<br>`glossary_service` | `glossary_ui`<br>`glossary_service` |
 | `reference_document` | `substar_core/manuscript_matching.py` | domain validation | `reference_manuscript_service` | `editor_api`<br>`reference_manuscript_service` |
 | `subtitle_export` | `substar_core/export.py` | domain validation | `export_service` | `editor_ui` |
@@ -1224,11 +1225,11 @@ Change impact modules: `segmentation_worker`<br>`semantic_segmentation_algorithm
 
 Change impact contracts: `segmentation_material`<br>`segmentation_candidate`
 
-### Semantic grouping algorithm (`semantic_segmentation_algorithm`)
+### Semantic Cue boundary algorithm (`semantic_segmentation_algorithm`)
 
 Layer: `model_orchestration`
 
-Ask the configured Flash model in low-effort semantic mode for meaning groups and Cue cuts without forcing provider JSON mode, freeze valid ranges, repair rejected gaps once and register unresolved gaps; locally materialize the accepted semantics and recalculate the downstream work plan.
+Ask the configured model for compact C/W Cue ranges, deterministically bind local aliases to the immutable word ledger, freeze valid ranges, repair every rejected range in one full-block patch and register unresolved gaps.
 
 Code:
 
@@ -1246,19 +1247,20 @@ Invariants:
 - Initial model requests run concurrently over the bootstrap work plan
 - The file-backed block ledger may notify its owning Worker after each durable update but never writes RuntimeStore directly
 - Valid ranges are frozen before repair
-- The program materializes model-authored semantics but never authors fallback semantic content
+- The provider receives each source word once and never receives persistent IDs
+- The finalizer authors canonical structure but never semantic content
 - Each unresolved range remains visible as a problem subtitle
 
 Failure modes:
 
-- Invalid JSON
+- Invalid Cue Script
 - Coverage gap
 - Hard-limit violation
 - Provider error
 
-Recovery: One repair request contains all rejected gaps while accepted groups remain frozen.
+Recovery: One repair request contains the complete original block and all rejected ranges while accepted ranges remain frozen.
 
-Reuses: `all accepted groups`; restarts: `rejected gaps only`; terminal behavior: Register remaining gaps as problem subtitles.
+Reuses: `all accepted Cue ranges`; restarts: `one block-wide patch`; terminal behavior: Register remaining gaps as problem subtitles.
 
 Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_execution_planner.py`, `tests/test_live_progress_projection.py`
 
@@ -1270,12 +1272,13 @@ Change impact contracts: `segmentation_material`<br>`semantic_grouping_result`<b
 
 Layer: `provider_connector`
 
-Render versioned prompts, apply stage-specific model scheduling and call the active cloud OpenAI-compatible provider endpoint.
+Render the frozen task/language prompt, append one authoritative Cue Script grammar, apply stage-specific model scheduling and call the active cloud OpenAI-compatible text endpoint.
 
 Code:
 
-- `substar_core/model_gateway/gateway.py` — `call_json_model`
+- `substar_core/model_gateway/gateway.py` — `call_text_model`
 - `substar_core/openai_compat.py` — `endpoint_url`, `auth_headers`
+- `substar_core/cue_script.py` — `output_contract`, `render_segmentation_request`, `parse_segmentation`
 - `prompts/production/segmentation/common/semantic_grouping.md`
 - `prompts/production/segmentation/common/semantic_grouping_repair.md`
 
@@ -1289,9 +1292,10 @@ Invariants:
 
 - Primary and repair stages use settings-selected models
 - Provider authentication mode and query-bearing deployment URL survive the immutable task snapshot
-- The production default is deepseek-v4-flash with low reasoning for segmentation and Flash non-thinking fallback for rejected units
-- Prompt snapshot hash is auditable
-- Provider JSON response mode is not forced; the local materializer validates the compact semantic response
+- The production default is deepseek-v4-flash with low reasoning for segmentation and Flash non-thinking repair
+- Prompt snapshot hash and exact provider-visible exchange are auditable
+- Provider JSON response mode is not forced
+- Only request-local C/W aliases cross the provider boundary
 
 Failure modes:
 
@@ -1478,14 +1482,15 @@ Change impact contracts: `project_task_info`<br>`settings_snapshot`<br>`project_
 
 Layer: `model_orchestration`
 
-Run revision-bound translation through Task Runtime, preserve accepted groups, and materialize translated or blank editable targets for every Cue.
+Run revision-bound translation through Task Runtime, expose only local Cue aliases to the provider, deterministically compile text rows to the frozen delivery contract and materialize translated or blank editable targets for every Cue.
 
 Code:
 
 - `substar_core/editor/translation/handler.py` — `build_translation_handler`
 - `substar_core/editor/translation/worker.py` — `run`
 - `substar_core/editor/translation/runner.py` — `execute_translation`
-- `substar_core/editor/translation/contextual.py` — `run_contextual_translation`, `complete_results`, `materialize_presentation`
+- `substar_core/editor/translation/contextual.py` — `run_contextual_translation`, `execution_block_batches`, `api_call`, `complete_results`, `materialize_presentation`
+- `substar_core/cue_script.py` — `render_translation_request`, `finalize_translation`, `compile_translation_units`
 - `substar_core/editor/translation/result_policy.py` — `accepted_translation_rows`, `translation_problem_cue_ids`
 - `substar_core/ai_block_cache.py` — `fingerprint`, `load_ai_block_cache`, `save_ai_block_cache`
 - `scripts/run_translation_worker.py`
@@ -1494,30 +1499,37 @@ Must not:
 
 - Synthesize missing translation text
 - Modify source tokens
-- Discard valid groups because another group failed
-- Enter repair more than once
+- Expose persistent Cue/group IDs to the provider
+- Discard valid aliases because another alias failed
+- Enter block repair more than once
 
 Invariants:
 
-- Model sees meaning-unit context
-- Each unit has one primary request and at most one repair request
-- The whole task enters repair at most once
-- Accepted groups survive unrelated failures
+- Each original execution block has one primary request and at most one block-wide repair request
+- Every primary and repair request exposes the exact target hard limit and count rule
+- Every repair sees the complete original block and one compact copy of all block validation errors
+- OWN/CONTEXT flags are the sole frozen-mask representation and accepted alias bindings remain frozen
+- A mixed repair row may retain known OWN aliases while known CONTEXT aliases are ignored and never mutated
+- One-to-one output may restore omitted or repeated local aliases only when the whole OWN block has exactly one non-empty row per Cue and no unique alias contradicts frozen order
+- Many-to-many output is never positionally rebound
+- Raw cache entries are re-finalized against the current local ledger and invalid responses are never cached
+- Cloud inference does not hold a global project-write resource; final publication uses optimistic ProjectStore concurrency
 - Every unresolved Cue has empty editable manual-required target text
 - Final partial success is succeeded_with_issues
 
 Failure modes:
 
 - Provider error
-- Invalid group assignment
+- Invalid Cue mapping
 - Missing Cue result
+- Hard-limit violation
 - Revision changed
 
-Recovery: Register successful Cue results, repair all unresolved Cues once, and mark any remainder as problem subtitles.
+Recovery: Freeze successful Cue mappings, submit one full-block patch containing every error, compile the patch into the frozen delivery contract and mark any remainder as problem subtitles.
 
-Reuses: `all accepted Cue translations`; restarts: `unresolved Cues only`; terminal behavior: Persist problem-subtitle markers without replacing content.
+Reuses: `all accepted Cue translations`<br>`valid provider-visible raw cache`; restarts: `one block-wide patch`; terminal behavior: Persist problem-subtitle markers without replacing content.
 
-Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translation_binding.py`
+Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translation_binding.py`, `tests/test_cue_script.py`, `tests/test_runtime_resource_policy.py`
 
 Change impact modules: `editor_api`<br>`task_service`<br>`scheduler`<br>`project_store`<br>`editor_ui`
 
@@ -1527,44 +1539,55 @@ Change impact contracts: `task_record`<br>`editor_revision`<br>`translation_requ
 
 Layer: `model_orchestration`
 
-Apply model-authored punctuation, casing, terminology, proper-name and ASR lexical corrections to the source track.
+Ask for complete corrected text under request-local Cue aliases, deterministically align it to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections.
 
 Code:
 
 - `substar_core/editor/calibration/handler.py` — `build_calibration_handler`
 - `substar_core/editor/calibration/worker.py` — `run`
-- `substar_core/editor/http_api.py` — `ai_calibrate_project`, `_ai_calibrate_project`, `_validated_calibration_contract_actions`
+- `substar_core/editor/http_api.py` — `ai_calibrate_project`, `_ai_calibrate_project`, `_run_editor_ai_blocks`, `_validated_calibration_contract_actions`
+- `substar_core/cue_script.py` — `render_cue_request`, `finalize_calibration_candidate`
 - `substar_core/editor/calibration/contracts.py`
 - `prompts/production/calibration/en.md`
 - `prompts/production/calibration/zh.md`
+- `prompts/production/calibration/ja.md`
+- `prompts/production/calibration/ko.md`
+- `prompts/production/calibration/mixed.md`
 - `scripts/run_calibration_worker.py`
 
 Must not:
 
 - Change Cue timing or topology
-- Apply an action the model marked review-only
+- Expose persistent Cue/token IDs to the provider
+- Treat one token as single-use across compatible actions
+- Apply an action the finalizer marked review-only
 - Use advisory review as automatic correction
 
 Invariants:
 
 - Calibration inherits the accepted-split execution plan and runs independent blocks concurrently
+- Every supported source language resolves to its own registered primary and repair prompt route; Auto detection resolves once before route selection
 - Each block sees ordered source Cues with its required context
 - A bounded per-run user instruction may refine terminology and attention but cannot expand the frozen calibration action contract or change Cue timing/topology
-- Every action binds exact Cue/token text
-- Model disposition is authoritative
+- Every accepted text row binds through the current local ledger
+- Compatible sequential actions may reuse one token
+- One repair request contains the complete original block and every block error while accepted Cues remain frozen
+- Cloud inference does not hold a global project-write resource; final publication uses optimistic ProjectStore concurrency
+- Invalid responses never enter the block cache
 
 Failure modes:
 
-- Invalid action
+- Invalid Cue Script
+- Unsafe lexical rewrite
 - Provider error
 - Revision changed
 - Partial block failure
 
-Recovery: Preserve valid block actions, repair all invalid blocks once, and expose unresolved items for review.
+Recovery: Preserve accepted Cue text, submit one full-block patch for all unresolved aliases, re-finalize against the immutable ledger and expose remaining items for review.
 
-Reuses: `valid calibration actions`; restarts: `invalid blocks only`; terminal behavior: Leave unresolved source text unchanged and flagged.
+Reuses: `valid calibration actions`<br>`valid provider-visible raw cache`; restarts: `one block-wide patch`; terminal behavior: Leave unresolved source text unchanged and flagged.
 
-Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_ai_calibration_instruction.py`
+Tests: `tests/test_editor_ai_calibration_protocol.py`, `tests/test_ai_calibration.py`, `tests/test_editor_ai_prompt_policy.py`, `tests/test_ai_calibration_instruction.py`, `tests/test_runtime_resource_policy.py`
 
 Change impact modules: `editor_api`<br>`task_service`<br>`scheduler`<br>`project_store`<br>`editor_ui`
 
@@ -2148,7 +2171,7 @@ Change impact contracts: `provider_test_request`<br>`credential_reference`<br>`s
 
 Layer: `application`
 
-Resolve versioned prompts, freeze primary/repair policy, and route JSON or Cue Script text-model requests through one provider-capability-aware gateway and deterministic finalizer.
+Resolve versioned semantic prompts, append one authoritative compact Cue Script grammar, freeze primary/repair policy, archive exact provider-visible exchanges and route text-model requests through one provider-capability-aware gateway and deterministic finalizer.
 
 Code:
 
@@ -2171,8 +2194,11 @@ Must not:
 Invariants:
 
 - Every production primary and repair call resolves through a named stage
+- Chinese, English, Japanese, Korean and mixed-language source selections resolve through explicit registered routes rather than a non-Chinese fallback
 - Provider, model, credential reference, thinking mode and reasoning effort are frozen in task input
 - Provider capability mapping happens once
+- Semantic prompt components do not duplicate the machine output grammar
+- Exact system prompt, local-alias request, raw response, finalized response and usage remain auditable
 - Transport retries are bounded and distinct from the single semantic repair phase
 
 Failure modes:
@@ -2190,7 +2216,7 @@ Tests: `tests/test_model_stage_scheduling.py`, `tests/test_editor_ai_prompt_poli
 
 Change impact modules: `settings_ui`<br>`settings_service`<br>`segmentation_model_connector`<br>`translation_service`<br>`calibration_service`
 
-Change impact contracts: `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component`
+Change impact contracts: `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component`<br>`model_text_exchange`
 
 ### Glossary browser application and API caller (`glossary_ui`)
 

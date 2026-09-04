@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from substar_core.ai_progress import ai_progress, progress_from_mapping
 from substar_core.editor import http_api
+from substar_core.cue_script import finalize_calibration_candidate, render_cue_request
 from substar_core.model_gateway import ModelGatewayError, ModelGatewayRequestError
 
 
@@ -184,6 +185,58 @@ def test_calibration_repairs_all_rejected_items_and_freezes_accepted_output(
     ]
     # The rejected primary response is never cached; only the valid repair is.
     assert len(list(tmp_path.glob("*.json"))) == 1
+
+
+def test_calibration_raw_wire_cache_rebinds_current_token_ids(tmp_path) -> None:
+    calls = 0
+
+    def model(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return "CUE\tC001\tHello.", {}
+
+    settings = {
+        "translation_api_key": "test-key",
+        "translation_api_base_url": "https://example.invalid",
+        "translation_api_model": "model",
+        "stage_calibration_model": "model",
+        "translation_workers": 1,
+    }
+    renderer = lambda cues, feedback=None: render_cue_request(
+        cues, task="CALIBRATE", instructions="complete rows",
+        repair_feedback=feedback,
+    )
+    first_block = [{
+        "cue_id": "old-cue", "editable": True,
+        "tokens": [{"token_id": "old-token", "text": "hello"}],
+    }]
+    second_block = [{
+        "cue_id": "new-cue", "editable": True,
+        "tokens": [{"token_id": "new-token", "text": "hello"}],
+    }]
+    with patch.object(http_api, "call_text_model", side_effect=model):
+        first = http_api._run_editor_ai_blocks(
+            settings=settings, system_prompt="prompt", blocks={"old": first_block},
+            failure_key="actions", stage_name="calibration", retry_stage=None,
+            response_validator=lambda _block, value: not value.get("_cue_script_issues"),
+            cache_directory=tmp_path, cache_scope="raw-cache-rebind-test",
+            request_renderer=renderer,
+            response_finalizer=finalize_calibration_candidate,
+        )
+        second = http_api._run_editor_ai_blocks(
+            settings=settings, system_prompt="prompt", blocks={"new": second_block},
+            failure_key="actions", stage_name="calibration", retry_stage=None,
+            response_validator=lambda _block, value: not value.get("_cue_script_issues"),
+            cache_directory=tmp_path, cache_scope="raw-cache-rebind-test",
+            request_renderer=renderer,
+            response_finalizer=finalize_calibration_candidate,
+        )
+
+    assert calls == 1
+    assert first[0][2]["cache_hit"] is False
+    assert second[0][2]["cache_hit"] is True
+    assert first[0][1]["actions"][0]["token_ids"] == ["old-token"]
+    assert second[0][1]["actions"][0]["token_ids"] == ["new-token"]
 
 
 def test_calibration_does_not_repair_authentication_failures() -> None:

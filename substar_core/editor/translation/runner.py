@@ -42,6 +42,7 @@ def execute_translation(
         "repair_planned": 0,
         "repair_completed": 0,
         "repair_accepted": 0,
+        "progress_floor": 0.0,
     }
 
     def write_progress(
@@ -76,6 +77,14 @@ def execute_translation(
             repair_failed=max(0, tracker["repair_completed"] - tracker["repair_accepted"]),
             problem_count=problem_count,
         )
+        # Repair work is discovered incrementally.  When a later validation
+        # pass adds exact local scopes, the denominator may grow after an
+        # earlier repair batch reached 100%.  Keep the durable worker's public
+        # fraction monotonic while exposing the updated unit counts.
+        value["progress"] = max(
+            float(tracker["progress_floor"]), float(value["progress"])
+        )
+        tracker["progress_floor"] = value["progress"]
         atomic_write_json(
             artifact_directory / TRANSLATION_PROGRESS_FILENAME,
             {
@@ -128,8 +137,25 @@ def execute_translation(
     )
     problem_cue_ids = translation_problem_cue_ids(revision.document)
     cue_block_ids = dict(result.get("cue_block_ids") or {})
+    display_cue_block_ids: dict[str, str] = {}
+    for cue in revision.document.cues:
+        mapping = cue.mapping if isinstance(cue.mapping, Mapping) else {}
+        source_cue_ids = [
+            str(value) for value in mapping.get("source_cue_ids", [])
+        ] if isinstance(mapping.get("source_cue_ids"), list) else []
+        source_blocks = [
+            str(cue_block_ids[source_cue_id])
+            for source_cue_id in source_cue_ids
+            if source_cue_id in cue_block_ids
+        ]
+        if source_blocks:
+            display_cue_block_ids[str(cue.cue_id)] = source_blocks[0]
     problem_block_ids = sorted({
-        str(cue_block_ids.get(str(cue_id)) or "manual")
+        str(
+            display_cue_block_ids.get(str(cue_id))
+            or cue_block_ids.get(str(cue_id))
+            or "manual"
+        )
         for cue_id in problem_cue_ids
     })
     rows = source_rows(source_revision.document)

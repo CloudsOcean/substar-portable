@@ -317,6 +317,62 @@ def test_reference_phrase_rewrite_is_suggested_without_overwriting_asr() -> None
     ]
 
 
+def test_repeated_reference_correction_resolves_name_inside_unequal_phrase() -> None:
+    material, breaks, report = materialize_reference_script(
+        "杨熊来了。杨熊出发。杨熊获胜。而在杨熊眼里，天下很小。"
+        "这是一个用于提高匹配覆盖率的完全相同句子。",
+        _asr_units(
+            "杨雄来了。",
+            "杨雄出发。",
+            "杨雄获胜。",
+            "而在杨雄的视角里，",
+            "天下很小。",
+            "这是一个用于提高匹配覆盖率的完全相同句子。",
+        ),
+        "，。？",
+    )
+    document = build_reference_script_document(
+        material,
+        source_asset_id="reference-fixture",
+        display_breaks=breaks,
+        reference_report=report,
+    )
+
+    assert report["quality"] == "good"
+    assert {
+        (item["source"], item["reference"], item["evidence_count"])
+        for item in report["lexical_consensus"]
+    } >= {("雄", "熊", 3)}
+    promoted = [
+        item
+        for item in report["replacements"]
+        if item.get("decision") == "document_consensus"
+    ]
+    promoted_values = [
+        (item["before"], item["after"], item["evidence_count"])
+        for item in promoted
+    ]
+    assert promoted_values == [
+        ("雄", "熊", 3),
+    ]
+    assert "杨雄" not in "".join(_cue_texts(document))
+    assert "而在杨熊的视角里" in "".join(_cue_texts(document))
+
+
+def test_conflicting_reference_corrections_do_not_form_document_consensus() -> None:
+    _material, _breaks, report = materialize_reference_script(
+        "甲熊。甲熊。甲熊。甲雄。甲杰。",
+        _asr_units("甲雄。", "甲雄。", "甲雄。", "甲雄。", "甲雄的称呼。"),
+        "，。？",
+    )
+
+    assert not any(item["source"] == "雄" for item in report["lexical_consensus"])
+    assert not any(
+        item.get("decision") == "document_consensus"
+        for item in report["replacements"]
+    )
+
+
 def test_reference_script_request_requires_document_and_freezes_symbols() -> None:
     request = build_segmentation_request(
         transcription_task_id="tsk_" + "a" * 32,

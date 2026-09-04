@@ -26,6 +26,7 @@ from substar_core.prompt_registry import (
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
 from substar_core.cue_script import (
+    compile_translation_units,
     finalize_translation,
     output_contract,
     render_translation_request,
@@ -51,7 +52,7 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
     for group in groups:
         cleaned.append({
             "group_id": group["group_id"],
-            "semantic_group_ids": list(group.get("semantic_group_ids", [])),
+            "execution_block_id": str(group.get("execution_block_id") or "manual"),
             "cues": [
                 {
                     "cue_id": cue["cue_id"],
@@ -72,7 +73,7 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
     return [
         {
             "group_id": f"line:{cue['cue_id']}",
-            "semantic_group_ids": list(group.get("semantic_group_ids", [])),
+            "execution_block_id": str(group.get("execution_block_id") or "manual"),
             "cues": [dict(cue)],
         }
         for group in cleaned
@@ -80,27 +81,17 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
     ]
 
 
-def execution_block_batches(document: Any, groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    editor_groups = {group.group_id: group for group in document.groups}
-    cue_blocks = {
-        cue.cue_id: list(editor_groups.get(cue.group_id).execution_block_ids)
-        if cue.group_id in editor_groups else []
-        for cue in document.cues
-        if cue.state is EntityState.ACTIVE
-    }
+def execution_block_batches(
+    document: Any, groups: list[dict[str, Any]], *, mapping_mode: str = "many_to_many",
+) -> list[dict[str, Any]]:
+    if mapping_mode not in {"many_to_many", "one_to_one"}:
+        raise RuntimeError(f"不支持的翻译分配模式：{mapping_mode}")
     ordered_ids = list(dict.fromkeys(
-        block_id
-        for group in document.groups
-        for block_id in group.execution_block_ids
+        str(group.get("execution_block_id") or "manual") for group in groups
     ))
     batches: dict[str, list[dict[str, Any]]] = {}
     for group in groups:
-        candidates = [
-            block_id for cue in group["cues"]
-            for block_id in cue_blocks.get(str(cue["cue_id"]), [])
-        ]
-        block_id = next((item for item in ordered_ids if item in candidates), None)
-        block_id = block_id or (candidates[0] if candidates else "manual")
+        block_id = str(group.get("execution_block_id") or "manual")
         batches.setdefault(block_id, []).append(group)
     rank = {block_id: index for index, block_id in enumerate(ordered_ids)}
     return [
@@ -129,13 +120,40 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         "stage": stage_name,
         "model": str(route["model"]),
         "system_prompt": wire_system_prompt,
+        "user_text": wire_text,
         "mapping_mode": mapping_mode,
-        "groups": prompt_groups,
-        "schema": "translation-cue-script.v1",
+        "thinking_mode": str(route["thinking_mode"]),
+        "reasoning_effort": str(route["reasoning_effort"]),
+        "max_tokens": int(route["max_tokens"]),
+        "temperature": float(route["temperature"]),
+        "schema": "translation-map.v5-raw-cache",
     })
     cached = load_ai_block_cache(cache_directory, cache_key) if cache_directory else None
-    if cached is not None and (cache_validator is None or cache_validator(cached)):
-        return cached, {"cache_hit": True, "cache_key": cache_key}
+    if cached is not None:
+        cached_raw = cached.get("_raw_model_response")
+        if isinstance(cached_raw, str):
+            cached_response = finalize_translation(
+                cached_raw, prompt_groups, wire_ledger, mapping_mode=mapping_mode
+            )
+            if (
+                cache_validator(cached_response) if cache_validator is not None
+                else _response_contract_valid(
+                    cached_response, prompt_groups, mapping_mode
+                )
+            ):
+                return cached_response, {
+                    "cache_hit": True, "cache_key": cache_key,
+                    "wire_protocol": "substar-translation-map.v5",
+                    "raw_model_response": cached_raw,
+                    "finalized_response": cached_response,
+                }
+        elif (
+            cache_validator(cached) if cache_validator is not None
+            else _response_contract_valid(cached, prompt_groups, mapping_mode)
+        ):
+            # Read compatibility for v4 canonical cache entries. They are not
+            # written again because their embedded project IDs are not portable.
+            return cached, {"cache_hit": True, "cache_key": cache_key}
     model_output, telemetry = call_translation_model(
         base_url=str(route["base_url"]),
         api_key=str(route["api_key"]),
@@ -157,7 +175,8 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
     if isinstance(model_output, Mapping):
         response = dict(model_output)
         if cache_directory is not None and (
-            cache_validator is None or cache_validator(response)
+            cache_validator(response) if cache_validator is not None
+            else _response_contract_valid(response, prompt_groups, mapping_mode)
         ):
             save_ai_block_cache(cache_directory, cache_key, response)
         return response, {**telemetry, "cache_hit": False, "cache_key": cache_key}
@@ -168,7 +187,9 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         atomic_write_json(exchange_path, {
             "schema_version": "substar.model-exchange.v1",
             "stage": stage_name,
-            "wire_protocol": "substar-cue-script.v1",
+            "wire_protocol": "substar-translation-map.v5",
+            "system_prompt": wire_system_prompt,
+            "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
             "request_text": wire_text,
             "raw_model_response": raw_response,
             "transport_telemetry": telemetry,
@@ -182,7 +203,9 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
             atomic_write_json(exchange_path, {
                 "schema_version": "substar.model-exchange.v1",
                 "stage": stage_name,
-                "wire_protocol": "substar-cue-script.v1",
+                "wire_protocol": "substar-translation-map.v5",
+                "system_prompt": wire_system_prompt,
+                "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
                 "request_text": wire_text,
                 "raw_model_response": raw_response,
                 "transport_telemetry": telemetry,
@@ -191,7 +214,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         raise RuntimeError(f"翻译 Cue Script finalizer 拒绝模型输出：{exc}") from exc
     telemetry = {
         **telemetry,
-        "wire_protocol": "substar-cue-script.v1",
+        "wire_protocol": "substar-translation-map.v5",
         "wire_input_characters": len(wire_text),
         "wire_output_characters": len(raw_response),
         "raw_model_response": raw_response,
@@ -201,16 +224,28 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         atomic_write_json(exchange_path, {
             "schema_version": "substar.model-exchange.v1",
             "stage": stage_name,
-            "wire_protocol": "substar-cue-script.v1",
+            "wire_protocol": "substar-translation-map.v5",
+            "system_prompt": wire_system_prompt,
+            "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
             "request_text": wire_text,
             "raw_model_response": raw_response,
             "finalized_response": response,
-            "transport_telemetry": telemetry,
+            "transport_telemetry": {
+                key: value for key, value in telemetry.items()
+                if key not in {"raw_model_response", "finalized_response"}
+            },
         })
     if cache_directory is not None and (
-        cache_validator is None or cache_validator(response)
+        cache_validator(response) if cache_validator is not None
+        else _response_contract_valid(response, prompt_groups, mapping_mode)
     ):
-        save_ai_block_cache(cache_directory, cache_key, response)
+        # Cache the provider-visible raw response, not a canonical response
+        # containing project-specific IDs. A hit is finalized again against
+        # the current alias ledger, so identical source blocks can be reused
+        # safely across projects and revisions.
+        save_ai_block_cache(
+            cache_directory, cache_key, {"_raw_model_response": raw_response}
+        )
     return response, {**telemetry, "cache_hit": False, "cache_key": cache_key}
 
 
@@ -261,13 +296,28 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
         for row in results[str(batch["block_id"])]["response"].get("group_results", [])
         if isinstance(row, dict)
     ]
-    return {"group_results": rows}, {
+    wire_units = [
+        dict(unit)
+        for batch in batches
+        for unit in results[str(batch["block_id"])]["response"].get("_wire_units", [])
+        if isinstance(unit, Mapping)
+    ]
+    issues = [
+        {**dict(issue), "block_id": str(batch["block_id"])}
+        for batch in batches
+        for issue in results[str(batch["block_id"])]["response"].get("_cue_script_issues", [])
+        if isinstance(issue, Mapping)
+    ]
+    return {
+        "group_results": rows,
+        "_wire_units": wire_units,
+        "_cue_script_issues": issues,
+    }, {
         "execution_blocks": [
             {"block_id": batch["block_id"], **results[str(batch["block_id"])]}
             for batch in batches
         ]
     }
-
 
 def _result_rows(response: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = response.get("group_results")
@@ -469,7 +519,13 @@ def _result_row_occurrences(
 def _response_contract_valid(
     response: Mapping[str, Any], groups: list[dict[str, Any]], mapping_mode: str,
 ) -> bool:
-    if set(response) != {"group_results"}:
+    allowed = {
+        "group_results", "_wire_units", "_covered_cue_ids",
+        "_cue_script_issues", "_cue_script_warnings",
+    }
+    if "group_results" not in response or not set(response) <= allowed:
+        return False
+    if response.get("_cue_script_issues"):
         return False
     occurrences = _result_row_occurrences(response)
     expected = {str(group["group_id"]) for group in groups}
@@ -482,29 +538,101 @@ def _response_contract_valid(
     )
 
 
-def _repair_group(*, settings: dict[str, Any], repair_prompt: str,
-                  group: dict[str, Any], cache_directory: Path | None = None,
-                  cache_scope: str = "", mapping_mode: str = "many_to_many",
-                  ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    records: list[dict[str, Any]] = []
-    try:
-        response, telemetry = api_call(
-            settings=settings, system_prompt=repair_prompt,
-            groups=[group], stage_name="translation_repair",
-            cache_directory=cache_directory, cache_scope=cache_scope,
-            mapping_mode=mapping_mode,
-            cache_validator=lambda value: _presentation_plan(
-                group, _result_rows(value).get(str(group["group_id"])), mapping_mode
-            ) is not None,
-        )
-        plan = _presentation_plan(
-            group, _result_rows(response).get(group["group_id"]), mapping_mode
-        )
-        records.append({"attempt": 1, "response": response, "telemetry": telemetry, "valid": bool(plan)})
-        return plan, records
-    except Exception as exc:
-        records.append({"attempt": 1, "error": str(exc), "valid": False})
-        return None, records
+def _target_length(value: str, count_rule: str) -> int:
+    if count_rule == "characters_excluding_spaces":
+        return sum(not char.isspace() for char in value)
+    return len(value)
+
+
+def _plan_limit_issues(
+    plan: Mapping[str, Any], cues_by_id: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    assigned_by_unit: dict[str, list[str]] = {}
+    for assignment in plan.get("cue_assignments", []):
+        if isinstance(assignment, Mapping):
+            assigned_by_unit.setdefault(
+                str(assignment.get("meaning_unit_id") or ""), []
+            ).append(str(assignment.get("cue_id") or ""))
+    issues: list[dict[str, Any]] = []
+    for unit in plan.get("meaning_units", []):
+        if not isinstance(unit, Mapping):
+            continue
+        unit_id = str(unit.get("meaning_unit_id") or "")
+        cue_ids = [cue_id for cue_id in assigned_by_unit.get(unit_id, []) if cue_id in cues_by_id]
+        if not cue_ids:
+            continue
+        text = str(unit.get("target_text") or "")
+        limits = [int(cues_by_id[cue_id].get("hard_limit") or 0) for cue_id in cue_ids]
+        limits = [value for value in limits if value > 0]
+        limit = min(limits) if limits else 0
+        rule = str(cues_by_id[cue_ids[0]].get("count_rule") or "all_characters_including_spaces")
+        count = _target_length(text, rule)
+        if limit and count > limit:
+            issues.append({
+                "code": "target_over_limit",
+                "meaning_unit_id": unit_id,
+                "cue_ids": cue_ids,
+                "target_text": text,
+                "count": count,
+                "limit": limit,
+                "count_rule": rule,
+            })
+    return issues
+
+
+def _plans_as_wire_units(plans: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    units: list[dict[str, Any]] = []
+    covered: set[str] = set()
+    for plan in plans:
+        assignments: dict[str, list[str]] = {}
+        for row in plan.get("cue_assignments", []):
+            if isinstance(row, Mapping):
+                assignments.setdefault(str(row.get("meaning_unit_id") or ""), []).append(
+                    str(row.get("cue_id") or "")
+                )
+        for unit in plan.get("meaning_units", []):
+            if not isinstance(unit, Mapping):
+                continue
+            cue_ids = [
+                cue_id for cue_id in assignments.get(
+                    str(unit.get("meaning_unit_id") or ""), []
+                ) if cue_id and cue_id not in covered
+            ]
+            target = str(unit.get("target_text") or "").strip()
+            if cue_ids and target:
+                units.append({"cue_ids": cue_ids, "target_text": target})
+                covered.update(cue_ids)
+    return units
+
+
+def _response_wire_units(
+    response: Mapping[str, Any], groups: list[dict[str, Any]], mapping_mode: str,
+) -> list[dict[str, Any]]:
+    raw_units = response.get("_wire_units")
+    if isinstance(raw_units, list):
+        return [dict(row) for row in raw_units if isinstance(row, Mapping)]
+    rows = _result_rows(dict(response))
+    plans = [
+        plan for group in groups
+        if (plan := _presentation_plan(
+            group, rows.get(str(group["group_id"])), mapping_mode
+        )) is not None
+    ]
+    return _plans_as_wire_units(plans)
+
+
+def _compile_translation_plans(
+    groups: list[dict[str, Any]], units: list[dict[str, Any]], mapping_mode: str,
+) -> list[dict[str, Any]]:
+    rows = _result_rows(
+        compile_translation_units(groups, units, mapping_mode=mapping_mode)
+    )
+    return [
+        plan for group in groups
+        if (plan := _presentation_plan(
+            group, rows.get(str(group["group_id"])), mapping_mode
+        )) is not None
+    ]
 
 
 def complete_results(*, settings: dict[str, Any], repair_prompt: str,
@@ -512,244 +640,386 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
                       mapping_mode: str = "many_to_many",
                       non_repairable_group_ids: set[str] | None = None,
                       progress_callback: Callable[[int, int, int], None] | None = None,
-                     cache_directory: Path | None = None,
-                     cache_scope: str = "",
-                     group_block_ids: dict[str, str] | None = None,
-                     failure_injector: Callable[[str, int], None] | None = None,
-                     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    occurrences = _result_row_occurrences(response)
-    rows = {group_id: values[0] for group_id, values in occurrences.items() if values}
-    plans: list[dict[str, Any]] = []
-    invalid: list[dict[str, Any]] = []
-    initial_issues: dict[str, list[dict[str, Any]]] = {}
-    for group in groups:
-        group_id = str(group["group_id"])
-        group_rows = occurrences.get(group_id, [])
-        if len(group_rows) > 1:
-            initial_issues[group_id] = [{
-                "code": "duplicate_group_result", "group_id": group_id,
-                "count": len(group_rows),
-                "detail": "响应重复返回了同一翻译组。",
-            }]
-            plan = None
-        else:
-            plan = _presentation_plan(group, rows.get(group_id), mapping_mode)
-            if plan is None:
-                initial_issues[group_id] = _translation_validation_issues(
-                    group, rows.get(group_id), mapping_mode
-                )
-        if plan is None:
-            invalid.append(group)
-        else:
-            plans.append(plan)
+                      cache_directory: Path | None = None,
+                      cache_scope: str = "",
+                      group_block_ids: dict[str, str] | None = None,
+                      failure_injector: Callable[[str, int], None] | None = None,
+                      ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Finalize translation with at most one structural repair per source block.
+
+    Valid alias bindings are immutable. A repair sees the complete original
+    block, receives every program error together, and owns only unresolved
+    aliases. The deterministic compiler then merges that patch with the frozen
+    primary units and rebuilds the unchanged delivery contract.
+    """
     non_repairable = set(non_repairable_group_ids or set())
-    repairable_invalid = [
-        group for group in invalid if str(group["group_id"]) not in non_repairable
-    ]
+    block_ids = {
+        str(group["group_id"]): str(
+            (group_block_ids or {}).get(
+                str(group["group_id"]),
+                group.get("execution_block_id") or group["group_id"],
+            )
+        )
+        for group in groups
+    }
+    groups_by_block: dict[str, list[dict[str, Any]]] = {}
+    for group in groups:
+        groups_by_block.setdefault(block_ids[str(group["group_id"])], []).append(group)
+
+    primary_units = _response_wire_units(response, groups, mapping_mode)
+    current_units = [dict(row) for row in primary_units]
+    plans = _compile_translation_plans(groups, current_units, mapping_mode)
+    # Compatibility with injected legacy JSON responses that do not expose
+    # wire units but already passed the canonical validator.
+    if not current_units:
+        rows = _result_rows(response)
+        plans = [
+            plan for group in groups
+            if (plan := _presentation_plan(
+                group, rows.get(str(group["group_id"])), mapping_mode
+            )) is not None
+        ]
+        current_units = _plans_as_wire_units(plans)
+
+    accepted_ids = {str(plan["group_id"]) for plan in plans}
+    invalid_ids = {
+        str(group["group_id"]) for group in groups
+        if str(group["group_id"]) not in accepted_ids
+    }
+    repair_blocks = {
+        block_id: block_groups
+        for block_id, block_groups in groups_by_block.items()
+        if any(
+            str(group["group_id"]) in invalid_ids
+            and str(group["group_id"]) not in non_repairable
+            for group in block_groups
+        )
+    }
     repair_record: dict[str, Any] = {
-        "attempted_group_ids": [str(group["group_id"]) for group in repairable_invalid],
+        "attempted_group_ids": sorted(invalid_ids - non_repairable),
+        "repair_phase_entered": bool(repair_blocks),
         "groups": [],
     }
-    repair_enabled = True
-    repair_record["repair_phase_entered"] = bool(repairable_invalid)
-    if repairable_invalid and repair_enabled:
-        repair_results: dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]] = {}
+    if progress_callback is not None and repair_blocks:
+        progress_callback(0, len(repair_blocks), 0)
 
-        if group_block_ids:
-            repair_blocks: dict[str, list[dict[str, Any]]] = {}
-            for group in repairable_invalid:
-                group_id = str(group["group_id"])
-                repair_blocks.setdefault(group_block_ids.get(group_id, group_id), []).append(group)
-            if progress_callback is not None:
-                progress_callback(0, len(repair_blocks), 0)
+    primary_issues = [
+        dict(row) for row in response.get("_cue_script_issues", [])
+        if isinstance(row, Mapping)
+    ]
 
-            def repair_block(block: tuple[str, list[dict[str, Any]]]) -> dict[str, tuple[dict[str, Any] | None, list[dict[str, Any]]]]:
-                block_id, block_groups = block
-                payloads = []
-                issues_by_group: dict[str, list[dict[str, Any]]] = {}
-                for group in block_groups:
-                    group_id = str(group["group_id"])
-                    rejected_output = rows.get(group_id)
-                    issues = initial_issues.get(group_id) or _translation_validation_issues(
-                        group, rejected_output, mapping_mode
-                    )
-                    issues_by_group[group_id] = issues
-                    payloads.append({
-                        **group,
-                        "rejected_output": rejected_output,
-                        "program_validation_errors": issues,
-                        "frozen_accepted_output": {},
-                        "repair_attempt": 1,
-                    })
-                try:
-                    response_value, telemetry = api_call(
-                        settings=settings, system_prompt=repair_prompt,
-                        groups=payloads, stage_name="translation_repair",
-                        cache_directory=cache_directory, cache_scope=cache_scope,
-                        mapping_mode=mapping_mode,
-                        cache_validator=lambda value: _response_contract_valid(
-                            value, block_groups, mapping_mode
-                        ),
-                    )
-                except Exception as exc:
-                    # A malformed repair response is an unresolved block, not
-                    # a reason to discard valid translations from every other
-                    # concurrent block or fail the durable worker.
-                    return {
-                        str(group["group_id"]): (
-                            None,
-                            [{
-                                "attempt": 1,
-                                "block_id": block_id,
-                                "error": str(exc),
-                                "validation_errors": issues_by_group[str(group["group_id"])],
-                                "rejected_output": rows.get(str(group["group_id"])),
-                                "valid": False,
-                            }],
-                        )
-                        for group in block_groups
-                    }
-                repaired_rows = _result_rows(response_value)
-                repaired_occurrences = _result_row_occurrences(response_value)
-                return {
-                    str(group["group_id"]): (
-                        _presentation_plan(
-                            group,
-                            repaired_rows.get(str(group["group_id"]))
-                            if len(repaired_occurrences.get(str(group["group_id"]), [])) == 1
-                            else None,
-                            mapping_mode,
-                        ),
-                        [{
-                            "attempt": 1, "block_id": block_id,
-                            "response": response_value, "telemetry": telemetry,
-                            "validation_errors": issues_by_group[str(group["group_id"])],
-                            "rejected_output": rows.get(str(group["group_id"])),
-                            "valid": bool(_presentation_plan(
-                                group,
-                                repaired_rows.get(str(group["group_id"]))
-                                if len(repaired_occurrences.get(str(group["group_id"]), [])) == 1
-                                else None,
-                                mapping_mode,
-                            )),
-                        }],
-                    )
-                    for group in block_groups
-                }
-
-            workers = min(len(repair_blocks), max(1, int(settings.get("translation_workers", 8))))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(repair_block, item): item[0]
-                    for item in repair_blocks.items()
-                }
-                completed_block_ids: set[str] = set()
-                accepted_block_ids: set[str] = set()
-                for future in concurrent.futures.as_completed(futures):
-                    block_id = futures[future]
-                    block_results = future.result()
-                    repair_results.update(block_results)
-                    completed_block_ids.add(block_id)
-                    if all(bool(row[0]) for row in block_results.values()):
-                        accepted_block_ids.add(block_id)
-                    if progress_callback is not None:
-                        progress_callback(
-                            len(completed_block_ids), len(repair_blocks),
-                            len(accepted_block_ids),
-                        )
-
-        def repair(group: dict[str, Any]) -> tuple[str, dict[str, Any] | None, list[dict[str, Any]]]:
-            if failure_injector is not None:
-                failure_injector(str(group["group_id"]), 1)
-            rejected_output = rows.get(str(group["group_id"]))
-            validation_issues = _translation_validation_issues(
-                group, rejected_output, mapping_mode
-            ) if str(group["group_id"]) not in initial_issues else initial_issues[str(group["group_id"])]
-            repair_group = {
-                **group,
-                "rejected_output": rejected_output,
-                "program_validation_errors": validation_issues,
-                "frozen_accepted_output": {},
-                "repair_attempt": 1,
-            }
-            repair_kwargs: dict[str, Any] = {
-                "settings": settings,
-                "repair_prompt": repair_prompt,
-                "group": repair_group,
-                "mapping_mode": mapping_mode,
-            }
-            if cache_directory is not None:
-                repair_kwargs.update(
-                    cache_directory=cache_directory, cache_scope=cache_scope
-                )
-            plan, records = _repair_group(**repair_kwargs)
-            for record in records:
-                record["validation_errors"] = validation_issues
-                record["rejected_output"] = rejected_output
-            return str(group["group_id"]), plan, records
-
-        if not group_block_ids:
-            if progress_callback is not None:
-                progress_callback(0, len(repairable_invalid), 0)
-            workers = min(
-                len(repairable_invalid), max(1, int(settings.get("translation_workers", 8)))
-            )
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(repair, group) for group in repairable_invalid]
-                for future in concurrent.futures.as_completed(futures):
-                    group_id, plan, records = future.result()
-                    repair_results[group_id] = (plan, records)
-                    if progress_callback is not None:
-                        progress_callback(
-                            len(repair_results), len(repairable_invalid),
-                            sum(bool(row[0]) for row in repair_results.values()),
-                        )
-
-        remaining: list[dict[str, Any]] = [
-            group for group in invalid if str(group["group_id"]) in non_repairable
+    def repair_one(
+        item: tuple[str, list[dict[str, Any]]],
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        block_id, block_groups = item
+        affected = [
+            group for group in block_groups
+            if str(group["group_id"]) in invalid_ids
+            and str(group["group_id"]) not in non_repairable
         ]
-        for group in repairable_invalid:
-            plan, records = repair_results[str(group["group_id"])]
-            repair_record["groups"].append({
-                "group_id": str(group["group_id"]),
-                "attempts": records,
-                "accepted": bool(plan),
-                "primary_request_count": 1,
-                "repair_attempted": True,
-                "repair_request_count": 1,
+        affected_cues = {
+            str(cue["cue_id"])
+            for group in affected for cue in group.get("cues", [])
+        }
+        block_cues = {
+            str(cue["cue_id"])
+            for group in block_groups for cue in group.get("cues", [])
+        }
+        frozen_cues = {
+            str(cue_id)
+            for unit in current_units for cue_id in unit.get("cue_ids", [])
+            if str(cue_id) in block_cues
+        }
+        editable_cues = affected_cues - frozen_cues
+        if not editable_cues:
+            # A legacy/non-wire invalid row has no safely frozen ownership.
+            editable_cues = set(affected_cues)
+        validation_issues = [
+            issue for issue in primary_issues
+            if str(issue.get("cue_id") or "") in affected_cues
+            or str(issue.get("block_id") or "") == block_id
+        ]
+        rows = _result_rows(response)
+        for group in affected:
+            group_id = str(group["group_id"])
+            if not any(str(issue.get("group_id") or "") == group_id for issue in validation_issues):
+                validation_issues.extend(
+                    _translation_validation_issues(
+                        group, rows.get(group_id), mapping_mode
+                    )
+                )
+        payloads: list[dict[str, Any]] = []
+        for group_index, group in enumerate(block_groups):
+            payloads.append({
+                **group,
+                "cues": [
+                    {**cue, "editable": str(cue["cue_id"]) in editable_cues}
+                    for cue in group.get("cues", [])
+                ],
+                "program_validation_errors": validation_issues if group_index == 0 else [],
+                "repair_attempt": 1,
             })
-            if plan is None:
-                remaining.append(group)
-            else:
-                plans.append(plan)
-        invalid = remaining
-    accepted_group_ids = {str(plan["group_id"]) for plan in plans}
-    candidate_targets_by_cue: dict[str, str] = {}
-    for group in groups:
-        group_id = str(group["group_id"])
-        if group_id in accepted_group_ids:
-            continue
-        repair_entry = next(
-            (
-                item for item in repair_record["groups"]
-                if str(item.get("group_id")) == group_id
-            ),
-            None,
+        if failure_injector is not None:
+            failure_injector(block_id, 1)
+        try:
+            patch_response, telemetry = api_call(
+                settings=settings, system_prompt=repair_prompt,
+                groups=payloads, stage_name="translation_repair",
+                cache_directory=cache_directory, cache_scope=cache_scope,
+                mapping_mode=mapping_mode,
+                cache_validator=lambda value: (
+                    set(str(value_id) for value_id in value.get("_covered_cue_ids", []))
+                    == editable_cues
+                    and not value.get("_cue_script_issues")
+                ),
+            )
+            patch_units = _response_wire_units(patch_response, payloads, mapping_mode)
+            covered = {
+                str(cue_id) for unit in patch_units for cue_id in unit.get("cue_ids", [])
+            }
+            if covered != editable_cues:
+                raise RuntimeError(
+                    "修复响应没有精确覆盖 OWN Cue："
+                    f"missing={sorted(editable_cues - covered)} "
+                    f"extra={sorted(covered - editable_cues)}"
+                )
+            return block_id, patch_units, {
+                "attempt": 1, "block_id": f"{block_id}:repair",
+                "source_block_id": block_id, "response": patch_response,
+                "telemetry": telemetry, "validation_errors": validation_issues,
+                "editable_cue_ids": sorted(editable_cues),
+                "frozen_cue_ids": sorted(frozen_cues), "valid": True,
+            }
+        except Exception as exc:
+            return block_id, [], {
+                "attempt": 1, "block_id": f"{block_id}:repair",
+                "source_block_id": block_id, "error": str(exc),
+                "validation_errors": validation_issues,
+                "editable_cue_ids": sorted(editable_cues),
+                "frozen_cue_ids": sorted(frozen_cues), "valid": False,
+            }
+
+    repair_results: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
+    if repair_blocks:
+        workers = min(
+            len(repair_blocks), max(1, int(settings.get("translation_workers", 8)))
         )
-        repaired_row = None
-        if repair_entry and repair_entry.get("attempts"):
-            repaired_response = repair_entry["attempts"][-1].get("response", {})
-            repaired_row = _result_rows(repaired_response).get(group_id)
-        for cue_id, target in {
-            **_candidate_targets(group, rows.get(group_id)),
-            **_candidate_targets(group, repaired_row),
-        }.items():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(repair_one, item): item[0]
+                for item in repair_blocks.items()
+            }
+            for future in concurrent.futures.as_completed(futures):
+                block_id, patch_units, audit = future.result()
+                repair_results[block_id] = (patch_units, audit)
+                if progress_callback is not None:
+                    progress_callback(
+                        len(repair_results), len(repair_blocks),
+                        sum(bool(row[1].get("valid")) for row in repair_results.values()),
+                    )
+
+    for block_id, block_groups in repair_blocks.items():
+        patch_units, audit = repair_results[block_id]
+        affected_ids = [
+            str(group["group_id"]) for group in block_groups
+            if str(group["group_id"]) in invalid_ids
+        ]
+        repair_record["groups"].append({
+            "group_id": block_id,
+            "affected_group_ids": affected_ids,
+            "source_block_id": block_id,
+            "attempts": [audit],
+            "accepted": bool(audit.get("valid")),
+            "primary_request_count": 1,
+            "repair_attempted": True,
+            "repair_request_count": 1,
+        })
+        if audit.get("valid"):
+            current_units.extend(patch_units)
+
+    plans = _compile_translation_plans(groups, current_units, mapping_mode)
+    accepted_ids = {str(plan["group_id"]) for plan in plans}
+    invalid = [
+        group for group in groups if str(group["group_id"]) not in accepted_ids
+    ]
+
+    # Length violations use the same block-wide repair invariant. The helper
+    # receives complete plans, groups all issues by their source block and
+    # freezes every target unit outside the explicit over-limit scope.
+    plans, limit_rows = _repair_over_limit_plans_blockwise(
+        plans=plans, groups=groups, settings=settings,
+        repair_prompt=repair_prompt, mapping_mode=mapping_mode,
+        cache_directory=cache_directory, cache_scope=cache_scope,
+        group_block_ids=block_ids, progress_callback=progress_callback,
+        completed_repairs=len(repair_record["groups"]),
+    )
+    if limit_rows:
+        repair_record["groups"].extend(limit_rows)
+        repair_record["repair_phase_entered"] = True
+
+    candidate_targets_by_cue: dict[str, str] = {}
+    for unit in current_units:
+        target = str(unit.get("target_text") or "").strip()
+        for cue_id in unit.get("cue_ids", []):
+            if target:
+                candidate_targets_by_cue.setdefault(str(cue_id), target)
+    # Legacy JSON/provider seams may carry useful text without a safe wire
+    # binding. Preserve it only as an editable candidate for unresolved Cues;
+    # it never becomes accepted output automatically.
+    response_rows = _result_rows(response)
+    for group in invalid:
+        for cue_id, target in _candidate_targets(
+            group, response_rows.get(str(group["group_id"]))
+        ).items():
             candidate_targets_by_cue.setdefault(cue_id, target)
     return plans, {
         "model_repair": repair_record,
         "invalid_group_ids": [str(group["group_id"]) for group in invalid],
         "candidate_targets_by_cue": candidate_targets_by_cue,
     }
+
+
+def _repair_over_limit_plans_blockwise(
+    *, plans: list[dict[str, Any]], groups: list[dict[str, Any]],
+    settings: dict[str, Any], repair_prompt: str, mapping_mode: str,
+    cache_directory: Path | None, cache_scope: str,
+    group_block_ids: Mapping[str, str],
+    progress_callback: Callable[[int, int, int], None] | None,
+    completed_repairs: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    cues_by_id = {
+        str(cue["cue_id"]): cue
+        for group in groups for cue in group.get("cues", [])
+    }
+    groups_by_block: dict[str, list[dict[str, Any]]] = {}
+    for group in groups:
+        block_id = str(group_block_ids.get(str(group["group_id"]), "manual"))
+        groups_by_block.setdefault(block_id, []).append(group)
+    issues_by_block: dict[str, list[dict[str, Any]]] = {}
+    for plan in plans:
+        block_id = str(group_block_ids.get(str(plan["group_id"]), "manual"))
+        issues_by_block.setdefault(block_id, []).extend(
+            _plan_limit_issues(plan, cues_by_id)
+        )
+    issues_by_block = {
+        block_id: issues for block_id, issues in issues_by_block.items() if issues
+    }
+    if not issues_by_block:
+        return plans, []
+
+    base_units = _plans_as_wire_units(plans)
+    total = completed_repairs + len(issues_by_block)
+    if progress_callback is not None:
+        progress_callback(completed_repairs, total, completed_repairs)
+
+    def repair_block(
+        item: tuple[str, list[dict[str, Any]]],
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        block_id, issues = item
+        editable = {
+            str(cue_id) for issue in issues for cue_id in issue.get("cue_ids", [])
+        }
+        payloads: list[dict[str, Any]] = []
+        for index, group in enumerate(groups_by_block[block_id]):
+            payloads.append({
+                **group,
+                "cues": [
+                    {**cue, "editable": str(cue["cue_id"]) in editable}
+                    for cue in group.get("cues", [])
+                ],
+                "program_validation_errors": issues if index == 0 else [],
+                "repair_attempt": 1,
+            })
+
+        def patch_valid(value: dict[str, Any]) -> bool:
+            units = _response_wire_units(value, payloads, mapping_mode)
+            covered = {
+                str(cue_id) for unit in units for cue_id in unit.get("cue_ids", [])
+            }
+            if covered != editable or value.get("_cue_script_issues"):
+                return False
+            for unit in units:
+                cue_ids = [str(value) for value in unit.get("cue_ids", [])]
+                limits = [
+                    int(cues_by_id[cue_id].get("hard_limit") or 0)
+                    for cue_id in cue_ids if cue_id in cues_by_id
+                ]
+                limits = [value for value in limits if value > 0]
+                if not limits:
+                    continue
+                rule = str(cues_by_id[cue_ids[0]].get(
+                    "count_rule", "all_characters_including_spaces"
+                ))
+                if _target_length(str(unit.get("target_text") or ""), rule) > min(limits):
+                    return False
+            return True
+
+        try:
+            response, telemetry = api_call(
+                settings=settings, system_prompt=repair_prompt,
+                groups=payloads, stage_name="translation_repair",
+                cache_directory=cache_directory, cache_scope=cache_scope,
+                mapping_mode=mapping_mode, cache_validator=patch_valid,
+            )
+            patch_units = _response_wire_units(response, payloads, mapping_mode)
+            if not patch_valid(response):
+                raise RuntimeError("长度修复响应没有精确覆盖 OWN Cue 或仍然超限")
+            return block_id, patch_units, {
+                "attempt": 1, "source_block_id": block_id,
+                "response": response, "telemetry": telemetry,
+                "validation_errors": issues,
+                "editable_cue_ids": sorted(editable), "valid": True,
+            }
+        except Exception as exc:
+            return block_id, [], {
+                "attempt": 1, "source_block_id": block_id,
+                "error": str(exc), "validation_errors": issues,
+                "editable_cue_ids": sorted(editable), "valid": False,
+            }
+
+    results: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
+    workers = min(
+        len(issues_by_block), max(1, int(settings.get("translation_workers", 8)))
+    )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(repair_block, item): item[0]
+            for item in issues_by_block.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            block_id, units, audit = future.result()
+            results[block_id] = (units, audit)
+            if progress_callback is not None:
+                progress_callback(
+                    completed_repairs + len(results), total,
+                    completed_repairs + sum(
+                        bool(value[1].get("valid")) for value in results.values()
+                    ),
+                )
+
+    merged_units = [dict(row) for row in base_units]
+    audit_rows: list[dict[str, Any]] = []
+    for block_id, issues in issues_by_block.items():
+        patch_units, audit = results[block_id]
+        editable = set(audit.get("editable_cue_ids", []))
+        if audit.get("valid"):
+            merged_units = [
+                unit for unit in merged_units
+                if not editable.intersection(str(value) for value in unit.get("cue_ids", []))
+            ]
+            merged_units.extend(patch_units)
+        audit_rows.append({
+            "group_id": block_id,
+            "repair_kind": "target_over_limit",
+            "source_block_id": block_id,
+            "validation_errors": issues,
+            "attempts": [audit],
+            "accepted": bool(audit.get("valid")),
+            "primary_request_count": 1,
+            "repair_attempted": True,
+            "repair_request_count": 1,
+        })
+    return _compile_translation_plans(groups, merged_units, mapping_mode), audit_rows
 
 
 def warning_report(translations: dict[str, str], settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -975,6 +1245,18 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
     return saved.revision_id
 
 
+def _translation_system_prompt(
+    base_prompt: str,
+    direction: str,
+    glossary_entries: list[dict[str, Any]],
+) -> str:
+    """Compose one stage prompt without emitting an empty glossary section."""
+    sections = [str(base_prompt).strip(), str(direction).strip()]
+    if glossary_entries:
+        sections.append(glossary_prompt(glossary_entries))
+    return "\n\n".join(section for section in sections if section)
+
+
 def run_contextual_translation(
     work: Path,
     settings: dict[str, Any],
@@ -1010,30 +1292,30 @@ def run_contextual_translation(
     )
     language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文"}
     direction = (
-        "# ACTIVE_LANGUAGE_DIRECTION\n"
+        "# TASK CONFIGURATION\n"
         f"源语言：{language_names.get(source_language, source_language)}\n"
         f"目标语言：{language_names.get(target_language, target_language)}\n"
-        "所有 target_text 必须使用目标语言。\n"
-        f"目标语言 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'english_hard_limit'), 55))}；"
-        f"当前 mapping_mode：{mapping_mode}。必须严格遵守对应模式契约。"
+        f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'english_hard_limit'), 55))}。"
     )
-    if mapping_mode == "many_to_many":
-        direction += "每个 meaning_units.target_text 必须是完整、唯一的目标语意义单元。"
-    else:
-        direction += "每个 group_results.target_text 必须是该单一 Cue 的完整非空译文。"
     task_info = load_task_info(work, work.name)
-    glossary = glossary_prompt(active_glossary(str(task_info.get("glossary_id") or "")))
-    if source_language == target_language:
-        direction += " 本任务是同语种字幕校订：保留原意与语言，只做自然表达和 Cue 分配。"
-    batches = execution_block_batches(revision.document, groups)
+    glossary_entries = active_glossary(str(task_info.get("glossary_id") or ""))
+    system_prompt = _translation_system_prompt(
+        prompt.text, direction, glossary_entries
+    )
+    repair_system_prompt = _translation_system_prompt(
+        repair_prompt.text, direction, glossary_entries
+    )
+    batches = execution_block_batches(
+        revision.document, groups, mapping_mode=mapping_mode
+    )
     if progress_callback is not None:
         progress_callback("executing", completed=0, planned=len(batches))
     response, telemetry = call_block_batches(
         settings=settings,
-        system_prompt=f"{prompt.text}\n\n{direction}\n\n{glossary}",
+        system_prompt=system_prompt,
         batches=batches,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-cue-script-v1",
+        cache_scope="translation-map-v5-block-patch",
         mapping_mode=mapping_mode,
         progress_callback=(
             (lambda done, total: progress_callback(
@@ -1063,13 +1345,13 @@ def run_contextual_translation(
     }
     plans, repair = complete_results(
         settings=settings,
-        repair_prompt=f"{repair_prompt.text}\n\n{direction}\n\n{glossary}",
+        repair_prompt=repair_system_prompt,
         groups=groups,
         response=response,
         mapping_mode=mapping_mode,
         non_repairable_group_ids=non_repairable_group_ids,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-cue-script-v1",
+        cache_scope="translation-map-v5-block-patch",
         group_block_ids=group_block_ids,
         progress_callback=(
             (lambda done, total, accepted: progress_callback(
@@ -1078,16 +1360,22 @@ def run_contextual_translation(
             )) if progress_callback is not None else None
         ),
     )
+    repair_attempt_rows = [
+        attempt
+        for group in repair["model_repair"].get("groups", [])
+        for attempt in group.get("attempts", [])
+        if isinstance(attempt, Mapping)
+    ]
     attempted_repair_block_ids = {
-        str(group_block_ids[str(group_id)])
-        for group_id in repair["model_repair"]["attempted_group_ids"]
-        if str(group_id) in group_block_ids
+        str(row["source_block_id"])
+        for row in repair_attempt_rows if str(row.get("source_block_id") or "")
     }
     unresolved_repair_block_ids = {
-        str(group_block_ids[str(group_id)])
-        for group_id in repair["invalid_group_ids"]
-        if str(group_id) in group_block_ids
-        and str(group_block_ids[str(group_id)]) in attempted_repair_block_ids
+        str(attempt.get("source_block_id"))
+        for group in repair["model_repair"].get("groups", [])
+        if not bool(group.get("accepted"))
+        for attempt in group.get("attempts", [])
+        if str(attempt.get("source_block_id") or "")
     }
     accepted_repair_block_count = len(
         attempted_repair_block_ids - unresolved_repair_block_ids

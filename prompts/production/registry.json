@@ -1,36 +1,36 @@
 {
   "schema_version": "substar.prompt-registry.v1",
   "categories": [
-    {"id": "segmentation", "title": "字幕切分", "description": "语义分组、句界证据与语言切分规则"},
+    {"id": "segmentation", "title": "字幕切分", "description": "Cue 边界、句界证据与语言切分规则"},
     {"id": "translation", "title": "字幕翻译", "description": "上下文翻译、坏块修复与目标语言规则"},
     {"id": "editor", "title": "编辑器 AI", "description": "源文校准"},
     {"id": "exchange", "title": "外部 AI", "description": "导出给 Web LLM 的分阶段工作流"}
   ],
   "prompts": {
     "semantic_grouping": {
-      "title": "语义分组",
+      "title": "Cue 边界规划",
       "category": "segmentation",
-      "description": "按源语言规则重建自然字幕语义组。",
-      "version": "2026-08-19.1",
+      "description": "按源语言规则规划自然显示 Cue。",
+      "version": "2026-09-04.3",
       "variants": {
         "en": ["segmentation/common/semantic_grouping.md", "segmentation/en/rules.md", "cases/semantic_grouping_en.constructed.md"],
         "zh": ["segmentation/common/semantic_grouping.md", "segmentation/zh/rules.md", "cases/semantic_grouping_zh.constructed.md"],
         "ja": ["segmentation/common/semantic_grouping.md", "segmentation/ja/rules.md", "cases/semantic_grouping_ja.constructed.md"],
         "ko": ["segmentation/common/semantic_grouping.md", "segmentation/ko/rules.md", "cases/semantic_grouping_ko.constructed.md"],
-        "mixed": ["segmentation/common/semantic_grouping.md"]
+        "mixed": ["segmentation/common/semantic_grouping.md", "segmentation/mixed/rules.md", "cases/semantic_grouping_mixed.constructed.md"]
       }
     },
     "semantic_grouping_repair": {
-      "title": "语义分组修复",
+      "title": "Cue 边界块内修复",
       "category": "segmentation",
-      "description": "只修复未通过契约验收的切分范围。",
-      "version": "2026-08-19.1",
+      "description": "保留完整原块和已验收范围，一次修复块内全部错误。",
+      "version": "2026-09-04.3",
       "variants": {
         "en": ["segmentation/common/semantic_grouping_repair.md", "segmentation/en/rules.md"],
         "zh": ["segmentation/common/semantic_grouping_repair.md", "segmentation/zh/rules.md"],
         "ja": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ja/rules.md"],
         "ko": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ko/rules.md"],
-        "mixed": ["segmentation/common/semantic_grouping_repair.md"]
+        "mixed": ["segmentation/common/semantic_grouping_repair.md", "segmentation/mixed/rules.md"]
       }
     },
     "boundary_evidence": {
@@ -48,7 +48,7 @@
       "title": "上下文翻译",
       "category": "translation",
       "description": "由公共规则、执行阶段、映射模式和语言规则组合生成翻译提示词。",
-      "version": "2026-09-03.1",
+      "version": "2026-09-04.4",
       "shared": ["translation/common/base.md", "translation/common/primary.md"],
       "default_mode": "many_to_many",
       "modes": {
@@ -68,7 +68,11 @@
           "ja_to_ko": ["cases/contextual_translation_ja_to_ko.constructed.md"],
           "ko_to_zh": ["cases/contextual_translation_ko_to_zh.constructed.md"],
           "ko_to_en": ["cases/contextual_translation_ko_to_en.constructed.md"],
-          "ko_to_ja": ["cases/contextual_translation_ko_to_ja.constructed.md"]
+          "ko_to_ja": ["cases/contextual_translation_ko_to_ja.constructed.md"],
+          "mixed_to_zh": ["cases/contextual_translation_mixed.constructed.md"],
+          "mixed_to_en": ["cases/contextual_translation_mixed.constructed.md"],
+          "mixed_to_ja": ["cases/contextual_translation_mixed.constructed.md"],
+          "mixed_to_ko": ["cases/contextual_translation_mixed.constructed.md"]
         }
       },
       "variants": {
@@ -84,14 +88,18 @@
         "ko_to_zh": ["translation/target/zh.md"],
         "ko_to_en": ["translation/target/en.md"],
         "ko_to_ja": ["translation/ja/rules.md"],
+        "mixed_to_zh": ["translation/mixed/rules.md", "translation/target/zh.md"],
+        "mixed_to_en": ["translation/mixed/rules.md", "translation/target/en.md"],
+        "mixed_to_ja": ["translation/mixed/rules.md", "translation/ja/rules.md"],
+        "mixed_to_ko": ["translation/mixed/rules.md", "translation/ko/rules.md"],
         "generic": ["translation/common/generic_language.md"]
       }
     },
     "contextual_translation_repair": {
       "title": "上下文翻译修复",
       "category": "translation",
-      "description": "使用同一映射模式契约，只修复缺失或无效翻译组。",
-      "version": "2026-09-03.1",
+      "description": "使用同一映射模式契约，一次修复原块内全部缺失或无效 Cue。",
+      "version": "2026-09-04.4",
       "shared": ["translation/common/base.md", "translation/common/repair.md"],
       "default_mode": "many_to_many",
       "modes": {
@@ -111,6 +119,10 @@
         "ko_to_zh": ["translation/target/zh.md"],
         "ko_to_en": ["translation/target/en.md"],
         "ko_to_ja": ["translation/ja/rules.md"],
+        "mixed_to_zh": ["translation/mixed/rules.md", "translation/target/zh.md"],
+        "mixed_to_en": ["translation/mixed/rules.md", "translation/target/en.md"],
+        "mixed_to_ja": ["translation/mixed/rules.md", "translation/ja/rules.md"],
+        "mixed_to_ko": ["translation/mixed/rules.md", "translation/ko/rules.md"],
         "generic": ["translation/common/generic_language.md"]
       }
     },
@@ -145,16 +157,28 @@
       "title": "源文 AI 校准",
       "category": "editor",
       "description": "应用大小写、标点、专名与确定性 ASR 修正。",
-      "version": "2026-08-28.1",
-      "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
+      "version": "2026-09-04.3",
+      "variants": {
+        "en": ["calibration/en.md"],
+        "zh": ["calibration/zh.md"],
+        "ja": ["calibration/ja.md"],
+        "ko": ["calibration/ko.md"],
+        "mixed": ["calibration/mixed.md"]
+      }
     },
     "calibration_repair": {
       "title": "源文 AI 校准修复",
       "category": "editor",
-      "description": "保留已验收动作，一次修复校准块内全部契约错误。",
-      "version": "2026-09-03.1",
+      "description": "保留完整原块和已验收 Cue，一次修复块内全部缺失或无法绑定项。",
+      "version": "2026-09-04.3",
       "shared": ["calibration/repair.md"],
-      "variants": {"en": ["calibration/en.md"], "zh": ["calibration/zh.md"]}
+      "variants": {
+        "en": ["calibration/en.md"],
+        "zh": ["calibration/zh.md"],
+        "ja": ["calibration/ja.md"],
+        "ko": ["calibration/ko.md"],
+        "mixed": ["calibration/mixed.md"]
+      }
     }
   }
 }

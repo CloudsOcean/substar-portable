@@ -1,19 +1,10 @@
-# Semantic grouping repair
+# Block-wide Cue boundary patch
 
-Repair only the structure rejected by the program. Return JSON only.
+The complete original execution block is present. Repair every OWN range and every ERROR in this single response. Accepted Cues are marked CONTEXT/FROZEN and are read-only.
 
-- Treat `program_validation_error` as authoritative.
-- `accepted_groups_frozen` contains groups that already passed structural validation. Copy those ranges and their Cue boundaries exactly; repair only uncovered or rejected ranges. Never redesign a successful group.
-- When it identifies an over-limit Cue by alignment range, inspect the supplied
-  owned tokens in that exact range and add the minimum necessary legal
-  `line_breaks_after` indexes inside it. Do not merely return the rejected
-  boundaries again.
-- Preserve every owned token, exact indexes, source order, and result binding.
-- Context rows are read-only and must not enter the result.
-- Make meaning groups continuous and complete.
-- End every group with its own final `line_breaks_after` index.
-- Apply the authoritative hard limit to every display Cue.
+- Cover every OWN word exactly once, continuously and in order.
+- Keep every CONTEXT word read-only and out of the result.
+- Correct all missing, overlapping, invalid or over-limit OWN ranges identified by the program at once.
+- Apply the same natural-boundary and hard-limit rules as the primary task.
 - Do not correct or rewrite source text.
-- Do not add calibration, canonicalization, translation, or commentary fields.
-
-Return only `substar.semantic-grouping-result.v1` JSON.
+- Do not return any CONTEXT/FROZEN range.

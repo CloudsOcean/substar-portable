@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from substar_core.editor.translation.contextual import complete_results, warning_report
@@ -60,16 +61,43 @@ class SemanticExecutionTests(unittest.TestCase):
             ["cue_1", "cue_2"],
         )
 
-    def test_over_limit_result_skips_repair_and_is_not_unresolved(self) -> None:
+    def test_failed_limit_repair_keeps_original_and_is_not_unresolved(self) -> None:
         group = _group("cue_1", hard_limit=5)
-        plans, repair = complete_results(
-            settings={"translation_repair_attempts": 0},
-            repair_prompt="unused",
-            groups=[group],
-            response={"group_results": [_row("cue_1", target_text="Long but useful")]},
-        )
+        with patch(
+            "substar_core.editor.translation.contextual.api_call",
+            side_effect=RuntimeError("repair unavailable"),
+        ):
+            plans, repair = complete_results(
+                settings={"translation_workers": 1},
+                repair_prompt="repair",
+                groups=[group],
+                response={"group_results": [_row("cue_1", target_text="Long but useful")]},
+            )
         self.assertEqual(len(plans), 1)
+        self.assertEqual(plans[0]["meaning_units"][0]["target_text"], "Long but useful")
         self.assertEqual(repair["invalid_group_ids"], [])
+        self.assertFalse(repair["model_repair"]["groups"][0]["accepted"])
+
+    def test_limit_repair_replaces_only_the_rejected_local_scope(self) -> None:
+        group = _group("cue_1", hard_limit=5)
+        def repaired(**kwargs: object) -> tuple[dict[str, object], dict[str, str]]:
+            repair_group = kwargs["groups"][0]  # type: ignore[index]
+            row = _row("cue_1", target_text="Short")
+            row["group_id"] = repair_group["group_id"]
+            return {"group_results": [row]}, {"model": "repair"}
+        with patch(
+            "substar_core.editor.translation.contextual.api_call",
+            side_effect=repaired,
+        ) as api:
+            plans, repair = complete_results(
+                settings={"translation_workers": 1},
+                repair_prompt="repair",
+                groups=[group],
+                response={"group_results": [_row("cue_1", target_text="Long but useful")]},
+            )
+        self.assertEqual(plans[0]["meaning_units"][0]["target_text"], "Short")
+        self.assertEqual(api.call_args.kwargs["groups"][0]["cues"][0]["cue_id"], "cue_1")
+        self.assertTrue(repair["model_repair"]["groups"][0]["accepted"])
 
     def test_over_limit_result_is_reported_as_warning(self) -> None:
         warnings = warning_report(

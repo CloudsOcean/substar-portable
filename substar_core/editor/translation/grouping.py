@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import Any
 
 from substar_core.domain import EditorDocument, EntityState
@@ -11,11 +10,11 @@ def translation_groups(
     settings: dict[str, Any],
     selected: set[str] | None = None,
 ) -> tuple[list[dict[str, Any]], set[str], dict[str, str]]:
-    """Build translation batches from canonical editor groups."""
+    """Build ordered technical components without semantic-group boundaries."""
 
     groups_by_id = {group.group_id: group for group in document.groups}
     display_by_id = {token.token_id: token for token in document.display_tokens}
-    members: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    rows: list[dict[str, Any]] = []
     for cue in document.cues:
         if cue.state is not EntityState.ACTIVE:
             continue
@@ -26,15 +25,14 @@ def translation_groups(
             and display_by_id[token_id].state is EntityState.ACTIVE
         ]
         group = groups_by_id.get(cue.group_id or "")
-        group_id = group.group_id if group else f"manual:{cue.cue_id}"
-        semantic_ids = list(group.source_group_ids) if group else [group_id]
-        members[group_id].append(
-            {
-                "cue": cue,
-                "source_text": " ".join(token.text for token in tokens).strip(),
-                "semantic_group_ids": semantic_ids,
-            }
-        )
+        execution_ids = list(group.execution_block_ids) if group else []
+        rows.append({
+            "cue": cue,
+            "source_text": " ".join(token.text for token in tokens).strip(),
+            # Compatibility read only: the legacy group supplies the accepted
+            # scheduler block id, never a translation boundary.
+            "execution_block_id": execution_ids[0] if execution_ids else "manual",
+        })
 
     payloads: list[dict[str, Any]] = []
     required: set[str] = set()
@@ -46,18 +44,22 @@ def translation_groups(
         "ja": ("japanese_hard_limit", "characters_excluding_spaces"),
         "ko": ("korean_hard_limit", "characters_excluding_spaces"),
     }
-    for sequence, (group_id, rows) in enumerate(members.items(), start=1):
-        if selected is not None and not any(row["cue"].cue_id in selected for row in rows):
+    max_component_cues = max(1, int(settings.get("translation_execution_max_cues", 48)))
+    components: list[list[dict[str, Any]]] = []
+    for row in rows:
+        if (
+            not components
+            or components[-1][-1]["execution_block_id"] != row["execution_block_id"]
+            or len(components[-1]) >= max_component_cues
+        ):
+            components.append([])
+        components[-1].append(row)
+    for sequence, component_rows in enumerate(components, start=1):
+        if selected is not None and not any(row["cue"].cue_id in selected for row in component_rows):
             continue
-        rows.sort(key=lambda row: row["cue"].index)
         payload_group_id = f"component_{sequence:04d}"
-        semantic_ids = list(
-            dict.fromkeys(
-                value for row in rows for value in row["semantic_group_ids"]
-            )
-        )
         cues: list[dict[str, Any]] = []
-        for row in rows:
+        for row in component_rows:
             cue = row["cue"]
             source_text = row["source_text"]
             required.add(cue.cue_id)
@@ -87,7 +89,7 @@ def translation_groups(
         payloads.append(
             {
                 "group_id": payload_group_id,
-                "semantic_group_ids": semantic_ids,
+                "execution_block_id": str(component_rows[0]["execution_block_id"]),
                 "mapping_policy": "translate_whole_then_allocate_to_cues",
                 "cues": cues,
             }

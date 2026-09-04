@@ -72,7 +72,9 @@ body.editor-shell {
   cursor: pointer;
 }
 .editor-command-bar select { padding-right: 28px; }
-.editor-command-bar button:hover,
+.editor-command-bar button:hover:not(:disabled),
+.editor-command-menu:not(.disabled) > summary:hover,
+.editor-command-link:hover,
 .pane-heading button:hover,
 .cue-actions button:hover,
 .editor-tool-sidebar button:hover { border-color: #7651aa; background: #21182e; color: #fff; }
@@ -372,6 +374,8 @@ body.editor-shell {
 .cue-history-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 34px; padding: 5px 8px; border-top: 1px solid #2a2e38; color: #7f8796; font-size: 9px; }
 .cue-history-row span { margin-right: auto; }
 .cue-history-row button { height: 25px; padding: 0 8px; border: 1px solid #353a45; border-radius: 6px; background: #171a20; color: #c9cdd5; font-size: 9px; }
+.cue-history-row button:hover:not(:disabled) { border-color: #7651aa; background: #21182e; color: #fff; }
+.cue-history-row button:disabled { opacity: .36; cursor: not-allowed; }
 body.hide-editor-translations .translation-track { display: none; }
 
 .editor-preview-pane { grid-column: 3; grid-row: 1; display: grid; grid-template-rows: 32px minmax(220px, 1fr); gap: 9px; padding: 10px 13px 12px; background: #0a0c10; }

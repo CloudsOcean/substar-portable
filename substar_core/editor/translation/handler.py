@@ -151,5 +151,8 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
         prepare=prepare,
         handle_worker_event=progress,
         finalize=finalize,
-        resources=("worker", "provider_io", "project_write"),
+        # The worker performs provider work without holding a global write
+        # lock. Publication is a short optimistic ProjectStore transaction,
+        # so distinct projects can run concurrently without corrupting state.
+        resources=("worker", "provider_io"),
     )

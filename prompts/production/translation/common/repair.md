@@ -1,9 +1,9 @@
-# 契约修复
+# 原始块内补丁修复
 
-本次只修复请求中列出的失败 group。每个失败 group 会携带 `rejected_output`、`program_validation_errors` 和 `repair_attempt`。
+本次请求保留完整原始执行块作为上下文，并一次列出该块的全部程序验收错误。只有标记为 OWN 的 Cue 需要输出；CONTEXT/FROZEN 已冻结，不得重复或改写。
 
-- 针对每条结构化错误从头修正该 group，不能照抄错误绑定。
-- `frozen_accepted_output` 是已经验收通过的只读结果；不得重复、修改或重新输出。
-- 仍须严格遵守当前映射模式的输出结构和 group 边界。
-- 所有失败 group 必须各返回一次，即使多个 group 在语义上相邻也不得合并。
-
+- 从上下文重新理解全部 OWN Cue，不得照抄错误绑定。
+- 一次覆盖本请求内全部 OWN C 别名；不得复述 CONTEXT/FROZEN 的原文或译文。
+- 保持 C 顺序，只输出当前映射模式允许的行。
+- 若 `PROGRAM VALIDATION` 标出 `TARGET_OVER_LIMIT`，每条错误都给出 `ACTUAL` 和 `REQUIRED_MAX`。输出前逐行计数并确保右侧文本不超过 `REQUIRED_MAX`；多对多模式应在必要时把 `+` 连接的连续 C 范围拆成更小的连续映射行。
+- 如果完整性与 LIMIT 无法同时满足，优先保留完整信息；程序会保留原始可编辑译文并标记人工复核。

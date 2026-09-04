@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from substar_core.config import DEFAULTS
+from substar_core.editor.calibration.handler import build_calibration_handler
+from substar_core.editor.translation.handler import build_translation_handler
 from substar_core.segmentation.handler import build_segmentation_handler
 from substar_core.transcription.handler import build_transcription_handler
 
@@ -13,8 +15,14 @@ def test_cloud_concurrency_defaults_to_four() -> None:
 def test_cloud_handlers_do_not_hold_global_project_or_gpu_locks(tmp_path) -> None:
     segmentation = build_segmentation_handler(tmp_path / "projects", tmp_path)
     transcription = build_transcription_handler(tmp_path / "projects", tmp_path)
+    calibration = build_calibration_handler(tmp_path / "projects", tmp_path)
+    translation = build_translation_handler(tmp_path / "projects", tmp_path)
 
     assert segmentation.resources == ("worker", "provider_io")
     assert transcription.resources == ("worker", "media_cpu", "provider_io")
+    assert calibration.resources == ("worker", "provider_io")
+    assert translation.resources == ("worker", "provider_io")
     assert "project_write" not in segmentation.resources
+    assert "project_write" not in calibration.resources
+    assert "project_write" not in translation.resources
     assert "local_gpu" not in transcription.resources

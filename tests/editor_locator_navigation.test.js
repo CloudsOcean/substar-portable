@@ -16,5 +16,15 @@ assert.match(
   /function selectCue\(cueId, seek = false, scroll = false\)[\s\S]*?activateCue\(cueId, \{seek, scroll,/,
   "selectCue must forward explicit list scrolling to activateCue"
 );
+assert.match(
+  source,
+  /function updateSearchSelection[\s\S]*?selectCue\(match\.cue_id, true, true\);/,
+  "search navigation must seek and center the matching Cue"
+);
+assert.match(
+  source,
+  /const searchHasFocus = document\.activeElement === \$\("#toolSearch"\);[\s\S]*?\(!isEditingText \|\| searchHasFocus\)/,
+  "Enter in the focused search field must not suppress explicit centering"
+);
 
 console.log("editor_locator_navigation: ok");

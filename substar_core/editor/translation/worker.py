@@ -75,7 +75,10 @@ def run(command: WorkerCommand) -> int:
 
     emit(WorkerMessageType.READY, {"worker": "translation"})
     try:
+        last_worker_progress = 0.0
+
         def progress(ai_progress: dict[str, Any]):
+            nonlocal last_worker_progress
             phase = str(ai_progress.get("phase") or "executing")
             units = dict(ai_progress.get("units") or {})
             active_completed = int(
@@ -94,6 +97,8 @@ def run(command: WorkerCommand) -> int:
                 "publishing": 0.98,
                 "completed": 1.0,
             }.get(phase, 0.02)
+            worker_progress = max(last_worker_progress, min(1.0, base))
+            last_worker_progress = worker_progress
             emit(
                 WorkerMessageType.PROGRESS,
                 {
@@ -102,7 +107,7 @@ def run(command: WorkerCommand) -> int:
                     "total": active_total,
                     "ai_progress": ai_progress,
                 },
-                progress=min(1.0, base),
+                progress=worker_progress,
                 step=f"translation.{phase}",
             )
 

@@ -131,25 +131,35 @@ def test_calibration_runs_primary_then_one_repair_and_reports_both_counts() -> N
 
 
 def test_translation_repairs_only_invalid_groups_and_reports_repair_denominator() -> None:
-    groups = [{"group_id": "g1"}, {"group_id": "g2"}]
+    groups = [
+        {"group_id": "g1", "cues": [{"cue_id": "c1", "source_text": "one"}]},
+        {"group_id": "g2", "cues": [{"cue_id": "c2", "source_text": "two"}]},
+    ]
     progress: list[tuple[int, int, int]] = []
 
-    def fake_plan(group, row, _mapping_mode="many_to_many"):
-        return {"group_id": group["group_id"]} if row else None
-
-    def fake_repair(**kwargs):
-        group = kwargs["group"]
-        return {"group_id": group["group_id"]}, [{"valid": True}]
+    def fake_repair(**_kwargs):
+        return {
+            "group_results": [],
+            "_wire_units": [{"cue_ids": ["c2"], "target_text": "二"}],
+            "_covered_cue_ids": ["c2"],
+            "_cue_script_issues": [],
+        }, {}
 
     with (
-        patch.object(contextual, "_presentation_plan", side_effect=fake_plan),
-        patch.object(contextual, "_repair_group", side_effect=fake_repair),
+        patch.object(contextual, "api_call", side_effect=fake_repair),
     ):
         plans, report = contextual.complete_results(
             settings={"translation_repair_attempts": 1, "translation_workers": 2},
             repair_prompt="repair",
             groups=groups,
-            response={"group_results": [{"group_id": "g1"}]},
+            response={
+                "group_results": [{
+                    "group_id": "g1", "cue_id": "c1", "target_text": "一",
+                }],
+                "_wire_units": [{"cue_ids": ["c1"], "target_text": "一"}],
+            },
+            mapping_mode="one_to_one",
+            group_block_ids={"g1": "b1", "g2": "b2"},
             progress_callback=lambda done, total, accepted: progress.append(
                 (done, total, accepted)
             ),

@@ -11,24 +11,22 @@ HEADER = "SUBSTAR-CUE-SCRIPT/1"
 
 OUTPUT_CONTRACTS = {
     "SEGMENT": """
-EXPERIMENTAL OUTPUT CONTRACT (this final section overrides every earlier JSON-output instruction):
-Return only SUBSTAR-CUE-SCRIPT/1 text. Do not return JSON, Markdown, commentary, token IDs, or internal IDs.
-Copy the requested local aliases exactly. Return consecutive CUE rows covering every OWN word exactly once.
-Each row is: CUE<TAB>Cue alias<TAB>meaning-group alias<TAB>first-last word alias<TAB>readable source preview.
-Adjacent Cues may reuse a meaning-group alias. Finish with END.
+AUTHORITATIVE OUTPUT CONTRACT:
+Return only SUBSTAR-CUE-SCRIPT/1 text; no JSON, Markdown, commentary, token IDs, or internal IDs.
+Use CUE<TAB>Cue alias<TAB>word span. Write W0001 for one word or W0002-W0004 for an inclusive multi-word range.
+Cover every OWN word exactly once, consecutively and in order. Never return CONTEXT words. Finish with END.
 """.strip(),
     "CALIBRATE": """
-EXPERIMENTAL OUTPUT CONTRACT (this final section overrides every earlier JSON/action-output instruction):
-Return only SUBSTAR-CUE-SCRIPT/1 text. Do not return JSON, Markdown, commentary, actions, token IDs, or internal IDs.
-Return every OWN Cue exactly once as: CUE<TAB>local Cue alias<TAB>the complete corrected source-language Cue text.
-Keep CONTEXT Cues read-only. Preserve meaning, word order, and Cue boundaries. You may correct recognition,
-case, punctuation, terminology, and merge written forms such as "U.S.". Finish with END.
+AUTHORITATIVE OUTPUT CONTRACT:
+Return only SUBSTAR-CUE-SCRIPT/1 text; no JSON, Markdown, commentary, actions, token IDs, or internal IDs.
+Use CUE<TAB>local Cue alias<TAB>complete corrected source-language Cue text. Return every OWN Cue exactly once.
+Never return CONTEXT Cues. Preserve meaning, word order and Cue boundaries. Finish with END.
 """.strip(),
     "TRANSLATE": """
-EXPERIMENTAL OUTPUT CONTRACT (this final section overrides every earlier JSON/mapping-output instruction):
-Return only SUBSTAR-CUE-SCRIPT/1 text. Do not return JSON, Markdown, commentary, group IDs, or internal IDs.
-Return every OWN Cue exactly once as: CUE<TAB>local Cue alias<TAB>complete target-language text for that display slot.
-Use neighboring Cues and group labels for context, but never combine, omit, or renumber Cue slots. Finish with END.
+AUTHORITATIVE OUTPUT CONTRACT:
+Return only mapping rows; no header, END, JSON, Markdown, commentary, group IDs, or internal IDs.
+Use local Cue alias<TAB>complete target-language subtitle text. In many_to_many mode, consecutive aliases may be joined with + and share one right-hand text; in one_to_one mode each row has one alias.
+Return every OWN alias exactly once and in input order. Never return CONTEXT aliases or copy aliases into subtitle text.
 """.strip(),
 }
 
@@ -51,7 +49,7 @@ def _body(raw: str) -> list[str]:
     return [line.rstrip("\r") for line in value.splitlines() if line.strip()]
 
 
-def records(raw: str, task: str) -> list[list[str]]:
+def records(raw: str, task: str, *, strict: bool = True) -> list[list[str]]:
     lines = _body(raw)
     expected = f"{HEADER}\t{task.upper()}"
     localized_headers = {
@@ -69,12 +67,12 @@ def records(raw: str, task: str) -> list[list[str]]:
     # Providers sometimes drop only the envelope while preserving every
     # tab-delimited record. The record shape and full alias coverage are the
     # actual safety boundary, so that envelope omission is recoverable.
-    if not has_header and any(not line.startswith("CUE\t") for line in body_lines):
+    if strict and not has_header and any(not line.startswith("CUE\t") for line in body_lines):
         issues.append(f"首行必须是 {expected}")
-    if not has_trailer and any(not line.startswith("CUE\t") for line in body_lines):
+    if strict and not has_trailer and any(not line.startswith("CUE\t") for line in body_lines):
         issues.append("末行必须是 END")
     rows = [line.split("\t") for line in body_lines]
-    if not rows:
+    if strict and not rows:
         issues.append("结果没有记录")
     if issues:
         raise CueScriptError(issues)
@@ -123,73 +121,80 @@ def render_segmentation_request(request: Mapping[str, Any]) -> tuple[str, Segmen
             ))
         )
     lines.extend((
-        "OUTPUT FORMAT",
+        "RETURN",
         f"{HEADER}\tSEGMENT",
-        "CUE\tC001\tG001\tW0001-W0003\treadable source preview",
+        "CUE\tC001\tW0001",
+        "CUE\tC002\tW0002-W0004",
         "END",
-        "Return consecutive CUE rows. Word ranges must cover every OWN token exactly once. "
-        "Adjacent Cues may share a G id when they belong to one meaning group. Context words are read-only.",
     ))
     return "\n".join(lines), SegmentationLedger(words, aliases_by_index)
 
 
-def parse_segmentation(raw: str, ledger: SegmentationLedger, binding: Mapping[str, Any]) -> dict[str, Any]:
-    rows = records(raw, "SEGMENT")
+def parse_segmentation(
+    raw: str, ledger: SegmentationLedger, binding: Mapping[str, Any], *,
+    require_all: bool = True,
+) -> dict[str, Any]:
+    """Compile C/W rows; legacy five-column rows remain read-compatible."""
+    rows = records(raw, "SEGMENT", strict=require_all)
     issues: list[str] = []
     parsed: list[tuple[str, str, int, int]] = []
-    seen_cues: set[str] = set()
     expected_cue = 1
     for number, fields in enumerate(rows, start=1):
-        if len(fields) != 5 or fields[0] != "CUE":
-            issues.append(f"第 {number} 条必须是五字段 CUE 记录")
+        if len(fields) not in {3, 4, 5} or fields[0] != "CUE":
+            if require_all:
+                issues.append(f"第 {number} 条必须是三字段 CUE 记录")
             continue
-        cue, group, word_range = fields[1], fields[2], fields[3]
-        if cue != f"C{expected_cue:03d}" or cue in seen_cues:
-            issues.append(f"第 {number} 条 Cue 必须连续编号")
+        cue = f"C{expected_cue:03d}"
+        # v1 experimental output carried a G column. It is deliberately
+        # ignored here so old cached responses remain readable without letting
+        # G influence the new Cue boundary contract.
+        word_range = fields[3] if len(fields) == 5 else fields[2]
+        # C labels are presentation ordinals; W ranges carry the binding.
+        # Providers occasionally continue a global counter or decorate the
+        # ordinal with its owned range (for example C480 or C168-175-01).
+        # Canonicalize the label by row order: it has no authority over token
+        # binding, so accepting it cannot move or steal a word.
         expected_cue += 1
-        seen_cues.add(cue)
-        match = re.fullmatch(r"(W\d{4})-(W\d{4})", word_range)
-        if not match or match.group(1) not in ledger.words or match.group(2) not in ledger.words:
-            issues.append(f"{cue} 的词元范围无效")
+        match = re.fullmatch(r"(W\d{4})(?:-(W\d{4}))?", word_range)
+        first_alias = match.group(1) if match else ""
+        last_alias = (match.group(2) or first_alias) if match else ""
+        if not match or first_alias not in ledger.words or last_alias not in ledger.words:
+            if require_all:
+                issues.append(f"{cue} 的词元范围无效")
             continue
-        first = ledger.words[match.group(1)]
-        last = ledger.words[match.group(2)]
+        first = ledger.words[first_alias]
+        last = ledger.words[last_alias]
         start, end = int(first["index"]), int(last["index"])
         if start > end or not bool(first.get("owner")) or not bool(last.get("owner")):
-            issues.append(f"{cue} 使用了倒序或只读范围")
+            if require_all:
+                issues.append(f"{cue} 使用了倒序或只读范围")
             continue
-        parsed.append((cue, group, start, end))
+        parsed.append((cue, "", start, end))
     ownership = binding.get("ownership", {})
     cursor = int(ownership.get("alignment_start", -1))
     final = int(ownership.get("alignment_end", -1))
     for cue, _group, start, end in parsed:
-        if start != cursor:
+        if require_all and start != cursor:
             issues.append(f"{cue} 未从预期词元 {cursor} 开始")
         cursor = end + 1
-    if cursor != final + 1:
+    if require_all and cursor != final + 1:
         issues.append("Cue 范围没有完整覆盖 owned 词元")
     if issues:
         raise CueScriptError(issues)
     groups: list[dict[str, Any]] = []
-    for _cue, group_alias, start, end in parsed:
-        if groups and groups[-1]["alias"] == group_alias:
-            groups[-1]["alignment_end"] = end
-            groups[-1]["line_breaks_after"].append(end)
-        else:
-            groups.append({
-                "alias": group_alias,
-                "alignment_start": start,
-                "alignment_end": end,
-                "line_breaks_after": [end],
-            })
+    for _cue, _legacy_group_alias, start, end in parsed:
+        groups.append({
+            "alignment_start": start,
+            "alignment_end": end,
+            "line_breaks_after": [end],
+        })
     return {
         "schema_version": "substar.semantic-grouping-result.v1",
         "input_fingerprint": str(binding.get("input_fingerprint", "")),
         "block_id": str(binding.get("block_id", "")),
         "ownership": dict(binding.get("ownership", {})),
         "meaning_groups": [
-            {key: value for key, value in group.items() if key != "alias"}
-            for group in groups
+            dict(group) for group in groups
         ],
         "exceptions": [],
     }
@@ -204,6 +209,7 @@ class CueLedger:
 
 def render_cue_request(
     cues: Iterable[Mapping[str, Any]], *, task: str, instructions: str,
+    repair_feedback: Mapping[str, Any] | None = None,
 ) -> tuple[str, CueLedger]:
     rows = [dict(cue) for cue in cues]
     by_alias, by_id = alias_rows(rows, "C")
@@ -213,11 +219,28 @@ def render_cue_request(
         tokens = cue.get("tokens") if isinstance(cue.get("tokens"), list) else []
         source = str(cue.get("source_text") or " ".join(str(token.get("text", "")) for token in tokens)).strip()
         lines.append("\t".join((
+            "SRC",
             alias,
             "OWN" if alias in editable else "CONTEXT",
             source.replace("\t", " ").replace("\n", " "),
         )))
-    lines.extend(("OUTPUT FORMAT", f"{HEADER}\t{task.upper()}", "CUE\tC001\ttext", "END", instructions))
+    if repair_feedback:
+        issues = repair_feedback.get("program_validation_errors", [])
+        lines.extend(("", "PROGRAM VALIDATION"))
+        for issue in issues if isinstance(issues, list) else []:
+            if not isinstance(issue, Mapping):
+                continue
+            cue_id = str(issue.get("cue_id") or "")
+            alias = by_id.get(cue_id, str(issue.get("alias") or ""))
+            lines.append("\t".join((
+                "ERROR", alias or "BLOCK",
+                str(issue.get("code") or "invalid_output"),
+                str(issue.get("detail") or "").replace("\t", " ").replace("\n", " "),
+            )))
+        lines.append(
+            "PATCH RULE\tReturn only OWN aliases. CONTEXT aliases and accepted edits are frozen."
+        )
+    lines.extend(("RETURN", f"{HEADER}\t{task.upper()}", "CUE\tC001\ttext", "END"))
     return "\n".join(lines), CueLedger(by_alias, by_id, editable)
 
 
@@ -256,92 +279,385 @@ def parse_cue_text(raw: str, task: str, ledger: CueLedger, *, require_all: bool 
     return result
 
 
+def parse_cue_text_candidate(
+    raw: str, task: str, ledger: CueLedger,
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Salvage unambiguous C rows and report only the local repair scope."""
+    rows = records(raw, task, strict=False)
+    result: dict[str, str] = {}
+    issues: list[dict[str, Any]] = []
+    for _number, fields in enumerate(rows, start=1):
+        # The alias is the binding authority. A provider omitting only the
+        # redundant CUE record tag is therefore a harmless surface variation:
+        # both `CUE<TAB>C001<TAB>text` and `C001<TAB>text` are unambiguous.
+        if len(fields) >= 3 and fields[0] == "CUE":
+            alias, value = fields[1], " ".join(fields[2:]).strip()
+        elif len(fields) >= 2 and re.fullmatch(r"C\d{3}", fields[0]):
+            alias, value = fields[0], " ".join(fields[1:]).strip()
+        else:
+            continue
+        if alias in ledger.cues and alias not in ledger.editable_aliases:
+            continue
+        if alias not in ledger.editable_aliases or alias in result or not value:
+            continue
+        result[alias] = value
+    for alias in ledger.editable_aliases:
+        if alias not in result:
+            cue = ledger.cues[alias]
+            issues.append({
+                "code": "missing_cue_text",
+                "alias": alias,
+                "cue_id": str(cue.get("cue_id") or ""),
+                "detail": f"{alias} 缺少可绑定的完整校准文本",
+            })
+    return result, issues
+
+
 def render_translation_request(
     groups: Iterable[Mapping[str, Any]], *, mapping_mode: str,
 ) -> tuple[str, CueLedger]:
-    """Render model-friendly local aliases while retaining group context."""
+    """Render one block-wide C namespace without exposing internal groups."""
     cues: list[dict[str, Any]] = []
-    for group_number, group in enumerate(groups, start=1):
-        group_alias = f"G{group_number:03d}"
+    for group in groups:
         for cue in group.get("cues", []):
             if isinstance(cue, Mapping):
-                cues.append({**dict(cue), "local_group_alias": group_alias, "editable": True})
-    by_alias, by_id = alias_rows(cues, "C")
+                cues.append({**dict(cue), "editable": bool(cue.get("editable", True))})
+    for cue_number, cue in enumerate(cues, start=1):
+        cue["local_alias"] = f"C{cue_number:03d}"
+    by_alias = {str(cue["local_alias"]): cue for cue in cues}
+    by_id = {str(cue["cue_id"]): str(cue["local_alias"]) for cue in cues}
     lines = [
         "TASK\tTRANSLATE",
         f"MAPPING_MODE\t{mapping_mode}",
-        "CUES",
     ]
+    limit_profiles = {
+        (
+            int(cue.get("hard_limit") or 0),
+            str(cue.get("count_rule") or "all_characters_including_spaces"),
+        )
+        for cue in by_alias.values() if int(cue.get("hard_limit") or 0) > 0
+    }
+    if len(limit_profiles) == 1:
+        limit, count_rule = next(iter(limit_profiles))
+        lines.extend((
+            f"TARGET_LIMIT\t{limit}",
+            f"COUNT_RULE\t{count_rule}",
+        ))
+    elif limit_profiles:
+        lines.append("TARGET_LIMITS")
+        for alias, cue in by_alias.items():
+            lines.append("\t".join((
+                "LIMIT", alias, str(int(cue.get("hard_limit") or 0)),
+                str(cue.get("count_rule") or "all_characters_including_spaces"),
+            )))
+    lines.append("CUES")
+    editable = tuple(
+        alias for alias, cue in by_alias.items() if bool(cue.get("editable", True))
+    )
     for alias, cue in by_alias.items():
         lines.append("\t".join((
             alias,
-            str(cue["local_group_alias"]),
-            "OWN",
+            "OWN" if alias in editable else "CONTEXT",
             str(cue.get("source_text", "")).replace("\t", " ").replace("\n", " "),
         )))
-    lines.extend((
-        "OUTPUT FORMAT",
-        f"{HEADER}\tTRANSLATE",
-        "CUE\tC001\ttarget-language text",
-        "END",
-        "Return every OWN Cue exactly once; use its local alias unchanged.",
-    ))
-    return "\n".join(lines), CueLedger(
-        by_alias, by_id, tuple(by_alias)
+    repair_issues = [
+        issue
+        for group in groups
+        for issue in (
+            group.get("program_validation_errors", [])
+            if isinstance(group.get("program_validation_errors"), list) else []
+        )
+        if isinstance(issue, Mapping)
+    ]
+    if repair_issues or len(editable) != len(by_alias):
+        lines.extend(("", "PROGRAM VALIDATION"))
+        for issue in repair_issues:
+            raw_ids = issue.get("cue_ids")
+            cue_ids = (
+                [str(value) for value in raw_ids]
+                if isinstance(raw_ids, list)
+                else [str(issue.get("cue_id") or "")]
+            )
+            aliases = [by_id[cue_id] for cue_id in cue_ids if cue_id in by_id]
+            code = str(issue.get("code") or "invalid_output")
+            rendered_code = code
+            if code == "target_over_limit":
+                rendered_code = "TARGET_OVER_LIMIT"
+                detail = " ".join((
+                    f"ACTUAL={issue.get('count', '')}",
+                    f"REQUIRED_MAX={issue.get('limit', '')}",
+                    "ACTION=shorten_or_split",
+                    "REJECTED=" + str(issue.get("target_text") or ""),
+                ))
+            else:
+                detail = str(issue.get("detail") or "")
+            lines.append("\t".join((
+                "ERROR", "+".join(aliases) or "BLOCK", rendered_code,
+                detail.replace("\t", " ").replace("\n", " "),
+            )))
+        lines.append(
+            "PATCH RULE\tReturn every OWN alias exactly once. Do not return CONTEXT aliases or repeat frozen text."
+        )
+    example = (
+        "C001+C002\tshared target-language subtitle text"
+        if mapping_mode == "many_to_many"
+        else "C001\ttarget-language text"
     )
+    lines.extend((
+        "RETURN",
+        example,
+    ))
+    return "\n".join(lines), CueLedger(by_alias, by_id, editable)
+
+
+def compile_translation_units(
+    groups: Iterable[Mapping[str, Any]], units: Iterable[Mapping[str, Any]], *,
+    mapping_mode: str,
+) -> dict[str, Any]:
+    """Compile frozen Cue-owned text units into the legacy delivery contract."""
+    normalized: list[dict[str, Any]] = []
+    cue_to_unit: dict[str, int] = {}
+    for raw in units:
+        cue_ids = [str(value) for value in raw.get("cue_ids", []) if str(value)]
+        target = str(raw.get("target_text") or "").strip()
+        if not cue_ids or not target or any(cue_id in cue_to_unit for cue_id in cue_ids):
+            continue
+        index = len(normalized)
+        normalized.append({"cue_ids": cue_ids, "target_text": target})
+        for cue_id in cue_ids:
+            cue_to_unit[cue_id] = index
+
+    results: list[dict[str, Any]] = []
+    for raw_group in groups:
+        group = dict(raw_group)
+        group_id = str(group["group_id"])
+        cues = [dict(cue) for cue in group.get("cues", [])]
+        cue_ids = [str(cue.get("cue_id") or "") for cue in cues]
+        if not cue_ids or any(cue_id not in cue_to_unit for cue_id in cue_ids):
+            continue
+        if mapping_mode == "one_to_one":
+            if len(cue_ids) != 1:
+                continue
+            results.append({
+                "group_id": group_id,
+                "cue_id": cue_ids[0],
+                "target_text": normalized[cue_to_unit[cue_ids[0]]]["target_text"],
+            })
+            continue
+        meaning_units: list[dict[str, Any]] = []
+        assignments: list[dict[str, str]] = []
+        local_unit_ids: dict[int, str] = {}
+        group_set = set(cue_ids)
+        for cue_id in cue_ids:
+            unit_index = cue_to_unit[cue_id]
+            if unit_index not in local_unit_ids:
+                unit_id = f"unit_{len(meaning_units) + 1}"
+                local_unit_ids[unit_index] = unit_id
+                unit = normalized[unit_index]
+                # Old execution groups are an internal storage boundary only.
+                # If a valid wire row crosses one, retain the shared target but
+                # expose only evidence owned by this canonical group.
+                evidence = [value for value in unit["cue_ids"] if value in group_set]
+                meaning_units.append({
+                    "meaning_unit_id": unit_id,
+                    "target_text": unit["target_text"],
+                    "source_evidence_cue_ids": evidence,
+                })
+            assignments.append({
+                "cue_id": cue_id,
+                "meaning_unit_id": local_unit_ids[unit_index],
+            })
+        results.append({
+            "group_id": group_id,
+            "meaning_units": meaning_units,
+            "cue_assignments": assignments,
+        })
+    return {"group_results": results}
 
 
 def finalize_translation(
     raw: str, groups: Iterable[Mapping[str, Any]], ledger: CueLedger,
     *, mapping_mode: str,
 ) -> dict[str, Any]:
-    """Compile full-Cue text into the existing frozen translation contract."""
-    targets = parse_cue_text(raw, "TRANSLATE", ledger, require_all=False)
-    by_cue_id = {
-        str(cue.get("cue_id")): targets[alias]
-        for alias, cue in ledger.cues.items()
-        if alias in targets
-    }
-    results: list[dict[str, Any]] = []
-    for group in groups:
-        group_id = str(group["group_id"])
-        cues = [dict(cue) for cue in group.get("cues", [])]
-        if any(str(cue.get("cue_id")) not in by_cue_id for cue in cues):
-            # Return a partial canonical response. Existing delivery logic will
-            # repair only these groups while preserving every valid Cue.
+    """Compile explicit alias mappings into the frozen translation contract."""
+    lines = _body(raw)
+    all_alias_order = {alias: index for index, alias in enumerate(ledger.cues)}
+    editable = set(ledger.editable_aliases)
+    alias_pattern = r"C\d{3}"
+    parsed_units: list[tuple[tuple[str, ...], str]] = []
+    seen: set[str] = set()
+    warnings: list[dict[str, Any]] = []
+    for number, line in enumerate(lines, start=1):
+        value = re.sub(r"^\s*[-*]\s+", "", line.strip())
+        value = re.sub(r"<TAB>", "\t", value, flags=re.IGNORECASE)
+        previous = None
+        while previous != value:
+            previous = value
+            value = re.sub(
+                r"(C\d{3}(?:\s*\+\s*C\d{3})*)\s*\+\s*(\d{3})(?=\D|$)",
+                r"\1+C\2", value,
+            )
+        tab_parts = [part.strip() for part in value.split("\t")]
+        leading_aliases: list[str] = []
+        leading_fields = 0
+        for part in tab_parts[:-1]:
+            if re.fullmatch(rf"{alias_pattern}(?:\s*\+\s*{alias_pattern})*", part):
+                leading_aliases.extend(
+                    alias.strip() for alias in part.split("+")
+                )
+                leading_fields += 1
+            else:
+                break
+        if (
+            mapping_mode == "many_to_many"
+            and len(leading_aliases) >= 2
+            and len(set(leading_aliases)) == len(leading_aliases)
+        ):
+            # Some providers spell a join as C001<TAB>C002<TAB>text. The
+            # fixed aliases and trailing free-text field make this equivalent
+            # to C001+C002<TAB>text without guessing any binding.
+            value = "+".join(leading_aliases) + "\t" + "\t".join(
+                tab_parts[leading_fields:]
+            )
+        match = re.fullmatch(
+            # C aliases have a fixed, closed grammar, so a provider dropping
+            # only the separator is still unambiguous (for example
+            # ``C001译文``). Salvage that row instead of spending a repair
+            # request on typography. Alias joins still require an explicit +.
+            rf"({alias_pattern}(?:\s*\+\s*{alias_pattern})*)(?:\t+| +)?(.+)",
+            value,
+        )
+        if not match:
+            # Primary execution may still salvage every complete group whose
+            # rows are valid. A malformed row can never acquire a binding.
             continue
-        if mapping_mode == "one_to_one":
-            cue_id = str(cues[0]["cue_id"])
-            results.append({
-                "group_id": group_id,
-                "cue_id": cue_id,
-                "target_text": by_cue_id[cue_id],
+        aliases = tuple(part.strip() for part in match.group(1).split("+"))
+        text = match.group(2).strip()
+        alias_echo = re.match(
+            rf"^({alias_pattern}(?:\s*\+\s*{alias_pattern})*)\t+(.+)$", text
+        )
+        if alias_echo and re.sub(r"\s+", "", alias_echo.group(1)) == re.sub(
+            r"\s+", "", match.group(1)
+        ):
+            text = alias_echo.group(2).strip()
+        if text.upper().startswith("TAB\t"):
+            text = text[4:].strip()
+        cleaned = re.sub(r"^(?:<[^>\n]+>\s*)+", "", text).strip()
+        if cleaned:
+            text = cleaned
+        if not text:
+            continue
+        if mapping_mode == "one_to_one" and len(aliases) != 1:
+            warnings.append({"code": "joined_alias_in_one_to_one", "line": number})
+            continue
+        if any(alias not in all_alias_order for alias in aliases):
+            warnings.append({"code": "unknown_alias", "line": number})
+            continue
+        if all(alias not in editable for alias in aliases):
+            # Models occasionally echo read-only context. It cannot overwrite
+            # frozen data and does not justify another repair request.
+            continue
+        if any(alias not in editable for alias in aliases):
+            ignored = [alias for alias in aliases if alias not in editable]
+            aliases = tuple(alias for alias in aliases if alias in editable)
+            warnings.append({
+                "code": "context_aliases_ignored", "line": number,
+                "aliases": ignored,
+            })
+        duplicate = [alias for alias in aliases if alias in seen]
+        if duplicate:
+            warnings.append({
+                "code": "duplicate_alias_ignored", "line": number,
+                "aliases": duplicate,
             })
             continue
-        units: list[dict[str, Any]] = []
-        assignments: list[dict[str, str]] = []
-        for cue in cues:
-            cue_id = str(cue["cue_id"])
-            target = by_cue_id[cue_id]
-            # Reusing an identical adjacent translation is the explicit,
-            # deterministic representation of a many-to-many persistent unit.
-            if units and units[-1]["target_text"] == target:
-                units[-1]["source_evidence_cue_ids"].append(cue_id)
-                unit_id = str(units[-1]["meaning_unit_id"])
+        positions = [all_alias_order[alias] for alias in aliases]
+        if positions != list(range(positions[0], positions[0] + len(positions))):
+            warnings.append({"code": "non_consecutive_aliases", "line": number})
+            continue
+        seen.update(aliases)
+        parsed_units.append((aliases, text))
+    missing_aliases = [alias for alias in ledger.editable_aliases if alias not in seen]
+    if (
+        mapping_mode == "one_to_one"
+        and missing_aliases
+        and len(ledger.editable_aliases) == len(ledger.cues)
+    ):
+        # One-to-one output order is frozen by the contract. If a provider
+        # returns exactly one non-empty row per OWN Cue but drops or repeats
+        # only the local labels, recover the labels deterministically. Do not
+        # use this for repair requests with CONTEXT Cues or for many-to-many,
+        # where row count is intentionally not fixed.
+        positional: list[tuple[tuple[str, ...], str]] = []
+        explicit: list[str | None] = []
+        unusable = False
+        for line in lines:
+            value = re.sub(r"^\s*[-*]\s+", "", line.strip())
+            value = re.sub(r"<TAB>", "\t", value, flags=re.IGNORECASE)
+            if (
+                not value
+                or value in {"END", "结束"}
+                or value.startswith((HEADER, "TASK\t", "RETURN", "CUES"))
+                or value[0] in "{}[]"
+                or re.fullmatch(alias_pattern, value)
+            ):
+                unusable = True
+                break
+            match = re.fullmatch(rf"({alias_pattern})(?:\t+| +)(.+)", value)
+            if match:
+                alias, text = match.group(1), match.group(2).strip()
             else:
-                unit_id = f"unit_{len(units) + 1}"
-                units.append({
-                    "meaning_unit_id": unit_id,
-                    "target_text": target,
-                    "source_evidence_cue_ids": [cue_id],
+                alias, text = None, value.strip()
+            if not text or re.fullmatch(rf"{alias_pattern}(?:\s*\+\s*{alias_pattern})+.*", value):
+                unusable = True
+                break
+            explicit.append(alias)
+            positional.append(((), text))
+        expected = list(ledger.editable_aliases)
+        if not unusable and len(positional) == len(expected):
+            counts = {
+                alias: explicit.count(alias) for alias in set(explicit) if alias is not None
+            }
+            contradicted = any(
+                alias is not None
+                and counts.get(alias, 0) == 1
+                and alias in editable
+                and alias != expected[index]
+                for index, alias in enumerate(explicit)
+            )
+            if not contradicted:
+                parsed_units = [
+                    ((alias,), positional[index][1])
+                    for index, alias in enumerate(expected)
+                ]
+                seen = set(expected)
+                missing_aliases = []
+                warnings.append({
+                    "code": "positional_aliases_restored",
+                    "row_count": len(expected),
                 })
-            assignments.append({"cue_id": cue_id, "meaning_unit_id": unit_id})
-        results.append({
-            "group_id": group_id,
-            "meaning_units": units,
-            "cue_assignments": assignments,
-        })
-    return {"group_results": results}
+    wire_units = [{
+        "cue_ids": [str(ledger.cues[alias].get("cue_id") or "") for alias in aliases],
+        "target_text": text,
+    } for aliases, text in parsed_units]
+    missing_aliases = [alias for alias in ledger.editable_aliases if alias not in seen]
+    issues = [{
+        "code": "missing_cue_translation",
+        "alias": alias,
+        "cue_id": str(ledger.cues[alias].get("cue_id") or ""),
+        "detail": f"{alias} 缺少可绑定的非空译文",
+    } for alias in missing_aliases]
+    compiled = compile_translation_units(groups, wire_units, mapping_mode=mapping_mode)
+    return {
+        **compiled,
+        "_wire_units": wire_units,
+        "_covered_cue_ids": [
+            str(ledger.cues[alias].get("cue_id") or "")
+            for alias in ledger.editable_aliases if alias in seen
+        ],
+        "_cue_script_issues": issues,
+        "_cue_script_warnings": warnings,
+    }
 
 
 def _calibration_action(
@@ -411,13 +727,16 @@ def _align_calibration(old: list[str], new: list[str]) -> list[tuple[int, int, i
     return result
 
 
-def finalize_calibration(raw: str, ledger: CueLedger) -> dict[str, Any]:
-    """Compile full corrected Cue text to validated actions bound to real token IDs."""
-    corrected = parse_cue_text(raw, "CALIBRATE", ledger)
+def _calibration_actions(
+    corrected: Mapping[str, str], ledger: CueLedger,
+) -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     sequence = 0
     for alias in ledger.editable_aliases:
+        if alias not in corrected:
+            continue
         cue = ledger.cues[alias]
+        action_prefix = str(cue.get("cue_id") or alias)
         tokens = [dict(token) for token in cue.get("tokens", [])]
         old = [str(token.get("text", "")) for token in tokens]
         new = corrected[alias].split()
@@ -431,7 +750,7 @@ def finalize_calibration(raw: str, ledger: CueLedger) -> dict[str, Any]:
                 if before_text != next_text:
                     sequence += 1
                     actions.append(_calibration_action(
-                        action_id=f"cs_{alias}_{sequence:03d}", kind="merge_span",
+                        action_id=f"cs_{action_prefix}_{sequence:03d}", kind="merge_span",
                         token_ids=token_ids, before=before_text, after=next_text,
                     ))
                 continue
@@ -443,13 +762,13 @@ def finalize_calibration(raw: str, ledger: CueLedger) -> dict[str, Any]:
                 if intermediate != before_text:
                     sequence += 1
                     actions.append(_calibration_action(
-                        action_id=f"cs_{alias}_{sequence:03d}", kind="set_case",
+                        action_id=f"cs_{action_prefix}_{sequence:03d}", kind="set_case",
                         token_ids=token_ids, before=before_text, after=intermediate,
                     ))
                 if next_text != intermediate:
                     sequence += 1
                     actions.append(_calibration_action(
-                        action_id=f"cs_{alias}_{sequence:03d}", kind="set_punctuation",
+                        action_id=f"cs_{action_prefix}_{sequence:03d}", kind="set_punctuation",
                         token_ids=token_ids, before=intermediate, after=next_text,
                     ))
             else:
@@ -462,9 +781,28 @@ def finalize_calibration(raw: str, ledger: CueLedger) -> dict[str, Any]:
                 )
                 sequence += 1
                 actions.append(_calibration_action(
-                    action_id=f"cs_{alias}_{sequence:03d}", kind="replace_token",
+                    action_id=f"cs_{action_prefix}_{sequence:03d}", kind="replace_token",
                     token_ids=token_ids, before=before_text, after=next_text,
                     confidence="medium" if safe_lexical else "low",
                     disposition="apply" if safe_lexical else "review",
                 ))
     return {"actions": actions}
+
+
+def finalize_calibration(raw: str, ledger: CueLedger) -> dict[str, Any]:
+    """Compile complete corrected Cue text to actions bound to real token IDs."""
+    return _calibration_actions(
+        parse_cue_text(raw, "CALIBRATE", ledger), ledger
+    )
+
+
+def finalize_calibration_candidate(raw: str, ledger: CueLedger) -> dict[str, Any]:
+    """Freeze valid C rows while exposing omitted Cues as repairable issues."""
+    corrected, issues = parse_cue_text_candidate(raw, "CALIBRATE", ledger)
+    return {
+        **_calibration_actions(corrected, ledger),
+        "_cue_script_issues": issues,
+        "_covered_cue_ids": [
+            str(ledger.cues[alias].get("cue_id") or "") for alias in corrected
+        ],
+    }

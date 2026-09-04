@@ -21,7 +21,7 @@ test("release keeps the non-dubbing editor tool contract", () => {
 
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
-    "editor.css":"20260904-editor-lock-1",
+    "editor.css":"20260904-nav-hover-1",
     "editor.js":"20260904-editor-lock-1",
     "editor_document.js":"20260903-delivery-1",
     "editor_timeline.js":"20260828-shortcuts-1",
@@ -30,6 +30,14 @@ test("hotfix fingerprints every changed editor asset", () => {
   for (const [asset, version] of Object.entries(fingerprints)) {
     assert.match(html, new RegExp(`${asset.replace(".", "\\.")}\\?v=${version}`));
   }
+});
+
+test("command and history actions share hover feedback", () => {
+  assert.match(css, /\.editor-command-bar button:hover:not\(:disabled\)/);
+  assert.match(css, /\.editor-command-menu:not\(\.disabled\) > summary:hover/);
+  assert.match(css, /\.editor-command-link:hover/);
+  assert.match(css, /\.cue-history-row button:hover:not\(:disabled\)/);
+  assert.match(css, /\.cue-history-row button:disabled \{[^}]*opacity: \.36;[^}]*cursor: not-allowed;/s);
 });
 
 test("smart snap and multi-token search producers match their consumers", () => {

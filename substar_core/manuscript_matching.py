@@ -6,6 +6,7 @@ import io
 import re
 import unicodedata
 import zipfile
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -581,6 +582,28 @@ def materialize_reference_script(
     matcher = difflib.SequenceMatcher(None, source_values, right, autojunk=False)
     raw_opcodes = matcher.get_opcodes()
     similarity = matcher.ratio()
+
+    # Learn only repeated, conflict-free corrections from the strongest local
+    # evidence: one source token aligned to one reference token.  This lets a
+    # manuscript consistently correct a recurring name even when one later
+    # occurrence sits inside an unequal phrase rewrite, without treating a
+    # single ambiguous rewrite as permission to overwrite ASR text.
+    consensus_candidates: dict[str, Counter[str]] = defaultdict(Counter)
+    for tag, i1, i2, j1, j2 in raw_opcodes:
+        if tag != "replace" or i2 - i1 != 1 or j2 - j1 != 1:
+            continue
+        source_value = source_values[i1]
+        reference_value = right[j1]
+        if source_value != reference_value:
+            consensus_candidates[source_value][reference_value] += 1
+    lexical_consensus: dict[str, tuple[str, int]] = {}
+    for source_value, candidates in consensus_candidates.items():
+        if len(candidates) != 1:
+            continue
+        reference_value, evidence_count = candidates.most_common(1)[0]
+        if evidence_count >= 3:
+            lexical_consensus[source_value] = (reference_value, evidence_count)
+
     changes: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
     insertions: list[dict[str, Any]] = []
@@ -593,6 +616,7 @@ def materialize_reference_script(
         reference_index: int,
         *,
         apply_lexical_change: bool,
+        consensus_evidence_count: int | None = None,
     ) -> None:
         nonlocal direct
         owner = source[source_index]
@@ -607,16 +631,18 @@ def materialize_reference_script(
         # changes as reversible reference replacements.
         should_record = before != after and (exact or apply_lexical_change)
         if should_record:
-            replacements.append(
-                {
-                    "source_index": source_index,
-                    "reference_index": reference_index,
-                    "before": before,
-                    "after": after,
-                    "lexical_match": exact,
-                    "status": "applied" if (exact or apply_lexical_change) else "suggested",
-                }
-            )
+            item = {
+                "source_index": source_index,
+                "reference_index": reference_index,
+                "before": before,
+                "after": after,
+                "lexical_match": exact,
+                "status": "applied" if (exact or apply_lexical_change) else "suggested",
+            }
+            if consensus_evidence_count is not None and not exact:
+                item["decision"] = "document_consensus"
+                item["evidence_count"] = consensus_evidence_count
+            replacements.append(item)
         elif before != after and not exact:
             replacements.append(
                 {
@@ -677,10 +703,25 @@ def materialize_reference_script(
         # fixes often form one opcode despite mapping one-to-one.
         apply_lexical_change = source_count == reference_count
         for offset in range(paired):
+            source_index = i1 + offset
+            reference_index = j1 + offset
+            consensus = lexical_consensus.get(source_values[source_index])
+            consensus_evidence_count = (
+                consensus[1]
+                if consensus is not None and consensus[0] == right[reference_index]
+                else None
+            )
             replacement(
-                i1 + offset,
-                j1 + offset,
-                apply_lexical_change=apply_lexical_change,
+                source_index,
+                reference_index,
+                apply_lexical_change=(
+                    apply_lexical_change or consensus_evidence_count is not None
+                ),
+                consensus_evidence_count=(
+                    consensus_evidence_count
+                    if not apply_lexical_change
+                    else None
+                ),
             )
         if source_count == 1 and reference_count > 1:
             # Providers keep numeric/alphanumeric runs such as "20" in one
@@ -878,6 +919,16 @@ def materialize_reference_script(
         "replacements": replacements,
         "insertions": insertions,
         "retained_source": retained_source,
+        "lexical_consensus": [
+            {
+                "source": source_value,
+                "reference": reference_value,
+                "evidence_count": evidence_count,
+            }
+            for source_value, (reference_value, evidence_count) in sorted(
+                lexical_consensus.items()
+            )
+        ],
         "tokenization": {
             "reference": reference_diagnostics,
             "source": source_diagnostics,

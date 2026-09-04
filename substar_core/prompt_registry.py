@@ -156,11 +156,29 @@ def opposite_language(source_language: str) -> str:
     return "en" if str(source_language).lower().startswith("zh") else "zh-CN"
 
 
+def calibration_variant(source_language: str) -> str:
+    """Return the dedicated calibration prompt route for one source track."""
+    normalized = normalize_source_language(source_language)
+    routes = {
+        "zh-CN": "zh",
+        "en": "en",
+        "ja": "ja",
+        "ko": "ko",
+        "mixed": "mixed",
+    }
+    if normalized not in routes:
+        raise PromptRegistryError(f"校准提示词不支持原文语言：{source_language}")
+    return routes[normalized]
+
+
 def translation_variant(source_language: str, target_language: str | None = None) -> str:
-    aliases = {"zh": "zh", "zh-cn": "zh", "en": "en", "ja": "ja", "ko": "ko"}
+    aliases = {
+        "zh": "zh", "zh-cn": "zh", "en": "en", "ja": "ja", "ko": "ko",
+        "mixed": "mixed",
+    }
     source = aliases.get(str(source_language or "en").lower())
     target = aliases.get(str(target_language or opposite_language(source_language)).lower())
-    if source and target and source != target:
+    if source and target and target != "mixed" and source != target:
         return f"{source}_to_{target}"
     return "generic"
 

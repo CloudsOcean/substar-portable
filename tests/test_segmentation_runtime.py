@@ -345,11 +345,13 @@ class SegmentationContractTests(unittest.TestCase):
             self.assertEqual(kwargs["reasoning_effort"], "low")
             self.assertTrue(kwargs["system"].startswith("primary prompt\n\n"))
             self.assertIn("SUBSTAR-CUE-SCRIPT/1", kwargs["user_text"])
-            self.assertIn("program_validation_error", kwargs["user_text"])
-            self.assertIn("Return a complete replacement Cue Script", kwargs["user_text"])
+            self.assertIn("PROGRAM VALIDATION", kwargs["user_text"])
+            self.assertIn("BASE_SHA256", kwargs["user_text"])
+            self.assertIn("ERROR\tW0001-W0002", kwargs["user_text"])
+            self.assertIn("Return all OWN ranges in one response", kwargs["user_text"])
             self.assertEqual(
                 kwargs["telemetry_metadata"]["repair_mode"],
-                "full_same_prefix_all_issues",
+                "full_block_single_patch",
             )
             return {
                 "schema_version": "substar.semantic-grouping-result.v1",
@@ -418,6 +420,95 @@ class SegmentationContractTests(unittest.TestCase):
         self.assertEqual(cuts, {10})
         self.assertEqual(exceptions, [])
 
+    def test_repair_finalizer_inserts_unambiguous_hard_limit_break(self) -> None:
+        from scripts.run_semantic_segmentation import request_semantic_grouping_block
+
+        units = [
+            AlignmentUnit(index=10, start=0.0, end=0.6, text="A" * 30),
+            AlignmentUnit(index=11, start=0.7, end=1.3, text="B" * 29),
+        ]
+
+        def repaired_response(**_kwargs):
+            return {
+                "schema_version": "substar.semantic-grouping-result.v1",
+                "input_fingerprint": hashlib.sha256(json.dumps({
+                    "core_ownership": [10, 11],
+                    "rows": [
+                        {"index": 10, "start": 0.0, "end": 0.6, "text": "A" * 30, "speaker_id": None, "owner": True},
+                        {"index": 11, "start": 0.7, "end": 1.3, "text": "B" * 29, "speaker_id": None, "owner": True},
+                    ],
+                }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "block_id": "c0001",
+                "ownership": {"alignment_start": 10, "alignment_end": 11},
+                "meaning_groups": [{
+                    "alignment_start": 10,
+                    "alignment_end": 11,
+                    "line_breaks_after": [11],
+                }],
+                "exceptions": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            args = Namespace(
+                source_language="en", hard_limit=55, repair_attempts=1,
+                output_dir=Path(temporary), sentence_boundary_policy="unpunctuated",
+                grouping_model="glm-5.3-flash", repair_model="glm-5.3-flash",
+                base_url="https://example.test", api_key="test", auth_mode="bearer",
+                timeout=30, api_telemetry=[], grouping_thinking_mode="enabled",
+                grouping_reasoning_effort="low", grouping_max_tokens=4096,
+                grouping_temperature=0.0, repair_thinking_mode="enabled",
+                repair_reasoning_effort="low", repair_max_tokens=4096,
+                repair_temperature=0.0,
+            )
+            with patch(
+                "scripts.run_semantic_segmentation.model_cue_script",
+                side_effect=repaired_response,
+            ):
+                row = request_semantic_grouping_block(
+                    units, (0, 1), 1, args, "prompt", [], cached_value={"invalid": True}
+                )
+            audit = json.loads(
+                (Path(temporary) / "semantic_grouping_repair_c0001.json").read_text("utf-8")
+            )
+
+        self.assertEqual(row[4], {10})
+        self.assertEqual(row[5], [])
+        self.assertEqual(
+            audit["scope_validation"][0]["finalizer_hard_limit_splits"][0]["line_breaks_after"],
+            [10, 11],
+        )
+
+    def test_hard_limit_finalizer_balances_equally_natural_boundaries(self) -> None:
+        from scripts.run_semantic_segmentation import _minimum_hard_limit_breaks
+
+        units = [
+            AlignmentUnit(index=0, start=0.0, end=0.2, text="short"),
+            AlignmentUnit(index=1, start=0.2, end=0.4, text="A" * 20),
+            AlignmentUnit(index=2, start=0.4, end=0.6, text="B" * 20),
+        ]
+        self.assertEqual(
+            _minimum_hard_limit_breaks(
+                units, {0: 0, 1: 1, 2: 2}, 0, 2, hard_limit=46
+            ),
+            [1, 2],
+        )
+
+    def test_hard_limit_finalizer_does_not_create_timed_orphan_row(self) -> None:
+        from scripts.run_semantic_segmentation import _minimum_hard_limit_breaks
+
+        units = [
+            AlignmentUnit(index=0, start=0.0, end=0.2, text="this is"),
+            AlignmentUnit(index=1, start=0.2, end=0.4, text="a complete"),
+            AlignmentUnit(index=2, start=0.4, end=0.6, text="thought since"),
+            AlignmentUnit(index=3, start=1.8, end=2.0, text="1980"),
+        ]
+        self.assertEqual(
+            _minimum_hard_limit_breaks(
+                units, {0: 0, 1: 1, 2: 2, 3: 3}, 0, 3, hard_limit=24
+            ),
+            [1, 3],
+        )
+
     def test_partial_model_success_is_frozen_before_repair(self) -> None:
         from scripts.run_semantic_segmentation import _salvage_semantic_groups
 
@@ -449,6 +540,70 @@ class SegmentationContractTests(unittest.TestCase):
             [(0, 0), (2, 2)],
         )
         self.assertEqual(cuts, {0})
+
+    def test_multiple_missing_scopes_share_one_full_block_repair_request(self) -> None:
+        from scripts.run_semantic_segmentation import (
+            request_semantic_grouping_block,
+            semantic_grouping_binding,
+        )
+
+        units = [
+            AlignmentUnit(index=index, start=index * 0.2, end=(index + 1) * 0.2, text=f"w{index}")
+            for index in range(5)
+        ]
+        _payload, binding = semantic_grouping_binding(
+            units, 0, 4, 1, sentence_boundary_policy="unpunctuated"
+        )
+        partial = {
+            "schema_version": "substar.semantic-grouping-result.v1",
+            **binding,
+            "meaning_groups": [
+                {"alignment_start": 0, "alignment_end": 0, "line_breaks_after": [0]},
+                {"alignment_start": 2, "alignment_end": 2, "line_breaks_after": [2]},
+                {"alignment_start": 4, "alignment_end": 4, "line_breaks_after": [4]},
+            ],
+            "exceptions": [],
+        }
+        requests = []
+
+        def repair(**kwargs):
+            requests.append(kwargs)
+            return {
+                "schema_version": "substar.semantic-grouping-result.v1",
+                **binding,
+                "meaning_groups": [
+                    {"alignment_start": 1, "alignment_end": 1, "line_breaks_after": [1]},
+                    {"alignment_start": 3, "alignment_end": 3, "line_breaks_after": [3]},
+                ],
+                "exceptions": [],
+            }
+
+        with tempfile.TemporaryDirectory() as temporary:
+            args = Namespace(
+                source_language="en", hard_limit=55, repair_attempts=1,
+                output_dir=Path(temporary), sentence_boundary_policy="unpunctuated",
+                grouping_model="model", repair_model="model",
+                base_url="https://example.test", api_key="test", auth_mode="bearer",
+                timeout=30, api_telemetry=[], grouping_thinking_mode="enabled",
+                grouping_reasoning_effort="low", grouping_max_tokens=4096,
+                grouping_temperature=0.0, repair_thinking_mode="disabled",
+                repair_reasoning_effort="low", repair_max_tokens=4096,
+                repair_temperature=0.0,
+            )
+            with patch(
+                "scripts.run_semantic_segmentation.model_cue_script", side_effect=repair
+            ):
+                row = request_semantic_grouping_block(
+                    units, (0, 4), 1, args, "prompt", [], cached_value=partial
+                )
+
+        assert len(requests) == 1
+        assert "ERROR\tW0002-W0002" in requests[0]["user_text"]
+        assert "ERROR\tW0004-W0004" in requests[0]["user_text"]
+        assert requests[0]["telemetry_metadata"]["target_ranges"] == [[1, 1], [3, 3]]
+        assert [(group["alignment_start"], group["alignment_end"]) for group in row[2]] == [
+            (0, 0), (1, 1), (2, 2), (3, 3), (4, 4),
+        ]
 
 
 class SegmentationRuntimeTests(unittest.TestCase):

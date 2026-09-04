@@ -107,5 +107,7 @@ def build_calibration_handler(projects_root: Path, application_root: Path) -> Ta
         prepare=prepare,
         handle_worker_event=progress,
         finalize=finalize,
-        resources=("worker", "provider_io", "project_write"),
+        # ProjectStore serializes the short final publication per project;
+        # cloud inference across distinct projects must remain concurrent.
+        resources=("worker", "provider_io"),
     )

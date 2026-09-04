@@ -1380,7 +1380,9 @@
     const tokenIds = match?.token_ids || [];
     state.selectedTokenIds = new Set(tokenIds);
     state.selectionAnchorTokenId = tokenIds.at(-1) || null;
-    if (match?.cue_id) selectCue(match.cue_id, true);
+    // Search is an explicit navigation command, so materialize and center the
+    // matching Cue instead of only changing the active selection and playback.
+    if (match?.cue_id) selectCue(match.cue_id, true, true);
     const status = $("#toolSearchStatus");
     if (status && match) {
       status.textContent = `${index + 1} / ${total} · ${match.kind === "target" ? "译文" : "源语"}`;
@@ -2231,7 +2233,11 @@
     const isEditingText = document.activeElement?.matches?.(
       'textarea, [contenteditable="true"], input[type="text"], input[type="search"], input[type="number"], input[type="email"], input[type="url"], input[type="password"]'
     );
-    if (scroll && cue && !isEditingText) centerCueInList(cue);
+    // Pressing Enter in the search box is still an explicit navigation action.
+    // Keep the broader guard for in-place edits, where playback-follow scrolling
+    // would otherwise pull the row away while the user is typing.
+    const searchHasFocus = document.activeElement === $("#toolSearch");
+    if (scroll && cue && (!isEditingText || searchHasFocus)) centerCueInList(cue);
   }
 
   function selectCue(cueId, seek = false, scroll = false) {
