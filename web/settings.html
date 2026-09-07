@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20260831-unsaved-nav-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20260907-clean-theme-2" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
-    <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260814-8" />
-    <script src="/assets/theme/personalization.js?v=20260814-8"></script>
+    <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260907-crisp-2" />
+    <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
   </head>
   <body>
     <header class="app-header">
@@ -27,17 +27,17 @@
       <aside class="settings-sidebar asset-sidebar">
         <div class="sidebar-title asset-sidebar-heading">
           <h1>设置</h1>
-          <p>全局默认值会用于新任务，运行中的项目仍使用自己的配置快照。</p>
+
         </div>
         <div class="category-list asset-sidebar-list" role="tablist">
-          <button class="category asset-sidebar-item active" data-panel="general" type="button"><span class="asset-sidebar-copy"><b>通用</b><small>基础、快捷键与运行资源</small></span></button>
+          <button class="category asset-sidebar-item active" data-panel="general" type="button"><span class="asset-sidebar-copy"><b>通用</b></span></button>
           <button
             class="category asset-sidebar-item"
             data-panel="api"
             type="button"
           >
             <span class="asset-sidebar-copy"
-              ><b>模型</b><small>服务商、连接与模型</small></span
+              ><b>模型</b></span
             ><i class="asset-sidebar-meta" id="apiBadge">读取中</i>
           </button>
           <button
@@ -46,7 +46,7 @@
             type="button"
           >
             <span class="asset-sidebar-copy"
-              ><b>引擎</b><small>识别、对齐与导入</small></span
+              ><b>引擎</b></span
             ><i class="asset-sidebar-meta" id="recognitionBadge">读取中</i>
           </button>
           <button
@@ -55,7 +55,7 @@
             type="button"
           >
             <span class="asset-sidebar-copy"
-              ><b>切分</b><small>长度、接缝与阶段参数</small></span
+              ><b>切分</b></span
             >
           </button>
           <button
@@ -64,17 +64,17 @@
             type="button"
           >
             <span class="asset-sidebar-copy"
-              ><b>翻译</b><small>语言、风格与质量复核</small></span
+              ><b>翻译</b></span
             >
           </button>
           <button class="category asset-sidebar-item" data-panel="audit" type="button">
-            <span class="asset-sidebar-copy"><b>审校</b><small>AI 校准参数</small></span>
+            <span class="asset-sidebar-copy"><b>审校</b></span>
           </button>
           <button class="category asset-sidebar-item" data-panel="prompts" type="button">
-            <span class="asset-sidebar-copy"><b>提示词</b><small>编辑模板与查看路由</small></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
+            <span class="asset-sidebar-copy"><b>提示词</b></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
           </button>
           <button class="category asset-sidebar-item" data-panel="personalization" type="button">
-            <span class="asset-sidebar-copy"><b>个性化</b><small>外观、颜色与动效</small></span>
+            <span class="asset-sidebar-copy"><b>个性化</b></span>
           </button>
         </div>
       </aside>
@@ -466,50 +466,37 @@
           </section>
 
           <section class="settings-panel prompt-settings-panel" data-settings-panel="prompts">
-            <div class="prompt-metrics" id="promptMetrics" aria-label="提示词规模">
-              <article><small>提示词族</small><strong>—</strong><span>注册任务</span></article>
-              <article><small>路由组合</small><strong>—</strong><span>语言与策略变体</span></article>
-              <article><small>生产组件</small><strong>—</strong><span>唯一 Markdown</span></article>
-              <article><small>核心 / 案例</small><strong>—</strong><span>规则与示例分离</span></article>
-            </div>
-            <section class="prompt-lifecycle" aria-label="提示词生效路径">
-              <div class="prompt-flow-node source"><small>唯一权威</small><b>生产注册表</b><span>版本 · 文件 · SHA-256</span></div>
-              <i class="prompt-flow-arrow">→</i>
-              <div class="prompt-flow-node route"><small>运行时路由</small><b>任务 × 语言</b><span>按顺序组合共享组件</span></div>
-              <i class="prompt-flow-arrow">→</i>
-              <div class="prompt-flow-branches">
-                <div><b>字幕切分</b><span>创建项目时冻结快照</span></div>
-                <div><b>翻译 / 校准</b><span>执行时读取当前注册表</span></div>
-              </div>
-            </section>
+            <label class="prompt-search-label" for="promptSearch">查找提示词</label>
+            <input id="promptSearch" type="search" placeholder="搜索名称、语言或路径" autocomplete="off" />
+            <div id="promptSearchResults" class="prompt-search-results" hidden></div>
+            <details class="prompt-help"><summary>修改何时生效</summary><p>字幕切分：创建项目时冻结快照；翻译与校准：执行时读取当前注册表。</p></details>
             <div class="prompt-category-tabs" id="promptCategoryTabs" role="tablist" aria-label="提示词分类"></div>
             <div class="prompt-workspace">
               <section class="prompt-family-column">
-                <div class="prompt-section-title"><div><small>ROUTES</small><h3 id="promptCategoryTitle">正在读取</h3></div><span id="promptCategorySummary">—</span></div>
+                <div class="prompt-section-title"><h3 id="promptCategoryTitle">提示词</h3><span id="promptCategorySummary" hidden></span></div>
                 <div class="prompt-family-list" id="promptFamilyList"><div class="prompt-loading">正在读取生产提示词注册表…</div></div>
               </section>
               <aside class="prompt-inspector" aria-live="polite">
                 <header><div><small id="promptInspectorKind">COMPONENT</small><h3 id="promptInspectorTitle">选择一个提示词组件</h3></div><span id="promptInspectorCount">—</span></header>
                 <div class="prompt-route-chain" id="promptRouteChain"><span>点击左侧语言路由，查看实际组合顺序。</span></div>
-                <div class="prompt-file-meta" id="promptFileMeta"></div>
-                <textarea id="promptSourceView" aria-label="提示词正文" spellcheck="false" disabled>提示词正文将在这里显示。</textarea>
+                <details class="prompt-file-details"><summary>文件详情</summary><div class="prompt-file-meta" id="promptFileMeta"></div></details>
                 <div class="prompt-editor-actions">
                   <span id="promptSaveMessage">选择组件后即可编辑。</span>
                   <button id="promptReloadButton" type="button" disabled>重新载入</button>
                   <button id="promptSaveButton" class="primary" type="button" disabled>保存提示词</button>
                 </div>
+                <textarea id="promptSourceView" aria-label="提示词正文" spellcheck="false" disabled>提示词正文将在这里显示。</textarea>
+
               </aside>
             </div>
           </section>
 
           <section class="settings-panel" data-settings-panel="personalization">
             <div class="personalization-grid">
-              <label class="field"><span>外观</span><select name="appearance_mode"><option value="dark">深色</option><option value="light">浅色</option></select><small>默认使用深色，可手动切换为浅色。</small></label>
-              <label class="field"><span>强调色</span><select name="accent_color"><option value="purple">紫色</option><option value="blue">蓝色</option><option value="cyan">青色</option><option value="green">绿色</option><option value="orange">橙色</option><option value="pink">粉色</option></select><small>用于选中状态、主按钮和重点提示。</small></label>
-              <label class="field"><span>界面材质</span><select name="surface_style"><option value="standard">标准</option><option value="glass">通透毛玻璃</option></select><small>毛玻璃会提高透明度和背景模糊。</small></label>
-              <label class="field"><span>界面密度</span><select name="ui_density"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select><small>紧凑模式会减少主要容器的间距。</small></label>
-              <label class="field"><span>动态效果</span><select name="motion_level"><option value="full">完整</option><option value="reduced">精简</option><option value="none">关闭</option></select><small>减少或关闭非必要过渡与动画。</small></label>
-              <label class="field"><span>字号</span><select name="font_scale"><option value="small">小</option><option value="standard">标准</option><option value="large">大</option></select><small>统一调整应用界面的基础字号。</small></label>
+              <label class="field"><span>外观</span><select name="appearance_mode"><option value="dark">深色</option><option value="light">浅色</option></select></label>
+              <label class="field"><span>强调色</span><select name="accent_color"><option value="purple">紫色</option><option value="blue">蓝色</option><option value="cyan">青色</option><option value="green">绿色</option><option value="orange">橙色</option><option value="pink">粉色</option></select></label>
+              <label class="field"><span>界面材质</span><select name="surface_style"><option value="standard">标准</option><option value="glass">通透毛玻璃</option></select></label>
+              <label class="field"><span>动态效果</span><select name="motion_level"><option value="full">完整</option><option value="reduced">精简</option><option value="none">关闭</option></select></label>
             </div>
             <section class="background-settings" aria-labelledby="backgroundSettingsTitle">
               <div class="background-settings-heading">
@@ -607,6 +594,6 @@
       </div>
       <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
     </dialog>
-  <script src="/assets/settings.js?v=20260831-unsaved-nav-1"></script>
+  <script src="/assets/settings.js?v=20260907-fixed-scale-1"></script>
   </body>
 </html>

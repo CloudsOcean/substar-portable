@@ -26,7 +26,8 @@ test("prompt UI renders catalog routes and lazily reads registered components", 
   assert.match(js, /promptVariantLabel/);
   assert.match(js, /prompt-route-chain/);
   assert.match(js, /\["environment", "prompts"\]\.includes\(name\)/);
-  assert.match(css, /\.prompt-lifecycle/);
+  assert.doesNotMatch(html, /class="prompt-lifecycle"/);
+  assert.match(html, /id="promptSearch"/);
   assert.match(css, /\.prompt-workspace/);
   assert.match(css, /#promptSourceView/);
 });

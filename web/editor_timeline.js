@@ -289,6 +289,7 @@
     function timelineTheme() {
       const documentRef = canvas.ownerDocument;
       return {
+        light:documentRef?.documentElement?.dataset.theme === "light",
         background:cssColor(documentRef, "--theme-timeline-bg", "#0b0e14"),
         ruler:cssColor(documentRef, "--theme-timeline-ruler", "#080a0f"),
         grid:cssColor(documentRef, "--theme-timeline-grid", "#3a4150"),
@@ -395,7 +396,7 @@
       context.fillRect(0, 0, width, 22);
       const step = visibleSpan() <= 8 ? 1 : visibleSpan() <= 30 ? 2 : visibleSpan() <= 90 ? 5 : 10;
       const first = Math.ceil(viewStart / step) * step;
-      context.font = "9px Consolas, monospace";
+      context.font = "12px Consolas, monospace";
       context.textBaseline = "top";
       for (let time = first; time <= viewEnd; time += step) {
         const x = xAt(time, width);
@@ -404,14 +405,14 @@
         context.moveTo(x, 14);
         context.lineTo(x, 22);
         context.stroke();
-        context.fillStyle = colors.outline;
+        context.fillStyle = colors.text;
         context.fillText(`${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`, x + 3, 2);
       }
     }
 
     function drawWaveform(context, width, height) {
       if (!waveform.length) return;
-      const top = 36;
+      const top = timelineTheme().light ? 66 : 36;
       const bottom = height - 10;
       const center = (top + bottom) / 2;
       const amplitude = (bottom - top) * 0.37;
@@ -508,9 +509,13 @@
           speaker_0:colors.speaker0, speaker_1:colors.speaker1,
           speaker_2:colors.speaker2, speaker_3:colors.speaker3
         };
-        context.fillStyle = speakerColors[cue.speaker]
+        context.fillStyle = (!colors.light && speakerColors[cue.speaker])
           || (cue.index % 2 ? colors.cue : colors.cueAlt);
         context.fillRect(left, top, Math.max(1, right - left), bottom - top);
+        if (colors.light) {
+          context.fillStyle = speakerColors[cue.speaker] || colors.outline;
+          context.fillRect(left + 1, top + 1, Math.max(0, right - left - 2), 3);
+        }
         context.strokeStyle = selected ? colors.selected : colors.outline;
         context.lineWidth = selected ? 2 : 1;
         context.strokeRect(left + .5, top + .5, Math.max(0, right - left - 1), bottom - top - 1);
@@ -522,7 +527,7 @@
       const colors = timelineTheme();
       const top = 28;
       context.fillStyle = colors.text;
-      context.font = "600 13px 'Segoe UI', sans-serif";
+      context.font = "500 14px 'Microsoft YaHei', 'Segoe UI', sans-serif";
       context.textBaseline = "top";
       cueRanges.forEach(cue => {
         if (cue.end < viewStart || cue.start > viewEnd) return;
@@ -541,19 +546,33 @@
         let line = "";
         words.forEach(word => {
           const candidate = line ? `${line} ${word}` : word;
-          if (line && context.measureText(candidate).width > available) {
-            lines.push(line);
-            line = word;
-          } else line = candidate;
+          if (context.measureText(candidate).width <= available) {
+            line = candidate;
+            return;
+          }
+          if (line) { lines.push(line); line = ""; }
+          // Wrap CJK and long tokens at characters instead of squeezing their glyphs.
+          for (const character of word) {
+            if (line && context.measureText(line + character).width > available) {
+              lines.push(line);
+              line = "";
+            }
+            line += character;
+          }
         });
         if (line) lines.push(line);
-        lines.slice(0, Math.max(1, Math.floor((height - top - 12) / 17))).forEach((text, index) => {
+        const maxLines = colors.light ? 2 : Math.max(1, Math.floor((height - top - 12) / 17));
+        lines.slice(0, maxLines).forEach((text, index) => {
+          if (index === maxLines - 1 && lines.length > maxLines) {
+            while (text && context.measureText(text + "…").width > available) text = text.slice(0, -1);
+            text += "…";
+          }
           context.strokeStyle = colors.labelShadow;
           context.lineWidth = 2;
           context.lineJoin = "round";
-          context.strokeText(text, left + 6, top + 6 + index * 17, available);
+          if (!colors.light) context.strokeText(text, left + 6, top + 6 + index * 17);
           context.fillStyle = colors.text;
-          context.fillText(text, left + 6, top + 6 + index * 17, available);
+          context.fillText(text, left + 6, top + 6 + index * 17);
         });
         context.lineWidth = 1;
       });
@@ -665,6 +684,7 @@
         drawStatic(context, width, height);
       }
       drawPlayhead(context, width, height);
+      options.onViewportChange?.({start:viewStart, end:viewEnd, duration});
     }
 
     const drawReasons = new Set();

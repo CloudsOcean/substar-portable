@@ -2119,7 +2119,7 @@ async def create_workbench_split_job(
         save_task_info(job_dir, job_id, {
             "display_name": (
                 "初级教程" if tutorial_case_id == "reference-script-v1"
-                else f"{Path(media_name).stem} · {recognition_profile.short_label}"
+                else Path(media_name).stem
             ),
             "language": source_language,
             "target_language_mode": target_language,
@@ -2156,7 +2156,7 @@ async def create_workbench_split_job(
         display_name=(
             "初级教程"
             if tutorial_case_id == "reference-script-v1"
-            else f"{Path(media_name).stem} · {recognition_profile.short_label}"
+            else Path(media_name).stem
         ),
         settings_overrides=overrides,
         message="等待生成字幕草稿",

@@ -71,7 +71,7 @@ body {
 .header-state {
   justify-self: end;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .header-state.saved {
   color: var(--green);
@@ -83,7 +83,7 @@ body {
   width: min(1480px, calc(100% - 40px));
   margin: 28px auto 100px;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 320px minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
@@ -102,7 +102,7 @@ body {
 }
 .library-head small,
 .content-heading small {
-  font-size: 10px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   color: var(--purple2);
   font-weight: 750;
@@ -154,7 +154,7 @@ body {
   color: white;
 }
 .filter-tabs b {
-  font-size: 10px;
+  font-size: 13px;
   margin-left: 3px;
 }
 .library-summary {
@@ -173,7 +173,7 @@ body {
 }
 .library-summary span,
 .library-note {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 .library-note {
@@ -334,13 +334,13 @@ body {
   color: #a9c9f5;
   border-radius: 999px;
   padding: 5px 9px;
-  font-size: 10px;
+  font-size: 13px;
   white-space: nowrap;
 }
 .expand-entry,
 .delete-entry {
   width: 32px;
-  height: 32px;
+  height: 38px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel2);
@@ -373,7 +373,7 @@ body {
   gap: 6px;
 }
 .field label {
-  font-size: 11px;
+  font-size: 14px;
   color: var(--muted);
 }
 .field.wide {
@@ -383,7 +383,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 14px;
   color: #c7cbd5;
 }
 .check input {
@@ -427,7 +427,7 @@ textarea {
   color: var(--purple2);
 }
 .empty-state h3 {
-  color: white;
+  color: var(--text);
   margin: 12px 0 3px;
 }
 .empty-state p {
@@ -450,7 +450,7 @@ textarea {
 }
 .save-bar span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .save-bar span.error {
   color: var(--red);
@@ -461,7 +461,7 @@ textarea {
   justify-content: space-between;
   margin: 20px 4px 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 750;
   letter-spacing: 0.12em;
 }
@@ -505,31 +505,31 @@ textarea {
   gap: 10px;
   margin-top: 7px;
   padding: 9px 11px;
-  border: 1px dashed #343b4b;
+  border: 1px dashed var(--theme-line-strong);
   border-radius: 11px;
-  background: #10131a;
-  color: #cbd0da;
+  background: var(--theme-panel);
+  color: var(--theme-text);
   text-align: left;
   cursor: pointer;
   transition: 0.16s ease;
 }
-.collection-create:hover { border-color: #6852a7; color: white; background: #171525; }
+.collection-create:hover { border-color: var(--theme-accent); color: var(--theme-text); background: var(--theme-hover); }
 .collection-create:focus { outline: none; }
 .collection-create:focus-visible { border-color: #7c63c7; box-shadow: 0 0 0 2px #7c3aed40; }
 .collection-create-icon {
   width: 30px;
-  height: 30px;
+  height: 36px;
   display: grid;
   place-items: center;
   border-radius: 9px;
-  color: #c4b5fd;
-  background: #28213d;
+  color: var(--theme-accent);
+  background: color-mix(in srgb, var(--theme-accent) 12%, var(--theme-panel));
   font-size: 18px;
 }
 .collection-create b,
 .collection-create small { display: block; }
-.collection-create b { font-size: 12px; }
-.collection-create small { margin-top: 1px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.collection-create b { font-size: 14px; }
+.collection-create small { margin-top: 1px; color: var(--muted); font-size: 13px; font-weight: 400; }
 dialog.collection-modal {
   width: min(500px, calc(100vw - 32px));
   max-width: none;
@@ -550,7 +550,7 @@ dialog.collection-modal::backdrop { background: #07080dbd; backdrop-filter: blur
   gap: 14px;
 }
 .dialog-heading h3 { margin: 1px 0 4px; font-size: 19px; letter-spacing: -0.01em; }
-.dialog-heading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.dialog-heading p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
 .dialog-icon {
   width: 46px;
   height: 46px;
@@ -565,7 +565,7 @@ dialog.collection-modal::backdrop { background: #07080dbd; backdrop-filter: blur
 .dialog-icon.danger { border-color: #633541; color: #ff91a1; background: #321c23; }
 .dialog-close {
   width: 30px;
-  height: 30px;
+  height: 36px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -576,9 +576,9 @@ dialog.collection-modal::backdrop { background: #07080dbd; backdrop-filter: blur
 }
 .dialog-close:hover { color: white; background: #242833; }
 .dialog-field { display: grid; gap: 8px; margin-top: 24px; }
-.dialog-field > span { color: #d9dce3; font-size: 12px; font-weight: 650; }
+.dialog-field > span { color: #d9dce3; font-size: 14px; font-weight: 650; }
 .dialog-field input { height: 44px; padding-inline: 13px; background: #0d1016; }
-.dialog-field small { min-height: 16px; color: var(--red); font-size: 11px; }
+.dialog-field small { min-height: 16px; color: var(--red); font-size: 14px; }
 .dialog-note {
   display: flex;
   align-items: center;
@@ -588,7 +588,7 @@ dialog.collection-modal::backdrop { background: #07080dbd; backdrop-filter: blur
   border-radius: 10px;
   color: #9da4b2;
   background: #10131a;
-  font-size: 11px;
+  font-size: 14px;
 }
 .dialog-note .ui-icon { width: 16px; height: 16px; flex: 0 0 auto; color: #a78bfa; }
 .dialog-note.danger-note { margin-top: 22px; border-color: #4a2932; color: #dba7af; background: #21151a; }

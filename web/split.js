@@ -105,7 +105,7 @@
       || (state.activeQueueCount === 0 && !quickStartConfigured());
     $("#quickStartPanel").classList.toggle("hidden", !showQuickStart);
     $("#pipelinePanel").classList.toggle("hidden", showQuickStart);
-    $("#creationTutorialActions").classList.toggle("hidden", showQuickStart);
+    syncTutorialEntry();
     $("#pipelineTitle").textContent = showQuickStart ? "快速开始" : "流水线作业";
     const statusPill = $("#statusPill");
     if (showQuickStart) {
@@ -589,8 +589,22 @@
     syncPrimaryPanel();
   }
 
+  function syncTutorialEntry() {
+    const unseen = !localStorage.getItem(TUTORIAL_STATUS_KEY);
+    const muted = localStorage.getItem("substar.split.tutorial.pulse-dismissed") === "1";
+    $("#creationTutorialActions").classList.toggle("tutorial-pulse", unseen && !muted);
+    $("#dismissTutorialPulse").hidden = !unseen || muted;
+  }
+
+  function markTutorialStarted() {
+    if (!localStorage.getItem(TUTORIAL_STATUS_KEY)) localStorage.setItem(TUTORIAL_STATUS_KEY, "started");
+    $("#creationTutorialActions").open = false;
+    syncTutorialEntry();
+  }
+
   function startSplitTutorial() {
     if (!state.settings) return toast("正在读取配置，请稍候再开始教程");
+    markTutorialStarted();
     state.tutorial.snapshot = tutorialSnapshot();
     state.tutorial.active = true;
     state.tutorial.kind = "beginner";
@@ -616,6 +630,7 @@
 
   function startAdvancedSplitTutorial() {
     if (!state.settings) return toast("正在读取配置，请稍候再开始教程");
+    markTutorialStarted();
     state.tutorial.snapshot = tutorialSnapshot();
     state.tutorial.active = true;
     state.tutorial.kind = "advanced";
@@ -872,7 +887,7 @@
   }
 
   function jobLabel(job) {
-    return job.display_name || job.filename || job.id;
+    return window.SubstarProjectLabel(job.display_name || job.filename || job.id);
   }
 
   function normalizedProgress(job) {
@@ -1310,6 +1325,12 @@
     summary.textContent = "导出";
     const panel = document.createElement("div");
     panel.className = "export-menu-panel";
+    const positionPanel = () => {
+      if (!details.open || !details.closest("#recentJobs")) return;
+      const rect = summary.getBoundingClientRect();
+      panel.style.left = `${Math.max(8, Math.min(rect.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 8))}px`;
+      panel.style.top = `${Math.max(8, rect.top - panel.offsetHeight - 7)}px`;
+    };
     const renderOptions = () => {
     panel.replaceChildren();
     const translated = hasTranslation(job);
@@ -1337,6 +1358,7 @@
     renderOptions();
     let loading = false;
     details.addEventListener("toggle", async () => {
+      positionPanel();
       if (!details.open || loading || job.export_availability || job.project_only) return;
       loading = true;
       panel.textContent = "正在读取导出选项…";
@@ -1346,7 +1368,7 @@
         renderOptions();
       } catch (error) {
         panel.textContent = `读取失败，请重新打开：${errorMessage(error)}`;
-      } finally { loading = false; }
+      } finally { loading = false; positionPanel(); }
     });
     details.append(summary, panel);
     details.addEventListener("mouseenter", () => { details.open = true; });
@@ -1453,7 +1475,11 @@
 
   function renderRecent(jobs) {
     const container = $("#recentJobs");
-    const complete = jobs.filter((job) => COMPLETE_STATUSES.has(job.status)).slice(0, 8);
+    const scrollTop = container.scrollTop;
+    container.onscroll = () => {
+      container.querySelectorAll(".export-menu[open]").forEach(menu => { menu.open = false; });
+    };
+    const complete = jobs.filter((job) => COMPLETE_STATUSES.has(job.status));
     if (!complete.length) {
       container.innerHTML = '<p class="recent-empty">还没有完成的切分任务，成稿会自动移到这里。</p>';
       return;
@@ -1496,6 +1522,7 @@
       item.append(info, actions);
       return item;
     }));
+    container.scrollTop = scrollTop;
   }
 
   let projectCatalog = {projects:[]};
@@ -1689,6 +1716,17 @@
   $("#renameProjectDialog").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeRenameDialog();
   });
+  $("#dismissTutorialPulse").addEventListener("click", () => {
+    localStorage.setItem("substar.split.tutorial.pulse-dismissed", "1");
+    syncTutorialEntry();
+  });
+  document.addEventListener("click", event => {
+    if (!$("#creationTutorialActions").contains(event.target)) $("#creationTutorialActions").open = false;
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") $("#creationTutorialActions").open = false;
+  });
+  syncTutorialEntry();
   $("#creationTutorialButton").addEventListener("click", startSplitTutorial);
   $("#advancedTutorialButton").addEventListener("click", startAdvancedSplitTutorial);
   $("#quickStartTutorial").addEventListener("click", startSplitTutorial);

@@ -126,9 +126,9 @@
     root.dataset.theme = value.appearance_mode === "light" ? "light" : "dark";
     root.dataset.accent = value.accent_color || defaults.accent_color;
     root.dataset.surface = value.surface_style || defaults.surface_style;
-    root.dataset.density = value.ui_density || defaults.ui_density;
+    root.dataset.density = "comfortable";
     root.dataset.motion = value.motion_level || defaults.motion_level;
-    root.dataset.fontScale = value.font_scale || defaults.font_scale;
+    root.dataset.fontScale = "standard";
     // Canvas-based views (notably the editor timeline) cannot inherit CSS
     // colors automatically.  Give them one stable signal whenever the
     // semantic theme changes so they can redraw from the same token contract.

@@ -51,7 +51,7 @@
     searchReplaceUndo:null,
     aiChangeIndex:-1,
     referenceChangeIndex:-1,
-    fontSize:14,
+    fontSize:18,
     shortcuts:{
       undo:"Ctrl+Z", redo:"Ctrl+Y", playPause:"Space", hideCue:"Backspace", zoomModifier:"Alt"
     },
@@ -806,16 +806,16 @@
         button.classList.toggle("tutorial", Boolean(project.tutorial_case_id));
         button.setAttribute("role", "option");
         button.setAttribute("aria-selected", String(project.project_id === state.projectId));
-        button.setAttribute("aria-label", `${project.display_name || project.project_id}${project.tutorial_case_id ? "，教程案例" : project.complete ? "，完成稿" : ""}`);
-        button.textContent = project.display_name || project.project_id;
-        button.title = `${project.display_name || project.project_id}${project.complete ? " · 完成稿" : ""}`;
+        button.setAttribute("aria-label", `${window.SubstarProjectLabel(project.display_name || project.project_id)}${project.tutorial_case_id ? "，教程案例" : project.complete ? "，完成稿" : ""}`);
+        button.textContent = window.SubstarProjectLabel(project.display_name || project.project_id);
+        button.title = `${window.SubstarProjectLabel(project.display_name || project.project_id)}${project.complete ? " · 完成稿" : ""}`;
         list.append(button);
       });
   }
 
   function currentProjectBaseName() {
     const project = state.projects.find(item => item.project_id === state.projectId);
-    return project?.display_name || project?.project_id || state.projectId || "当前项目";
+    return window.SubstarProjectLabel(project?.display_name || project?.project_id || state.projectId || "当前项目");
   }
 
   function checkpointNumber(item) {
@@ -1090,7 +1090,7 @@
     if (!$("#taskInfoMenu").open || state.projectId !== projectId) return;
     state.taskInfo = info;
     await loadProjectLlmOptions().catch(error => ordinaryError(`模型列表读取失败：${error.message}`));
-    $("#taskInfoName").value = info.display_name || projectId;
+    $("#taskInfoName").value = window.SubstarProjectLabel(info.display_name || projectId);
     $("#taskInfoMediaPath").value = info.media_path || "";
     $("#taskInfoMediaPath").title = info.media_path || "";
     $("#taskInfoMediaPath").dataset.selection = "";
@@ -1942,30 +1942,6 @@
 
   function closeSpeakerDialog() { $("#speakerDialog").classList.add("hidden"); }
 
-  let cueScrollSyncFrame = 0;
-  function syncCueScrollSlider() {
-    if (cueScrollSyncFrame) return;
-    cueScrollSyncFrame = requestAnimationFrame(() => {
-      cueScrollSyncFrame = 0;
-      if ($("#cueScrollbarBottom").hidden) return;
-      const list = $("#cueList");
-      const slider = $("#cueScrollSlider");
-      const maximum = Math.max(0, list.scrollHeight - list.clientHeight);
-      slider.max = String(maximum);
-      slider.value = String(Math.min(maximum, Math.max(0, list.scrollTop)));
-      slider.disabled = maximum === 0;
-      slider.setAttribute("aria-valuetext", `${maximum ? Math.round(list.scrollTop / maximum * 100) : 0}%`);
-    });
-  }
-
-  function applyCueScrollbarPosition(position) {
-    const bottom = position === "bottom";
-    $("#cueScrollbarPosition").value = bottom ? "bottom" : "right";
-    $(".editor-document-pane").classList.toggle("cue-scrollbar-bottom-mode", bottom);
-    $("#cueScrollbarBottom").hidden = !bottom;
-    syncCueScrollSlider();
-  }
-
   function renderCues({preservePage = false} = {}) {
     const list = $("#cueList");
     if (!state.view) {
@@ -2074,11 +2050,14 @@
     if (type === "replace") {
       status = token.text === after ? "已采用" : token.text === before ? "保留听写结果" : "已手动修改";
     } else if (type === "insert") {
-      status = token.state === "deleted" ? "未采用" : "已采用";
+      status = token.state === "deleted" ? "默认隐藏，可恢复" : "已采用";
     } else {
       status = "已保留";
     }
     $("#referenceSelectionType").textContent = labels[type] || "参考稿差异";
+    if (type === "insert" && ["ambiguous_reference", "existing_cue_boundary"].includes(change.reason)) {
+      $("#referenceSelectionType").textContent = "待确认参考文字";
+    }
     $("#referenceSelectionStatus").textContent = status;
     $("#referenceSelectionBefore").textContent = before || "（无）";
     $("#referenceSelectionAfter").textContent = after || "（参考稿未包含）";
@@ -3093,7 +3072,7 @@
         });
       }
       const similarity = Number(result.match?.similarity || 0);
-      if (result.match?.requires_review) ordinaryError("参考稿匹配置信度较低，请复核已标记的差异；未匹配的听写内容已保留。");
+      if (result.match?.requires_review) ordinaryError("参考稿有局部待确认内容，请复核标记；未确定对应的参考文字已默认隐藏。");
       renderWorkbenchTask(
         "参考文稿", 100,
         `已匹配并标记 ${result.applied || 0} 个词元 · 相似度 ${(similarity * 100).toFixed(1)}%`,
@@ -3218,6 +3197,15 @@
     state.timelineController?.destroy?.();
     state.waveformCache = window.EditorWaveformCache?.createWaveformCache?.({limit:16}) || null;
     state.timelineController = factory.createTimelineController({
+      onViewportChange({start, end, duration}) {
+        const slider = $("#timelineScrollSlider");
+        const halfSpan = Math.min(duration, end - start) / 2;
+        slider.min = String(halfSpan);
+        slider.max = String(Math.max(halfSpan, duration - halfSpan));
+        slider.value = String((start + end) / 2);
+        slider.disabled = duration <= end - start;
+        slider.setAttribute("aria-valuetext", `${((start + end) / 2).toFixed(1)} 秒`);
+      },
       canvas,
       media:activeMedia(),
       keyboardTarget:document,
@@ -3446,7 +3434,6 @@
     }
     ordinaryError("");
     state.projectId = projectId;
-    applyCueScrollbarPosition(localStorage.getItem(`substar.editor.cue-scrollbar-position:${projectId}`) || "right");
     state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
     if ($("#cueSplitView")) $("#cueSplitView").value = state.cueSplitView;
     renderProjectList();
@@ -3474,10 +3461,6 @@
       const aiTaskReady = refreshEditorAiTask();
       if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
-      const referenceAudit = [...state.revision.document.changes].reverse().find(change => change.metadata?.authority);
-      if (referenceAudit?.metadata?.requires_review) ordinaryError(referenceAudit.metadata.authority === "reference_strict"
-        ? "参考稿与听写匹配置信度较低。本项目以参考稿文字为主，时间为匹配估算，请复核。"
-        : "参考稿匹配置信度较低，已保留听写中未匹配内容，请复核差异。");
       loadRevisionHistory().catch(() => {});
       ensureOperationQueue();
       state.mediaLoadAttempts = 0;
@@ -4203,7 +4186,7 @@
         const sequence = nextExportSequence();
         const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
         const spec = systemSaveAs.exchangeSpec(
-          state.taskInfo?.display_name || state.projectId,
+          window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
           exchange.dataset.exchangeExport,
           sequence.value,
           projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`)
@@ -4231,7 +4214,7 @@
       const sequence = nextExportSequence();
       const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
       const spec = systemSaveAs.subtitleSpec(
-        state.taskInfo?.display_name || state.projectId,
+        window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
         button.dataset.exportMode,
         sequence.value,
         projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`)
@@ -4361,15 +4344,9 @@
   };
   $("#forwardSnapPreRoll").oninput = selectSmartForwardSnap;
   $("#forwardSnapSensitivity").oninput = selectSmartForwardSnap;
-  $("#cueScrollbarPosition").onchange = event => {
-    const position = event.target.value === "bottom" ? "bottom" : "right";
-    applyCueScrollbarPosition(position);
-    if (state.projectId) localStorage.setItem(`substar.editor.cue-scrollbar-position:${state.projectId}`, position);
+  $("#timelineScrollSlider").oninput = event => {
+    state.timelineController?.revealTime(Number(event.target.value), true);
   };
-  $("#cueScrollSlider").oninput = event => {
-    $("#cueList").scrollTop = Number(event.target.value);
-  };
-  new ResizeObserver(syncCueScrollSlider).observe($("#cueList"));
   $("#cueSplitView").onchange = event => {
     state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
     if (state.projectId) {
@@ -4559,13 +4536,19 @@
       additive:event.ctrlKey || event.metaKey
     };
   });
+  $("#cueList").addEventListener("wheel", event => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || !event.deltaY) return;
+    const list = event.currentTarget;
+    const lineHeight = parseFloat(getComputedStyle(list).lineHeight) || 16;
+    const unit = event.deltaMode === 1 ? lineHeight : event.deltaMode === 2 ? list.clientHeight : 1;
+    event.preventDefault();
+    list.scrollTop += event.deltaY * unit / 3;
+  }, {passive:false});
   $("#cueList").addEventListener("scroll", () => {
-    syncCueScrollSlider();
     positionSelectionMenus();
     positionEditorTutorial();
   }, {passive:true});
   new MutationObserver(() => {
-    syncCueScrollSlider();
     positionEditorTutorial();
   }).observe($("#cueList"), {
     childList:true, subtree:true

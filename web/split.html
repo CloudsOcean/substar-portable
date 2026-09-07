@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260904-asr-stage-2">
+  <link rel="stylesheet" href="/assets/split.css?v=20260907-crisp-2">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
-  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
-  <script src="/assets/theme/personalization.js?v=20260814-8"></script>
+  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260907-crisp-2">
+  <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
 </head>
 <body>
   <header class="app-bar app-header">
@@ -28,20 +28,19 @@
   </header>
 
   <main class="page-shell">
-    <section class="hero">
-      <div>
-        <h1>生成一份可以立即编辑的切分稿</h1>
-      </div>
-    </section>
 
     <div class="workspace-grid">
       <section class="creation-card" aria-labelledby="createTitle">
         <div class="section-heading">
           <div><span class="step-number">01</span><h2 id="createTitle">任务配置</h2></div>
-          <div id="creationTutorialActions" class="creation-tutorial-actions hidden">
-            <button id="creationTutorialButton" class="creation-tutorial-button" type="button">启动初级教程</button>
-            <button id="advancedTutorialButton" class="creation-tutorial-button advanced" type="button">启动进阶教程</button>
-          </div>
+          <details id="creationTutorialActions" class="creation-tutorial-actions">
+            <summary class="creation-tutorial-button">启动教程</summary>
+            <div class="creation-tutorial-menu">
+              <button id="creationTutorialButton" type="button">基础教程</button>
+              <button id="advancedTutorialButton" type="button">进阶教程</button>
+              <button id="dismissTutorialPulse" type="button">关闭闪烁</button>
+            </div>
+          </details>
         </div>
 
         <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
@@ -236,6 +235,7 @@
     </form>
   </div>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2" defer></script>
-  <script src="/assets/split.js?v=20260904-asr-stage-2" defer></script>
+  <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
+<script src="/assets/split.js?v=20260907-crisp-2" defer></script>
 </body>
 </html>

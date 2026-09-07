@@ -51,10 +51,8 @@ html[data-accent="green"] { --v2-purple: var(--op-green-6); --v2-purple-soft: #6
 html[data-accent="orange"] { --v2-purple: var(--op-orange-6); --v2-purple-soft: #ffa94d; }
 html[data-accent="pink"] { --v2-purple: var(--op-pink-6); --v2-purple-soft: #f783ac; }
 
-html[data-surface="glass"] { --theme-surface-alpha: .72; --theme-surface-mix: 72%; --theme-blur: 26px; }
-html[data-density="compact"] { --theme-density-scale: .82; }
-html[data-font-scale="small"] { --theme-font-size: 94%; --theme-font-factor: .94; }
-html[data-font-scale="large"] { --theme-font-size: 108%; --theme-font-factor: 1.08; }
+html[data-surface="glass"] { --theme-surface-alpha: .82; --theme-surface-mix: 82%; --theme-blur: 18px; }
+html[data-surface="glass"][data-theme="light"] { --theme-surface-alpha: .90; --theme-surface-mix: 90%; }
 html[data-motion="reduced"] { --theme-duration: .08s; }
 html[data-motion="none"] { --theme-duration: 0s; }
 html[data-motion="none"] *, html[data-motion="none"] *::before, html[data-motion="none"] *::after {
@@ -84,23 +82,6 @@ html { font-size: var(--theme-font-size); }
   --v2-purple: var(--theme-accent);
   --v2-purple-soft: color-mix(in srgb, var(--theme-accent) 19%, transparent);
 }
-
-/* Existing screens use many explicit pixel sizes. Zooming the application shell is
-   the only reliable way to make the font preference visibly affect all of them,
-   including editor controls, while keeping their internal proportions intact. */
-html[data-font-scale="small"] body {
-  zoom: .94;
-}
-html[data-font-scale="large"] body {
-  zoom: 1.08;
-}
-/* The editor is a fixed-height three-pane workspace. Let its own viewport math
-   remain untouched; scale its type and controls without zooming the entire grid. */
-html[data-font-scale="small"] body.editor-shell,
-html[data-font-scale="large"] body.editor-shell { zoom: 1; }
-html[data-font-scale="small"] body.editor-shell :is(button, input, select, textarea, label, p, span, strong, small) { font-size: .94em; }
-html[data-font-scale="large"] body.editor-shell :is(button, input, select, textarea, label, p, span, strong, small) { font-size: 1.08em; }
-html[data-font-scale="large"] body.editor-shell :is(button, input, select, textarea) { min-height: 1.08em; }
 
 /* Accent ownership: buttons, selected navigation, focused fields and active rows
    all derive from the selected accent instead of the original hard-coded purple. */
@@ -157,86 +138,6 @@ input[type="range"], input[type="checkbox"], input[type="radio"] { accent-color:
 .toggle-label input:checked + i,
 .enable-toggle input:checked + span { background: var(--theme-accent) !important; }
 .brand-mark { color: var(--theme-accent) !important; filter: drop-shadow(0 0 10px color-mix(in srgb, var(--theme-accent) 48%, transparent)) !important; }
-
-/* Glass needs something behind translucent panels. These fixed radial lights are
-   deliberately subtle in dark mode and remain visible beneath every page shell. */
-html[data-surface="glass"][data-theme] body {
-  background:
-    radial-gradient(circle at 13% 8%, color-mix(in srgb, var(--theme-accent) 20%, transparent) 0, transparent 29rem),
-    radial-gradient(circle at 88% 22%, color-mix(in srgb, var(--theme-blue) 13%, transparent) 0, transparent 34rem),
-    radial-gradient(circle at 55% 92%, color-mix(in srgb, var(--theme-accent-soft) 10%, transparent) 0, transparent 32rem),
-    var(--theme-bg) !important;
-  background-attachment: fixed !important;
-}
-
-/* Per-page artwork begins at the top edge of the document, including the
-   navigation bar. The fixed overlay keeps controls readable on bright images. */
-html[data-theme][data-has-background="true"] body {
-  background-image:
-    linear-gradient(180deg, rgb(5 8 14 / 44%) 0, rgb(5 8 14 / 70%) 34%, rgb(5 8 14 / 84%) 100%),
-    var(--theme-background-image) !important;
-  background-position: center top !important;
-  background-repeat: no-repeat !important;
-  background-size: cover !important;
-  background-attachment: fixed !important;
-}
-html[data-theme="light"][data-has-background="true"] body {
-  background-image:
-    linear-gradient(180deg, rgb(243 244 247 / 35%) 0, rgb(243 244 247 / 72%) 42%, rgb(243 244 247 / 88%) 100%),
-    var(--theme-background-image) !important;
-}
-html[data-has-background="true"] .app-header,
-html[data-has-background="true"] .v2-command-bar {
-  background-color: color-mix(in srgb, var(--theme-panel) 64%, transparent) !important;
-  -webkit-backdrop-filter: blur(22px) saturate(145%);
-  backdrop-filter: blur(22px) saturate(145%);
-}
-html[data-has-background="true"] :is(
-  .settings-sidebar, .provider-workspace, .provider-rail, .provider-detail, .card,
-  .personalization-grid, .background-settings, .theme-preview, .save-bar,
-  .creation-card, .pipeline-card, .recent-section, .parameter-panel,
-  .library-sidebar, .glossary-main, .content-card, .term-card,
-  .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel
-) {
-  background-color: color-mix(in srgb, var(--theme-panel) 78%, transparent) !important;
-  background-image: linear-gradient(145deg, rgb(255 255 255 / 4%), transparent 58%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(135%);
-  backdrop-filter: blur(20px) saturate(135%);
-}
-html[data-surface="glass"][data-theme] :is(
-  .app-header, .settings-sidebar, .provider-workspace, .provider-rail, .provider-detail,
-  .card, .personalization-grid, .theme-preview, .save-bar,
-  .creation-card, .pipeline-card, .recent-section, .parameter-panel, .srt-row,
-  .mode-card, .queue-job, .recent-item, .batch-item,
-  .library-sidebar, .glossary-main, .content-card, .term-card,
-  .v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane,
-  .cue-timeline-panel, .cue-row, .v2-command-popover
-) {
-  background-color: color-mix(in srgb, var(--theme-panel) var(--theme-surface-mix), transparent) !important;
-  background-image: linear-gradient(145deg, color-mix(in srgb, white 4%, transparent), transparent 58%) !important;
-  border-color: color-mix(in srgb, var(--theme-accent) 10%, var(--theme-line)) !important;
-  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(145%);
-  backdrop-filter: blur(var(--theme-blur)) saturate(145%);
-}
-html[data-surface="glass"][data-theme] :is(.card, .personalization-grid, .theme-preview, .creation-card, .pipeline-card, .recent-section, .content-card) {
-  box-shadow: 0 20px 60px rgb(0 0 0 / 24%), inset 0 1px 0 rgb(255 255 255 / 5%);
-}
-
-/* Compact mode changes layout density only; font sizing remains an independent
-   preference. Overrides cover shared shells plus each main workspace. */
-html[data-density="compact"] :is(.settings-layout, .glossary-layout, .workspace-grid) { gap: 12px !important; }
-html[data-density="compact"] :is(.settings-sidebar, .library-sidebar) { padding: 14px !important; }
-html[data-density="compact"] :is(.category, .provider-item) { min-height: 48px !important; padding: 7px 9px !important; gap: 8px !important; }
-html[data-density="compact"] :is(.provider-detail, .card, .personalization-grid, .theme-preview, .creation-card, .pipeline-card, .recent-section) { padding: 14px !important; }
-html[data-density="compact"] :is(.parameter-grid, .field-grid, .personalization-grid, .stage-grid, .runtime-grid) { gap: 10px !important; }
-html[data-density="compact"] :is(.detail-heading, .save-bar, .section-heading, .recent-head) { padding-top: 9px !important; padding-bottom: 9px !important; }
-html[data-density="compact"] .page-shell { padding-top: 34px !important; padding-bottom: 48px !important; }
-html[data-density="compact"] .hero { margin-bottom: 18px !important; }
-html[data-density="compact"] .drop-zone { min-height: 155px !important; padding: 14px !important; }
-html[data-density="compact"] :is(.srt-row, .recent-item, .queue-job, .batch-item, .term-card) { padding: 9px 11px !important; }
-html[data-density="compact"] .pipeline-card { min-height: 540px !important; }
-html[data-density="compact"] :is(.v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane, .cue-timeline-panel) { gap: 5px !important; }
-html[data-density="compact"] :is(.cue-row, .tool-locator-row, .translation-track) { padding-top: 5px !important; padding-bottom: 5px !important; }
 
 html[data-theme="light"] {
   --bg: var(--theme-bg);
@@ -477,7 +378,7 @@ html[data-theme="light"] :is(
   .recent-item a, .recent-item button, .batch-item-actions a,
   .export-menu > summary, .export-menu-panel, .square-button,
   .expand-entry, .delete-entry, .file-button
-):not(.primary):not(.primary-button):not(.glossary-primary):not(.editor-button):not(.translation-command):not(.debug-primary) {
+):where(:not(.primary,.primary-button,.glossary-primary,.editor-button,.translation-command,.debug-primary)) {
   color: var(--theme-text) !important;
   background: var(--theme-panel-2) !important;
   border-color: var(--theme-line-strong) !important;
@@ -560,7 +461,7 @@ html[data-theme="light"] :is(.glossary-table-wrap, .glossary-table th) {
 html[data-theme="light"] .glossary-table th { color: var(--theme-muted) !important; }
 
 /* Editor document, token controls, task panels and tool rail. */
-html[data-theme="light"] :is(.cue-row, .tool-locator-row, .translation-track, .display-token,
+html[data-theme="light"] :is(.tool-locator-row, .translation-track, .display-token,
   .token-selection-menu button, .cue-page-control, .debug-stage-summary,
   .debug-tab textarea) {
   color: var(--theme-text) !important;
@@ -634,7 +535,7 @@ html[data-theme="light"] :is(
   .v2-command-menu > summary, .v2-command-link,
   .v2-tool-sidebar button, .pane-heading button, .cue-history-row button,
   .v2-command-popover button
-):not(.translation-command):not(.primary):not(.primary-button) {
+):where(:not(.translation-command,.primary,.primary-button)) {
   color: var(--theme-text) !important;
   background: var(--theme-panel-2) !important;
   border-color: var(--theme-line-strong) !important;
@@ -643,7 +544,7 @@ html[data-theme="light"] :is(
   .v2-command-menu > summary:hover, .v2-command-link:hover,
   .v2-tool-sidebar button:hover, .pane-heading button:hover,
   .cue-history-row button:hover, .v2-command-popover button:hover
-):not(.translation-command):not(.primary):not(.primary-button) {
+):where(:not(.translation-command,.primary,.primary-button)) {
   background: var(--theme-hover) !important;
   border-color: color-mix(in srgb, var(--theme-accent) 38%, var(--theme-line)) !important;
 }
@@ -652,18 +553,325 @@ html[data-theme="light"] :is(
 html[data-theme="light"] :is(.media-frame, .media-stage, .media-viewport) { background: #050607 !important; }
 html[data-theme="light"] .media-controls { background: linear-gradient(180deg, rgb(13 16 21 / 18%), rgb(13 16 21 / 96%) 45%) !important; }
 
-/* Glass is a material choice, not a second palette. */
-html[data-theme="light"][data-surface="glass"] :is(
-  .app-header, .app-bar, .settings-sidebar, .library-sidebar, .provider-workspace,
-  .provider-rail, .provider-detail, .card, .personalization-grid, .theme-preview,
-  .background-settings, .creation-card, .pipeline-card, .recent-section,
-  .parameter-panel, .srt-row, .mode-card, .queue-job, .recent-item, .batch-item,
-  .v2-command-bar, .v2-tool-sidebar, .v2-cue-pane, .v2-preview-pane,
-  .cue-timeline-panel, .cue-row, .content-card, .entry-card
-) {
-  background-color: color-mix(in srgb, var(--theme-panel) var(--theme-surface-mix), transparent) !important;
-  background-image: linear-gradient(145deg, rgb(255 255 255 / 58%), transparent 60%) !important;
-  border-color: color-mix(in srgb, var(--theme-accent) 14%, var(--theme-line)) !important;
-  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(135%);
-  backdrop-filter: blur(var(--theme-blur)) saturate(135%);
+/* Shared workbench surfaces and controls: neutral depth, semantic actions. */
+html[data-theme] {
+  --theme-bg: #090c10; --theme-panel: #12171e; --theme-panel-2: #10151c;
+  --theme-field: #0c1117; --theme-text: #f0f3f7; --theme-muted: #aeb9c8;
+  --theme-line: #28323e; --theme-line-strong: #4c5c70;
+  --theme-hover: #202c3b; --theme-inset: #0d1218;
+  --theme-shadow: 0 1px 2px rgb(0 0 0 / 16%), 0 4px 12px rgb(0 0 0 / 7%);
+  --theme-float-shadow: 0 8px 24px rgb(0 0 0 / 26%), 0 24px 64px rgb(0 0 0 / 18%);
+  --theme-edge: rgb(255 255 255 / 5%);
+  --theme-glass-shadow: 0 4px 18px rgb(0 0 0 / 12%), inset 0 1px 0 var(--theme-edge);
+  --theme-action: color-mix(in srgb, var(--theme-accent) 58%, #16171a);
+  --theme-accent-ink: color-mix(in srgb, var(--theme-accent) 64%, var(--theme-text));
+  --theme-control-hover: color-mix(in srgb, var(--theme-accent) 13%, var(--theme-panel));
+  --theme-control-pressed: color-mix(in srgb, var(--theme-accent) 21%, var(--theme-panel));
+  --theme-control-edge: color-mix(in srgb, var(--theme-accent) 52%, var(--theme-line-strong));
+  --bg:var(--theme-bg); --panel:var(--theme-panel); --panel2:var(--theme-panel-2);
+  --field:var(--theme-field); --text:var(--theme-text); --muted:var(--theme-muted);
+  --line:var(--theme-line); --line2:var(--theme-line-strong); --shadow:var(--theme-shadow);
 }
+html[data-theme="light"] {
+  --theme-bg:#f3f6fa; --theme-panel:#ffffff; --theme-panel-2:#f8fafc;
+  --theme-field:#ffffff; --theme-text:#182332; --theme-muted:#526176;
+  --theme-line:#dce3ec; --theme-line-strong:#aebccd;
+  --theme-hover:#e9f0f8; --theme-inset:#edf2f7;
+  --theme-shadow:0 1px 2px rgb(24 28 44 / 4%), 0 4px 12px rgb(24 28 44 / 3%);
+  --theme-float-shadow:0 5px 16px rgb(24 28 44 / 8%), 0 20px 48px rgb(24 28 44 / 10%);
+  --theme-edge:rgb(255 255 255 / 80%);
+  --theme-glass-shadow:0 3px 14px rgb(24 28 44 / 5%), inset 0 1px 0 var(--theme-edge);
+}
+html[data-theme] body { color:var(--theme-text); background-color:var(--theme-bg); }
+html[data-theme]:not([data-surface="glass"]) :is(.app-header,.app-bar,.editor-command-bar) { background:var(--theme-panel) !important; box-shadow:none !important; border-color:var(--theme-line) !important; }
+html[data-theme] :is(.card,.creation-card,.pipeline-card,.recent-section,.settings-sidebar,.library-sidebar,.asset-sidebar,.provider-detail,.provider-rail,.personalization-grid,.background-settings,.save-bar,.appearance-preview,.prompt-inspector,.prompt-family-column) {
+  color:var(--theme-text) !important; background:var(--theme-panel) !important;
+  border:1px solid var(--theme-line) !important; border-radius:10px; box-shadow:var(--theme-shadow) !important;
+}
+html[data-theme] :is(.background-page-card,.tool-locator-row,.entry-card,.prompt-family-card,.stage-config-card) { background:var(--theme-panel-2) !important; border-color:var(--theme-line) !important; box-shadow:none !important; }
+html[data-theme] :is(.secondary,.secondary-button,.quiet-button,.text-button,.file-button,.creation-tutorial-menu button,.prompt-editor-actions button,.prompt-route-chain button,.prompt-route-pill,.prompt-category-tab,.background-page-actions button,.editor-command-bar button,.editor-command-menu summary,.editor-command-link,.pane-heading button,.cue-history-row button,.editor-tool-sidebar button) {
+  appearance:none; min-height:34px; padding:7px 12px; border:1px solid var(--theme-line) !important; border-radius:7px;
+  color:var(--theme-text) !important; background:var(--theme-panel) !important; box-shadow:none !important;
+  font-family:inherit; font-size:14px; line-height:1.3; cursor:pointer;
+  transition:background-color .12s,border-color .12s;
+}
+
+html[data-theme] :is(.primary,.primary-button,.glossary-primary,.translation-command:not(.retry),.debug-primary,.prompt-editor-actions .primary) { background:var(--theme-action) !important; border-color:var(--theme-action) !important; color:#fff !important; box-shadow:none !important; border-radius:7px; }
+
+html[data-theme] :is(button,input,select,textarea):disabled { color:var(--theme-muted) !important; background:var(--theme-inset) !important; border-color:var(--theme-line) !important; box-shadow:none !important; opacity:.55; cursor:default; }
+html[data-theme] :is(.text-button,[data-background-remove]) { border-color:transparent !important; background:transparent !important; }
+html[data-theme] [data-background-remove]:hover:not(:disabled) { color:var(--theme-danger) !important; background:color-mix(in srgb,var(--theme-danger) 9%,var(--theme-panel)) !important; border-color:transparent !important; }
+html[data-theme] :is(button,summary,a):focus-visible { outline:2px solid var(--theme-accent); outline-offset:3px; }
+html[data-theme] :is(input,select,textarea):not([type="range"]):not([type="checkbox"]):not([type="radio"]) { color:var(--theme-text) !important; background:var(--theme-field) !important; border-color:var(--theme-line-strong) !important; border-radius:7px; }
+html[data-theme] :is(input,select,textarea):focus { box-shadow:0 0 0 2px color-mix(in srgb,var(--theme-accent) 14%,transparent) !important; }
+html[data-theme] :is(.category.active,.asset-sidebar-item.active,.prompt-category-tab.active,.prompt-route-pill.active,.prompt-route-chain button.active) { color:var(--theme-text) !important; background:color-mix(in srgb,var(--theme-accent) 9%,var(--theme-panel)) !important; border-color:color-mix(in srgb,var(--theme-accent) 32%,var(--theme-line)) !important; box-shadow:none !important; }
+html[data-theme] :is(.brand-mark,.brand span) { filter:none !important; text-shadow:none !important; }
+html[data-theme] :is(.editor-document-pane,.editor-tool-sidebar,.pane-heading,.cue-list) { background:var(--theme-bg) !important; border-color:var(--theme-line) !important; }
+html[data-theme] .cue-row { background:var(--theme-panel) !important; border-color:var(--theme-line) !important; box-shadow:none !important; }
+html[data-theme] .cue-row.current { background:color-mix(in srgb,var(--theme-accent) 10%,var(--theme-panel)) !important; border-color:var(--theme-accent) !important; }
+html[data-theme] :is(.cue-row.over-limit,.cue-row.advisory) { border-color:var(--theme-danger) !important; }
+html[data-theme] .cue-task-island { background:var(--theme-panel) !important; border-color:var(--theme-line) !important; box-shadow:var(--theme-shadow) !important; }
+html[data-theme] .background-page-card:not(.has-image) .background-page-preview { background:var(--theme-inset) !important; }
+html[data-theme] .background-page-card:not(.has-image) .background-page-preview::after { display:none; }
+html[data-theme] .background-page-card:not(.has-image) .background-page-preview span { color:var(--theme-muted); }
+html[data-theme] .timeline-scrollbar input { background:var(--theme-inset) !important; }
+html[data-theme] .timeline-scrollbar input::-webkit-slider-thumb { background:var(--theme-line-strong); }
+html[data-theme] .timeline-scrollbar input::-moz-range-thumb { background:var(--theme-line-strong); }
+
+html[data-theme] :is(.primary,.primary-button,.glossary-primary,.prompt-editor-actions .primary):disabled { color:var(--theme-muted) !important; background:var(--theme-inset) !important; border-color:var(--theme-line) !important; opacity:1; }
+html[data-theme] .cue-row.advisory { border-color:#b38a35 !important; }
+
+html[data-theme] :is(.editor-tool-sidebar .tool-accordion > summary,.editor-tool-sidebar .tool-locator-row strong,.editor-tool-sidebar .tool-section > label) { color:var(--theme-text) !important; }
+html[data-theme] :is(.editor-tool-sidebar .tool-locator-row span,.editor-tool-sidebar .tool-status) { color:var(--theme-muted) !important; }
+html[data-theme] .editor-tool-sidebar .tool-accordion { border-color:var(--theme-line) !important; }
+html[data-theme] .editor-preview-pane { background:var(--theme-bg) !important; }
+html[data-theme] .editor-preview-pane .preview-heading { color:var(--theme-text) !important; }
+html[data-theme] .source-token-line.virtual-line .display-token { background:transparent !important; }
+html[data-theme] .source-token-line.virtual-line .display-token.selected { background:color-mix(in srgb,var(--theme-accent) 15%,transparent) !important; }
+
+/* Surface and state ownership. These rules change paint only, never geometry. */
+html[data-theme] {
+  --panel-2: var(--theme-panel-2); --line-strong: var(--theme-line-strong);
+  --green: var(--theme-success); --red: var(--theme-danger); --blue: var(--theme-blue);
+  --shell-bg: var(--theme-panel); --shell-line: var(--theme-line);
+  --shell-panel: var(--theme-panel); --shell-panel-hover: var(--theme-hover);
+  --shell-text: var(--theme-text); --shell-muted: var(--theme-muted);
+  --shell-border: var(--theme-line); --shell-purple: var(--theme-accent);
+  --editor-bg: var(--theme-bg); --editor-panel: var(--theme-panel);
+  --editor-panel-2: var(--theme-panel-2); --editor-panel-3: var(--theme-hover);
+  --editor-text: var(--theme-text); --editor-muted: var(--theme-muted);
+  --editor-line: var(--theme-line); --editor-line-strong: var(--theme-line-strong);
+  --editor-purple: var(--theme-accent); --editor-purple-soft: var(--theme-accent-soft);
+  --editor-red: var(--theme-danger); --editor-green: var(--theme-success);
+  --theme-timeline-bg: #14151a; --theme-timeline-ruler: #18191e;
+  --theme-timeline-grid: #343641; --theme-timeline-waveform: #bbc0d0;
+  --theme-timeline-cue: #30323e; --theme-timeline-cue-alt: #373946;
+  --theme-timeline-text: #eeeef4; --theme-timeline-outline: #696e80;
+}
+html[data-theme="light"] {
+  --theme-timeline-bg: #f3f6fa; --theme-timeline-ruler: #ffffff;
+  --theme-timeline-grid: #d6e0eb; --theme-timeline-waveform: #4c6988;
+  --theme-timeline-cue: #ffffff; --theme-timeline-cue-alt: #f6f9fc;
+  --theme-timeline-text: #172c43; --theme-timeline-outline: #a4b5c8;
+  --theme-timeline-selected: var(--theme-accent);
+  --theme-timeline-speaker-0: #5684b8; --theme-timeline-speaker-1: #b46591;
+  --theme-timeline-speaker-2: #378977; --theme-timeline-speaker-3: #ab7b3e;
+}
+html[data-theme] body:where(:not(.design-demo)) {
+  color: var(--theme-text) !important;
+  background: var(--theme-bg) !important;
+}
+html[data-theme] :is(.app-header,.editor-command-bar,.app-nav) {
+  color: var(--theme-text) !important; background: var(--theme-panel) !important;
+  border-color: var(--theme-line) !important; box-shadow: none !important;
+}
+html[data-theme] .app-header .brand { color: var(--theme-text) !important; }
+html[data-theme] :is(.parameter-panel,.srt-row,.recent-item,.queue-job,.batch-item,
+  .runtime-log,.entry-card,.entry-details,.background-page-card,.tool-locator-row,
+  .stage-config-card,.recognition-adapters div,.model-asset-row) {
+  color: var(--theme-text) !important; background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line) !important; box-shadow: none !important;
+}
+html[data-theme] :is(.drop-zone,.empty-state) {
+  color: var(--theme-text) !important; background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important; box-shadow: none !important;
+}
+html[data-theme] :is(.drop-zone:hover,.drop-zone:focus-visible,.drop-zone.dragging) {
+  background: var(--theme-control-hover) !important; border-color: var(--theme-accent) !important;
+}
+html[data-theme] :is(.drop-icon,.step-number,.mode-card.active .mode-icon) {
+  color: var(--theme-accent-ink) !important; background: var(--theme-control-hover) !important;
+  border-color: color-mix(in srgb,var(--theme-accent) 25%,var(--theme-line)) !important;
+  box-shadow: none !important;
+}
+html[data-theme] :is(.parameter-accordion > summary,.qwen-enhancement-settings > summary,.language-limit-settings > summary,.runtime-log > summary,
+  .tool-accordion > summary,.pane-heading,.prompt-inspector h3) { color: var(--theme-text) !important; }
+html[data-theme] :is(.parameter-accordion > summary small,.qwen-enhancement-settings > summary span,.language-limit-settings > summary span,.runtime-log > summary small) { color: var(--theme-muted) !important; }
+
+/* All ordinary actions share one state recipe, including anchors and details. */
+html[data-theme] :is(.secondary,.secondary-button,.quiet-button,.text-button,.file-button,
+  .square-button,.collection-create,.recent-actions a,.recent-actions button,
+  .export-menu > summary,.bundle-actions a,.batch-item-actions a,
+  .creation-tutorial-entry,.creation-tutorial-menu button,
+  .prompt-editor-actions button,.prompt-route-chain button,.prompt-route-pill,.prompt-category-tab,
+  .background-page-actions button,.editor-command-bar button,.editor-command-menu > summary,
+  .editor-command-link,.pane-heading button,.cue-history-row button,.editor-tool-sidebar button,
+  .editor-command-popover button,.selection-float-menu button) {
+  color: var(--theme-text) !important; background: var(--theme-panel) !important;
+  border-color: var(--theme-line-strong) !important; box-shadow: none !important;
+  transition: background-color min(.14s,var(--theme-duration)),
+    border-color min(.14s,var(--theme-duration)), color min(.14s,var(--theme-duration));
+}
+html[data-theme] :is(.text-button,[data-background-remove]) { background: transparent !important; border-color: transparent !important; }
+html[data-theme] :is(.secondary,.secondary-button,.quiet-button,.text-button,.file-button,
+  .square-button,.collection-create,.recent-actions a,.recent-actions button,
+  .export-menu > summary,.bundle-actions a,.batch-item-actions a,
+  .creation-tutorial-entry,.creation-tutorial-menu button,
+  .prompt-editor-actions button,.prompt-route-chain button,.prompt-route-pill,.prompt-category-tab,
+  .background-page-actions button,.editor-command-bar button,.editor-command-menu > summary,
+  .editor-command-link,.pane-heading button,.cue-history-row button,.editor-tool-sidebar button,
+  .editor-command-popover button,.selection-float-menu button
+):where(:not(:disabled,[aria-disabled="true"],.disabled)):is(:hover,:active) {
+  color: var(--theme-accent-ink) !important; background: var(--theme-control-hover) !important;
+  border-color: var(--theme-control-edge) !important; transform: none;
+}
+html[data-theme] :is(button,a,summary):where(:not(:disabled,[aria-disabled="true"],.disabled)):active {
+  --theme-control-hover: var(--theme-control-pressed);
+}
+html[data-theme] :is(.primary,.primary-button,.glossary-primary,.translation-command:not(.retry),
+  .debug-primary,.editor-button,.prompt-editor-actions .primary) {
+  color: #fff !important; background: var(--theme-action) !important;
+  border-color: var(--theme-action) !important; box-shadow: inset 0 1px 0 rgb(255 255 255 / 9%) !important;
+}
+html[data-theme] :is(.primary,.primary-button,.glossary-primary,.translation-command:not(.retry),
+  .debug-primary,.editor-button,.prompt-editor-actions .primary):where(:not(:disabled,[aria-disabled="true"])):hover {
+  color: #fff !important; background: color-mix(in srgb,var(--theme-action) 94%,#fff) !important;
+  border-color: color-mix(in srgb,var(--theme-action) 80%,#fff) !important;
+}
+html[data-theme="light"] :is(.primary,.primary-button,.glossary-primary,.translation-command:not(.retry),
+  .debug-primary,.editor-button,.prompt-editor-actions .primary):where(:not(:disabled,[aria-disabled="true"])):hover {
+  background: color-mix(in srgb,var(--theme-action) 90%,#000) !important;
+}
+html[data-theme] :is(.primary,.primary-button,.glossary-primary,.translation-command:not(.retry),
+  .debug-primary,.editor-button,.prompt-editor-actions .primary):where(:not(:disabled,[aria-disabled="true"])):active {
+  background: color-mix(in srgb,var(--theme-action) 84%,#000) !important;
+}
+html[data-theme] :is(.recent-actions .recent-delete,.delete-entry,.background-page-actions [data-background-remove],.dialog-danger,.danger-button) {
+  color: var(--theme-danger) !important; background: transparent !important;
+  border-color: color-mix(in srgb,var(--theme-danger) 25%,var(--theme-line)) !important;
+}
+html[data-theme] :is(.recent-actions .recent-delete,.delete-entry,.background-page-actions [data-background-remove],.dialog-danger,.danger-button):where(:not(:disabled)):hover {
+  color: var(--theme-danger) !important; background: color-mix(in srgb,var(--theme-danger) 12%,var(--theme-panel)) !important;
+  border-color: var(--theme-danger) !important;
+}
+html[data-theme] :is(button,summary,a):focus-visible {
+  outline: 2px solid var(--theme-accent) !important; outline-offset: 2px;
+}
+html[data-theme][data-surface] :is(button,summary,a):is(:disabled,[aria-disabled="true"],.disabled),
+html[data-theme][data-surface] details.disabled > summary {
+  color: var(--theme-muted) !important; background: var(--theme-inset) !important;
+  border-color: var(--theme-line) !important; box-shadow: none !important;
+  cursor: default !important; opacity: .6; transform: none !important;
+}
+html[data-theme] :is(.app-nav a.active,.category.active,.asset-sidebar-item.active,.provider-item.active,
+  .prompt-category-tab.active,.prompt-route-pill.active,.prompt-route-chain button.active,
+  .search-scope-toggle button.active) {
+  color: var(--theme-accent-ink) !important; background: var(--theme-control-hover) !important;
+  border-color: color-mix(in srgb,var(--theme-accent) 32%,var(--theme-line)) !important;
+  box-shadow: none !important;
+}
+html[data-theme] :is(.app-nav a,.category,.asset-sidebar-item,.provider-item,
+  .parameter-accordion > summary,.qwen-enhancement-settings > summary,.language-limit-settings > summary,.runtime-log > summary,.tool-accordion > summary):where(:not([aria-disabled="true"])):hover {
+  color: var(--theme-text) !important; background-color: var(--theme-hover) !important;
+}
+html[data-theme] :is(.cue-row,.cue-list,.pane-heading,.editor-preview-pane,.editor-tool-sidebar) {
+  border-color: var(--theme-line) !important;
+}
+html[data-theme] .cue-row { color: var(--theme-text) !important; background: var(--theme-panel) !important; box-shadow: none !important; }
+html[data-theme] .cue-row:hover { background: color-mix(in srgb,var(--theme-panel) 85%,var(--theme-hover)) !important; }
+html[data-theme] .cue-row.current { background: var(--theme-control-hover) !important; border-color: var(--theme-accent) !important; }
+html[data-theme] .cue-row.over-limit { border-color: var(--theme-danger) !important; }
+html[data-theme] .cue-row.advisory { border-color: #b38a35 !important; }
+html[data-theme] .cue-actions button {
+  --cue-action: var(--theme-accent-ink);
+  color: var(--cue-action) !important;
+  border-color: color-mix(in srgb,var(--cue-action) 38%,var(--theme-line)) !important;
+  background: color-mix(in srgb,var(--cue-action) 5%,var(--theme-panel)) !important;
+}
+html[data-theme] .cue-actions .hide-cue { --cue-action: #cba653; }
+html[data-theme="light"] .cue-actions .hide-cue { --cue-action: #87631a; }
+html[data-theme] .cue-actions .danger { --cue-action: var(--theme-danger); }
+html[data-theme] .cue-actions .restore { --cue-action: var(--theme-success); }
+html[data-theme] .cue-actions .speaker-0 { --cue-action: #8ebcff; }
+html[data-theme] .cue-actions .speaker-1 { --cue-action: #e9a0c8; }
+html[data-theme] .cue-actions .speaker-2 { --cue-action: #7dcab4; }
+html[data-theme] .cue-actions .speaker-3 { --cue-action: #e3b076; }
+html[data-theme="light"] .cue-actions .speaker-0 { --cue-action: #3468a5; }
+html[data-theme="light"] .cue-actions .speaker-1 { --cue-action: #a23d79; }
+html[data-theme="light"] .cue-actions .speaker-2 { --cue-action: #25765e; }
+html[data-theme="light"] .cue-actions .speaker-3 { --cue-action: #946120; }
+html[data-theme] .cue-actions button:where(:not(:disabled)):hover {
+  color: var(--cue-action) !important; border-color: var(--cue-action) !important;
+  background: color-mix(in srgb,var(--cue-action) 14%,var(--theme-panel)) !important;
+}
+html[data-theme] .source-token-line.virtual-line .display-token:where(:not(.selected)):hover { background: var(--theme-control-hover) !important; }
+html[data-theme] :is(.cue-list,.recent-list,.runtime-log-lines,.prompt-editor-textarea) {
+  scrollbar-color: var(--theme-line-strong) transparent;
+}
+html[data-theme] .cue-list::-webkit-scrollbar-track { background: transparent; }
+html[data-theme] .cue-list::-webkit-scrollbar-thumb { background: var(--theme-line-strong); }
+
+/* Floating layers are nearly opaque for legibility and have their own depth. */
+html[data-theme] :is(.editor-command-popover,.export-menu-panel,.creation-tutorial-menu,
+  .selection-float-menu,.cue-task-island,.save-bar,.text-dialog,.validation-dialog,
+  .collection-modal,.debug-float,.dialog-card) {
+  color: var(--theme-text) !important; background: var(--theme-panel) !important;
+  border-color: var(--theme-line-strong) !important;
+  box-shadow: var(--theme-float-shadow) !important;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-theme] :is(.cue-task-island,.save-bar) { box-shadow: var(--theme-shadow) !important; }
+html[data-theme] dialog::backdrop { background: rgb(12 14 20 / 42%); backdrop-filter: none; }
+
+/* Glass belongs to the shell. Rows, fields and the timeline never run a blur. */
+html[data-theme] :is(.app-header,.editor-command-bar,.settings-sidebar,.library-sidebar,
+  .creation-card,.pipeline-card,.recent-section,.card,.personalization-grid,.background-settings,
+  .parameter-panel,.recent-item,.queue-job,.batch-item,.entry-card,.cue-row,.cue-timeline-panel,
+  .editor-tool-sidebar,.editor-document-pane,.editor-preview-pane) {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-surface="glass"][data-theme] body {
+  background: radial-gradient(ellipse at 8% 0%,color-mix(in srgb,var(--theme-accent) 9%,transparent),transparent 46rem),
+    radial-gradient(ellipse at 95% 70%,rgb(145 150 170 / 5%),transparent 48rem),var(--theme-bg) !important;
+  background-attachment: fixed !important; background-repeat: no-repeat !important; background-size: cover !important;
+}
+html[data-theme][data-has-background="true"] body {
+  background-image: linear-gradient(180deg,rgb(17 18 21 / 55%),rgb(17 18 21 / 72%) 55%,rgb(17 18 21 / 84%)),var(--theme-background-image) !important;
+  background-position: center top !important; background-size: cover !important;
+  background-repeat: no-repeat !important; background-attachment: fixed !important;
+}
+html[data-theme="light"][data-has-background="true"] body {
+  background-image: linear-gradient(180deg,rgb(242 243 245 / 62%),rgb(242 243 245 / 77%) 55%,rgb(242 243 245 / 88%)),var(--theme-background-image) !important;
+}
+html[data-surface="glass"][data-theme] :is(.app-header,.editor-command-bar,
+  .settings-sidebar,.library-sidebar,.creation-card,.pipeline-card,.recent-section,
+  :where(.settings-panel) > .card,.personalization-grid,.background-settings,.provider-workspace,
+  .prompt-inspector,.prompt-family-column,.editor-tool-sidebar,.editor-document-pane,.editor-preview-pane) {
+  background: color-mix(in srgb,var(--theme-panel) var(--theme-surface-mix),transparent) !important;
+  border-color: color-mix(in srgb,var(--theme-line) 80%,var(--theme-edge)) !important;
+  box-shadow: var(--theme-glass-shadow) !important;
+  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(110%);
+  backdrop-filter: blur(var(--theme-blur)) saturate(110%);
+}
+html[data-surface="glass"][data-theme] :is(.editor-layout,.cue-list,.pane-heading,.preview-heading,
+  .glossary-content,.provider-workspace .provider-rail,.provider-workspace .provider-detail) {
+  background: transparent !important;
+}
+html[data-surface="glass"][data-theme] :is(.editor-tool-sidebar,.editor-document-pane,.editor-preview-pane) {
+  box-shadow: inset 0 1px 0 var(--theme-edge) !important;
+}
+/* Keep viewport-positioned export and token menus out of a filter containing block. */
+html[data-surface="glass"][data-theme] :is(.recent-section,.editor-document-pane) {
+  position: relative; isolation: isolate; background: transparent !important;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+html[data-surface="glass"][data-theme] :is(.recent-section,.editor-document-pane)::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  border-radius: inherit;
+  background: color-mix(in srgb,var(--theme-panel) var(--theme-surface-mix),transparent);
+  -webkit-backdrop-filter: blur(var(--theme-blur)) saturate(110%);
+  backdrop-filter: blur(var(--theme-blur)) saturate(110%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-surface="glass"] { --theme-surface-mix: 98%; }
+  html[data-surface="glass"][data-theme="light"] { --theme-surface-mix: 98%; }
+}
+
+/* Readable controls and labels; Cue text retains the user's font-size setting. */
+html[data-theme] body { font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", system-ui, sans-serif; }
+html[data-theme] :is(.parameter-grid label > span,.fixed-model > span,.section-heading h2,.recent-head h2) { color:var(--theme-text) !important; }
+html[data-theme] :is(.parameter-grid label > span,.fixed-model > span,.recent-item strong,.main-nav a) { font-size:15px; }
+html[data-theme] :is(.parameter-grid label > small,.recent-item span,.reference-row strong em,.runtime-log-lines,.queue-job-detail span) { font-size:13px; color:var(--theme-muted) !important; }
+html[data-theme] :is(.recent-actions a,.recent-actions button,.recent-actions .export-menu > summary) { font-size:13px; }
+html[data-theme] :is(.pane-heading,.preview-heading,.timeline-heading,.tool-accordion > summary) { color:var(--theme-text); font-size:14px; }
+html[data-theme] :is(.cue-meta,.cue-history-row,.editor-task-label) { color:var(--theme-muted); }

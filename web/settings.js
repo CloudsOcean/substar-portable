@@ -591,7 +591,12 @@ async function showPromptComponent(path, skipDiscardCheck = false) {
   const record = promptComponentRecord(path);
   if (!record) return;
   if (!skipDiscardCheck && !mayDiscardPromptChanges(path)) return;
-  $("#promptInspectorKind").textContent = promptKindLabel(record.kind).toUpperCase();
+  $("#promptInspectorKind").textContent = promptKindLabel(record.kind);
+  $$("#promptRouteChain button").forEach(button => {
+    const active = button.dataset.promptComponent === path;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
   $("#promptInspectorTitle").textContent = record.title;
   $("#promptInspectorCount").textContent = `${record.characters.toLocaleString()} 字符`;
   $("#promptFileMeta").innerHTML = `<code>${escapeHtml(record.path)}</code><span>SHA-256 · ${escapeHtml(record.sha256.slice(0, 12))}</span>`;
@@ -664,7 +669,7 @@ function showPromptRoute(family, variant, skipDiscardCheck = false) {
   $("#promptRouteChain").classList.add("prompt-route-chain");
   $("#promptRouteChain").innerHTML = variant.files.map((path, index) => {
     const record = promptComponentRecord(path);
-    return `${index ? '<i>→</i>' : ''}<button type="button" data-prompt-component="${escapeHtml(path)}"><small>${promptKindLabel(record?.kind)}</small><b>${escapeHtml(record?.title || path)}</b></button>`;
+    return `<button type="button" data-prompt-component="${escapeHtml(path)}" title="${escapeHtml(record?.title || path)}">${promptKindLabel(record?.kind)}</button>`;
   }).join("");
   showPromptComponent(variant.files[0], true);
 }
@@ -680,11 +685,9 @@ function renderPromptCategory(categoryId) {
   $("#promptCategoryTitle").textContent = category?.title || categoryId;
   $("#promptCategorySummary").textContent = `${families.length} 个提示词族 · ${families.reduce((sum, item) => sum + item.variants.length, 0)} 条路由`;
   $("#promptFamilyList").innerHTML = families.map((family) => {
-    const files = new Set(family.variants.flatMap((variant) => variant.files));
     return `<article class="prompt-family-card" data-prompt-family-card="${escapeHtml(family.id)}">
-      <header><div><small>${escapeHtml(family.id)}</small><h4>${escapeHtml(family.title)}</h4><p>${escapeHtml(family.description)}</p></div><span>v${escapeHtml(family.version)}</span></header>
-      <div class="prompt-family-stats"><span>${family.variants.length} 条路由</span><span>${files.size} 个组件</span></div>
-      <div class="prompt-route-pills">${family.variants.map((variant) => `<button class="prompt-route-pill" type="button" data-prompt-family="${escapeHtml(family.id)}" data-prompt-variant="${escapeHtml(variant.id)}">${escapeHtml(promptVariantLabel(variant.id))}<i>${variant.files.length}</i></button>`).join("")}</div>
+      <header><h4>${escapeHtml(family.title)}</h4></header>
+      <div class="prompt-route-pills">${family.variants.map((variant) => `<button class="prompt-route-pill" type="button" data-prompt-family="${escapeHtml(family.id)}" data-prompt-variant="${escapeHtml(variant.id)}">${escapeHtml(promptVariantLabel(variant.id))}</button>`).join("")}</div>
     </article>`;
   }).join("");
   if (firstFamily?.variants[0]) showPromptRoute(firstFamily, firstFamily.variants[0], true);
@@ -694,9 +697,6 @@ function renderPromptCatalog(catalog) {
   promptCatalogData = catalog;
   const stats = catalog.stats;
   $("#promptBadge").textContent = `${stats.components} 项`;
-  const metrics = $$("#promptMetrics article");
-  const values = [stats.families, stats.variants, stats.components, `${stats.core_components} / ${stats.cases}`];
-  metrics.forEach((card, index) => { $("strong", card).textContent = values[index]; });
   $("#promptCategoryTabs").innerHTML = catalog.categories.map((category) => {
     const count = catalog.families.filter((item) => item.category === category.id).length;
     return `<button class="prompt-category-tab" type="button" data-prompt-category="${escapeHtml(category.id)}"><b>${escapeHtml(category.title)}</b><small>${escapeHtml(category.description)}</small><i>${count}</i></button>`;
@@ -749,7 +749,7 @@ function populate(value) {
   }
   const localPersonalization = window.SubstarTheme?.read();
   if (localPersonalization) {
-    for (const name of ["appearance_mode", "accent_color", "surface_style", "ui_density", "motion_level", "font_scale"]) {
+    for (const name of ["appearance_mode", "accent_color", "surface_style", "motion_level"]) {
       if (form.elements[name]) form.elements[name].value = localPersonalization[name];
     }
   }
@@ -887,9 +887,9 @@ function currentPersonalization() {
     appearance_mode: form.elements.appearance_mode.value,
     accent_color: form.elements.accent_color.value,
     surface_style: form.elements.surface_style.value,
-    ui_density: form.elements.ui_density.value,
+    ui_density: "comfortable",
     motion_level: form.elements.motion_level.value,
-    font_scale: form.elements.font_scale.value,
+    font_scale: "standard",
   };
 }
 
@@ -1288,6 +1288,29 @@ $$('[data-engine-profile]').forEach((button) => {
 $$(".category").forEach((button) =>
   button.addEventListener("click", () => switchPanel(button.dataset.panel)),
 );
+$("#promptSearch")?.addEventListener("input", () => {
+  const query = $("#promptSearch").value.trim().toLowerCase();
+  const results = $("#promptSearchResults");
+  results.hidden = !query;
+  if (!query) return;
+  const records = (promptCatalogData?.components || []).filter(record => {
+    const routes = (promptCatalogData?.families || []).flatMap(family => family.variants
+      .filter(variant => variant.files.includes(record.path))
+      .map(variant => `${family.title} ${promptVariantLabel(variant.id)}`)).join(" ");
+    return `${record.title} ${record.path} ${promptKindLabel(record.kind)} ${routes}`.toLowerCase().includes(query);
+  });
+  results.innerHTML = records.length ? records.map(record => `<button type="button" data-prompt-component="${escapeHtml(record.path)}"><b>${escapeHtml(record.title)}</b><small>${escapeHtml(record.path)}</small></button>`).join("") : '<p>没有找到匹配的提示词，请尝试名称、语言或路径。</p>';
+});
+$("#promptSearchResults")?.addEventListener("click", async event => {
+  const button = event.target.closest("[data-prompt-component]");
+  if (!button) return;
+  await showPromptComponent(button.dataset.promptComponent);
+  if (selectedPromptComponent?.path === button.dataset.promptComponent) {
+    $("#promptRouteChain").innerHTML = '<span>已通过搜索定位提示词，可直接修改并保存。</span>';
+    $("#promptSearchResults").hidden = true;
+    $("#promptSourceView").scrollIntoView({block:"nearest"});
+  }
+});
 $("#promptCategoryTabs")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt-category]");
   if (button) renderPromptCategory(button.dataset.promptCategory);
@@ -1369,16 +1392,16 @@ $(".reveal-key").addEventListener("click", (event) => {
   event.currentTarget.setAttribute("aria-label", input.type === "password" ? "显示密钥" : "隐藏密钥");
 });
 form.addEventListener("input", (event) => {
-  if (event.target?.matches?.("[data-background-input]")) return;
+  if (event.target?.matches?.("[data-background-input]") || event.target?.closest?.(".prompt-settings-panel")) return;
   editRevision += 1;
-  if (["appearance_mode", "accent_color", "surface_style", "ui_density", "motion_level", "font_scale"].includes(event.target?.name)) {
+  if (["appearance_mode", "accent_color", "surface_style", "motion_level"].includes(event.target?.name)) {
     window.SubstarTheme?.preview({
       appearance_mode: form.elements.appearance_mode.value,
       accent_color: form.elements.accent_color.value,
       surface_style: form.elements.surface_style.value,
-      ui_density: form.elements.ui_density.value,
+      ui_density: "comfortable",
       motion_level: form.elements.motion_level.value,
-      font_scale: form.elements.font_scale.value,
+      font_scale: "standard",
     });
   }
   syncStageControls();
