@@ -236,13 +236,13 @@ flowchart LR
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
 | `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
 | `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields, including the optional project-scoped LLM provider. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
-| `translation_service` | `model_orchestration` | Translate original execution blocks using N|source input and N[-M]|target output (v16-numeric-pipe); both modes share the standard task container. Expand shared translations into original timed slots. Historical Cue syntax is read-compatible only; segmentation uses N|W####[-W####] and calibration uses N|corrected source; their binding and validation semantics remain unchanged. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request`<br>`model_text_exchange` | `task_record`<br>`translation_result`<br>`editor_revision`<br>`model_text_exchange` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
-| `calibration_service` | `model_orchestration` | Ask for number|corrected-source rows (numeric-pipe v2), deterministically align request-local numbers to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections. Historical C aliases remain readable. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/http_api.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`prompts/production/calibration/ja.md`<br>`prompts/production/calibration/ko.md`<br>`prompts/production/calibration/mixed.md`<br>`scripts/run_calibration_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`model_text_exchange` | `task_record`<br>`calibration_result`<br>`editor_revision`<br>`model_text_exchange` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
+| `translation_service` | `model_orchestration` | Translate original execution blocks using N|source input and N[-M]|target output (v16-numeric-pipe); both modes share the standard task container. Expand shared translations into original timed slots. Historical Cue syntax is read-compatible only; segmentation uses N|W####[-W####] and calibration uses N|corrected source; their binding and validation semantics remain unchanged. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request`<br>`model_text_exchange` | `task_record`<br>`translation_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
+| `calibration_service` | `model_orchestration` | Ask for number|corrected-source rows (numeric-pipe v2), deterministically align request-local numbers to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections. Historical C aliases remain readable. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/calibration/service.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`prompts/production/calibration/ja.md`<br>`prompts/production/calibration/ko.md`<br>`prompts/production/calibration/mixed.md`<br>`scripts/run_calibration_worker.py`<br>`substar_core/editor/http_api.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`model_text_exchange` | `task_record`<br>`calibration_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
 | `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
-| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py` | `editor_operation`<br>`editor_revision` | `editor_revision` | `editor_domain`<br>`project_store` |
+| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`scripts/run_reference_match.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Parse TXT/DOCX/SRT with a Unicode script-aware tokenizer, apply aligned reference spelling, casing, punctuation and boundaries over ASR timing, preserve ASR-only wording with retained-source markers, and produce reversible corrections, insertions and audit records. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
 | `export_service` | `domain_service` | Render verified source, target and bilingual SRT outputs from the current revision and presentation rules. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
@@ -304,6 +304,7 @@ flowchart LR
 | `project_task_info` | `substar_core/task_info.py` | domain validation | `editor_api`<br>`task_info_service`<br>`editor_ui`<br>`project_exchange_service` | `editor_api`<br>`task_info_service`<br>`editor_ui`<br>`project_exchange_service` |
 | `runtime_identity` | `substar_core/runtime_instance.py` | domain validation | `launcher_runtime` | `settings_ui`<br>`launcher_runtime`<br>`packaging` |
 | `release_manifest` | `portable_manifest.json` | domain validation | `packaging` | `settings_service`<br>`local_environment_service`<br>`packaging` |
+| `editor_candidate` | `substar_core/editor/application/publication.py` | `docs/architecture/target/contracts/editor-candidate.schema.json` | `translation_service`<br>`calibration_service` | `editor_application` |
 
 ## End-to-end flows
 
@@ -1387,7 +1388,7 @@ Recovery: Load the latest verified revision; reject corrupt or conflicting write
 
 Reuses: `verified revision chain`; restarts: —; terminal behavior: ProjectIntegrityError or ProjectConflictError.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_editor_translation_binding.py`, `tests/test_editor_completion_lifecycle.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_editor_translation_binding.py`, `tests/test_editor_completion_lifecycle.py`, `tests/test_architecture_audit.py`
 
 Change impact modules: `segmentation_finalizer`<br>`editor_api`<br>`editor_ui`<br>`translation_service`<br>`calibration_service`
 
@@ -1514,6 +1515,7 @@ Invariants:
 - Raw exchanges are archived and versioned raw caches are rebound to the current ledger
 - New candidates take priority over previous text; unresolved or reused previous text is always explicitly marked for review
 - Final publication checks the inspected revision
+- Worker computation writes candidate and audit artifacts only; finalizer publishes via a CAS transaction with a durable receipt.
 
 Failure modes:
 
@@ -1543,7 +1545,7 @@ Code:
 
 - `substar_core/editor/calibration/handler.py` — `build_calibration_handler`
 - `substar_core/editor/calibration/worker.py` — `run`
-- `substar_core/editor/http_api.py` — `ai_calibrate_project`, `_ai_calibrate_project`, `_run_editor_ai_blocks`, `_validated_calibration_contract_actions`
+- `substar_core/editor/calibration/service.py` — `compute_calibration`, `_run_editor_ai_blocks`, `_validated_calibration_contract_actions`
 - `substar_core/cue_script.py` — `render_cue_request`, `finalize_calibration_candidate`
 - `substar_core/editor/calibration/contracts.py`
 - `prompts/production/calibration/en.md`
@@ -1552,6 +1554,7 @@ Code:
 - `prompts/production/calibration/ko.md`
 - `prompts/production/calibration/mixed.md`
 - `scripts/run_calibration_worker.py`
+- `substar_core/editor/http_api.py` — `ai_calibrate_project`
 
 Must not:
 
@@ -1572,6 +1575,7 @@ Invariants:
 - One repair request contains the complete original block and every block error while accepted Cues remain frozen
 - Cloud inference does not hold a global project-write resource; final publication uses optimistic ProjectStore concurrency
 - Invalid responses never enter the block cache
+- Worker computation writes candidate and audit artifacts only; finalizer publishes via a CAS transaction with a durable receipt.
 
 Failure modes:
 
@@ -1691,6 +1695,10 @@ Invariants:
 - Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers
 - Reference choices appear above the selected token and remain reversible
 - Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract
+- Conflicting edits stay unsaved until explicitly resolved.
+- Exports drain all pending edits and pin the saved revision.
+- Project requests and queue callbacks must belong to the current session.
+- Cue DOM is bounded to three pages plus a focused row.
 
 Failure modes:
 
@@ -1703,7 +1711,7 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`
+Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_audit_regressions.test.js`
 
 Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1811,6 +1819,9 @@ Code:
 - `substar_core/editor/api/editing_endpoints.py`
 - `substar_core/editor/ports/project_repository.py`
 - `substar_core/editor/infrastructure/sqlite_project_repository.py` — `SQLiteProjectRepository`
+- `substar_core/editor/application/publication.py`
+- `substar_core/editor/application/reference.py`
+- `scripts/run_reference_match.py`
 
 Must not:
 
@@ -1823,6 +1834,8 @@ Invariants:
 - Every write carries expected_revision_id
 - Repository conflicts are explicit
 - Operation batches commit atomically
+- Repeated operation IDs with the same content commit exactly once; reuse with changed content is rejected.
+- Publication receipts and revisions commit in one project transaction; startup repairs missing runtime completion.
 
 Failure modes:
 
@@ -1834,7 +1847,7 @@ Recovery: Reload the latest revision and let the caller rebase explicitly.
 
 Reuses: `operation_id`<br>`latest revision`; restarts: —; terminal behavior: Return conflict without partial commit.
 
-Tests: `tests/test_editor_ai_contracts.py`, `tests/test_editor_translation_binding.py`
+Tests: `tests/test_editor_ai_contracts.py`, `tests/test_editor_translation_binding.py`, `tests/test_architecture_audit.py`
 
 Change impact modules: `editor_domain`<br>`project_store`<br>`editor_api`<br>`editor_api_client`
 

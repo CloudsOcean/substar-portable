@@ -119,6 +119,8 @@ def run(command: WorkerCommand) -> int:
             progress_callback=progress,
         )
         contracts = {
+            "candidate.json": ("editor_candidate", "substar.editor-candidate.v1"),
+            "translation_report.json": ("translation_report", "substar.translation-report.v1"),
             TRANSLATION_PROGRESS_FILENAME: ("translation_progress", TRANSLATION_PROGRESS_SCHEMA),
             TRANSLATION_REVISION_FILENAME: ("translation_revision", "substar.translation-revision.v2"),
             TRANSLATION_SUBTITLE_FILENAME: ("translation_subtitle", "substar.srt.v1"),

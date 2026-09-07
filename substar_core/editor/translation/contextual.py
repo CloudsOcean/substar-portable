@@ -12,6 +12,7 @@ from substar_core.domain import (
     ChangeKind,
     ChangeProvenance,
     DisplayCue,
+    DocumentRevision,
     EntityState,
     TranslationTrack,
     stable_id,
@@ -20,7 +21,7 @@ from substar_core.editor.translation.grouping import translation_groups
 from substar_core.glossary import active_glossary, glossary_prompt
 from substar_core.prompt_registry import (
     opposite_language,
-    render_prompt,
+    render_prompt, frozen_prompt,
     translation_variant,
 )
 from substar_core.policy import SubtitlePolicy
@@ -1263,6 +1264,7 @@ def materialize_presentation(
             "issue_code": "translation_unresolved" if needs_review else None,
             "editable": True,
         })
+    presentation.extend(cue for cue in document.cues if cue.state is EntityState.DELETED)
     presentation.sort(key=lambda cue: (cue.start, cue.end, cue.index, cue.cue_id))
     presentation = [replace(cue, index=index) for index, cue in enumerate(presentation)]
     return replace(document, cues=tuple(presentation)), {
@@ -1291,9 +1293,10 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
                       metadata: dict[str, Any], target_language: str,
                       expected_revision_id: str,
                       candidate_targets_by_cue: Mapping[str, str] | None = None,
+                      artifact_dir: Path | None = None,
+                      source_revision: DocumentRevision | None = None,
                       ) -> str:
-    store = ProjectStore.open(work / "project")
-    revision = store.load_latest()
+    revision = source_revision or ProjectStore.open(work / "project").load_latest()
     if revision is None:
         raise RuntimeError("项目缺少可翻译版本")
     if revision.revision_id != expected_revision_id:
@@ -1302,7 +1305,7 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
         revision.document, plans, target_language, candidate_targets_by_cue
     )
     translations = {
-        cue.cue_id: cue.target.target_text for cue in candidate.cues if cue.target is not None
+        cue.cue_id: cue.target.target_text for cue in candidate.cues if cue.target is not None and cue.state is EntityState.ACTIVE
     }
     warnings = warning_report(translations, settings)
     report = {"validation": {"warnings": warnings}, "presentation": presentation_report}
@@ -1331,9 +1334,23 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
             "translation_problem_reasons": problem_reasons,
         },
     )
-    candidate = replace(candidate, changes=(*candidate.changes, provenance))
-    saved = store.save(candidate, provenance=provenance, expected_revision_id=revision.revision_id)
-    atomic_write_json(work / "translation_report.json", report)
+    # Current tracks own review state; historical audit rows are evidence only.
+    cues = []
+    for cue in candidate.cues:
+        if cue.state is EntityState.DELETED:
+            cues.append(cue)
+            continue
+        target = cue.target
+        if target is not None and target.translation_status == "translated" and cue.cue_id in problem_reasons:
+            target = replace(target, translation_status="needs_review", issue_code=problem_reasons[cue.cue_id][0])
+        cues.append(replace(cue, target=target) if target is not cue.target else cue)
+    from substar_core.document_operations import synchronize_translation_status
+    candidate = synchronize_translation_status(replace(candidate, cues=tuple(cues), changes=(*candidate.changes, provenance)), set())
+    from substar_core.editor.application.publication import write_candidate
+    directory = artifact_dir or work / "translation" / "candidate"
+    directory.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(directory / "translation_report.json", report)
+    saved = write_candidate(directory, revision, candidate, provenance)
     return saved.revision_id
 
 
@@ -1354,11 +1371,12 @@ def run_contextual_translation(
     settings: dict[str, Any],
     *,
     artifact_dir: Path | None = None,
+    source_revision: DocumentRevision | None = None,
     progress_callback: Callable[..., None] | None = None,
 ) -> dict[str, Any]:
     audit_dir = artifact_dir or work
     audit_dir.mkdir(parents=True, exist_ok=True)
-    revision = ProjectStore.open(work / "project").load_latest()
+    revision = source_revision or ProjectStore.open(work / "project").load_latest()
     if revision is None:
         raise RuntimeError("项目缺少可翻译版本")
     groups = clean_groups(revision.document, settings)
@@ -1376,10 +1394,10 @@ def run_contextual_translation(
         )
     variant = translation_variant(source_language, target_language)
     mapping_mode = str(settings.get("translation_mapping_mode") or "many_to_many")
-    prompt = render_prompt(
+    prompt = frozen_prompt(settings,
         "contextual_translation", variant=variant, mode=mapping_mode
     )
-    repair_prompt = render_prompt(
+    repair_prompt = frozen_prompt(settings,
         "contextual_translation_repair", variant=variant, mode=mapping_mode
     )
     language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文"}
@@ -1390,7 +1408,7 @@ def run_contextual_translation(
         f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'english_hard_limit'), 55))}。"
     )
     task_info = load_task_info(work, work.name)
-    glossary_entries = active_glossary(str(task_info.get("glossary_id") or ""))
+    glossary_entries = settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(task_info.get("glossary_id") or ""))
     system_prompt = _translation_system_prompt(
         prompt.text, direction, glossary_entries
     )
@@ -1501,6 +1519,8 @@ def run_contextual_translation(
         work=work, plans=plans, settings=settings,
         metadata=metadata, target_language=target_language,
         expected_revision_id=revision.revision_id,
+        source_revision=revision,
+        artifact_dir=audit_dir,
         candidate_targets_by_cue=repair.get("candidate_targets_by_cue", {}),
     )
     return {

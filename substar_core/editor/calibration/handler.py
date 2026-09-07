@@ -86,20 +86,29 @@ def build_calibration_handler(projects_root: Path, application_root: Path) -> Ta
         if not isinstance(summary, Mapping):
             raise InvalidTaskError("calibration worker summary is invalid")
         project = (projects_root / str(context.task["project_id"])).resolve()
-        revision = ProjectStore.open(project / "project").load_latest()
-        if revision is None or revision.revision_id != summary.get("result_revision_id"):
-            raise InvalidTaskError("calibration result revision was not published")
+        from substar_core.editor.application.publication import publish_candidate
+        from substar_core.artifacts import atomic_write_json
+        import json
+        # All required IO precedes the authoritative transaction.
+        for name in ("latest.json", "audit.json"):
+            value = json.loads((context.artifact_directory / name).read_text(encoding="utf-8"))
+            atomic_write_json(project / "calibration" / name, value)
         problems = list(summary.get("problem_cue_ids") or [])
         problem_blocks = list(summary.get("problem_block_ids") or [])
         failures = list(summary.get("failed_blocks") or [])
-        return {
-            "result_revision_id": revision.revision_id,
+        final_result = {
+            "result_revision_id": str(summary["result_revision_id"]),
             "problem_cue_ids": problems,
             "problem_block_ids": problem_blocks,
             "failed_blocks": failures,
             "needs_attention": bool(problems or failures),
             "ai_progress": dict(summary.get("ai_progress") or {}),
         }
+
+        revision = publish_candidate(ProjectStore.open(project / "project"), context.artifact_directory,
+            task_id=str(context.task["task_id"]),
+            expected_revision_id=str(context.input_payload["expected_revision_id"]), summary=final_result)
+        return final_result
 
     return TaskHandler(
         task_type="calibration",

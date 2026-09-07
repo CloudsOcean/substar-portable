@@ -30,22 +30,23 @@
         pending:pending.length,
         in_flight:inFlight?.entries.length || 0,
         failed:failed.length,
-        busy:!!inFlight || pending.length > 0
+        busy:!!inFlight || pending.length > 0,
+        hasUnsavedChanges:!!inFlight || pending.length > 0 || failed.length > 0
       };
     }
 
     function publish() {
       const journal = [
+        ...failed,
         ...(inFlight?.entries || []),
-        ...pending,
-        ...failed
+        ...pending
       ].map(entry => entry.operation);
       options.onStatus?.(snapshot());
       options.onJournal?.(journal);
     }
 
     function schedule(delay = debounceMs) {
-      if (destroyed || inFlight || timer || !pending.length) return;
+      if (destroyed || inFlight || timer || failed.length || !pending.length) return;
       timer = setTimeout(() => {
         timer = null;
         flush();
@@ -54,11 +55,11 @@
 
     function retryable(error) {
       if (typeof options.shouldRetry === "function") return !!options.shouldRetry(error);
-      return !error?.status || error.status === 409 || error.status >= 500;
+      return !error?.status || error.status >= 500;
     }
 
     async function flush() {
-      if (destroyed || inFlight || !pending.length) return null;
+      if (destroyed || inFlight || failed.length || !pending.length) return null;
       const entries = pending.splice(0, maxBatchSize);
       const batch = {
         schema_version:"substar.editor-operation-batch.v1",
@@ -68,6 +69,7 @@
       };
       inFlight = {entries, batch};
       publish();
+      let retryDelay = 0;
       try {
         const result = await options.sendBatch(batch);
         entries.forEach(entry => entry.resolve(result));
@@ -78,7 +80,7 @@
           entries.forEach(entry => { entry.attempts += 1; });
           try { await options.onRetry?.(error, batch); } catch (_) { /* next send reports it */ }
           pending.unshift(...entries);
-          schedule(Math.min(4000, 150 * (2 ** attempts)));
+          retryDelay = Math.min(4000, 150 * (2 ** attempts));
         } else {
           failed.push(...entries.map(entry => ({...entry, error})));
           entries.forEach(entry => entry.reject(error));
@@ -88,7 +90,7 @@
       } finally {
         inFlight = null;
         publish();
-        schedule(0);
+        schedule(retryDelay);
       }
     }
 
@@ -104,7 +106,7 @@
 
     function retryFailed() {
       if (!failed.length) return;
-      pending.push(...failed.splice(0).map(entry => ({...entry, error:null})));
+      pending.unshift(...failed.splice(0).map(entry => ({...entry, error:null, attempts:0})));
       publish();
       schedule(0);
     }
@@ -120,6 +122,26 @@
         if (timer) clearTimeout(timer);
         timer = null;
         return flush();
+      },
+      async flushAndWait() {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        await flush();
+        while (inFlight || pending.length) {
+          if (failed.length) throw new Error("仍有编辑未保存，请先处理保存冲突或错误");
+          if (destroyed) throw new Error("保存会话已结束");
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        if (failed.length) throw new Error("仍有编辑未保存，请先处理保存冲突或错误");
+        if (destroyed) throw new Error("保存会话已结束");
+        return options.base();
+      },
+      discardUnsaved() {
+        if (inFlight) throw new Error("保存请求仍在进行");
+        const entries = [...failed.splice(0), ...pending.splice(0)];
+        entries.forEach(entry => entry.reject(new Error("编辑已保留为恢复副本")));
+        publish();
+        return entries.map(entry => entry.operation);
       },
       retryFailed,
       getState:snapshot,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+import threading
 import uuid
 from pathlib import PurePosixPath
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .model import (
     TASK_TYPES,
@@ -73,6 +74,8 @@ class TaskService:
 
     def __init__(self, store: RuntimeStore, instance_id: str):
         self.store = store
+        self.publication_lock = threading.RLock()
+        self.publication_recoverer: Callable[[str], bool] | None = None
         self.instance_id = _required_text(instance_id, "instance_id")
 
     @staticmethod
@@ -321,20 +324,24 @@ class TaskService:
     def request_cancel(
         self, task_id: str, *, request_id: str | None = None
     ) -> dict[str, Any]:
-        return self._public(
-            self.store.request_cancel(
-                _required_text(task_id, "task_id"),
-                request_id=(
-                    _required_text(request_id, "request_id")
-                    if request_id is not None
-                    else None
-                ),
+        with self.publication_lock:
+            return self._public(
+                self.store.request_cancel(
+                    _required_text(task_id, "task_id"),
+                    request_id=(
+                        _required_text(request_id, "request_id")
+                        if request_id is not None
+                        else None
+                    ),
+                )
             )
-        )
 
     def retry(
         self, task_id: str, *, request_id: str | None = None
     ) -> dict[str, Any]:
+        with self.publication_lock:
+            if self.recover_publication(task_id):
+                return self.get_task(task_id)
         return self._public(
             self.store.retry(
                 _required_text(task_id, "task_id"),
@@ -345,6 +352,9 @@ class TaskService:
                 ),
             )
         )
+
+    def recover_publication(self, task_id: str) -> bool:
+        return bool(self.publication_recoverer and self.publication_recoverer(task_id))
 
     def complete(
         self,

@@ -109,6 +109,7 @@ def execute_translation(
         project_root,
         dict(settings),
         artifact_dir=artifact_directory,
+        source_revision=source_revision,
         progress_callback=write_progress,
     )
     write_progress(
@@ -118,9 +119,11 @@ def execute_translation(
         repair_planned=tracker["repair_planned"],
         repair_accepted=tracker["repair_accepted"],
     )
-    revision = store.load_latest()
-    if revision is None or revision.revision_id != result["revision_id"]:
-        raise RuntimeError("正式翻译结果未写入项目版本库")
+    from substar_core.domain import DocumentRevision
+    candidate_value = json.loads((artifact_directory / "candidate.json").read_text(encoding="utf-8"))
+    revision = DocumentRevision.from_dict(candidate_value["revision"])
+    if revision.revision_id != result["revision_id"]:
+        raise RuntimeError("翻译候选版本不一致")
     atomic_write_text(
         artifact_directory / TRANSLATION_SUBTITLE_FILENAME,
         render_document_srt(revision.document, SubtitleExportMode.AB_DOUBLE),

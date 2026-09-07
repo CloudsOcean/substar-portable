@@ -117,14 +117,15 @@ class SemanticExecutionTests(unittest.TestCase):
         group = _group("cue_1")
         self.assertIsNone(validate_presentation_plan(group, _row("cue_1", target_text="  ")))
 
-    def test_translation_problem_queue_is_read_from_revision_metadata(self) -> None:
-        document = SimpleNamespace(changes=(
-            SimpleNamespace(operation="split_cue", metadata={}),
-            SimpleNamespace(
-                operation="contextual_translation",
-                metadata={"translation_problem_cue_ids": ["cue_2", "cue_2", "cue_5"]},
-            ),
-        ))
+    def test_translation_problem_queue_uses_current_track_state(self) -> None:
+        active = SimpleNamespace(value="active")
+        deleted = SimpleNamespace(value="deleted")
+        def cue(name, state, status):
+            return SimpleNamespace(cue_id=name, state=state, target=SimpleNamespace(translation_status=status))
+        document = SimpleNamespace(cues=[cue("cue_2", active, "manual_required"),
+                                        cue("cue_5", active, "needs_review"),
+                                        cue("old", deleted, "manual_required"),
+                                        cue("fixed", active, "translated")])
         self.assertEqual(translation_problem_cue_ids(document), ["cue_2", "cue_5"])
 
 

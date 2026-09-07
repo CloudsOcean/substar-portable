@@ -42,6 +42,7 @@ class AlignmentUnit:
     sentence_end: bool = False
     speaker_id: str | None = None
     speaker_confidence: float = 0.0
+    timing: dict[str, Any] | None = None
 
 
 @dataclass

@@ -106,9 +106,8 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
             raise InvalidTaskError("translation worker summary is invalid")
         project = Path(context.task.get("project_id") or "")
         project_root = (projects_root / project).resolve()
-        revision = ProjectStore.open(project_root / "project").load_latest()
-        if revision is None or revision.revision_id != summary.get("result_revision_id"):
-            raise InvalidTaskError("translation result revision was not published")
+        from substar_core.editor.application.publication import publish_candidate
+        store = ProjectStore.open(project_root / "project")
         latest_path = project_root / "translation" / "latest.json"
         latest_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(latest_path, {
@@ -116,6 +115,7 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
             "task_id": context.task["task_id"],
             **dict(summary),
         })
+        # Write all derived files before the transaction. The receipt is the authority.
         problems = list(summary.get("problem_cue_ids") or [])
         problem_blocks = list(summary.get("problem_block_ids") or [])
         planned = int(summary.get("planned", 0) or 0)
@@ -123,8 +123,8 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
         repair_completed = int(summary.get("repair_completed", 0) or 0)
         repair_accepted = int(summary.get("repair_accepted", 0) or 0)
         accepted = max(0, planned - max(0, repair_planned - repair_accepted))
-        return {
-            "result_revision_id": revision.revision_id,
+        final_result = {
+            "result_revision_id": str(summary["result_revision_id"]),
             "problem_cue_ids": problems,
             "problem_block_ids": problem_blocks,
             "needs_attention": bool(problems),
@@ -148,6 +148,11 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
                 problem_count=len(problem_blocks),
             ),
         }
+
+        revision = publish_candidate(store, context.artifact_directory,
+            task_id=str(context.task["task_id"]),
+            expected_revision_id=str(context.input_payload["expected_revision_id"]), summary=final_result)
+        return final_result
 
     return TaskHandler(
         task_type="translation",

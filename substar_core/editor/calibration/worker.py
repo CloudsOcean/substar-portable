@@ -84,7 +84,7 @@ def run(command: WorkerCommand) -> int:
     emit(WorkerMessageType.READY, {"worker": "calibration"})
     try:
         # The worker protocol is the only lifecycle/progress authority.
-        from substar_core.editor import http_api
+        from substar_core.editor.calibration import service
 
         def project_progress(value: Any) -> None:
             value = dict(value or {})
@@ -111,20 +111,23 @@ def run(command: WorkerCommand) -> int:
                 step=f"calibration.{phase}",
             )
 
-        request = http_api.AiCalibrationRequest(
+        request = service.AiCalibrationRequest(
             expected_revision_id=str(payload["expected_revision_id"]),
             instruction=str(payload["instruction"]),
         )
-        result = http_api._ai_calibrate_project(
+        result = service.compute_calibration(
             str(command.project_id),
             request,
             command.task_id,
+            project_root=project_root,
+            artifact_directory=artifacts,
             settings_snapshot=settings,
             progress_sink=project_progress,
         )
 
-        project_artifacts = project_root / "calibration"
+        project_artifacts = artifacts
         contracts = {
+            "candidate.json": ("editor_candidate", "substar.editor-candidate.v1"),
             "latest.json": ("calibration_result", "substar.calibration-result.v2"),
             "audit.json": ("calibration_audit", "substar.calibration-audit.v2"),
         }
@@ -132,7 +135,8 @@ def run(command: WorkerCommand) -> int:
         for name, (artifact_type, schema_version) in contracts.items():
             source = project_artifacts / name
             destination = artifacts / name
-            shutil.copy2(source, destination)
+            if source != destination:
+                shutil.copy2(source, destination)
             row = {
                 "artifact_type": artifact_type,
                 "relative_path": name,
@@ -146,7 +150,7 @@ def run(command: WorkerCommand) -> int:
         # Internal editor saves return the serialized revision payload while
         # storage APIs return a DocumentRevision.  Publish one canonical id to
         # the Runtime regardless of that representation boundary.
-        revision_id = http_api._revision_id(revision)
+        revision_id = service._revision_id(revision)
         emit(WorkerMessageType.RESULT, {
             "schema_version": CALIBRATION_RESULT_SCHEMA,
             "artifacts": rows,

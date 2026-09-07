@@ -31,14 +31,16 @@ function row(value, index = 0) {
   };
 }
 
-function fixture() {
+function fixture({dynamic = false} = {}) {
   let scrollReads = 0;
   let scrollWrites = 0;
+  let scrollTop = 317;
   const inserted = new Map();
   const frames = [];
   let scrollHandler = null;
   const container = {
     children:[],
+    style:{},
     clientHeight:600,
     scrollHeight:2400,
     addEventListener(name, handler) {
@@ -74,12 +76,15 @@ function fixture() {
   Object.defineProperty(container, "scrollTop", {
     get() {
       scrollReads += 1;
-      return 317;
+      return scrollTop;
     },
-    set(_value) {
+    set(value) {
       scrollWrites += 1;
+      scrollTop = value;
     }
   });
+  if (dynamic) Object.defineProperty(container, "scrollHeight", {get:() =>
+    container.children.length * 80 + (parseFloat(container.style.paddingTop) || 0) + (parseFloat(container.style.paddingBottom) || 0)});
   global.document = {
     createDocumentFragment() {
       return {
@@ -105,6 +110,29 @@ function fixture() {
 
 function ids(container) {
   return container.children.map(node => node.dataset.cueId);
+}
+
+{
+  const {container, fireScroll, flushFrames} = fixture({dynamic:true});
+  let window;
+  const view = createCueListView({container, pageSize:160, renderCue:row, onWindowChange:value => {window=value;}});
+  const cues = Array.from({length:10000}, (_, index) => cue(`long_${index}`, `Cue ${index}`));
+  view.render({cues, tokenById:new Map(), activeCueId:cues[0].cue_id});
+  for (let i=0; i<70 && window.end<cues.length; i++) {
+    container.scrollTop = container.scrollHeight - (parseFloat(container.style.paddingBottom) || 0) - container.clientHeight;
+    fireScroll(); flushFrames();
+    assert.ok(container.children.length <= 480, "forward scroll has a bounded DOM");
+    assert.equal(new Set(ids(container)).size, container.children.length);
+  }
+  assert.equal(window.end,10000);
+  for (let i=0; i<70 && window.start>0; i++) {
+    container.scrollTop = parseFloat(container.style.paddingTop) || 0;
+    fireScroll(); flushFrames();
+    assert.ok(container.children.length <= 480, "backward scroll has a bounded DOM");
+  }
+  assert.equal(window.start,0);
+  assert.equal(container.children[0].dataset.cueId,"long_0");
+  assert.equal(parseFloat(container.style.paddingTop),0);
 }
 
 {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import difflib
 import html
+import hashlib
 import io
+import json
 import re
 import unicodedata
 import zipfile
@@ -390,6 +392,7 @@ def materialize_reference_alignment(
     source_language: str | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     source_units = [dict(item) for item in alignment.get("units", [])]
+    evidence_hash = hashlib.sha256(json.dumps(alignment, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if not source_units:
         raise ManuscriptMatchError("ASR 对齐为空，无法匹配参考文稿")
     source_values, token_owners = _unit_tokens(source_units, source_language)
@@ -445,6 +448,15 @@ def materialize_reference_alignment(
                 if source_values[mapping[ref_index]] == token.normalized
                 else "reference_envelope_inherited"
             ),
+            "timing": {
+                **dict(source.get("timing") or {}),
+                "kind": "subdivided" if count > 1 else "envelope-inherited",
+                "evidence_sha256": (source.get("timing") or {}).get("evidence_sha256", evidence_hash),
+                "native_token_ids": (source.get("timing") or {}).get("native_token_ids", [str(source.get("index", owner))]),
+                "native_start": (source.get("timing") or {}).get("native_start", start),
+                "native_end": (source.get("timing") or {}).get("native_end", end),
+                "source_alignment_index": int(source.get("index", owner)),
+            },
             "reference_changed": source_values[mapping[ref_index]] != token.normalized,
             "reference_only": ref_index in reference_only_indexes,
         }
@@ -463,14 +475,20 @@ def materialize_reference_alignment(
     canonical["units"] = canonical_units
     canonical["master_text"] = reference_text.strip()
     canonical["reference_manuscript"] = {
+        "authority": "reference_strict",
         "applied": True,
         "similarity": round(similarity, 6),
+        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
+        "requires_review": similarity < 0.40,
     }
     report = {
         "schema_version": "substar.reference-manuscript.v1",
         "similarity": round(similarity, 6),
+        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
+        "requires_review": similarity < 0.40,
         "source_unit_count": len(source_units),
         "reference_unit_count": len(canonical_units),
+        "authority": "reference_strict",
         "changes": changes,
         "provenance": provenance,
         "tokenization": _tokenization_diagnostics(reference_text, source_language),
@@ -903,9 +921,12 @@ def materialize_reference_script(
     }
     report = {
         "schema_version": "substar.reference-script-alignment.v1",
+        "authority": "reference_assisted",
         "quality": quality,
         "break_symbols": symbols,
         "similarity": round(similarity, 6),
+        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
+        "requires_review": similarity < 0.40,
         "matched_token_ratio": round(matched_ratio, 6),
         "segment_coverage": round(segment_coverage, 6),
         "source_token_count": len(source),
@@ -1032,8 +1053,11 @@ def editor_reference_operations(
         )
     return {
         "schema_version": "substar.reference-editor.v1",
+        "authority": "reference_assisted",
         "quality": quality,
         "similarity": round(similarity, 6),
+        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
+        "requires_review": similarity < 0.40,
         "edits": edits,
         "merges": merges,
         "insertions": insertions,

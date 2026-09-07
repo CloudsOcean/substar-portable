@@ -170,12 +170,7 @@ def _copy_translation_for_split(
             "translation_copy_group": group,
         },
     )
-    return TranslationTrack(
-        target_text=track.target_text,
-        original_text=track.original_text,
-        language=track.language,
-        provenance=copy_provenance,
-    )
+    return replace(track, provenance=copy_provenance)
 
 
 def _translation_join_separator(left: str, right: str) -> str:
@@ -226,6 +221,9 @@ def _replace(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
     tokens = _token_map(document)
     if token_id not in tokens:
         raise DocumentOperationError(f"unknown display token: {token_id}")
+    expected = payload.get("expected_text", payload.get("original_text"))
+    if expected is not None and tokens[token_id].text != expected:
+        raise DocumentOperationError("replacement precondition failed: source text changed")
     provenance = _provenance(operation, "replace")
     updated = replace(tokens[token_id], text=text, provenance=provenance)
     display_tokens = tuple(
@@ -1018,6 +1016,8 @@ def _merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
             original_text=targets[0].original_text,
             language=targets[0].language,
             provenance=merged_provenance,
+            translation_status=targets[0].translation_status,
+            issue_code=targets[0].issue_code,
         )
     elif targets:
         target = TranslationTrack(
@@ -1029,9 +1029,16 @@ def _merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
                 targets[1].original_text or targets[1].target_text,
             ),
             language=targets[0].language,
+            translation_status="manual_required" if any(t.translation_status == "manual_required" for t in targets) else "needs_review" if any(t.translation_status == "needs_review" for t in targets) else "translated",
+            issue_code="translation_unresolved" if any(t.translation_status == "manual_required" for t in targets) else "source_changed" if any(t.translation_status == "needs_review" for t in targets) else None,
             provenance=provenance,
         )
     groups = document.groups
+    if target is not None:
+        unresolved = next((track for track in targets if track.translation_status == "manual_required"), None)
+        unresolved = unresolved or next((track for track in targets if track.translation_status == "needs_review"), None)
+        if unresolved is not None:
+            target = replace(target, translation_status=unresolved.translation_status, issue_code=unresolved.issue_code)
     merged_group_id = left.group_id
     if groups and left.group_id != right.group_id:
         group_map = {group.group_id: group for group in groups}
@@ -1142,6 +1149,62 @@ _APPLIERS = {
 }
 
 
+def apply_document_batch(document: EditorDocument, operations: list[Mapping[str, Any]]) -> EditorDocument:
+    if not all(op.get("type") == "replace" for op in operations):
+        for operation in operations:
+            document = apply_document_operation(document, operation)
+        return document
+    tokens = _token_map(document)
+    frozen = {token_id for cue in document.cues if cue.state is EntityState.DELETED for token_id in cue.display_token_ids}
+    changes = list(document.changes)
+    changed_ids = set()
+    for operation in operations:
+        payload = operation["payload"]
+        token_id = str(payload["token_id"])
+        try:
+            if not operation.get("operation_id") or token_id in frozen:
+                raise DocumentOperationError("cannot edit a deleted Cue or omit operation_id")
+            token = tokens[token_id]
+            expected = payload.get("expected_text", payload.get("original_text"))
+            if expected is not None and token.text != expected:
+                raise DocumentOperationError("replacement precondition failed: source text changed")
+            text = str(payload.get("text", "")).strip()
+            if not text:
+                raise DocumentOperationError("replacement text cannot be empty")
+            provenance = _provenance(operation, "replace")
+            tokens[token_id] = replace(token, text=text, provenance=provenance)
+            changed_ids.add(token_id)
+            changes.append(provenance)
+        except (KeyError, TypeError, ValueError) as exc:
+            error = DocumentOperationError(str(exc))
+            error.operation_id = operation.get("operation_id")
+            raise error from exc
+    return synchronize_translation_status(replace(document, display_tokens=tuple(tokens[t.token_id] for t in document.display_tokens), changes=tuple(changes)), changed_ids)
+
+
+def synchronize_translation_status(document: EditorDocument, changed_ids: set[str]) -> EditorDocument:
+    """Keep current tracks authoritative and preserve immutable deleted cues."""
+    cues = []
+    for cue in document.cues:
+        if cue.state is EntityState.DELETED:
+            cues.append(cue)
+            continue
+        target = cue.target
+        if target is not None and changed_ids.intersection(cue.display_token_ids) and target.translation_status == "translated":
+            target = replace(target, translation_status="needs_review", issue_code="source_changed")
+        mapping = dict(cue.mapping or {})
+        if target is not None:
+            mapping.update(translation_status=target.translation_status, issue_code=target.issue_code,
+                           translation_unresolved=target.translation_status == "manual_required",
+                           requires_manual_translation=target.translation_status == "manual_required",
+                           translation_needs_review=target.translation_status == "needs_review")
+        elif mapping:
+            for key in ("translation_status", "issue_code", "translation_unresolved", "requires_manual_translation", "translation_needs_review"):
+                mapping.pop(key, None)
+        cues.append(replace(cue, target=target, mapping=mapping) if target is not cue.target or mapping != dict(cue.mapping or {}) else cue)
+    return replace(document, cues=tuple(cues)) if tuple(cues) != document.cues else document
+
+
 def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
@@ -1155,4 +1218,8 @@ def apply_document_operation(
         ordered_document, operation_type, operation.get("payload", {})
     )
     result = _APPLIERS[operation_type](ordered_document, operation)
-    return canonicalize_document_cues(result)
+    changed_ids = set()
+    if operation_type in {"replace", "batch_replace", "set_ai_calibration", "delete", "restore", "insert", "merge"}:
+        before = {token.token_id: (token.text, token.state) for token in document.display_tokens}
+        changed_ids = {token.token_id for token in result.display_tokens if before.get(token.token_id) != (token.text, token.state)}
+    return synchronize_translation_status(canonicalize_document_cues(result), changed_ids)

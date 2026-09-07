@@ -115,10 +115,9 @@ def attach_semantic_reference_audit(
 
     insertion_anchor_by_gap: dict[tuple[int, int], str] = {}
     source_to_display = {
-        source.index: display
+        source.index: display_by_source_id[source.token_id]
         for source in document.source_tokens
-        for display in document.display_tokens
-        if source.token_id in display.source_token_ids
+        if source.token_id in display_by_source_id
     }
     for suggestion in reference_suggestions or []:
         after_index = int(suggestion.get("after_index", -1))
@@ -209,7 +208,7 @@ def attach_semantic_reference_audit(
             }
         )
 
-    if not reference_changes:
+    if not reference_changes and not reference_report.get("requires_review"):
         return document
     audit = ChangeProvenance(
         kind=ChangeKind.IMPORT,
@@ -218,6 +217,8 @@ def attach_semantic_reference_audit(
         metadata={
             "reference": True,
             "mode": "semantic",
+            "authority": "reference_strict",
+            "requires_review": bool(reference_report.get("requires_review")),
             "similarity": float(reference_report.get("similarity", 0.0)),
             "reference_changes": reference_changes,
             "replacement_count": sum(
@@ -356,13 +357,12 @@ def build_reference_script_document(
         cue_layout={"display_breaks": display_breaks},
         generation_mode="reference_script",
     )
+    display_by_source = {
+        source_id: token.token_id
+        for token in document.display_tokens for source_id in token.source_token_ids
+    }
     source_to_display = {
-        source.index: next(
-            token.token_id
-            for token in document.display_tokens
-            if source.token_id in token.source_token_ids
-        )
-        for source in document.source_tokens
+        source.index: display_by_source[source.token_id] for source in document.source_tokens
     }
     reference_changes: list[dict[str, Any]] = []
     replacements = []
@@ -526,6 +526,9 @@ def build_reference_script_document(
         metadata={
             "reference": True,
             "quality": str(reference_report.get("quality", "failed")),
+            "authority": "reference_assisted",
+            "requires_review": bool(reference_report.get("requires_review")),
+            "confidence": str(reference_report.get("confidence", "unknown")),
             "similarity": float(reference_report.get("similarity", 0.0)),
             "break_symbols": str(reference_report.get("break_symbols", "")),
             "reference_changes": reference_changes,

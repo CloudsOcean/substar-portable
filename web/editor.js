@@ -93,11 +93,18 @@
   };
 
   async function api(path, options = {}) {
+    const requestEpoch = projectEpoch;
+    const projectRequest = String(path).startsWith("/api/projects/");
     const response = await fetch(path, options);
     let body = null;
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("json")) {
       try { body = await response.json(); } catch (_) { body = null; }
+    }
+    if (projectRequest && requestEpoch !== projectEpoch) {
+      const error = new Error("项目会话已变化，忽略旧响应");
+      error.status = 410;
+      throw error;
     }
     if (!response.ok) {
       const detail = body?.detail || body || {};
@@ -159,9 +166,12 @@
 
   async function refreshEditorAiTask() {
     if (!state.projectId) return null;
+    const refreshEpoch = projectEpoch;
     const previousLocked = editorAiTaskLocksEditor();
     const previousTaskId = state.editorAiTask?.task_id || "";
-    state.editorAiTask = await api(projectPath("/ai-task")).catch(() => null);
+    const nextTask = await api(projectPath("/ai-task")).catch(() => null);
+    if (refreshEpoch !== projectEpoch) return null;
+    state.editorAiTask = nextTask;
     const locked = editorAiTaskLocksEditor();
     document.body.classList.toggle("editor-ai-task-locked", locked);
     renderHeader();
@@ -573,9 +583,8 @@
         cueId => problemCueIds.add(String(cueId))
       );
     });
-    (latestTranslation?.metadata?.translation_problem_cue_ids || []).forEach(
-      cueId => problemCueIds.add(String(cueId))
-    );
+    state.view.cue_views.filter(cue => cue.target && cue.target.translation_status !== "translated")
+      .forEach(cue => problemCueIds.add(cue.cue_id));
     const calibrationMetadata = latestCalibration?.metadata || {};
     const calibrationFailedBlocks = calibrationMetadata.failed_blocks || [];
     const calibrationExecutionBlocks = calibrationMetadata.execution_blocks || [];
@@ -1708,6 +1717,9 @@
     const source = sourceTextForToken(token);
     if (source && source !== token.text) button.title = `原词：${source}`;
     else if (!source) button.title = "人工新增词元";
+    const timings = token.source_token_ids.map(id => state.indexes?.sourceById.get(id)?.timing);
+    const timingLabels = {native:"识别词时间", "envelope-inherited":"继承时间区间", subdivided:"区间内估算时间", manual:"人工时间", unknown:"来源未标注"};
+    if (timings.length) button.title += `${button.title ? "；" : ""}时间来源：${[...new Set(timings.map(value => timingLabels[value?.kind || "unknown"]))].join("、")}`;
     button.append(label);
     return button;
   }
@@ -1886,7 +1898,8 @@
       target.dataset.originalTarget = cue.target.target_text;
       target.dataset.projectedTarget = projected.target;
       target.dataset.rawEditing = "false";
-      target.title = "直接编辑译文";
+      target.title = cue.target.translation_status === "needs_review" ? (cue.target.issue_code === "source_changed" ? "原文已变更，请复核译文" : "译文质量或行长需要复核") : cue.target.translation_status === "manual_required" ? "译文需要人工处理" : "直接编辑译文";
+      target.dataset.translationStatus = cue.target.translation_status || "translated";
       target.disabled = cue.state === "deleted" || editorAiTaskLocksEditor();
       target.value = projected.target;
       content.append(target);
@@ -2430,6 +2443,10 @@
       const projection = state.documentStore?.restore(initialOperations);
       if (projection) setRevision(projection, {localProjection:true});
     }
+    const queueProjectId = state.projectId;
+    const queueEpoch = projectEpoch;
+    const queueCurrent = () => queueProjectId === state.projectId && queueEpoch === projectEpoch;
+    const queuePath = suffix => `/api/projects/${encodeURIComponent(queueProjectId)}${suffix || ""}`;
     let wasBusy = false;
     state.operationQueueProjectId = state.projectId;
     state.operationQueue = factory.createOperationQueue({
@@ -2448,11 +2465,12 @@
       async sendBatch(batch) {
         const batchHasTopology = batch.operations.some(isTopologyOperation);
         try {
-          const response = await api(projectPath("/operation-batches"), {
+          const response = await api(queuePath("/operation-batches"), {
             method:"POST",
             headers:{"Content-Type":"application/json"},
             body:JSON.stringify(batch)
           });
+          if (!queueCurrent()) throw new Error("保存会话已变化");
           const acknowledged = state.documentStore?.acknowledged() || state.revision;
           const operationIds = response.acknowledged_operation_ids
             || batch.operations.map(item => item.operation_id);
@@ -2481,7 +2499,7 @@
             // client delta, projection, or render failure using the server's
             // authoritative snapshot, and never leave the committed operation
             // in the retry journal.
-            const latest = contract.consumeRevision(await api(projectPath()));
+            const latest = contract.consumeRevision(await api(queuePath()));
             const applied = appliedOperationIds(latest);
             if (!operationIds.every(id => applied.has(id))) throw clientApplyError;
             revision = latest;
@@ -2516,7 +2534,7 @@
             // impossible operations forever. The server remains authoritative:
             // discard only this rejected batch and rebuild from its latest
             // revision without creating a new edit.
-            const latest = contract.consumeRevision(await api(projectPath()));
+            const latest = contract.consumeRevision(await api(queuePath()));
             const operationIds = batch.operations.map(operation => operation.operation_id);
             state.documentStore?.discard(operationIds);
             const projection = state.documentStore?.replaceAcknowledged(latest) || latest;
@@ -2530,7 +2548,7 @@
             return latest;
           }
           if (error.status !== 409) throw error;
-          const latestPayload = await api(projectPath());
+          const latestPayload = await api(queuePath());
           const latest = contract.consumeRevision(latestPayload);
           const projection = state.documentStore?.replaceAcknowledged(latest) || latest;
           setRevision(projection, {
@@ -2553,10 +2571,12 @@
         }
       },
       shouldRetry(error) {
-        return !error?.status || error.status === 409 || error.status >= 500;
+        return !error?.status || error.status >= 500;
       },
       onStatus(status) {
-        state.operationPending = status.busy;
+        if (!queueCurrent()) return;
+        state.operationPending = status.hasUnsavedChanges;
+        $("#saveRecoveryActions")?.classList.toggle("hidden", !status.failed);
         renderHeader();
         if (wasBusy && !status.busy) {
           if (state.skipNextQueueIdleTimelineRedraw) {
@@ -2571,9 +2591,10 @@
         try {
           if (operations.length) localStorage.setItem(journalKey, JSON.stringify(operations));
           else localStorage.removeItem(journalKey);
-        } catch (_) { /* queue remains in memory if browser storage is unavailable */ }
+        } catch (_) { ordinaryError("浏览器恢复记录写入失败，编辑仅保留在内存中，请保持此页面打开并完成保存"); }
       },
       onFailed(error) {
+        if (!queueCurrent()) return;
         ordinaryError(`编辑尚未保存：${error.message}。操作已保留，可刷新前重试。`);
       }
     });
@@ -3048,6 +3069,7 @@
         });
       }
       const similarity = Number(result.match?.similarity || 0);
+      if (result.match?.requires_review) ordinaryError("参考稿匹配置信度较低，请复核已标记的差异；未匹配的听写内容已保留。");
       renderWorkbenchTask(
         "参考文稿", 100,
         `已匹配并标记 ${result.applied || 0} 个词元 · 相似度 ${(similarity * 100).toFixed(1)}%`,
@@ -3374,13 +3396,25 @@
     }
   }
 
+  let projectEpoch = 0;
+
   async function loadProject(projectId, {restoreTranslation = true, resetTutorial = false, showTutorialIntro = true} = {}) {
     if (!projectId) return;
-    if (state.operationQueue?.getState().busy) {
+    if (state.operationQueue?.getState().hasUnsavedChanges) {
       ordinaryError("当前编辑仍在排队保存，完成前不会切换或刷新项目");
       renderProjectList();
       return;
     }
+    const epoch = ++projectEpoch;
+    state.operationQueue?.destroy();
+    state.operationQueue = null;
+    state.operationQueueProjectId = "";
+    state.revision = null;
+    state.view = null;
+    state.documentStore = null;
+    $("#editorWorkbench").inert = true;
+    renderHeader();
+    const current = () => epoch === projectEpoch && projectId === state.projectId;
     stopTranslationPoll();
     if (projectId !== state.projectId) {
       renderTranslationTask(null);
@@ -3396,12 +3430,14 @@
       hideEditorTutorialIntro();
       const resetRevision = resetTutorial && project?.tutorial_case_id
         ? await api(projectPath("/tutorial/reset"), {method:"POST"}) : null;
+      if (!current()) return;
       const [revision, taskInfo, mediaInfo, llmOptions] = await Promise.all([
         resetRevision ? Promise.resolve(resetRevision) : api(projectPath()),
         api(projectPath("/task-info")),
         api(projectPath("/media-info")),
         api(projectPath("/llm-options"))
       ]);
+      if (!current()) return;
       state.taskInfo = taskInfo;
       state.llmOptions = llmOptions;
       applySubtitlePolicy(taskInfo);
@@ -3409,9 +3445,14 @@
       state.mediaInfo = mediaInfo;
       configureMedia(mediaInfo?.kind);
       setRevision(revision, {preserveCueViewport:false});
+      $("#editorWorkbench").inert = false;
       const aiTaskReady = refreshEditorAiTask();
       if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
+      const referenceAudit = [...state.revision.document.changes].reverse().find(change => change.metadata?.authority);
+      if (referenceAudit?.metadata?.requires_review) ordinaryError(referenceAudit.metadata.authority === "reference_strict"
+        ? "参考稿与听写匹配置信度较低。本项目以参考稿文字为主，时间为匹配估算，请复核。"
+        : "参考稿匹配置信度较低，已保留听写中未匹配内容，请复核差异。");
       loadRevisionHistory().catch(() => {});
       ensureOperationQueue();
       state.mediaLoadAttempts = 0;
@@ -3422,6 +3463,7 @@
       loadProjectMedia();
       state.timelineController?.redraw();
       await aiTaskReady;
+      if (!current()) return;
       startEditorAiTaskPoll();
       if (restoreTranslation) {
         const task = await refreshTranslationTask();
@@ -3429,12 +3471,13 @@
           followTranslationTask(task);
         }
       }
+      if (!current()) return;
       const url = new URL(window.location.href);
       url.searchParams.set("project", projectId);
       history.replaceState(null, "", url);
       if (project?.tutorial_case_id && showTutorialIntro) maybeShowTutorialIntro(project.tutorial_case_id);
     } catch (error) {
-      ordinaryError(error.message);
+      if (current()) ordinaryError(error.message);
     }
   }
 
@@ -4101,13 +4144,39 @@
   $("#translateDocument").onclick = startTranslation;
   $("#dismissTaskPanel").onclick = cancelOrDismissTaskPanel;
   $("#dismissOrdinaryError").onclick = () => ordinaryError("");
+  $("#retryUnsaved").onclick = () => state.operationQueue?.retryFailed();
+  $("#downloadConflictCopy").onclick = async () => {
+    try {
+      const text = JSON.stringify({schema_version:"substar.editor-recovery.v1", project_id:state.projectId,
+        revision:state.revision, operations:state.documentStore?.pending() || []}, null, 2);
+      const result = await systemSaveAs.saveBlob({
+        suggestedName:`${systemSaveAs.safeFilename(state.projectId)}_未保存编辑.json`,
+        description:"未保存编辑恢复副本", mimeType:"application/json", extension:".json"
+      }, new Blob([text], {type:"application/json;charset=utf-8"}));
+      if (!result.cancelled) ordinaryError(`恢复副本已保存：${result.filename}`, "completed");
+    } catch (error) { ordinaryError(`恢复副本下载失败：${error.message}`); }
+  };
+  $("#keepConflictCopy").onclick = async () => {
+    try {
+      const operations = state.documentStore?.pending() || [];
+      const key = `substar.editor.conflict-copy:${state.projectId}:${Date.now()}`;
+      localStorage.setItem(key, JSON.stringify({revision:state.revision, operations}));
+      state.operationQueue?.discardUnsaved();
+      state.documentStore?.discard(operations.map(operation => operation.operation_id));
+      await loadProject(state.projectId);
+      ordinaryError("已载入保存版本。未保存编辑的恢复副本已留在本浏览器。", "completed");
+    } catch (error) { ordinaryError(`恢复副本未能保存：${error.message}`); }
+  };
   $("#exportMenu").addEventListener("click", async event => {
+    const exportEpoch = projectEpoch;
     const exchange = event.target.closest("[data-exchange-export]");
     if (exchange && state.projectId && state.revision) {
       $("#exportMenu").open = false;
       try {
+        const savedBase = await ensureOperationQueue().flushAndWait();
+        if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
         const sequence = nextExportSequence();
-        const query = new URLSearchParams({export_sequence:String(sequence.value)});
+        const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
         const spec = systemSaveAs.exchangeSpec(
           state.taskInfo?.display_name || state.projectId,
           exchange.dataset.exchangeExport,
@@ -4132,8 +4201,10 @@
     if (!button || !state.projectId || !state.revision) return;
     $("#exportMenu").open = false;
     try {
+      const savedBase = await ensureOperationQueue().flushAndWait();
+      if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
       const sequence = nextExportSequence();
-      const query = new URLSearchParams({export_sequence:String(sequence.value)});
+      const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
       const spec = systemSaveAs.subtitleSpec(
         state.taskInfo?.display_name || state.projectId,
         button.dataset.exportMode,

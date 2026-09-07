@@ -11,6 +11,7 @@ import queue
 import threading
 from typing import Any, BinaryIO, Iterable, Iterator, Mapping
 import uuid
+import weakref
 import zipfile
 
 from substar_core.artifacts import atomic_write_json
@@ -75,8 +76,16 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+_export_index = threading.local()
+
+
 def _cue_text(document: EditorDocument, cue: Any) -> str:
-    tokens = {item.token_id: item for item in document.display_tokens}
+    cached = getattr(_export_index, "document", None)
+    if cached is None or cached() is not document:
+        tokens = {item.token_id: item for item in document.display_tokens}
+        _export_index.document = weakref.ref(document, lambda _reference: tokens.clear())
+        _export_index.tokens = tokens
+    tokens = _export_index.tokens
     values = [tokens[token_id].text for token_id in cue.display_token_ids
               if tokens[token_id].state is not EntityState.DELETED]
     if not values:

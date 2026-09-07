@@ -547,7 +547,8 @@ class ProjectStore:
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ProjectIntegrityError("revision content is invalid") from exc
         document_hash = document.content_hash()
-        if stored_document_hash != document_hash:
+        from substar_core.domain.editor_document import compatible_content_hash
+        if not compatible_content_hash(document_value, stored_document_hash):
             raise ProjectIntegrityError("revision document checksum mismatch")
         revision = DocumentRevision(
             revision_id=row["revision_id"],
@@ -556,10 +557,31 @@ class ProjectStore:
             parent_revision_id=row["parent_revision_id"],
             provenance=provenance,
             created_at=row["created_at"],
-            document_hash=document_hash,
+            document_hash=stored_document_hash,
         )
         _cache_put(self.root, revision)
         return revision
+
+    def publication_result(self, task_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as connection:
+            if connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commit_receipts'").fetchone() is None:
+                return None
+            row = connection.execute("SELECT revision_id, result_json FROM commit_receipts WHERE receipt_id=?", ("publication:" + task_id,)).fetchone()
+            if row is None:
+                return None
+            self._load_revision_with_connection(connection, self._resolve_row(connection, row["revision_id"]))
+            return {**json.loads(row["result_json"]), "result_revision_id": row["revision_id"]}
+
+    def find_receipt(self, receipt_id: str, payload_hash: str) -> DocumentRevision | None:
+        with closing(self._connect()) as connection:
+            if connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='commit_receipts'").fetchone() is None:
+                return None
+            row = connection.execute("SELECT * FROM commit_receipts WHERE receipt_id=?", (receipt_id,)).fetchone()
+            if row is None:
+                return None
+            if row["payload_hash"] != payload_hash:
+                raise ProjectConflictError("receipt ID was reused with different content")
+            return self._load_revision_with_connection(connection, self._resolve_row(connection, row["revision_id"]))
 
     def save(
         self,
@@ -567,11 +589,21 @@ class ProjectStore:
         *,
         provenance: ChangeProvenance,
         expected_revision_id: str | None = None,
+        receipt: Mapping[str, Any] | None = None,
     ) -> DocumentRevision:
         self._marker()
         try:
             connection = self._connect()
             connection.execute("BEGIN IMMEDIATE")
+            connection.execute("CREATE TABLE IF NOT EXISTS commit_receipts (receipt_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, revision_id TEXT NOT NULL, result_json TEXT NOT NULL)")
+            if receipt is not None:
+                prior = connection.execute("SELECT * FROM commit_receipts WHERE receipt_id=?", (receipt["id"],)).fetchone()
+                if prior is not None:
+                    if prior["payload_hash"] != receipt["hash"]:
+                        raise ProjectConflictError("receipt ID reused with different content")
+                    revision = self._load_revision_with_connection(connection, self._resolve_row(connection, prior["revision_id"]))
+                    connection.execute("COMMIT")
+                    return revision
             latest_row = connection.execute(
                 "SELECT * FROM revisions ORDER BY revision_number DESC LIMIT 1"
             ).fetchone()
@@ -645,6 +677,15 @@ class ProjectStore:
                 "INSERT OR REPLACE INTO metadata(key, value) VALUES ('document_schema_version', ?)",
                 (document.schema_version,),
             )
+            for operation_id, payload_hash in provenance.metadata.get("operation_hashes", {}).items():
+                connection.execute("INSERT INTO commit_receipts VALUES (?, ?, ?, ?)", (
+                    "operation:" + operation_id, payload_hash, revision.revision_id, "{}",
+                ))
+            if receipt is not None:
+                connection.execute("INSERT INTO commit_receipts VALUES (?, ?, ?, ?)", (
+                    receipt["id"], receipt["hash"], revision.revision_id,
+                    json.dumps(receipt.get("result", {}), ensure_ascii=False),
+                ))
             connection.execute("COMMIT")
         except ProjectConflictError:
             if "connection" in locals():

@@ -712,6 +712,7 @@ class TaskScheduler:
                 )
             if execution is None:
                 continue
+            self.service.publication_lock.acquire()
             try:
                 current = self.service.get_task(completion.task_id)
                 if completion.status == "succeeded":
@@ -768,6 +769,8 @@ class TaskScheduler:
                         ),
                         exit_code=completion.returncode,
                     )
+                elif current["state"] == "cancelling":
+                    self.service.cancelled(completion.task_id, completion.attempt)
                 elif completion.status == "succeeded":
                     result = execution.handler.finalize(execution.context, completion)
                     if bool(result.get("needs_attention")):
@@ -816,6 +819,13 @@ class TaskScheduler:
             except Exception as exc:
                 self._remember_error(exc)
                 try:
+                    recovered = False
+                    try:
+                        recovered = self.service.recover_publication(completion.task_id)
+                    except Exception as recovery_error:
+                        self._remember_error(recovery_error)
+                    if recovered:
+                        continue
                     self.service.interrupted(
                         completion.task_id,
                         completion.attempt,
@@ -836,6 +846,7 @@ class TaskScheduler:
                 except TaskRuntimeError as nested:
                     self._remember_error(nested)
             finally:
+                self.service.publication_lock.release()
                 self._release_execution(completion.task_id, completion.attempt)
 
     def _release_execution(self, task_id: str, attempt: int) -> None:

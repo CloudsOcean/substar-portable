@@ -49,11 +49,18 @@ def utc_now() -> str:
 
 
 def _canonical_bytes(value: Any) -> bytes:
-    if orjson is not None:
-        return orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+
+
+CANONICAL_ENCODING = "stdlib-json-sorted-utf8-v1"
+
+
+def compatible_content_hash(value: Any, expected: str) -> bool:
+    if hashlib.sha256(_canonical_bytes(value)).hexdigest() == expected:
+        return True
+    return orjson is not None and hashlib.sha256(orjson.dumps(value, option=orjson.OPT_SORT_KEYS)).hexdigest() == expected
 
 
 def stable_id(namespace: str, value: Any) -> str:
@@ -121,6 +128,7 @@ class SourceToken:
     start: float
     end: float
     speaker: str | None = None
+    timing: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "index", int(self.index))
@@ -131,6 +139,11 @@ class SourceToken:
             raise DocumentValidationError("source token index must be non-negative")
         _require_text(self.text, "source token text")
         _require_source_time_range(self.start, self.end)
+        if self.timing is not None:
+            timing = dict(self.timing)
+            if timing.get("kind") not in {"native", "envelope-inherited", "subdivided", "manual", "unknown"}:
+                raise DocumentValidationError("unsupported timing provenance")
+            object.__setattr__(self, "timing", timing)
 
     @classmethod
     def create(
@@ -153,6 +166,7 @@ class SourceToken:
             "start": self.start,
             "end": self.end,
             "speaker": self.speaker,
+            **({"timing": dict(self.timing)} if self.timing is not None else {}),
         }
 
     @classmethod
@@ -164,6 +178,7 @@ class SourceToken:
             start=float(value["start"]),
             end=float(value["end"]),
             speaker=value.get("speaker"),
+            timing=value.get("timing"),
         )
 
 
@@ -239,12 +254,15 @@ class TranslationTrack:
     editable: bool = True
 
     def __post_init__(self) -> None:
-        if self.translation_status not in {"translated", "manual_required"}:
+        if self.translation_status not in {"translated", "manual_required", "needs_review"}:
             raise DocumentValidationError(
                 f"unsupported translation status: {self.translation_status!r}"
             )
         if self.translation_status == "translated":
             _require_text(self.target_text, "target_text")
+        elif self.translation_status == "needs_review":
+            _require_text(self.target_text, "target_text")
+            _require_text(self.issue_code, "needs_review issue_code")
         elif not self.editable or self.issue_code != "translation_unresolved":
             raise DocumentValidationError(
                 "manual_required translation must be editable and identify translation_unresolved"

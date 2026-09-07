@@ -4,7 +4,7 @@ import json
 from unittest.mock import Mock, patch
 
 from substar_core.ai_progress import ai_progress, progress_from_mapping
-from substar_core.editor import http_api
+from substar_core.editor.calibration import service as http_api
 from substar_core.editor.translation import contextual
 from substar_core.model_gateway import ModelGatewayError, call_json_model
 from substar_core.model_routing import resolve_stage_request

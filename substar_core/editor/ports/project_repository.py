@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 
 from substar_core.domain import ChangeProvenance, DocumentRevision, EditorDocument
 
@@ -14,6 +14,8 @@ class RepositoryError(RuntimeError):
 
 
 class ProjectRepository(Protocol):
+    def find_operation_commit(self, operations: list[Mapping[str, Any]]) -> DocumentRevision | None: ...
+
     def load_latest(self) -> DocumentRevision | None: ...
 
     def save(

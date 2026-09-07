@@ -3,7 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from substar_core.ai_progress import ai_progress, progress_from_mapping
-from substar_core.editor import http_api
+from substar_core.editor.calibration import service as http_api
 from substar_core.cue_script import finalize_calibration_candidate, render_cue_request
 from substar_core.model_gateway import ModelGatewayError, ModelGatewayRequestError
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 from typing import Any, Mapping
@@ -60,7 +61,8 @@ def build_segmentation_material_with_reference_projection(
     units: list[dict[str, Any]] = []
     display_projection: list[dict[str, Any]] = []
     reference_suggestions: list[dict[str, Any]] = []
-    for item in evidence.get("units", []):
+    evidence_hash = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    for evidence_index, item in enumerate(evidence.get("units", [])):
         raw_text = str(item.get("text", item.get("word", "")) or "").strip()
         if bool(item.get("reference_only")):
             if raw_text:
@@ -90,6 +92,16 @@ def build_segmentation_material_with_reference_projection(
                     "end": end if offset + 1 == len(fragments) else start + (offset + 1) * width,
                     "text": fragment,
                     "speaker_id": item.get("speaker_id"),
+                    "timing": {
+                        **dict(item.get("timing") or {}),
+                        "kind": "subdivided" if len(fragments) > 1 or (item.get("timing") or {}).get("kind") == "subdivided" else (
+                            "envelope-inherited" if str(item.get("timing_source", "")).startswith("reference") else (item.get("timing") or {}).get("kind", "native")
+                        ),
+                        "evidence_sha256": (item.get("timing") or {}).get("evidence_sha256", evidence_hash),
+                        "native_token_ids": (item.get("timing") or {}).get("native_token_ids", [str(item.get("index", evidence_index))]),
+                        "native_start": (item.get("timing") or {}).get("native_start", start),
+                        "native_end": (item.get("timing") or {}).get("native_end", end),
+                    },
                 }
             )
             display_projection.append(
@@ -153,7 +165,7 @@ def validate_segmentation_material(value: object) -> dict[str, Any]:
         "speaker_id",
     }
     for position, raw in enumerate(raw_units):
-        if not isinstance(raw, dict) or set(raw) != required:
+        if not isinstance(raw, dict) or not required.issubset(raw) or set(raw) - required - {"timing"}:
             raise ValueError(f"segmentation material unit {position} has invalid fields")
         index = raw["index"]
         if isinstance(index, bool) or not isinstance(index, int):
@@ -178,6 +190,7 @@ def validate_segmentation_material(value: object) -> dict[str, Any]:
                 "end": end,
                 "text": text,
                 "speaker_id": speaker_id,
+                **({"timing": dict(raw["timing"])} if raw.get("timing") is not None else {}),
             }
         )
     return {
@@ -201,6 +214,7 @@ def load_segmentation_material(path: Path) -> tuple[str, list[AlignmentUnit]]:
             text=item["text"],
             speaker_id=item["speaker_id"],
             speaker_confidence=1.0 if item["speaker_id"] else 0.0,
+            timing=item.get("timing"),
         )
         for item in value["units"]
     ]

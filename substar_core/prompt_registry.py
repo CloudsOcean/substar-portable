@@ -55,6 +55,16 @@ class RenderedPrompt:
         return value
 
 
+def frozen_prompt(settings: dict[str, Any], key: str, **options: Any) -> RenderedPrompt:
+    value = settings.get("prompt_snapshot", {}).get(key)
+    if value is None:
+        return render_prompt(key, **options)
+    prompt = RenderedPrompt(**{**value, "files": tuple(value["files"])})
+    if hashlib.sha256(prompt.text.encode("utf-8")).hexdigest() != prompt.sha256:
+        raise PromptRegistryError("frozen prompt checksum mismatch")
+    return prompt
+
+
 def source_language_analysis(
     text: str, language_ratio_threshold_percent: int | float = 20
 ) -> dict[str, Any]:

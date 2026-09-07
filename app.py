@@ -244,6 +244,9 @@ def _claim_backend_instance() -> None:
             _OWNS_RUNTIME_RECORD = True
         task_store = RuntimeStore(APP_DATA_DIR / "runtime-v2.sqlite3")
         task_service = TaskService(task_store, APP_INSTANCE_ID)
+        from substar_core.editor.application.publication import recover_publication, recover_publications
+        task_service.publication_recoverer = lambda task_id: recover_publication(task_service, PROJECTS_ROOT, task_id)
+        recover_publications(task_service, PROJECTS_ROOT)
         task_service.reconcile_startup()
         task_registry = TaskRegistry()
         task_registry.register(

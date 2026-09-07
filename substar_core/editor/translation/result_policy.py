@@ -93,11 +93,5 @@ def accepted_translation_rows(
 
 
 def translation_problem_cue_ids(document: Any) -> list[str]:
-    for change in reversed(document.changes):
-        if change.operation != "contextual_translation":
-            continue
-        raw_ids = change.metadata.get("translation_problem_cue_ids", [])
-        if not isinstance(raw_ids, (list, tuple)):
-            return []
-        return list(dict.fromkeys(str(cue_id) for cue_id in raw_ids if str(cue_id)))
-    return []
+    return [cue.cue_id for cue in document.cues if cue.state.value == "active"
+            and cue.target is not None and cue.target.translation_status != "translated"]

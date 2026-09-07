@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://substar.local/contracts/editor-candidate.schema.json",
+  "title": "Editor AI candidate before publication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source_revision_id", "document_hash", "revision"],
+  "properties": {
+    "schema_version": {"const": "substar.editor-candidate.v1"},
+    "source_revision_id": {"type": "string", "minLength": 1},
+    "document_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "revision": {
+      "type": "object",
+      "required": ["schema_version", "revision_id", "revision_number", "parent_revision_id", "provenance", "created_at", "document"],
+      "properties": {
+        "schema_version": {"const": "substar.editor-revision.v2"},
+        "revision_id": {"type": "string", "minLength": 1},
+        "revision_number": {"type": "integer", "minimum": 1},
+        "parent_revision_id": {"type": "string", "minLength": 1},
+        "provenance": {"type": "object"},
+        "created_at": {"type": "string"},
+        "document": {"type": "object"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

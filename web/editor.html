@@ -175,6 +175,11 @@
         </section>
         <div id="ordinaryError" class="ordinary-error hidden" role="status">
           <span id="ordinaryErrorMessage"></span>
+          <span id="saveRecoveryActions" class="hidden">
+            <button id="retryUnsaved" type="button">重试保存</button>
+            <button id="downloadConflictCopy" type="button">下载恢复副本</button>
+            <button id="keepConflictCopy" type="button">保留副本并载入已保存版</button>
+          </span>
           <button id="dismissOrdinaryError" class="task-dismiss" type="button" title="关闭提示" aria-label="关闭提示">×</button>
         </div>
         <div class="cue-history-row"><span id="draftState">当前修改自动写入版本链</span><button id="undoDocument" type="button" disabled>撤销</button><button id="redoDocument" type="button" disabled>恢复</button><button id="saveCheckpoint" type="button" disabled>暂存</button><button id="resetDocument" type="button" disabled>重置</button><button id="refreshDocumentBottom" type="button">刷新</button></div>

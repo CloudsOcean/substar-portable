@@ -75,6 +75,7 @@ def _source_tokens(
                 start=start,
                 end=end,
                 speaker=str(speaker) if speaker is not None and speaker != "" else None,
+                timing=row.get("timing") if isinstance(row, Mapping) else getattr(row, "timing", None),
             )
         )
         seen_indexes.add(index)

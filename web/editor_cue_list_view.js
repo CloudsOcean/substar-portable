@@ -34,6 +34,48 @@
     let windowStart = 0;
     let windowEnd = 0;
     let windowLoading = false;
+    let topGap = 0;
+    let bottomGap = 0;
+    const maxRows = pageSize * 3;
+    const baseStyle = typeof getComputedStyle === "function" ? getComputedStyle(container) : {};
+    const baseTop = parseFloat(baseStyle.paddingTop) || 0;
+    const baseBottom = parseFloat(baseStyle.paddingBottom) || 0;
+    const measuredHeights = new Map();
+    const rangeHeight = (start, end) => context.cues.slice(start, end).reduce((sum, cue) => sum + (measuredHeights.get(cue.cue_id) || 80), 0);
+    const gapStyle = () => {
+      if (!container.style) return;
+      container.style.paddingTop = `${baseTop + topGap}px`;
+      container.style.paddingBottom = `${baseBottom + bottomGap}px`;
+    };
+    const rowHeight = node => Number(node.getBoundingClientRect?.().height || node.offsetHeight || 80)
+      + (typeof getComputedStyle === "function" ? parseFloat(getComputedStyle(node).marginBottom) || 0 : 0);
+    const trimWindow = direction => {
+      const focus = document.activeElement;
+      while (windowEnd - windowStart > maxRows) {
+        const index = direction === "forward" ? windowStart++ : --windowEnd;
+        const id = context.cues[index]?.cue_id;
+        const node = [...container.children].find(row => row.dataset?.cueId === id);
+        if (!node) continue;
+        // One focused row may remain outside the window until blur.
+        if (node.contains?.(focus)) continue;
+        measuredHeights.set(id, rowHeight(node));
+        if (direction === "forward") topGap += rowHeight(node);
+        else bottomGap += rowHeight(node);
+        node.remove();
+      }
+      const allowed = new Set(context.cues.slice(windowStart, windowEnd).map(cue => cue.cue_id));
+      [...container.children].forEach(node => {
+        if (!allowed.has(node.dataset?.cueId) && !node.contains?.(focus)) {
+          const index = context.cues.findIndex(cue => cue.cue_id === node.dataset?.cueId);
+          const height = rowHeight(node);
+          measuredHeights.set(node.dataset?.cueId, height);
+          if (index >= 0 && index < windowStart) topGap += height;
+          else if (index >= windowEnd) bottomGap += height;
+          node.remove();
+        }
+      });
+      gapStyle();
+    };
 
     const reuseOrPatchRow = (existing, next) => {
       if (!existing || existing.dataset.cueId !== next.dataset.cueId) return next;
@@ -85,41 +127,49 @@
       const safeStart = Math.max(0, Math.min(start, context.cues.length));
       const safeEnd = Math.max(safeStart, Math.min(end, context.cues.length));
       const fragment = document.createDocumentFragment();
+      const existing = new Set([...container.children].map(node => node.dataset?.cueId));
       for (let index = safeStart; index < safeEnd; index += 1) {
         const cue = context.cues[index];
-        if (cue) fragment.append(renderCue(cue, index, context.tokenById));
+        if (cue && !existing.has(cue.cue_id)) fragment.append(renderCue(cue, index, context.tokenById));
       }
       container.append(fragment);
     };
 
-    const prependRange = (start, end) => {
+    const prependRange = (start, end, preserveGap = false) => {
       if (!context || start >= end) return;
       const safeStart = Math.max(0, Math.min(start, context.cues.length));
       const safeEnd = Math.max(safeStart, Math.min(end, context.cues.length));
       const previousHeight = container.scrollHeight;
       const fragment = document.createDocumentFragment();
+      const existing = new Set([...container.children].map(node => node.dataset?.cueId));
       for (let index = safeStart; index < safeEnd; index += 1) {
         const cue = context.cues[index];
-        if (cue) fragment.append(renderCue(cue, index, context.tokenById));
+        if (cue && !existing.has(cue.cue_id)) fragment.append(renderCue(cue, index, context.tokenById));
       }
       container.prepend(fragment);
-      container.scrollTop += container.scrollHeight - previousHeight;
+      if (!preserveGap) container.scrollTop += container.scrollHeight - previousHeight;
     };
 
     container.addEventListener("scroll", () => {
       if (!context || windowLoading) return;
       windowLoading = true;
       requestAnimationFrame(() => {
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - 480 && windowEnd < context.cues.length) {
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight - bottomGap - 480 && windowEnd < context.cues.length) {
           const nextEnd = Math.min(context.cues.length, windowEnd + pageSize);
+          bottomGap = Math.max(0, bottomGap - rangeHeight(windowEnd, nextEnd));
           appendRange(windowEnd, nextEnd);
           windowEnd = nextEnd;
+          trimWindow("forward");
           notify();
         }
-        if (container.scrollTop <= 320 && windowStart > 0) {
+        if (container.scrollTop <= topGap + 320 && windowStart > 0) {
           const nextStart = Math.max(0, windowStart - pageSize);
-          prependRange(nextStart, windowStart);
+          const preserveGap = topGap > 0;
+          topGap = Math.max(0, topGap - rangeHeight(nextStart, windowStart));
+          gapStyle();
+          prependRange(nextStart, windowStart, preserveGap);
           windowStart = nextStart;
+          trimWindow("backward");
           notify();
         }
         windowLoading = false;
@@ -133,10 +183,11 @@
       const keepWindow = preservePage
         && preserved.end > preserved.start
         && preserved.start < cues.length;
-      const preservedSize = Math.max(pageSize, preserved.end - preserved.start);
+      const preservedSize = Math.min(maxRows, Math.max(pageSize, preserved.end - preserved.start));
       const page = keepWindow
         ? pageWindow(cues.length, preserved.start, activeIndex, preservedSize, true)
         : pageWindow(cues.length, pageStart, activeIndex, pageSize, false);
+      if (!keepWindow) { topGap = 0; bottomGap = 0; gapStyle(); }
       windowStart = page.start;
       windowEnd = page.end;
       const desiredRows = [];

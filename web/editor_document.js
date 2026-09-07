@@ -105,6 +105,9 @@
     const status = String(target.translation_status || "translated");
     if (status === "translated") {
       requireText(target.target_text, `${label}.target_text`);
+    } else if (status === "needs_review") {
+      requireText(target.target_text, `${label}.target_text`);
+      requireText(target.issue_code, `${label}.issue_code`);
     } else if (status === "manual_required") {
       if (typeof target.target_text !== "string") {
         throw new Error(`${label}.target_text must be text`);
@@ -508,6 +511,7 @@
       token_id:token.token_id,
       text:String(text),
       original_text:token.text,
+      expected_text:token.text,
       source_token_ids:[...token.source_token_ids],
       provenance:provenanceInput(provenance, "replace")
     });

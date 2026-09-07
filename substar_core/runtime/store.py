@@ -1199,6 +1199,22 @@ class RuntimeStore:
             ).fetchall()
         return [TaskEvent.from_row(row) for row in rows]
 
+    def reconcile_publication(self, task_id: str, result: Mapping[str, Any]) -> None:
+        """A verified project receipt takes precedence over a lost runtime ACK."""
+        now = utc_now()
+        with self._transaction() as connection:
+            row = self._task_row(connection, task_id)
+            if row["state"] not in {"running", "cancelling", "interrupted"}:
+                return
+            issues = bool(result.get("problem_cue_ids") or result.get("failed_blocks"))
+            state = "succeeded_with_issues" if issues else "succeeded"
+            connection.execute("UPDATE tasks SET state=?, progress=1, updated_at=?, finished_at=?, owner_instance_id=NULL, lease_expires_at=NULL, result_json=?, error_json=NULL, needs_attention=?, row_version=row_version+1 WHERE task_id=?",
+                               (state, now, now, canonical_json({**dict(result), "needs_attention": issues}), int(issues), task_id))
+            connection.execute("UPDATE task_attempts SET finished_at=?, terminal_reason=?, exit_code=0, error_json=NULL WHERE task_id=? AND attempt=?", (now, "publication_receipt_recovered", task_id, row["attempt"]))
+            self._event(connection, event_type="task." + state, occurred_at=now,
+                        task_id=task_id, project_id=row["project_id"], attempt=row["attempt"],
+                        data={"state": state, "result": dict(result), "reason": "publication_receipt_recovered"})
+
     def reconcile_startup(self, instance_id: str) -> list[TaskRecord]:
         """Interrupt tasks whose recorded owner/lease cannot represent this startup."""
 

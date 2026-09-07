@@ -54,8 +54,22 @@
   }
 
   function applyLocalOperation(revision, operation) {
-    const next = clone(revision);
-    const document = next.document;
+    const payloadIds = operation.payload || {};
+    const tokenIds = new Set([
+      payloadIds.token_id, ...(payloadIds.token_ids || []),
+      ...(payloadIds.replacements || []).map(row => row.token_id)
+    ].filter(Boolean).map(String));
+    const cueIds = new Set([
+      payloadIds.cue_id, ...(payloadIds.cue_ids || []),
+      ...(payloadIds.cues || []).map(row => row.cue_id)
+    ].filter(Boolean).map(String));
+    const before = revision.document;
+    const document = {...before,
+      properties:{...before.properties}, changes:[...before.changes],
+      display_tokens:before.display_tokens.map(token => tokenIds.has(token.token_id) ? {...token} : token),
+      cues:before.cues.map(cue => cueIds.has(cue.cue_id) ? {...cue} : cue)
+    };
+    const next = {...revision, document};
     const payload = operation.payload || {};
     const tokenById = new Map(document.display_tokens.map(token => [token.token_id, token]));
     const cueById = new Map(document.cues.map(cue => [cue.cue_id, cue]));
@@ -178,6 +192,14 @@
             provenance
           };
         }
+        if (target) {
+          const unresolved = targets.find(track => track.translation_status === "manual_required")
+            || targets.find(track => track.translation_status === "needs_review");
+          if (unresolved) {
+            target.translation_status = unresolved.translation_status;
+            target.issue_code = unresolved.issue_code;
+          }
+        }
         left.display_token_ids = [...left.display_token_ids, ...right.display_token_ids];
         left.end = Number(right.end);
         left.target = target;
@@ -203,7 +225,24 @@
         // until the authoritative delta supplies server-stable entity IDs.
         return next;
     }
-    document.cues = ordering.canonicalCueOrder(document.cues);
+    const sourceChanges = new Set(before.display_tokens.filter(token => {
+      const after = tokenById.get(token.token_id);
+      return tokenIds.has(token.token_id) && after && (after.text !== token.text || after.state !== token.state);
+    }).map(token => token.token_id));
+    document.cues = document.cues.map(cue => {
+      if (cue.state === "deleted" || !cue.target) return cue;
+      let target = cue.target;
+      if (target.translation_status === "translated" && cue.display_token_ids.some(id => sourceChanges.has(id)))
+        target = {...target, translation_status:"needs_review", issue_code:"source_changed"};
+      if (target === cue.target && !cueIds.has(cue.cue_id)) return cue;
+      return {...cue, target, mapping:{...cue.mapping,
+        translation_status:target.translation_status, issue_code:target.issue_code,
+        translation_unresolved:target.translation_status === "manual_required",
+        requires_manual_translation:target.translation_status === "manual_required",
+        translation_needs_review:target.translation_status === "needs_review"}};
+    });
+    if (["split_cue", "merge_cues", "set_cue_time", "set_cue_times"].includes(operation.type))
+      document.cues = ordering.canonicalCueOrder(document.cues);
     document.changes.push(provenance);
     return next;
   }
@@ -218,7 +257,7 @@
     const reducer = options.applyLocalOperation || applyLocalOperation;
 
     function replay() {
-      projected = acknowledged ? pending.reduce(reducer, clone(acknowledged)) : null;
+      projected = acknowledged ? pending.reduce(reducer, acknowledged) : null;
       options.onChange?.(snapshot());
       return projected;
     }
@@ -247,8 +286,10 @@
       enqueue(operation) {
         if (!pending.some(item => item.operation_id === operation.operation_id)) {
           pending.push(operation);
+          projected = projected ? reducer(projected, operation) : null;
         }
-        return replay();
+        options.onChange?.(snapshot());
+        return projected;
       },
       restore(operations) {
         operations.forEach(operation => {
