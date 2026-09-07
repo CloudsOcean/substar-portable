@@ -34,7 +34,13 @@ test("AI brief and hotword guidance restore examples without extra configuration
   assert.match(html, /节目内容与识别重点/);
   assert.match(html, /id="qwenAiBriefInput"[^>]*placeholder="描述本期节目内容/);
   assert.match(html, /id="qwenPromptInput"[^>]*placeholder="向 Qwen 说明节目领域/);
-  assert.match(html, /id="qwenHotwordsInput"[^>]*placeholder="每行一个/);
+  assert.match(html, /id="qwenHotwordsInput"[^>]*placeholder="英伟达：50/);
+  assert.match(html, /超微电子：5/);
+  assert.match(html, /AMD：4/);
+  assert.match(html, /1–5 = 普通热词权重/);
+  assert.match(html, /4 = 默认，5 = 最高/);
+  assert.match(html, /50 = 必须重点命中的超级热词/);
+  assert.match(html, /中英文冒号均可，保存时会自动统一/);
   assert.doesNotMatch(html, /qwenDeliverySummary|本次投递给 ASR/);
   assert.doesNotMatch(html, /<small>描述节目内容/);
   assert.doesNotMatch(html, /<small>使用所选原文语言/);
@@ -87,6 +93,8 @@ test("provider registration links appear in tutorials instead of quick cards", (
 });
 
 test("temporary hotword parser rejects unsupported numeric weights", () => {
+  assert.match(source, /line\.match\(\/\^\(\.\*\)\[:：\]/);
+  assert.match(source, /`\$\{item\.text\}:\$\{Number/);
   assert.match(source, /\[1, 2, 3, 4, 5, 50\]\.includes\(weight\)/);
   assert.match(source, /热词权重必须为 1–5 或 50/);
   assert.match(source, /只能指定一个热词权重/);

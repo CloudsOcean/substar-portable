@@ -90,7 +90,9 @@ def test_external_ai_prooftranslation_uses_one_routed_two_stage_prompt(tmp_path:
     assert task["prompt_snapshot"]["stages"]["translation"]["variant"] == "en_to_zh"
     prompt = files["02_执行提示词.md"].decode("utf-8-sig")
     assert "校准稿未经用户明确接受，不得翻译" in prompt
-    assert "允许 1:1、1:N、N:1 与 N:M 的语义重组" in prompt
+    assert "C###[-C###]" in prompt
+    assert "模型不需要输出源语证据映射" in prompt
+    assert "局部反序" in prompt
     assert "English to Simplified Chinese" in prompt
 
 

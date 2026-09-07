@@ -118,6 +118,11 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
         })
         problems = list(summary.get("problem_cue_ids") or [])
         problem_blocks = list(summary.get("problem_block_ids") or [])
+        planned = int(summary.get("planned", 0) or 0)
+        repair_planned = int(summary.get("repair_planned", 0) or 0)
+        repair_completed = int(summary.get("repair_completed", 0) or 0)
+        repair_accepted = int(summary.get("repair_accepted", 0) or 0)
+        accepted = max(0, planned - max(0, repair_planned - repair_accepted))
         return {
             "result_revision_id": revision.revision_id,
             "problem_cue_ids": problems,
@@ -129,17 +134,16 @@ def build_translation_handler(projects_root: Path, application_root: Path) -> Ta
                 phase="completed",
                 unit_label="块",
                 unit_kind="translation_block",
-                planned=int(summary.get("planned", 0) or 0),
-                completed=int(summary.get("planned", 0) or 0),
-                accepted=int(summary.get("planned", 0) or 0),
-                failed=0,
-                repair_planned=int(summary.get("repair_planned", 0) or 0),
-                repair_completed=int(summary.get("repair_completed", 0) or 0),
-                repair_accepted=int(summary.get("repair_accepted", 0) or 0),
+                planned=planned,
+                completed=planned,
+                accepted=accepted,
+                failed=max(0, planned - accepted),
+                repair_planned=repair_planned,
+                repair_completed=repair_completed,
+                repair_accepted=repair_accepted,
                 repair_failed=max(
                     0,
-                    int(summary.get("repair_completed", 0) or 0)
-                    - int(summary.get("repair_accepted", 0) or 0),
+                    repair_completed - repair_accepted,
                 ),
                 problem_count=len(problem_blocks),
             ),

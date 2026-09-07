@@ -30,6 +30,7 @@ from substar_core.cue_script import (
     finalize_translation,
     output_contract,
     render_translation_request,
+    translation_target_is_control_text,
 )
 from substar_core.model_gateway import (
     ModelGatewayRequestError,
@@ -52,7 +53,11 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
     for group in groups:
         cleaned.append({
             "group_id": group["group_id"],
-            "execution_block_id": str(group.get("execution_block_id") or "manual"),
+            # translation_groups has already split the legacy scheduler block
+            # into bounded transport components. Use that component as the
+            # request/repair boundary; carrying the legacy id here used to
+            # merge 24-Cue components back into 32-46 Cue provider requests.
+            "execution_block_id": str(group["group_id"]),
             "cues": [
                 {
                     "cue_id": cue["cue_id"],
@@ -126,7 +131,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         "reasoning_effort": str(route["reasoning_effort"]),
         "max_tokens": int(route["max_tokens"]),
         "temperature": float(route["temperature"]),
-        "schema": "translation-map.v5-raw-cache",
+        "schema": "translation-map.v16-numeric-pipe-cache",
     })
     cached = load_ai_block_cache(cache_directory, cache_key) if cache_directory else None
     if cached is not None:
@@ -143,7 +148,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
             ):
                 return cached_response, {
                     "cache_hit": True, "cache_key": cache_key,
-                    "wire_protocol": "substar-translation-map.v5",
+                    "wire_protocol": "substar-translation-map.v16-numeric-pipe",
                     "raw_model_response": cached_raw,
                     "finalized_response": cached_response,
                 }
@@ -187,7 +192,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         atomic_write_json(exchange_path, {
             "schema_version": "substar.model-exchange.v1",
             "stage": stage_name,
-            "wire_protocol": "substar-translation-map.v5",
+            "wire_protocol": "substar-translation-map.v16-numeric-pipe",
             "system_prompt": wire_system_prompt,
             "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
             "request_text": wire_text,
@@ -203,7 +208,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
             atomic_write_json(exchange_path, {
                 "schema_version": "substar.model-exchange.v1",
                 "stage": stage_name,
-                "wire_protocol": "substar-translation-map.v5",
+                "wire_protocol": "substar-translation-map.v16-numeric-pipe",
                 "system_prompt": wire_system_prompt,
                 "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
                 "request_text": wire_text,
@@ -214,7 +219,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         raise RuntimeError(f"翻译 Cue Script finalizer 拒绝模型输出：{exc}") from exc
     telemetry = {
         **telemetry,
-        "wire_protocol": "substar-translation-map.v5",
+        "wire_protocol": "substar-translation-map.v16-numeric-pipe",
         "wire_input_characters": len(wire_text),
         "wire_output_characters": len(raw_response),
         "raw_model_response": raw_response,
@@ -224,7 +229,7 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
         atomic_write_json(exchange_path, {
             "schema_version": "substar.model-exchange.v1",
             "stage": stage_name,
-            "wire_protocol": "substar-translation-map.v5",
+            "wire_protocol": "substar-translation-map.v16-numeric-pipe",
             "system_prompt": wire_system_prompt,
             "system_prompt_sha256": fingerprint({"text": wire_system_prompt}),
             "request_text": wire_text,
@@ -312,6 +317,16 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
         "group_results": rows,
         "_wire_units": wire_units,
         "_cue_script_issues": issues,
+        "_raw_blocks": {
+            str(batch["block_id"]): str(
+                results[str(batch["block_id"])].get("telemetry", {}).get("raw_model_response", "")
+            ) for batch in batches
+        },
+        "_cue_script_warnings": [
+            dict(issue) for batch in batches
+            for issue in results[str(batch["block_id"])]["response"].get("_cue_script_warnings", [])
+            if isinstance(issue, Mapping)
+        ],
     }, {
         "execution_blocks": [
             {"block_id": batch["block_id"], **results[str(batch["block_id"])]}
@@ -600,7 +615,15 @@ def _plans_as_wire_units(plans: Iterable[Mapping[str, Any]]) -> list[dict[str, A
             ]
             target = str(unit.get("target_text") or "").strip()
             if cue_ids and target:
-                units.append({"cue_ids": cue_ids, "target_text": target})
+                units.append({
+                    "source_cue_ids": [
+                        str(cue_id)
+                        for cue_id in unit.get("source_evidence_cue_ids", [])
+                        if str(cue_id)
+                    ],
+                    "cue_ids": cue_ids,
+                    "target_text": target,
+                })
                 covered.update(cue_ids)
     return units
 
@@ -647,10 +670,11 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
                       ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Finalize translation with at most one structural repair per source block.
 
-    Valid alias bindings are immutable. A repair sees the complete original
-    block, receives every program error together, and owns only unresolved
-    aliases. The deterministic compiler then merges that patch with the frozen
-    primary units and rebuilds the unchanged delivery contract.
+    A repair sees the complete original block, receives every program error
+    together, and rewrites that block in one request. The deterministic
+    compiler accepts the rewrite only when it completely covers the display
+    aliases and passes every structural and length check. A failed rewrite is
+    retained only as an editable candidate for guaranteed delivery.
     """
     non_repairable = set(non_repairable_group_ids or set())
     block_ids = {
@@ -681,11 +705,47 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
         ]
         current_units = _plans_as_wire_units(plans)
 
+    cues_by_id = {
+        str(cue["cue_id"]): cue
+        for group in groups for cue in group.get("cues", [])
+    }
+    cue_group_ids = {
+        str(cue["cue_id"]): str(group["group_id"])
+        for group in groups for cue in group.get("cues", [])
+    }
+    primary_issues = [
+        dict(row) for row in response.get("_cue_script_issues", [])
+        if isinstance(row, Mapping)
+    ]
+    quality_issues = list(response.get("_cue_script_warnings", []))
+    for plan in plans:
+        quality_issues.extend(_plan_limit_issues(plan, cues_by_id))
+
     accepted_ids = {str(plan["group_id"]) for plan in plans}
     invalid_ids = {
         str(group["group_id"]) for group in groups
         if str(group["group_id"]) not in accepted_ids
     }
+    for issue in primary_issues:
+        explicit_group = str(issue.get("group_id") or "")
+        if explicit_group in block_ids:
+            invalid_ids.add(explicit_group)
+        raw_cue_ids = issue.get("cue_ids")
+        issue_cue_ids = (
+            [str(value) for value in raw_cue_ids]
+            if isinstance(raw_cue_ids, list)
+            else [str(issue.get("cue_id") or "")]
+        )
+        invalid_ids.update(
+            cue_group_ids[cue_id]
+            for cue_id in issue_cue_ids if cue_id in cue_group_ids
+        )
+        explicit_block = str(issue.get("block_id") or "")
+        if explicit_block:
+            invalid_ids.update(
+                group_id for group_id, block_id in block_ids.items()
+                if block_id == explicit_block
+            )
     repair_blocks = {
         block_id: block_groups
         for block_id, block_groups in groups_by_block.items()
@@ -703,40 +763,26 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
     if progress_callback is not None and repair_blocks:
         progress_callback(0, len(repair_blocks), 0)
 
-    primary_issues = [
-        dict(row) for row in response.get("_cue_script_issues", [])
-        if isinstance(row, Mapping)
-    ]
-
     def repair_one(
         item: tuple[str, list[dict[str, Any]]],
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         block_id, block_groups = item
-        affected = [
-            group for group in block_groups
-            if str(group["group_id"]) in invalid_ids
-            and str(group["group_id"]) not in non_repairable
-        ]
-        affected_cues = {
-            str(cue["cue_id"])
-            for group in affected for cue in group.get("cues", [])
-        }
+        affected = list(block_groups)
         block_cues = {
             str(cue["cue_id"])
             for group in block_groups for cue in group.get("cues", [])
         }
-        frozen_cues = {
-            str(cue_id)
-            for unit in current_units for cue_id in unit.get("cue_ids", [])
-            if str(cue_id) in block_cues
-        }
-        editable_cues = affected_cues - frozen_cues
-        if not editable_cues:
-            # A legacy/non-wire invalid row has no safely frozen ownership.
-            editable_cues = set(affected_cues)
+        affected_cues = set(block_cues)
+        frozen_cues: set[str] = set()
+        editable_cues = set(block_cues)
         validation_issues = [
             issue for issue in primary_issues
             if str(issue.get("cue_id") or "") in affected_cues
+            or bool(
+                affected_cues.intersection(
+                    str(value) for value in issue.get("cue_ids", [])
+                )
+            )
             or str(issue.get("block_id") or "") == block_id
         ]
         rows = _result_rows(response)
@@ -757,29 +803,43 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
                     for cue in group.get("cues", [])
                 ],
                 "program_validation_errors": validation_issues if group_index == 0 else [],
+                "previous_output": str(response.get("_raw_blocks", {}).get(block_id, "")) if group_index == 0 else "",
                 "repair_attempt": 1,
             })
         if failure_injector is not None:
             failure_injector(block_id, 1)
+        def patch_valid(value: dict[str, Any]) -> bool:
+            if value.get("_cue_script_issues"):
+                return False
+            units = _response_wire_units(value, payloads, mapping_mode)
+            covered = {
+                str(cue_id)
+                for unit in units for cue_id in unit.get("cue_ids", [])
+            }
+            if covered != editable_cues:
+                return False
+            patch_plans = _compile_translation_plans(
+                payloads, units, mapping_mode
+            )
+            if len(patch_plans) != len(payloads):
+                return False
+            return True
+
         try:
             patch_response, telemetry = api_call(
                 settings=settings, system_prompt=repair_prompt,
                 groups=payloads, stage_name="translation_repair",
                 cache_directory=cache_directory, cache_scope=cache_scope,
                 mapping_mode=mapping_mode,
-                cache_validator=lambda value: (
-                    set(str(value_id) for value_id in value.get("_covered_cue_ids", []))
-                    == editable_cues
-                    and not value.get("_cue_script_issues")
-                ),
+                cache_validator=patch_valid,
             )
             patch_units = _response_wire_units(patch_response, payloads, mapping_mode)
             covered = {
                 str(cue_id) for unit in patch_units for cue_id in unit.get("cue_ids", [])
             }
-            if covered != editable_cues:
+            if covered != editable_cues or not patch_valid(patch_response):
                 raise RuntimeError(
-                    "修复响应没有精确覆盖 OWN Cue："
+                    "修复响应未通过完整覆盖、单分句或长度验收："
                     f"missing={sorted(editable_cues - covered)} "
                     f"extra={sorted(covered - editable_cues)}"
                 )
@@ -818,14 +878,39 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
                         sum(bool(row[1].get("valid")) for row in repair_results.values()),
                     )
 
+    repair_owned_cues = {
+        str(cue["cue_id"])
+        for block_groups in repair_blocks.values()
+        for group in block_groups for cue in group.get("cues", [])
+    }
+    current_units = [
+        unit for unit in current_units
+        if not repair_owned_cues.intersection(
+            str(cue_id) for cue_id in unit.get("cue_ids", [])
+        )
+    ]
+
     for block_id, block_groups in repair_blocks.items():
         patch_units, audit = repair_results[block_id]
+        validation_issues = [
+            issue for issue in audit.get("validation_errors", [])
+            if isinstance(issue, Mapping)
+        ]
         affected_ids = [
             str(group["group_id"]) for group in block_groups
             if str(group["group_id"]) in invalid_ids
         ]
         repair_record["groups"].append({
             "group_id": block_id,
+            "repair_kind": (
+                "target_over_limit"
+                if validation_issues
+                and all(
+                    str(issue.get("code") or "") == "target_over_limit"
+                    for issue in validation_issues
+                )
+                else "block_rewrite"
+            ),
             "affected_group_ids": affected_ids,
             "source_block_id": block_id,
             "attempts": [audit],
@@ -836,6 +921,7 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
         })
         if audit.get("valid"):
             current_units.extend(patch_units)
+            quality_issues.extend(audit.get("response", {}).get("_cue_script_warnings", []))
 
     plans = _compile_translation_plans(groups, current_units, mapping_mode)
     accepted_ids = {str(plan["group_id"]) for plan in plans}
@@ -843,25 +929,11 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
         group for group in groups if str(group["group_id"]) not in accepted_ids
     ]
 
-    # Length violations use the same block-wide repair invariant. The helper
-    # receives complete plans, groups all issues by their source block and
-    # freezes every target unit outside the explicit over-limit scope.
-    plans, limit_rows = _repair_over_limit_plans_blockwise(
-        plans=plans, groups=groups, settings=settings,
-        repair_prompt=repair_prompt, mapping_mode=mapping_mode,
-        cache_directory=cache_directory, cache_scope=cache_scope,
-        group_block_ids=block_ids, progress_callback=progress_callback,
-        completed_repairs=len(repair_record["groups"]),
-    )
-    if limit_rows:
-        repair_record["groups"].extend(limit_rows)
-        repair_record["repair_phase_entered"] = True
-
     candidate_targets_by_cue: dict[str, str] = {}
-    for unit in current_units:
+    for unit in primary_units:
         target = str(unit.get("target_text") or "").strip()
         for cue_id in unit.get("cue_ids", []):
-            if target:
+            if target and not translation_target_is_control_text(target):
                 candidate_targets_by_cue.setdefault(str(cue_id), target)
     # Legacy JSON/provider seams may carry useful text without a safe wire
     # binding. Preserve it only as an editable candidate for unresolved Cues;
@@ -874,6 +946,7 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
             candidate_targets_by_cue.setdefault(cue_id, target)
     return plans, {
         "model_repair": repair_record,
+        "quality_issues": quality_issues,
         "invalid_group_ids": [str(group["group_id"]) for group in invalid],
         "candidate_targets_by_cue": candidate_targets_by_cue,
     }
@@ -1115,8 +1188,11 @@ def materialize_presentation(
         str(cue_id): str(text).strip()
         for cue_id, text in dict(candidate_targets_by_cue or {}).items()
         if str(text).strip()
+        and not translation_target_is_control_text(str(text).strip())
     }
     unresolved_source_cue_ids: list[str] = []
+    preserved_candidate_cue_ids: list[str] = []
+    reused_previous_translation_cue_ids: list[str] = []
     unresolved_provenance = ChangeProvenance(
         kind=ChangeKind.AI,
         operation="contextual_translation_unresolved",
@@ -1139,16 +1215,20 @@ def materialize_presentation(
             else ""
         )
         candidate_target = candidate_targets.get(source_cue.cue_id, "")
-        target_text = previous_target or candidate_target
-        needs_review = not bool(previous_target)
+        target_text = candidate_target or previous_target
+        if previous_target and not candidate_target:
+            reused_previous_translation_cue_ids.append(source_cue.cue_id)
+        if candidate_target:
+            preserved_candidate_cue_ids.append(source_cue.cue_id)
+        needs_review = True
         if needs_review:
             unresolved_source_cue_ids.append(source_cue.cue_id)
         unresolved_mapping = {
             "schema_version": "substar.presentation-mapping.v1",
             "mapping_type": "1:1",
             "group_mapping_type": (
-                "reused-previous-translation" if previous_target else
                 "manual-required-candidate" if candidate_target else
+                "reused-previous-translation" if previous_target else
                 "manual-required-empty-target"
             ),
             "source_cue_ids": [source_cue.cue_id],
@@ -1157,7 +1237,7 @@ def materialize_presentation(
             "translation_status": "manual_required" if needs_review else "translated",
             "issue_code": "translation_unresolved" if needs_review else None,
             "editable": True,
-            "candidate_preserved": bool(candidate_target and not previous_target),
+            "candidate_preserved": bool(candidate_target),
         }
         presentation.append(replace(
             source_cue,
@@ -1200,7 +1280,10 @@ def materialize_presentation(
         ],
         "cues": report_rows,
         "unresolved_source_cue_ids": sorted(unresolved_source_cue_ids),
-        "preserved_candidate_cue_ids": sorted(candidate_targets),
+        "preserved_candidate_cue_ids": sorted(preserved_candidate_cue_ids),
+        "reused_previous_translation_cue_ids": sorted(
+            reused_previous_translation_cue_ids
+        ),
     }
 
 
@@ -1229,6 +1312,15 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
     }
     for cue_id in presentation_report.get("unresolved_source_cue_ids", []):
         problem_reasons.setdefault(str(cue_id), []).append("translation_unresolved")
+    quality_by_source: dict[str, list[str]] = {}
+    for issue in metadata.get("quality_issues", []):
+        for cue_id in issue.get("cue_ids", []) or [issue.get("cue_id")]:
+            if cue_id:
+                quality_by_source.setdefault(str(cue_id), []).append(str(issue.get("code")))
+    for cue in candidate.cues:
+        for source_id in (cue.mapping or {}).get("source_cue_ids", []):
+            if source_id in quality_by_source:
+                problem_reasons.setdefault(cue.cue_id, []).extend(quality_by_source[source_id])
     provenance = ChangeProvenance(
         kind=ChangeKind.AI,
         operation="contextual_translation",
@@ -1315,7 +1407,7 @@ def run_contextual_translation(
         system_prompt=system_prompt,
         batches=batches,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-map-v5-block-patch",
+        cache_scope="translation-map-v16-numeric-pipe-block-rewrite",
         mapping_mode=mapping_mode,
         progress_callback=(
             (lambda done, total: progress_callback(
@@ -1351,7 +1443,7 @@ def run_contextual_translation(
         mapping_mode=mapping_mode,
         non_repairable_group_ids=non_repairable_group_ids,
         cache_directory=work / "translation" / "block_cache",
-        cache_scope="translation-map-v5-block-patch",
+        cache_scope="translation-map-v16-numeric-pipe-block-rewrite",
         group_block_ids=group_block_ids,
         progress_callback=(
             (lambda done, total, accepted: progress_callback(
@@ -1397,6 +1489,7 @@ def run_contextual_translation(
         "repair_prompt": repair_prompt.metadata(),
         "execution_block_ids": [item["block_id"] for item in batches],
         "problem_group_ids": list(repair["invalid_group_ids"]),
+        "quality_issues": repair.get("quality_issues", []),
     }
     if progress_callback is not None:
         progress_callback(

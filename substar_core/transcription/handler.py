@@ -72,7 +72,11 @@ def _contained_project(projects_root: Path, project_id: str) -> Path:
 def _resolved_media(project: Path, request: Mapping[str, Any]) -> Path:
     relative = PurePosixPath(str(request["media"]["relative_path"]))
     candidate = project.joinpath(*relative.parts).resolve()
-    if project not in candidate.parents or not candidate.is_file():
+    from substar_core.media_reference import resolve_reference, read_reference
+    reference = read_reference(project)
+    external = resolve_reference(project) if reference and reference['relative_path'] == str(relative) else None
+    if external: candidate = external
+    if (not external and project not in candidate.parents) or not candidate.is_file():
         raise InvalidTaskError("transcription media does not exist inside its project")
     if candidate.stat().st_size != int(request["media"]["byte_size"]):
         raise InvalidTaskError("transcription media size changed after task creation")

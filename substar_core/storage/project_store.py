@@ -380,6 +380,34 @@ class ProjectStore:
             raise ProjectIntegrityError("project database does not exist")
         return marker
 
+    def load_summary(self) -> dict[str, Any] | None:
+        """Read list metadata without replaying or validating subtitle revisions."""
+        self._marker()
+        try:
+            with closing(self._connect()) as connection:
+                latest = connection.execute(
+                    "SELECT revision_id, created_at, complete FROM revisions "
+                    "ORDER BY revision_number DESC LIMIT 1"
+                ).fetchone()
+                if latest is None:
+                    return None
+                metadata = dict(connection.execute("SELECT key, value FROM metadata").fetchall())
+                schema = metadata.get("document_schema_version")
+                if schema is None:
+                    # Legacy stores: inspect one snapshot, never replay the patch chain.
+                    snapshot = connection.execute(
+                        "SELECT snapshot_blob, payload_sha256 FROM revisions "
+                        "WHERE snapshot_blob IS NOT NULL ORDER BY revision_number DESC LIMIT 1"
+                    ).fetchone()
+                    schema = _decompress_json(snapshot["snapshot_blob"], snapshot["payload_sha256"]).get("schema_version") if snapshot else None
+                count = connection.execute("SELECT COUNT(*) FROM revisions").fetchone()[0]
+                return {"document_id": metadata.get("document_id", ""),
+                        "latest_revision_id": latest["revision_id"],
+                        "revision_count": count, "complete": bool(latest["complete"]),
+                        "updated_at": latest["created_at"], "document_schema_version": schema}
+        except sqlite3.Error as exc:
+            raise ProjectIntegrityError("project database is unreadable") from exc
+
     def load_manifest(self) -> dict[str, Any]:
         marker = self._marker()
         try:
@@ -613,6 +641,10 @@ class ProjectStore:
                     "UPDATE metadata SET value=? WHERE key='document_id'",
                     (document.document_id,),
                 )
+            connection.execute(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES ('document_schema_version', ?)",
+                (document.schema_version,),
+            )
             connection.execute("COMMIT")
         except ProjectConflictError:
             if "connection" in locals():

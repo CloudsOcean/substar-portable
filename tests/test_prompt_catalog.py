@@ -36,11 +36,12 @@ def test_prompt_component_reads_registered_content_and_rejects_hidden_assets() -
     component = prompt_component("translation/common/contextual_translation.md")
     assert component["schema_version"] == "substar.prompt-component.v1"
     assert component["kind"] == "template"
-    assert "N:1" in component["text"]
+    assert "每个输入 cue 恰好覆盖一次" in component["text"]
+    assert "2-4" in component["text"]
     assert len(component["sha256"]) == 64
 
     one_to_one = prompt_component("translation/mode/one_to_one.md")
-    assert "one_to_one" in one_to_one["text"]
+    assert "不使用范围" in one_to_one["text"]
 
     with pytest.raises(PromptRegistryError, match="未注册"):
         prompt_component("experimental/merged_split.md")

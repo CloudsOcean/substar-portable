@@ -61,7 +61,7 @@ class SemanticExecutionTests(unittest.TestCase):
             ["cue_1", "cue_2"],
         )
 
-    def test_failed_limit_repair_keeps_original_and_is_not_unresolved(self) -> None:
+    def test_failed_limit_repair_preserves_original_as_manual_candidate(self) -> None:
         group = _group("cue_1", hard_limit=5)
         with patch(
             "substar_core.editor.translation.contextual.api_call",
@@ -73,10 +73,10 @@ class SemanticExecutionTests(unittest.TestCase):
                 groups=[group],
                 response={"group_results": [_row("cue_1", target_text="Long but useful")]},
             )
-        self.assertEqual(len(plans), 1)
         self.assertEqual(plans[0]["meaning_units"][0]["target_text"], "Long but useful")
         self.assertEqual(repair["invalid_group_ids"], [])
-        self.assertFalse(repair["model_repair"]["groups"][0]["accepted"])
+        self.assertEqual(repair["model_repair"]["groups"], [])
+        self.assertEqual(repair["quality_issues"][0]["code"], "target_over_limit")
 
     def test_limit_repair_replaces_only_the_rejected_local_scope(self) -> None:
         group = _group("cue_1", hard_limit=5)
@@ -95,9 +95,9 @@ class SemanticExecutionTests(unittest.TestCase):
                 groups=[group],
                 response={"group_results": [_row("cue_1", target_text="Long but useful")]},
             )
-        self.assertEqual(plans[0]["meaning_units"][0]["target_text"], "Short")
-        self.assertEqual(api.call_args.kwargs["groups"][0]["cues"][0]["cue_id"], "cue_1")
-        self.assertTrue(repair["model_repair"]["groups"][0]["accepted"])
+        self.assertEqual(plans[0]["meaning_units"][0]["target_text"], "Long but useful")
+        api.assert_not_called()
+        self.assertEqual(repair["model_repair"]["groups"], [])
 
     def test_over_limit_result_is_reported_as_warning(self) -> None:
         warnings = warning_report(

@@ -122,7 +122,7 @@
                 </label>
                 <label class="qwen-field">
                   <span>临时热词 <em id="qwenHotwordCount">0 / 2000</em></span>
-                  <textarea id="qwenHotwordsInput" rows="5" placeholder="每行一个，可混合中英文或其他语言。&#10;无后缀默认权重 4；:5 是普通热词最高权重。&#10;:50 是必须重点命中的超级热词，最多 50 个。"></textarea>
+                  <textarea id="qwenHotwordsInput" rows="5" placeholder="英伟达：50&#10;超微电子：5&#10;AMD：4&#10;&#10;1–5 = 普通热词权重，数字越大优先级越高；4 = 默认，5 = 最高。50 = 必须重点命中的超级热词。中英文冒号均可，保存时会自动统一。"></textarea>
                 </label>
               </div>
               <div class="qwen-glossary-placeholder"><b>词库热词</b><span>接口已预留，暂不自动注入本次听写。</span></div>

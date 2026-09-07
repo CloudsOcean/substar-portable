@@ -26,7 +26,7 @@ def test_segmentation_script_compiles_to_frozen_contract() -> None:
     wire, ledger = render_segmentation_request(request)
     assert "OWN_RANGE\tW0001-W0006" in wire
     assert "W0001\tOWN\tMAX_END=W0006\t10\t10.1\twe" in wire
-    assert "RETURN_FORMAT\tC###<TAB>W####[-W####]" in wire
+    assert "RETURN_FORMAT\t1|W####[-W####]" in wire
     assert "CHECK_MAX" not in wire
     assert "one-word preview" not in wire
     binding = {
@@ -178,9 +178,9 @@ def test_translation_script_uses_local_aliases_and_finalizes_many_to_many() -> N
     wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     assert "real-private-cue" not in wire
     assert "G001" not in wire
-    assert "C001\tOWN\twe are feeding" in wire
+    assert "1|we are feeding" in wire
     result = finalize_translation(
-        "C001+C002\t我们正在供养这台机器",
+        "C001+C002 -> C001+C002<TAB>我们正在供养这台机器",
         groups,
         ledger,
         mapping_mode="many_to_many",
@@ -207,7 +207,7 @@ def test_translation_script_salvages_a_dropped_separator() -> None:
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
     result = finalize_translation(
-        "C001你好", groups, ledger, mapping_mode="many_to_many"
+        "C001 -> C001<TAB>你好", groups, ledger, mapping_mode="many_to_many"
     )
 
     assert result["group_results"][0]["meaning_units"][0]["target_text"] == "你好"
@@ -229,8 +229,8 @@ def test_translation_script_freezes_first_duplicate_and_repairs_only_missing_ali
         "group_id": "g1", "cue_id": "c1", "target_text": "甲",
     }]
     assert result["_covered_cue_ids"] == ["c1"]
-    assert [row["cue_id"] for row in result["_cue_script_issues"]] == ["c2"]
-    assert result["_cue_script_warnings"][0]["code"] == "duplicate_alias_ignored"
+    assert [row["cue_id"] for row in result["_cue_script_issues"] if row["code"] == "missing_cue_translation"] == ["c2"]
+    assert result["_cue_script_issues"][0]["code"] == "duplicate_display_alias"
 
 
 def test_translation_script_salvages_complete_groups_from_partial_output() -> None:
@@ -246,7 +246,7 @@ def test_translation_script_salvages_complete_groups_from_partial_output() -> No
         "group_id": "g1", "cue_id": "c1", "target_text": "甲",
     }]
     assert result["_covered_cue_ids"] == ["c1"]
-    assert [row["cue_id"] for row in result["_cue_script_issues"]] == ["c2"]
+    assert [row["cue_id"] for row in result["_cue_script_issues"] if row["code"] == "missing_cue_translation"] == ["c2"]
 
 
 def test_one_to_one_restores_dropped_aliases_from_exact_frozen_row_order() -> None:
@@ -260,11 +260,8 @@ def test_one_to_one_restores_dropped_aliases_from_exact_frozen_row_order() -> No
         "甲\n乙", groups, ledger, mapping_mode="one_to_one"
     )
 
-    assert result["_cue_script_issues"] == []
-    assert [row["target_text"] for row in result["group_results"]] == ["甲", "乙"]
-    assert result["_cue_script_warnings"][-1] == {
-        "code": "positional_aliases_restored", "row_count": 2,
-    }
+    assert result["group_results"] == []
+    assert {row["cue_id"] for row in result["_cue_script_issues"] if row["code"] == "missing_cue_translation"} == {"c1", "c2"}
 
 
 def test_one_to_one_restores_repeated_aliases_and_honors_valid_reordering() -> None:
@@ -280,13 +277,8 @@ def test_one_to_one_restores_repeated_aliases_and_honors_valid_reordering() -> N
         "C002\t乙\nC001\t甲", groups, ledger, mapping_mode="one_to_one"
     )
 
-    assert restored["_cue_script_issues"] == []
-    assert any(
-        row["code"] == "positional_aliases_restored"
-        for row in restored["_cue_script_warnings"]
-    )
-    assert contradicted["_cue_script_issues"] == []
-    assert [row["target_text"] for row in contradicted["group_results"]] == ["甲", "乙"]
+    assert any(row["code"] == "duplicate_display_alias" for row in restored["_cue_script_issues"])
+    assert any(row["code"] == "display_alias_order_mismatch" for row in contradicted["_cue_script_issues"])
 
 
 def test_one_to_one_does_not_positionally_bind_repair_with_context() -> None:
@@ -310,7 +302,7 @@ def test_translation_script_allows_consecutive_mapping_across_legacy_groups() ->
     ]
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     result = finalize_translation(
-        "C001+C002\t跨旧组合并", groups, ledger,
+        "C001+C002 -> C001+C002<TAB>跨旧组合并", groups, ledger,
         mapping_mode="many_to_many"
     )
     assert len(result["group_results"]) == 2
@@ -326,13 +318,13 @@ def test_translation_script_accepts_two_space_delimiter_and_markdown_bullet() ->
     }]
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     result = finalize_translation(
-        "- C001 + C002  合并译文", groups, ledger,
+        "- C001 + C002 -> C001 + C002<TAB>合并译文", groups, ledger,
         mapping_mode="many_to_many"
     )
     assert result["group_results"][0]["meaning_units"][0]["target_text"] == "合并译文"
 
 
-def test_translation_script_reorders_safely_bound_rows_in_finalizer() -> None:
+def test_translation_script_derives_evidence_from_display_slots() -> None:
     groups = [{
         "group_id": "g1",
         "cues": [
@@ -342,12 +334,16 @@ def test_translation_script_reorders_safely_bound_rows_in_finalizer() -> None:
     }]
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     result = finalize_translation(
-        "C002\t乙\nC001\t甲", groups, ledger,
+        "C001<TAB>甲\nC002<TAB>乙", groups, ledger,
         mapping_mode="many_to_many"
     )
     assert [
         row["target_text"] for row in result["group_results"][0]["meaning_units"]
     ] == ["甲", "乙"]
+    assert [
+        row["source_evidence_cue_ids"]
+        for row in result["group_results"][0]["meaning_units"]
+    ] == [["c1"], ["c2"]]
 
 
 def test_translation_script_accepts_literal_tab_marker_and_safe_alias_echo() -> None:
@@ -357,12 +353,108 @@ def test_translation_script_accepts_literal_tab_marker_and_safe_alias_echo() -> 
     }]
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     result = finalize_translation(
-        "C001<TAB>C001<TAB>译文",
+        "C001 -> C001<TAB>译文",
         groups,
         ledger,
         mapping_mode="many_to_many",
     )
     assert result["group_results"][0]["meaning_units"][0]["target_text"] == "译文"
+
+
+def test_many_to_many_rejects_bare_control_alias_as_target_text() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [{"cue_id": "c1", "source_text": "one"}],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+
+    result = finalize_translation(
+        "C001 -> C001<TAB>C008",
+        groups,
+        ledger,
+        mapping_mode="many_to_many",
+    )
+
+    assert [row["code"] for row in result["_cue_script_issues"]] == [
+        "target_is_control_token"
+    ]
+
+
+def test_many_to_many_rejects_control_alias_embedded_in_target_text() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [{"cue_id": "c1", "source_text": "one"}],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+
+    result = finalize_translation(
+        "C001 -> C001<TAB>C006里情况也类似",
+        groups,
+        ledger,
+        mapping_mode="many_to_many",
+    )
+
+    assert [row["code"] for row in result["_cue_script_issues"]] == [
+        "target_is_control_token"
+    ]
+
+
+def test_many_to_many_accepts_plain_space_instead_of_dropped_tab() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [
+            {"cue_id": "c1", "source_text": "one"},
+            {"cue_id": "c2", "source_text": "two"},
+        ],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+
+    result = finalize_translation(
+        "C001+C002 -> C001+C002 完整译文",
+        groups,
+        ledger,
+        mapping_mode="many_to_many",
+    )
+
+    assert result["_cue_script_issues"] == []
+    assert result["_covered_cue_ids"] == ["c1", "c2"]
+
+
+def test_many_to_many_joins_tab_separated_display_aliases() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [
+            {"cue_id": "c1", "source_text": "one"},
+            {"cue_id": "c2", "source_text": "two"},
+        ],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+
+    result = finalize_translation(
+        "C001+C002 -> C001<TAB>C002<TAB>完整译文",
+        groups,
+        ledger,
+        mapping_mode="many_to_many",
+    )
+
+    assert result["_cue_script_issues"] == []
+    assert result["_covered_cue_ids"] == ["c1", "c2"]
+
+
+def test_one_to_one_rejects_bare_control_alias_as_target_text() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [{"cue_id": "c1", "source_text": "one"}],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="one_to_one")
+
+    result = finalize_translation(
+        "C001<TAB>C008", groups, ledger, mapping_mode="one_to_one"
+    )
+
+    assert [row["code"] for row in result["_cue_script_issues"]] == [
+        "target_is_control_token"
+    ]
 
 
 def test_many_to_many_translation_salvages_tab_separated_join_aliases() -> None:
@@ -376,7 +468,7 @@ def test_many_to_many_translation_salvages_tab_separated_join_aliases() -> None:
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
     result = finalize_translation(
-        "C001\tC002\t合并译文",
+        "C001+C002 -> C001+C002<TAB>合并译文",
         groups,
         ledger,
         mapping_mode="many_to_many",
@@ -401,7 +493,7 @@ def test_calibration_full_cue_finalizer_binds_real_tokens_and_allows_reuse() -> 
         cues, task="CALIBRATE", instructions="return corrected text"
     )
     result = finalize_calibration(
-        "SUBSTAR-CUE-SCRIPT/1\tCALIBRATE\nCUE\tC001\tU.S. Policy.\nEND",
+        "C001\tU.S. Policy.",
         ledger,
     )
     assert [row["kind"] for row in result["actions"]] == [
@@ -430,7 +522,7 @@ def test_calibration_finalizer_keeps_semantic_lexical_rewrite_for_review() -> No
         cues, task="CALIBRATE", instructions="return corrected text"
     )
     result = finalize_calibration(
-        "SUBSTAR-CUE-SCRIPT/1\tCALIBRATE\nCUE\tC001\tso-called\nEND",
+        "C001\tso-called",
         ledger,
     )
     assert result["actions"][0]["disposition"] == "review"
@@ -446,7 +538,7 @@ def test_calibration_finalizer_keeps_decorative_symbol_for_review() -> None:
         cues, task="CALIBRATE", instructions="return corrected text"
     )
     result = finalize_calibration(
-        "SUBSTAR-CUE-SCRIPT/1\tCALIBRATE\nCUE\tC001\tactually‡\nEND",
+        "C001\tactually‡",
         ledger,
     )
     assert result["actions"][0]["disposition"] == "review"
@@ -468,7 +560,7 @@ def test_calibration_candidate_freezes_valid_rows_and_scopes_only_missing_cue() 
         cues, task="CALIBRATE", instructions="return corrected text"
     )
     result = finalize_calibration_candidate(
-        "SUBSTAR-CUE-SCRIPT/1\tCALIBRATE\nCUE\tC001\tHello,\nEND",
+        "C001\tHello,",
         ledger,
     )
     assert result["_covered_cue_ids"] == ["cue-1"]
@@ -493,7 +585,7 @@ def test_calibration_candidate_accepts_unambiguous_bare_alias_rows() -> None:
     )
     result = finalize_calibration_candidate("C001\tHello.", ledger)
 
-    assert "SRC\tC001\tOWN\thello" in wire
+    assert "1|OWN|hello" in wire
     assert result["_cue_script_issues"] == []
     assert result["_covered_cue_ids"] == ["cue-1"]
 
@@ -514,8 +606,8 @@ def test_calibration_repair_wire_contains_errors_and_frozen_aliases() -> None:
         },
     )
 
-    assert "ERROR\tC002\tmissing_cue_text\tmissing output" in wire
-    assert "SRC\tC001\tCONTEXT\taccepted" in wire
+    assert "ERROR\t2\tmissing_cue_text\tmissing output" in wire
+    assert "1|CONTEXT|accepted" in wire
     assert "FROZEN\t" not in wire
     assert "REJECTED MODEL OUTPUT" not in wire
     assert "C001\taccepted" not in wire
@@ -539,8 +631,8 @@ def test_translation_limit_error_is_rendered_once_with_actionable_fields() -> No
 
     wire, _ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
-    assert wire.count("TARGET_OVER_LIMIT") == 1
-    assert "ERROR\tC001+C002\tTARGET_OVER_LIMIT\tACTUAL=30 REQUIRED_MAX=24 ACTION=shorten_or_split REJECTED=过长译文" in wire
+    assert wire.count("target_over_limit") == 1
+    assert "1,2: target_over_limit" in wire
 
 
 def test_translation_wire_exposes_one_uniform_target_limit() -> None:
@@ -560,8 +652,10 @@ def test_translation_wire_exposes_one_uniform_target_limit() -> None:
 
     wire, _ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
-    assert wire.count("TARGET_LIMIT\t24") == 1
-    assert wire.count("COUNT_RULE\tcharacters_excluding_spaces") == 1
+    assert wire.count("TARGET_LIMIT 24") == 1
+    assert wire.count("COUNT_RULE characters_excluding_spaces") == 1
+    assert "1|one\n2|two" in wire
+    assert "REQUIRED_SOURCE_COVERAGE" not in wire
 
 
 def test_many_to_many_repairs_short_join_alias_without_separator() -> None:
@@ -576,7 +670,7 @@ def test_many_to_many_repairs_short_join_alias_without_separator() -> None:
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
     result = finalize_translation(
-        "C001+002前半\nC003\t后半", groups, ledger,
+        "C001+002 -> C001+002<TAB>前半\nC003 -> C003<TAB>后半", groups, ledger,
         mapping_mode="many_to_many",
     )
 
@@ -596,7 +690,7 @@ def test_many_to_many_flattens_tab_separated_alias_and_join_fields() -> None:
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
     result = finalize_translation(
-        "C001\tC002+C003\t合并译文", groups, ledger,
+        "C001 -> C001<TAB>前半\nC002+C003 -> C002+C003<TAB>合并译文", groups, ledger,
         mapping_mode="many_to_many",
     )
 
@@ -615,15 +709,13 @@ def test_translation_patch_keeps_owned_alias_and_ignores_joined_context_alias() 
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
 
     result = finalize_translation(
-        "C002+C001\t修复译文", groups, ledger,
+        "C002<TAB>修复译文", groups, ledger,
         mapping_mode="many_to_many",
     )
 
     assert result["_cue_script_issues"] == []
     assert result["_covered_cue_ids"] == ["c2"]
-    assert result["_cue_script_warnings"] == [{
-        "code": "context_aliases_ignored", "line": 1, "aliases": ["C001"],
-    }]
+    assert result["_cue_script_warnings"] == []
 
 
 def test_translation_finalizer_normalizes_short_join_alias_and_stray_tag() -> None:
@@ -636,9 +728,104 @@ def test_translation_finalizer_normalizes_short_join_alias_and_stray_tag() -> No
     }]
     _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
     result = finalize_translation(
-        'C001+002\t<COREDE="" translate="no">合并译文',
+        'C001-C002<TAB><COREDE="" translate="no">合并译文',
         groups, ledger, mapping_mode="many_to_many",
     )
 
     assert result["_cue_script_issues"] == []
     assert result["group_results"][0]["meaning_units"][0]["target_text"] == "合并译文"
+
+
+def test_many_to_many_derives_conservative_evidence_from_each_display_range() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [
+            {"cue_id": "c1", "source_text": "one"},
+            {"cue_id": "c2", "source_text": "two"},
+            {"cue_id": "c3", "source_text": "three"},
+        ],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+    result = finalize_translation(
+        "C001<TAB>甲\n"
+        "C002-C003<TAB>乙。",
+        groups, ledger, mapping_mode="many_to_many",
+    )
+
+    assert result["_cue_script_issues"] == []
+    assert result["_covered_cue_ids"] == ["c1", "c2", "c3"]
+    assert [
+        row["source_evidence_cue_ids"]
+        for row in result["group_results"][0]["meaning_units"]
+    ] == [["c1"], ["c2", "c3"]]
+
+
+def test_many_to_many_marks_chinese_internal_comma_for_block_rewrite() -> None:
+    groups = [{
+        "group_id": "g1",
+        "cues": [{"cue_id": "c1", "source_text": "one"}],
+    }]
+    _wire, ledger = render_translation_request(groups, mapping_mode="many_to_many")
+    result = finalize_translation(
+        "C001 -> C001<TAB>他写道，美国已经准备就绪",
+        groups, ledger, mapping_mode="many_to_many",
+    )
+
+    assert result["_cue_script_issues"] == []
+    assert "target_contains_clause_boundary_punctuation" not in [
+        row["code"] for row in result["_cue_script_warnings"]
+    ]
+
+
+def test_calibration_finalizer_surfaces_count_changing_rewrite_for_review() -> None:
+    cues = [{
+        "cue_id": "cue-real", "editable": True,
+        "tokens": [
+            {"token_id": "t1", "text": "military"},
+            {"token_id": "t2", "text": "terror"},
+            {"token_id": "t3", "text": "strength"},
+        ],
+    }]
+    _wire, ledger = render_cue_request(
+        cues, task="CALIBRATE", instructions="return corrected text"
+    )
+    result = finalize_calibration_candidate(
+        "C001\tmilitary strength", ledger
+    )
+
+    assert result["_cue_script_issues"] == []
+    assert len(result["actions"]) == 1
+    assert result["actions"][0]["kind"] == "replace_span"
+    assert result["actions"][0]["disposition"] == "review"
+    assert result["actions"][0]["token_ids"] == ["t1", "t2", "t3"]
+
+def test_calibration_internal_periods_are_safe_punctuation_not_lexical_review() -> None:
+    cues = [
+        {
+            "cue_id": "cue-us", "editable": True,
+            "tokens": [{"token_id": "t1", "text": "US"}],
+        },
+        {
+            "cue_id": "cue-usa", "editable": True,
+            "tokens": [{"token_id": "t2", "text": "USA"}],
+        },
+    ]
+    _wire, ledger = render_cue_request(
+        cues, task="CALIBRATE", instructions="return corrected text"
+    )
+    result = finalize_calibration("C001\tU.S.\nC002\tU.S.A.", ledger)
+
+    assert [action["kind"] for action in result["actions"]] == [
+        "set_punctuation", "set_punctuation"
+    ]
+    assert all(action["disposition"] == "apply" for action in result["actions"])
+    token_map = {
+        "t1": type("Token", (), {"text": "US"})(),
+        "t2": type("Token", (), {"text": "USA"})(),
+    }
+    accepted, rejected = _validated_calibration_contract_actions(
+        result, ["t1", "t2"], token_map,
+        {"t1": "cue-us", "t2": "cue-usa"},
+    )
+    assert rejected == []
+    assert len(accepted) == 2

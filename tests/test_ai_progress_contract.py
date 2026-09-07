@@ -193,7 +193,7 @@ def test_calibration_raw_wire_cache_rebinds_current_token_ids(tmp_path) -> None:
     def model(**_kwargs):
         nonlocal calls
         calls += 1
-        return "CUE\tC001\tHello.", {}
+        return "C001\tHello.", {}
 
     settings = {
         "translation_api_key": "test-key",

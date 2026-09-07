@@ -286,11 +286,11 @@
     for (const [index, raw] of String(text || "").split(/\r?\n/).entries()) {
       const line = raw.trim();
       if (!line) continue;
-      const weighted = line.match(/^(.*):(\d+)$/);
+      const weighted = line.match(/^(.*)[:：](\d+)$/);
       const word = String(weighted?.[1] ?? line).trim();
       const weight = Number(weighted?.[2] ?? 4);
       if (!word) throw new Error(`第 ${index + 1} 行热词不能为空`);
-      if (weighted && /:\d+$/.test(word)) {
+      if (weighted && /[:：]\d+$/.test(word)) {
         throw new Error(`第 ${index + 1} 行只能指定一个热词权重`);
       }
       if (![1, 2, 3, 4, 5, 50].includes(weight)) {
@@ -950,7 +950,7 @@
     const total = accepted.reduce((sum, file) => sum + file.size, 0);
     const chip = $("#videoFileChip");
     chip.textContent = accepted.length === 1
-      ? `${accepted[0].name} · ${formatBytes(total)}`
+      ? `${accepted[0].name} · ${formatBytes(total)} · ${accepted[0].token ? '引用原文件' : '复制导入'}`
       : `${accepted.length} 个素材 · ${formatBytes(total)}`;
     chip.title = accepted.map((file) => file.name).join("\n");
     chip.classList.toggle("hidden", !accepted.length);
@@ -1072,7 +1072,8 @@
     const form = new FormData();
     const workflow = $("#splitWorkflowInput").value;
     form.append("mode", "asr");
-    form.append("media", media, media.name);
+    if (media.token) form.append("media_reference_token", media.token);
+    else form.append("media", media, media.name);
     if (workflow !== "disabled" && references.length) {
       form.append("reference_document", references[0], references[0].name);
     }
@@ -1309,6 +1310,8 @@
     summary.textContent = "导出";
     const panel = document.createElement("div");
     panel.className = "export-menu-panel";
+    const renderOptions = () => {
+    panel.replaceChildren();
     const translated = hasTranslation(job);
     const availability = job.export_availability || {};
     [
@@ -1329,6 +1332,21 @@
         link.addEventListener("click", (event) => event.preventDefault());
       }
       panel.append(link);
+    });
+    };
+    renderOptions();
+    let loading = false;
+    details.addEventListener("toggle", async () => {
+      if (!details.open || loading || job.export_availability || job.project_only) return;
+      loading = true;
+      panel.textContent = "正在读取导出选项…";
+      try {
+        const current = await api(`/api/project-creations/${encodeURIComponent(job.id)}`);
+        job.export_availability = current.export_availability;
+        renderOptions();
+      } catch (error) {
+        panel.textContent = `读取失败，请重新打开：${errorMessage(error)}`;
+      } finally { loading = false; }
     });
     details.append(summary, panel);
     details.addEventListener("mouseenter", () => { details.open = true; });
@@ -1480,14 +1498,22 @@
     }));
   }
 
-  async function refreshJobs() {
+  let projectCatalog = {projects:[]};
+  let projectCatalogUpdatedAt = 0;
+  async function refreshJobs(refreshCatalog = true) {
     if (state.refreshing) return;
     state.refreshing = true;
     try {
       const [jobs, editorTasks, projects] = await Promise.all([
         api("/api/project-creations"),
         api("/api/editor-tasks").catch(() => ({tasks:[]})),
-        api("/api/projects").catch(() => ({projects:[]})),
+        (refreshCatalog || Date.now() - projectCatalogUpdatedAt > 30000
+          ? api("/api/projects").then(value => {
+              projectCatalog = value;
+              projectCatalogUpdatedAt = Date.now();
+              return value;
+            }).catch(() => projectCatalog)
+          : Promise.resolve(projectCatalog)),
       ]);
       state.runtimeConnected = true;
       state.runtimeFailureCount = 0;
@@ -1561,6 +1587,7 @@
   }
 
   async function loadInitialState() {
+    const initialJobs = refreshJobs();
     try {
       const [settings, system, recognition] = await Promise.all([
         api("/api/settings"), api("/api/system"), api("/api/recognition/profiles"),
@@ -1580,8 +1607,8 @@
       $("#systemState span").textContent = "无法读取系统状态";
       toast(errorMessage(error));
     }
-    await refreshJobs();
-    window.setInterval(refreshJobs, 1300);
+    await initialJobs;
+    window.setInterval(() => refreshJobs(false), 1300);
   }
 
   async function refreshSharedSettings() {
@@ -1591,7 +1618,13 @@
     } catch (_) {}
   }
 
-  $("#chooseVideoButton").addEventListener("click", (event) => { event.stopPropagation(); $("#videoInput").click(); });
+  $("#chooseVideoButton").addEventListener("click", async (event) => {
+    event.stopPropagation();
+    try {
+      const selected = await api('/api/media-select', {method:'POST',headers:{'X-Substar-Media-Select':'1'}});
+      if (!selected.cancelled) chooseVideo([selected]);
+    } catch (error) { toast(`媒体选择失败：${error.message}`); }
+  });
   $("#videoDropZone").addEventListener("click", (event) => { if (!event.target.closest("button")) $("#videoInput").click(); });
   $("#videoDropZone").addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) $("#videoInput").click(); });
   $("#videoInput").addEventListener("change", (event) => chooseVideo(event.target.files));

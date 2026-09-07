@@ -166,15 +166,17 @@
     document.body.classList.toggle("editor-ai-task-locked", locked);
     renderHeader();
     const genericTaskOwnsPanel = state.editorAiTask?.kind !== "translation";
-    if ((locked || state.editorAiTask?.state === "succeeded_with_issues")
-      && state.editorAiTask && genericTaskOwnsPanel) {
+    const terminalSuccess = ["succeeded", "succeeded_with_issues"].includes(
+      state.editorAiTask?.state
+    );
+    if ((locked || terminalSuccess) && state.editorAiTask && genericTaskOwnsPanel) {
       const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
       const baseMessage = state.editorAiTask.display_error || state.editorAiTask.message
         || state.editorAiTask.error?.message || "任务运行中";
       const elapsedSeconds = Math.max(0, Number(state.editorAiTask.elapsed_seconds || 0));
-      const taskMessage = elapsedSeconds >= 1
+      const taskMessage = locked && elapsedSeconds >= 1
         ? `${baseMessage} · 已等待 ${Math.round(elapsedSeconds)} 秒`
         : baseMessage;
       renderWorkbenchTask(
@@ -1080,6 +1082,11 @@
     state.taskInfo = info;
     await loadProjectLlmOptions().catch(error => ordinaryError(`模型列表读取失败：${error.message}`));
     $("#taskInfoName").value = info.display_name || projectId;
+    $("#taskInfoMediaPath").value = info.media_path || "";
+    $("#taskInfoMediaPath").title = info.media_path || "";
+    $("#taskInfoMediaPath").dataset.selection = "";
+    $("#taskMediaStatus").hidden = !info.media_missing;
+    $("#taskMediaStatus").textContent = info.media_missing ? "文件不存在，请重新链接" : "";
     $("#taskInfoSourceLanguage").value = info.language === "zh-CN" ? "zh" : info.language;
     $("#taskInfoTargetLanguage").value = info.target_language_mode;
     $("#taskInfoSourceLimit").value = String(info.source_hard_limit);
@@ -1112,6 +1119,7 @@
         method:"PUT", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           display_name:displayName,
+          media_selection_token:$("#taskInfoMediaPath").dataset.selection || "",
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
           glossary_id:String(state.taskInfo?.glossary_id || ""),
@@ -1121,6 +1129,7 @@
         })
       });
       state.taskInfo = updated;
+      if ($("#taskInfoMediaPath").dataset.selection) loadProjectMedia();
       applySubtitlePolicy(updated);
       configureTranslationLanguageDefaults(updated);
       if (current) current.display_name = updated.display_name || displayName;
@@ -3400,8 +3409,7 @@
       state.mediaInfo = mediaInfo;
       configureMedia(mediaInfo?.kind);
       setRevision(revision, {preserveCueViewport:false});
-      await refreshEditorAiTask();
-      startEditorAiTaskPoll();
+      const aiTaskReady = refreshEditorAiTask();
       if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
       loadRevisionHistory().catch(() => {});
@@ -3413,6 +3421,8 @@
       setMediaMessage("正在读取媒体…");
       loadProjectMedia();
       state.timelineController?.redraw();
+      await aiTaskReady;
+      startEditorAiTaskPoll();
       if (restoreTranslation) {
         const task = await refreshTranslationTask();
         if (task && ["queued", "running", "cancelling"].includes(task.state)) {
@@ -3431,13 +3441,19 @@
   async function loadProjects() {
     ordinaryError("");
     try {
+      const query = new URLSearchParams(window.location.search);
+      const requested = query.get("project") || query.get("job");
+      // A direct editor link must never wait for the unrelated project catalog.
+      if (requested) await loadProject(requested);
       const response = await api("/api/projects");
       state.projects = response.projects || [];
-      const query = new URLSearchParams(window.location.search);
       //  links use `project`; accepting the same project id from the
       // short-lived `job` link keeps already-open  pages from becoming an
       // empty editor while all new links are emitted with the  contract.
-      const requested = query.get("project") || query.get("job");
+      if (requested) {
+        renderProjectList();
+        return;
+      }
       state.projectId = state.projects.some(item => item.project_id === requested)
         ? requested : state.projects[0]?.project_id || "";
       renderProjectList();
@@ -4057,6 +4073,22 @@
     if ($("#taskInfoMenu").open) openTaskInfoMenu();
   });
   $("#taskInfoForm").onsubmit = submitTaskInfo;
+  $("#relinkTaskMedia").onclick = async () => {
+    const projectId = state.projectId;
+    const button = $("#relinkTaskMedia");
+    button.disabled = true;
+    try {
+      const selection = await api(projectPath("/media-select"), {method:"POST", headers:{"X-Substar-Media-Select":"1"}});
+      if (selection.cancelled || projectId !== state.projectId || !$("#taskInfoMenu").open) return;
+      if (selection.needs_confirmation && !window.confirm("无法确认这是同一媒体。选择不同剪辑可能使字幕时间错位，仍使用此文件？")) return;
+      $("#taskInfoMediaPath").value = selection.path;
+      $("#taskInfoMediaPath").title = selection.path;
+      $("#taskInfoMediaPath").dataset.selection = selection.token;
+      $("#taskMediaStatus").hidden = false;
+      $("#taskMediaStatus").textContent = "点击保存后更新媒体引用";
+    } catch (error) { ordinaryError(`重新链接失败：${error.message}`); }
+    finally { button.disabled = false; }
+  };
   $("#cancelTaskInfo").onclick = closeTaskInfoMenu;
   $("#toggleComplete").onclick = toggleComplete;
   $("#startEditorTutorial").onclick = restartEditorTutorial;
@@ -4088,6 +4120,11 @@
         ordinaryError(`已保存：${result.filename}`, "completed");
       } catch (error) {
         ordinaryError(`导出失败：${error.message}`);
+        if (exchange.dataset.exchangeExport === 'subtitle-project' && /媒体|文件不存在|重新链接/.test(error.message)) {
+          $("#taskInfoMenu").open = true;
+          await openTaskInfoMenu();
+          $("#relinkTaskMedia").click();
+        }
       }
       return;
     }

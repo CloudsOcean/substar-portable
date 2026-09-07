@@ -459,7 +459,7 @@ def model_cue_script(
             "maxTokens": max_tokens,
             "thinkingMode": thinking_mode,
             "reasoningEffort": reasoning_effort if thinking_mode == "enabled" else None,
-            "wireProtocol": "substar-cue-script.v1",
+            "wireProtocol": "substar-segmentation-numeric-pipe.v2",
             "input": user_text,
         },
     )
@@ -482,7 +482,7 @@ def model_cue_script(
         "block_id": block_id,
         **dict(telemetry_metadata or {}),
         **call_info,
-        "wire_protocol": "substar-cue-script.v1",
+        "wire_protocol": "substar-segmentation-numeric-pipe.v2",
         "system_prompt": system,
         "system_prompt_sha256": hashlib.sha256(system.encode("utf-8")).hexdigest(),
         "request_text": user_text,

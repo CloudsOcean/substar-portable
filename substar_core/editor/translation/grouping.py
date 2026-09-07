@@ -44,7 +44,9 @@ def translation_groups(
         "ja": ("japanese_hard_limit", "characters_excluding_spaces"),
         "ko": ("korean_hard_limit", "characters_excluding_spaces"),
     }
-    max_component_cues = max(1, int(settings.get("translation_execution_max_cues", 48)))
+    # Keep the wire ledger short enough that providers reliably return every
+    # display alias. This is a transport boundary, never a semantic boundary.
+    max_component_cues = max(1, int(settings.get("translation_execution_max_cues", 10000)))
     components: list[list[dict[str, Any]]] = []
     for row in rows:
         if (

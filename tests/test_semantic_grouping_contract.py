@@ -79,7 +79,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
 
     def test_prompt_treats_hard_limit_as_ceiling_not_length_target(self) -> None:
         prompt = render_prompt("semantic_grouping", variant="en")
-        self.assertEqual("2026-09-04.3", prompt.version)
+        self.assertEqual("2026-09-06.17", prompt.version)
         self.assertIn("rejection ceiling", prompt.text)
         self.assertIn("not a preferred length", prompt.text)
         self.assertIn("never move the boundary later merely to make the Cue longer", prompt.text)

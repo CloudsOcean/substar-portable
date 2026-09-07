@@ -344,7 +344,7 @@ class SegmentationContractTests(unittest.TestCase):
             self.assertEqual(kwargs["thinking_mode"], "enabled")
             self.assertEqual(kwargs["reasoning_effort"], "low")
             self.assertTrue(kwargs["system"].startswith("primary prompt\n\n"))
-            self.assertIn("RETURN_FORMAT\tC###<TAB>W####[-W####]", kwargs["user_text"])
+            self.assertIn("RETURN_FORMAT\t1|W####[-W####]", kwargs["user_text"])
             self.assertIn("PROGRAM VALIDATION", kwargs["user_text"])
             self.assertIn("BASE_SHA256", kwargs["user_text"])
             self.assertIn("ERROR\tW0001-W0002", kwargs["user_text"])

@@ -166,6 +166,7 @@ def test_unresolved_translation_preserves_model_candidate_but_is_not_accepted() 
     assert unresolved.mapping["candidate_preserved"] is True
     assert report["unresolved_source_cue_ids"] == [cues[1].cue_id]
     assert report["preserved_candidate_cue_ids"] == [cues[1].cue_id]
+    assert report["reused_previous_translation_cue_ids"] == []
     assert translated_text_by_source_cue(candidate) == {
         cues[0].cue_id: "已翻译",
     }
@@ -191,6 +192,31 @@ def test_translation_repair_is_exactly_one_request_per_failed_group(monkeypatch)
     assert calls == 1
     assert report["model_repair"]["repair_phase_entered"] is True
     assert report["model_repair"]["groups"][0]["repair_request_count"] == 1
+
+
+def test_failed_control_alias_is_not_preserved_as_manual_candidate(monkeypatch) -> None:
+    group = {"group_id": "g1", "cues": [_cue("c1", 0)]}
+    monkeypatch.setattr(
+        contextual_translation,
+        "api_call",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("repair failed")),
+    )
+
+    _plans, report = contextual_translation.complete_results(
+        settings={"translation_workers": 1},
+        repair_prompt="repair",
+        groups=[group],
+        response={
+            "group_results": [],
+            "_wire_units": [{"cue_ids": ["c1"], "target_text": "C008"}],
+            "_covered_cue_ids": ["c1"],
+            "_cue_script_issues": [{
+                "code": "target_is_control_token", "cue_ids": ["c1"],
+            }],
+        },
+    )
+
+    assert report["candidate_targets_by_cue"] == {}
 
 
 def test_translation_repairs_all_invalid_groups_in_one_block_request(monkeypatch) -> None:
@@ -344,8 +370,12 @@ def test_translation_block_patch_freezes_valid_aliases_and_repairs_only_gap(monk
         calls.append(kwargs["groups"])
         return {
             "group_results": [],
-            "_wire_units": [{"cue_ids": ["c2"], "target_text": "二"}],
-            "_covered_cue_ids": ["c2"],
+            "_wire_units": [
+                {"cue_ids": ["c1"], "target_text": "一"},
+                {"cue_ids": ["c2"], "target_text": "二"},
+                {"cue_ids": ["c3"], "target_text": "三"},
+            ],
+            "_covered_cue_ids": ["c1", "c2", "c3"],
             "_cue_script_issues": [],
         }, {}
 
@@ -374,12 +404,12 @@ def test_translation_block_patch_freezes_valid_aliases_and_repairs_only_gap(monk
     assert len(calls) == 1
     assert [
         cue.get("editable") for group in calls[0] for cue in group["cues"]
-    ] == [False, True, False]
+    ] == [True, True, True]
     assert calls[0][0]["program_validation_errors"][0]["cue_id"] == "c2"
     assert {plan["group_id"] for plan in plans} == {"g1", "g2", "g3", "g4"}
     assert set(
         report["model_repair"]["groups"][0]["attempts"][0]["frozen_cue_ids"]
-    ) == {"c1", "c3"}
+    ) == set()
     assert report["invalid_group_ids"] == []
 
 
@@ -418,11 +448,10 @@ def test_translation_length_repairs_are_aggregated_once_per_source_block(monkeyp
         group_block_ids={"g1": "b1", "g2": "b1"},
     )
 
-    assert len(calls) == 1
-    assert len(calls[0][0]["program_validation_errors"]) == 2
-    assert "_repair_context" not in calls[0][0]
-    assert [plan["meaning_units"][0]["target_text"] for plan in plans] == ["短一", "短二"]
-    assert report["model_repair"]["groups"][0]["repair_kind"] == "target_over_limit"
+    assert calls == []
+    assert len(report["quality_issues"]) == 2
+    assert [plan["meaning_units"][0]["target_text"] for plan in plans] == ["超" * 30, "长" * 30]
+    assert report["model_repair"]["groups"] == []
 
 
 def test_translation_primary_progress_counts_execution_blocks(monkeypatch) -> None:
@@ -524,6 +553,39 @@ def test_one_to_one_mode_freezes_one_source_cue_per_model_group(monkeypatch) -> 
     assert [[cue["cue_id"] for cue in row["cues"]] for row in result] == [
         ["c1"], ["c2"],
     ]
+    assert [row["execution_block_id"] for row in result] == [
+        "meaning-1", "meaning-1",
+    ]
+
+
+def test_translation_transport_components_are_not_merged_back_by_legacy_block(monkeypatch) -> None:
+    groups = [
+        {
+            "group_id": "component_0001",
+            "execution_block_id": "legacy-block",
+            "cues": [{"cue_id": "c1", "source_text": "first"}],
+        },
+        {
+            "group_id": "component_0002",
+            "execution_block_id": "legacy-block",
+            "cues": [{"cue_id": "c2", "source_text": "second"}],
+        },
+    ]
+    monkeypatch.setattr(
+        contextual_translation,
+        "translation_groups",
+        lambda _document, _settings: (groups, {}, {}),
+    )
+
+    cleaned = contextual_translation.clean_groups(
+        object(), {"translation_mapping_mode": "many_to_many"}
+    )
+    batches = contextual_translation.execution_block_batches(object(), cleaned)
+
+    assert [row["block_id"] for row in batches] == [
+        "component_0001", "component_0002",
+    ]
+    assert [len(row["groups"]) for row in batches] == [1, 1]
 
 
 def test_one_to_one_contract_accepts_only_direct_text_for_its_own_cue() -> None:
@@ -863,9 +925,11 @@ def test_main_translation_prompt_uses_target_language_boundaries() -> None:
     prompt = render_prompt(
         "contextual_translation", variant="en_to_zh", mode="many_to_many"
     ).text
-    assert "C 别名是唯一绑定依据" in prompt
-    assert "C001+C002" in prompt
-    assert "即使合并后的文本仍未超过 `hard_limit`" in prompt
+    assert "1|译文" in prompt
+    assert "1-4" in prompt
+    assert "2-4" in prompt
+    assert "反序" in prompt
+    assert "内部不得出现 `，` 或 `；`" not in prompt
     assert "JSON" in output_contract("TRANSLATE")
     assert "group_id" not in prompt
 
@@ -875,8 +939,7 @@ def test_one_to_one_prompt_has_a_distinct_direct_output_contract() -> None:
         "contextual_translation", variant="en_to_zh", mode="one_to_one"
     )
     assert prompt.mode == "one_to_one"
-    assert "每行只能包含一个 C 别名" in prompt.text
+    assert "不使用范围" in prompt.text
     assert "JSON" in output_contract("TRANSLATE")
-    assert "不得把相邻两条合成同一译文" in prompt.text
-    assert "不得为了调整目标语语序" in prompt.text
-    assert "否定词" in prompt.text
+    assert "不转移到相邻 cue" in prompt.text
+    assert "保留全部实义信息" in prompt.text

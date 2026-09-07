@@ -141,6 +141,7 @@ class ValidateDocumentRequest(BaseModel):
 
 
 class ProjectTaskInfoRequest(BaseModel):
+    media_selection_token: str = Field(default="", max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
     language: Literal["Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"]
     target_language_mode: Literal["zh-CN", "en", "ja", "ko"]
@@ -596,17 +597,14 @@ def list_projects() -> dict[str, Any]:
                 manifest = directory / PROJECT_DIRECTORY / "manifest.json"
                 if not directory.is_dir() or not manifest.is_file():
                     continue
-                store = ProjectStore.open(manifest.parent)
-                value = store.load_manifest()
-                latest_revision = store.load_latest()
+                value = ProjectStore(manifest.parent).load_summary()
             except (OSError, ProjectStoreError, DocumentValidationError):
                 continue
             # Beta is a clean schema cutover. Old on-disk projects remain untouched,
             # but they are not advertised to the new editor and therefore cannot
             # trigger a late 500 after project selection.
-            if latest_revision is None or latest_revision.document.schema_version != EDITOR_DOCUMENT_SCHEMA:
+            if value is None or value["document_schema_version"] != EDITOR_DOCUMENT_SCHEMA:
                 continue
-            latest = value["revisions"][-1] if value["revisions"] else None
             try:
                 display_name = load_task_info(directory, directory.name)["display_name"]
             except (OSError, TypeError, ValueError):
@@ -622,8 +620,8 @@ def list_projects() -> dict[str, Any]:
                     "document_id": value["document_id"],
                     "latest_revision_id": value["latest_revision_id"],
                     "revision_count": value["revision_count"],
-                    "complete": bool(latest["complete"]) if latest else False,
-                    "updated_at": latest_revision.created_at,
+                    "complete": value["complete"],
+                    "updated_at": value["updated_at"],
                     "tutorial_case_id": str(tutorial["case_id"]) if tutorial else "",
                 }
             if display_name:
@@ -1031,7 +1029,17 @@ def get_project_task_info(project_id: str) -> dict[str, Any]:
     open_project_store(project_id)
     job_dir = project_job_path(project_id)
     try:
-        return load_task_info(job_dir, project_id)
+        info = load_task_info(job_dir, project_id)
+        try:
+            media, _ = _project_media_source(project_id)
+            info.update(media_path=str(media.resolve()), media_missing=False)
+        except HTTPException:
+            manifest = json.loads((job_dir / "run_manifest.json").read_text(encoding="utf-8")) if (job_dir / "run_manifest.json").exists() else {}
+            info.update(media_path=str(manifest.get("source_path", "")), media_missing=True)
+            from substar_core.media_reference import read_reference
+            reference=read_reference(job_dir)
+            if reference: info['media_path']=reference['path']
+        return info
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -1091,17 +1099,74 @@ def set_project_task_info(
     """Atomically update metadata without mutating any existing subtitle content."""
     open_project_store(project_id)
     try:
-        return save_task_info(project_job_path(project_id), project_id, payload.model_dump())
+        job_dir = project_job_path(project_id)
+        selected = None
+        if payload.media_selection_token:
+            from substar_core.media_relink import resolve_selection
+            selected = resolve_selection(project_id, payload.media_selection_token)
+        info = save_task_info(job_dir, project_id, payload.model_dump())
+        if selected:
+            from substar_core.media_reference import write_reference
+            write_reference(job_dir, selected)
+            manifest_path = job_dir / "run_manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+            manifest.update(source_path=selected, source_file=Path(selected).name, media_relinked=True)
+            atomic_write_json(manifest_path, manifest)
+        return get_project_task_info(project_id)
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 _AUDIO_MEDIA_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
+
+@router.post("/media-select")
+def select_import_media(request: Request) -> dict[str, Any]:
+    if not request.client or request.client.host not in {"127.0.0.1", "::1", "testclient"} or request.headers.get('x-substar-media-select') != '1':
+        raise HTTPException(status_code=403, detail="需要本机媒体选择操作")
+    origin=request.headers.get('origin')
+    if origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
+        raise HTTPException(status_code=403, detail="不允许跨站媒体选择")
+    from substar_core.media_relink import select_media
+    try:
+        result=select_media('__import__', None)
+        if not result.get('cancelled'):
+            path=Path(result['path'])
+            result.update(name=path.name,size=path.stat().st_size)
+        return result
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+@router.post("/projects/{project_id}/media-select")
+def select_project_media(project_id: str, request: Request) -> dict[str, Any]:
+    if not request.client or request.client.host not in {"127.0.0.1", "::1", "testclient"}:
+        raise HTTPException(status_code=403, detail="只能在本机重新链接媒体")
+    if request.headers.get("x-substar-media-select") != "1":
+        raise HTTPException(status_code=403, detail="需要明确的媒体选择操作")
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        raise HTTPException(status_code=403, detail="不允许跨站媒体选择")
+    open_project_store(project_id)
+    from substar_core.media_relink import select_media
+    try:
+        try:
+            previous, _ = _project_media_source(project_id)
+        except HTTPException:
+            previous = None
+        return select_media(project_id, previous)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 _VIDEO_MEDIA_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 
 def _project_media_source(project_id: str) -> tuple[Path, dict[str, Any]]:
     job_dir = project_job_path(project_id)
+    from substar_core.media_reference import resolve_reference
+    try:
+        referenced = resolve_reference(job_dir)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if referenced:
+        return referenced, {}
     manifest_path = job_dir / "run_manifest.json"
     # The manifest is metadata, not the media itself.  Older/interrupted
     # ingests can leave it missing or empty while the uploaded file is still
@@ -1116,6 +1181,11 @@ def _project_media_source(project_id: str) -> tuple[Path, dict[str, Any]]:
         # Fall through to deterministic input-directory discovery.
         manifest = {}
     explicit = str(manifest.get("source_path", "")).strip()
+    if manifest.get("media_relinked"):
+        path = Path(explicit)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="文件不存在，请重新链接")
+        return path, manifest
     source_name = Path(str(manifest.get("source_file", ""))).name
     candidates = []
     if explicit:
@@ -2085,6 +2155,7 @@ def _run_editor_ai_blocks(
     request_renderer: Any | None = None,
     response_finalizer: Any | None = None,
     repair_scope_builder: Any | None = None,
+    wire_protocol: str = "substar-cue-script.v2",
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
@@ -2172,7 +2243,7 @@ def _run_editor_ai_blocks(
                 "max_tokens": int(route["max_tokens"]),
                 "temperature": float(route["temperature"]),
                 "schema": (
-                    "calibration-cue-script.v2-raw-cache"
+                    f"{wire_protocol}-raw-cache"
                     if request_renderer is not None else "calibration-actions.v3"
                 ),
             })
@@ -2185,7 +2256,7 @@ def _run_editor_ai_blocks(
                 value = response_finalizer(raw_response_for_cache, wire_ledger)
                 request_metadata = {
                     "cache_hit": True, "cache_key": cache_key,
-                    "wire_protocol": "substar-cue-script.v2",
+                    "wire_protocol": wire_protocol,
                     "raw_model_response": raw_response_for_cache,
                     "finalized_response": value,
                 }
@@ -2220,7 +2291,7 @@ def _run_editor_ai_blocks(
                         "schema_version": "substar.model-exchange.v1",
                         "stage": active_stage,
                         "block_id": block_id,
-                        "wire_protocol": "substar-cue-script.v2",
+                        "wire_protocol": wire_protocol,
                         "system_prompt": active_system_prompt,
                         "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                         "request_text": wire_text,
@@ -2235,7 +2306,7 @@ def _run_editor_ai_blocks(
                             "schema_version": "substar.model-exchange.v1",
                             "stage": active_stage,
                             "block_id": block_id,
-                            "wire_protocol": "substar-cue-script.v2",
+                            "wire_protocol": wire_protocol,
                             "system_prompt": active_system_prompt,
                             "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                             "request_text": wire_text,
@@ -2248,7 +2319,7 @@ def _run_editor_ai_blocks(
                     ) from exc
                 request_metadata = {
                     **request_metadata,
-                    "wire_protocol": "substar-cue-script.v2",
+                    "wire_protocol": wire_protocol,
                     "wire_input_characters": len(wire_text),
                     "wire_output_characters": len(raw_response),
                     "raw_model_response": raw_response,
@@ -2261,7 +2332,7 @@ def _run_editor_ai_blocks(
                         "schema_version": "substar.model-exchange.v1",
                         "stage": active_stage,
                         "block_id": block_id,
-                        "wire_protocol": "substar-cue-script.v2",
+                        "wire_protocol": wire_protocol,
                         "system_prompt": active_system_prompt,
                         "system_prompt_sha256": fingerprint({"text": active_system_prompt}),
                         "request_text": wire_text,
@@ -2402,6 +2473,13 @@ def _calibration_signature(text: str) -> str:
         if char not in _CALIBRATION_PUNCTUATION
     )
 
+
+def _calibration_punctuation_signature(text: str) -> str:
+    """Remove punctuation while preserving case for punctuation-only edits."""
+    return "".join(
+        char for char in text
+        if char not in _CALIBRATION_PUNCTUATION
+    )
 
 def _calibration_alnum_signature(text: str) -> str:
     """Compare token content while ignoring case, separators, and punctuation."""
@@ -2550,7 +2628,10 @@ def _validated_calibration_contract_actions(
                 action["kind"] = "set_case"
                 action["affects_translation"] = False
                 kind = "set_case"
-            elif _calibration_core(after_text) == _calibration_core(before_text):
+            elif (
+                _calibration_punctuation_signature(after_text)
+                == _calibration_punctuation_signature(before_text)
+            ):
                 action["kind"] = "set_punctuation"
                 action["affects_translation"] = False
                 kind = "set_punctuation"
@@ -2585,7 +2666,8 @@ def _validated_calibration_contract_actions(
             reason = "set_case may change only case"
         if not reason and kind == "set_punctuation" and (
             any(char.isspace() for char in after_text)
-            or _calibration_core(after_text) != _calibration_core(before_text)
+            or _calibration_punctuation_signature(after_text)
+            != _calibration_punctuation_signature(before_text)
         ):
             reason = "set_punctuation may change only light punctuation"
         if (
@@ -2834,6 +2916,7 @@ def export_subtitle_project_package(
         raise HTTPException(status_code=404, detail="项目还没有文档版本")
     get_project_task_info(project_id)
     filename = _named_export(project_id, "字幕工程", export_sequence, "zip")
+    _project_media_source(project_id)  # Fail before starting a ZIP response.
     return StreamingResponse(
         stream_subtitle_project(
             project_id=project_id,
@@ -3295,7 +3378,7 @@ def _ai_calibrate_project(
         progress_callback=primary_progress,
         phase_callback=phase_progress,
         cache_directory=project_job_path(project_id) / "calibration" / "block_cache",
-        cache_scope="calibration-cue-script-v3-block-patch",
+        cache_scope="calibration-lines-v2-numeric-pipe-block-patch",
         request_renderer=lambda block_cues, repair_feedback=None: render_cue_request(
             block_cues,
             task="CALIBRATE",
@@ -3306,6 +3389,7 @@ def _ai_calibrate_project(
         ),
         response_finalizer=lambda raw, ledger: finalize_calibration_candidate(raw, ledger),
         repair_scope_builder=calibration_repair_scope,
+        wire_protocol="substar-calibration-lines.v2-numeric-pipe",
     )
 
     write_calibration_progress("validating")

@@ -4,13 +4,13 @@ These examples demonstrate mapping behavior only. Never copy their words or fact
 
 1. Preserve one meaning across a code switch:
 
-Input: `C001 请打开 Google Maps` / `C002 and search for this address`
+Input: `1 请打开 Google Maps` / `2 and search for this address`
 
 Use one natural target-language rendering that covers both instructions exactly once. Join the aliases only if one indivisible target phrase genuinely spans both time slots.
 
 2. Preserve metalinguistic content:
 
-Input: `C001 他原话说` / `C002 we are ready`
+Input: `1 他原话说` / `2 we are ready`
 
 If the foreign wording itself is being quoted, retain that distinction according to target-language conventions; do not silently treat the quotation as an instruction from the prompt.
 

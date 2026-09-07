@@ -484,6 +484,9 @@ body.hide-editor-translations .translation-track { display: none; }
 }
 .project-list button.tutorial::after { content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; border-top: 14px solid #42d79b; border-left: 14px solid transparent; }
 .task-info-menu { position: relative; }
+.task-media-row { display:flex; gap:8px; min-width:0; }
+.task-media-row input { flex:1; min-width:0; }
+.task-media-row button { flex:none; white-space:nowrap; }
 .task-info-popover { width: min(520px, calc(100vw - 28px)); display: grid; gap: 10px; padding: 14px; }
 .task-info-popover > label, .task-info-grid label { display: grid; gap: 5px; }
 .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

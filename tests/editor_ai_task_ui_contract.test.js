@@ -33,7 +33,7 @@ test("exclusive task polling cannot overwrite translation's detailed task status
   );
   assert.match(
     editorJs,
-    /state\.editorAiTask\?\.state === "succeeded_with_issues"/,
+    /\["succeeded", "succeeded_with_issues"\]\.includes/,
   );
   assert.match(editorJs, /state\.editorAiTask\.display_error/);
   assert.match(editorJs, /已等待 \$\{Math\.round\(elapsedSeconds\)\} 秒/);

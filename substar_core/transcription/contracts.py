@@ -231,9 +231,11 @@ def build_transcription_request(
 ) -> dict[str, Any]:
     project_root = project_directory.resolve()
     source = media_path.resolve()
-    if project_root not in source.parents or not source.is_file():
+    from substar_core.media_reference import resolve_reference, read_reference
+    external = resolve_reference(project_root)
+    if not source.is_file() or (project_root not in source.parents and source != external):
         raise InvalidTaskError("media file must exist inside its project directory")
-    relative_path = source.relative_to(project_root).as_posix()
+    relative_path = read_reference(project_root)['relative_path'] if source == external else source.relative_to(project_root).as_posix()
     options = {
         key: settings[key]
         for key in sorted(TRANSCRIPTION_OPTION_KEYS)

@@ -797,6 +797,36 @@ def write_bytes_zip(target: Path, files: Mapping[str, bytes]) -> None:
             archive.writestr(name, content)
 
 
+def _portable_media_entries(entries, job_dir):
+    from substar_core.media_reference import read_reference, resolve_reference
+    manifest_path=job_dir/'run_manifest.json'
+    manifest=json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {}
+    media=None
+    if read_reference(job_dir):
+        media=resolve_reference(job_dir)
+    else:
+        raw=Path(str(manifest.get('source_path') or ''))
+        if str(raw) != '.':
+            candidate=raw if raw.is_absolute() else job_dir/raw
+            if candidate.is_file(): media=candidate
+        if media is None:
+            name=Path(str(manifest.get('source_file') or '')).name
+            candidate=job_dir/'input'/name
+            if name and candidate.is_file(): media=candidate
+    if media is None:
+        legacy = sorted(p for p in (job_dir/'input').glob('*') if p.is_file() and p.suffix.lower() in {'.mp4','.mov','.mkv','.mp3','.wav','.m4a','.webm','.avi'})
+        if not read_reference(job_dir) and not manifest.get('media_relinked') and legacy:
+            media=legacy[0]
+    if media is None:
+        raise ProjectExchangeError('原媒体不存在，请重新链接后导出')
+    suffixes={'.mp4','.mov','.mkv','.avi','.webm','.m4v','.mp3','.wav','.m4a','.aac','.flac','.ogg'}
+    entries=[e for e in entries if e[0]!='project/run_manifest.json' and not (e[0].startswith('project/input/') and Path(e[0]).suffix.lower() in suffixes)]
+    relative='input/'+media.name
+    manifest.update(source_path=relative,source_file=media.name,media_relinked=False)
+    entries.append(('project/'+relative,media,None))
+    entries.append(('project/run_manifest.json',None,json.dumps(manifest,ensure_ascii=False).encode('utf-8')))
+    return entries
+
 def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, revision: Any) -> None:
     document_bytes = json.dumps(revision.document.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     entries: list[tuple[str, Path | None, bytes | None]] = [("document/latest.json", None, document_bytes)]
@@ -820,6 +850,7 @@ def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, rev
         seen.add(path)
         relative = path.relative_to(job_dir).as_posix()
         entries.append((f"project/{relative}", path, None))
+    entries = _portable_media_entries(entries, job_dir)
     manifest_files = []
     for name, path, content in entries:
         size = path.stat().st_size if path else len(content or b"")
@@ -904,7 +935,7 @@ def _subtitle_project_entries(
             continue
         seen.add(path)
         entries.append((f"project/{path.relative_to(job_dir).as_posix()}", path, None))
-    return entries
+    return _portable_media_entries(entries, job_dir)
 
 
 def stream_subtitle_project(
@@ -1020,6 +1051,8 @@ def import_subtitle_project(source: BinaryIO, *, projects_root: Path) -> str:
                     raise ProjectExchangeError(f"字幕工程文件清单不匹配：{name}")
                 output = None
                 if name.startswith("project/"):
+                    if name == 'project/media_reference.json':
+                        raise ProjectExchangeError('工程包不得携带外部媒体引用')
                     output = temporary / name.removeprefix("project/")
                     output.parent.mkdir(parents=True, exist_ok=True)
                 digest = hashlib.sha256()

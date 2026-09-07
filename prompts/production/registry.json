@@ -11,7 +11,7 @@
       "title": "Cue 边界规划",
       "category": "segmentation",
       "description": "按源语言规则规划自然显示 Cue。",
-      "version": "2026-09-04.3",
+      "version": "2026-09-06.17",
       "variants": {
         "en": ["segmentation/common/semantic_grouping.md", "segmentation/en/rules.md", "cases/semantic_grouping_en.constructed.md"],
         "zh": ["segmentation/common/semantic_grouping.md", "segmentation/zh/rules.md", "cases/semantic_grouping_zh.constructed.md"],
@@ -24,7 +24,7 @@
       "title": "Cue 边界块内修复",
       "category": "segmentation",
       "description": "保留完整原块和已验收范围，一次修复块内全部错误。",
-      "version": "2026-09-04.3",
+      "version": "2026-09-06.17",
       "variants": {
         "en": ["segmentation/common/semantic_grouping_repair.md", "segmentation/en/rules.md"],
         "zh": ["segmentation/common/semantic_grouping_repair.md", "segmentation/zh/rules.md"],
@@ -48,7 +48,7 @@
       "title": "上下文翻译",
       "category": "translation",
       "description": "由公共规则、执行阶段、映射模式和语言规则组合生成翻译提示词。",
-      "version": "2026-09-04.4",
+      "version": "2026-09-06.16",
       "shared": ["translation/common/base.md", "translation/common/primary.md"],
       "default_mode": "many_to_many",
       "modes": {
@@ -99,7 +99,7 @@
       "title": "上下文翻译修复",
       "category": "translation",
       "description": "使用同一映射模式契约，一次修复原块内全部缺失或无效 Cue。",
-      "version": "2026-09-04.4",
+      "version": "2026-09-06.16",
       "shared": ["translation/common/base.md", "translation/common/repair.md"],
       "default_mode": "many_to_many",
       "modes": {
@@ -157,7 +157,7 @@
       "title": "源文 AI 校准",
       "category": "editor",
       "description": "应用大小写、标点、专名与确定性 ASR 修正。",
-      "version": "2026-09-04.3",
+      "version": "2026-09-06.17",
       "variants": {
         "en": ["calibration/en.md"],
         "zh": ["calibration/zh.md"],
@@ -170,7 +170,7 @@
       "title": "源文 AI 校准修复",
       "category": "editor",
       "description": "保留完整原块和已验收 Cue，一次修复块内全部缺失或无法绑定项。",
-      "version": "2026-09-04.3",
+      "version": "2026-09-06.17",
       "shared": ["calibration/repair.md"],
       "variants": {
         "en": ["calibration/en.md"],

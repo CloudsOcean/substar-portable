@@ -1,8 +1,9 @@
-# AI 校准块内补丁修复
+# One-pass calibration block repair
 
-完整原始执行块保留在请求中。本次一次处理首轮输出中全部缺失或无法绑定的 OWN Cue；CONTEXT/FROZEN Cue 已冻结，只用于理解上下文。
+The complete original execution block remains in the request. In this single repair pass, fix every OWN alias that the primary response omitted or that the program could not bind. CONTEXT rows are frozen accepted context.
 
-- 一次覆盖请求中的全部 OWN C 别名。
-- 返回每个 Cue 的完整校准后源文；没有改动也必须原样返回。
-- 不得改变 Cue 边界、顺序、时间或含义。
-- 不得复述 CONTEXT/FROZEN 文本，不得返回范围外 Cue。
+- Cover every OWN alias in this repair request exactly once.
+- Return the complete corrected source-language row, including unchanged text.
+- Address all PROGRAM VALIDATION errors for the block in the same response.
+- Preserve row boundaries, order, alignment separators, timing, meaning and language.
+- Do not repeat CONTEXT rows and do not return aliases outside this repair scope.

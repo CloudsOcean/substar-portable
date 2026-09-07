@@ -637,7 +637,7 @@ class Job:
     submission_key: str = ""
     submission_fingerprint: str = ""
 
-    def public(self) -> dict[str, Any]:
+    def public(self, *, include_exports: bool = True) -> dict[str, Any]:
         stage_progress = _job_stage_progress(self.job_dir)
         if self.workflow_mode == "subtitle_creation" and self.transcription_task_id:
             # Canonical tasks expose business progress through task events;
@@ -709,7 +709,7 @@ class Job:
             "transcription_task_id": self.transcription_task_id,
             "segmentation_task_id": self.segmentation_task_id,
             "runtime_log_url": f"/api/project-creations/{self.id}/logs",
-            "export_availability": _workbench_export_availability(self),
+            "export_availability": _workbench_export_availability(self) if include_exports else None,
             "tutorial_case_id": tutorial_case_id,
         }
 
@@ -853,7 +853,7 @@ def _persist_job(job: Job) -> None:
     atomic_write_json(
         job.job_dir / "creation_state.json",
         {
-            **job.public(),
+            **job.public(include_exports=False),
             # The browser does not need these values, but a response-lost
             # retry must survive API restarts without creating a second
             # project or provider submission.
@@ -867,16 +867,21 @@ def _persist_job(job: Job) -> None:
     )
 
 
-def _editor_ready(job_dir: Path) -> bool:
+def _editor_ready(job_dir: Path, *, verify_document: bool = True) -> bool:
     """Prove the editor can open the project, media, and waveform authority."""
 
     try:
-        latest = ProjectStore.open(job_dir / "project").load_latest()
+        store = ProjectStore(job_dir / "project")
+        latest = store.load_latest() if verify_document else store.load_summary()
         if latest is None:
             return False
         audio = job_dir / "audio_16k_mono.wav"
         if not audio.is_file() or audio.stat().st_size <= 44:
             return False
+        from substar_core.media_reference import resolve_reference
+        reference = resolve_reference(job_dir)
+        if reference is not None:
+            return True
         input_dir = job_dir / "input"
         return any(
             path.is_file() and path.suffix.casefold() in ALLOWED_EXTENSIONS
@@ -954,7 +959,7 @@ def _refresh_canonical_job_projection(job: Job) -> None:
     projection = subtitle_creation_projection(
         transcription=transcription,
         segmentation=segmentation,
-        editor_ready=_editor_ready(job.job_dir),
+        editor_ready=_editor_ready(job.job_dir, verify_document=False),
         cancel_requested=job.cancel_requested,
     )
     next_ai_progress = (
@@ -1958,7 +1963,8 @@ def system_status() -> dict[str, Any]:
 @app.post("/api/project-creations")
 async def create_workbench_split_job(
     mode: str = Form(...),
-    media: UploadFile = File(...),
+    media: UploadFile | None = File(default=None),
+    media_reference_token: str = Form(default=""),
     reference_document: UploadFile | None = File(default=None),
     settings_json: str = Form(default="{}"),
     tutorial_case_id: str = Form(default=""),
@@ -1968,6 +1974,17 @@ async def create_workbench_split_job(
     if mode != "asr":
         raise HTTPException(status_code=400, detail="新版本只接受 ASR 媒体输入")
     submission_key = _normalized_idempotency_key(idempotency_key)
+    external_media = None
+    if isinstance(media_reference_token, str) and media_reference_token:
+        from substar_core.media_relink import resolve_selection
+        import io
+        try:
+            external_media = Path(resolve_selection('__import__', media_reference_token))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        media = UploadFile(filename=external_media.name, file=io.BytesIO())
+    if media is None:
+        raise HTTPException(status_code=422, detail="请选择媒体")
     media_name = safe_filename(media.filename or "media.mp4")
     media_suffix = Path(media_name).suffix.lower()
     if media_suffix not in ALLOWED_EXTENSIONS:
@@ -2052,7 +2069,12 @@ async def create_workbench_split_job(
             raise HTTPException(status_code=400, detail=f"{target.name} 为空")
 
     try:
-        await save_upload(media, media_path, 20 * 1024 * 1024 * 1024)
+        if external_media:
+            from substar_core.media_reference import write_reference
+            write_reference(job_dir, external_media)
+            media_path = external_media
+        else:
+            await save_upload(media, media_path, 20 * 1024 * 1024 * 1024)
         if reference_document is not None:
             reference_name = safe_filename(
                 reference_document.filename or "reference.txt"
@@ -2468,6 +2490,11 @@ def _workbench_retry_inputs(job: Job) -> tuple[Path, Path | None]:
     source_name = Path(str(frozen.get("source_file", job.filename))).name
     input_dir = job.job_dir / "input"
     media_path = input_dir / source_name
+    from substar_core.media_reference import resolve_reference
+    try:
+        media_path = resolve_reference(job.job_dir) or media_path
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not media_path.is_file():
         raise HTTPException(status_code=409, detail="服务端已保存的源媒体不存在")
     overrides = frozen.get("settings_overrides")
@@ -2824,7 +2851,7 @@ def _restore_persisted_jobs(wanted_id: str = "") -> None:
                     pass
             editor_ready = (
                 restored_job.workflow_mode == "subtitle_creation"
-                and _editor_ready(job_dir)
+                and _editor_ready(job_dir, verify_document=False)
             )
             if restored_job.cancel_requested:
                 # Startup reconciliation has already removed the previous
@@ -2892,7 +2919,7 @@ def list_jobs() -> list[dict[str, Any]]:
         _refresh_canonical_job_projection(job)
     with JOBS_LOCK:
         return [
-            job.public()
+            job.public(include_exports=False)
             for job in sorted(jobs, key=lambda x: x.created_at, reverse=True)
         ]
 
