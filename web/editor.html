@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260904-nav-hover-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260907-cue-scrollbar-2">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260823-hover-1">
   <script src="/assets/theme/personalization.js?v=20260814-8"></script>
@@ -145,6 +145,7 @@
       <div class="pane-heading">
         <div><strong>Cue 编辑区</strong></div>
         <div class="pane-live-controls">
+          <label id="cueScrollbarPositionLabel">滑块 <select id="cueScrollbarPosition" aria-label="Cue 滑块位置"><option value="right" selected>右侧</option><option value="bottom">下侧</option></select></label>
           <label id="cueSplitViewLabel">视图 <select id="cueSplitView" aria-label="Cue 视图"><option value="virtual" selected>光标</option><option value="auxiliary">辅助点</option></select></label>
           <button id="fontDecrease" type="button">A−</button><output id="fontValue">14</output><button id="fontIncrease" type="button">A+</button>
           <label class="tool-check"><input id="showTranslations" type="checkbox" checked>显示译文</label>
@@ -152,6 +153,9 @@
       </div>
       <div id="cueList" class="cue-list">
         <div class="empty-state">选择一个项目开始编辑</div>
+      </div>
+      <div id="cueScrollbarBottom" class="cue-scrollbar-bottom" hidden>
+        <input id="cueScrollSlider" type="range" min="0" max="0" step="1" value="0" aria-label="Cue 列表滚动位置" aria-controls="cueList" disabled>
       </div>
       <div id="tokenSelectionMenu" class="selection-float-menu token-selection-menu hidden" role="toolbar" aria-label="词元操作">
         <button id="mergeTokens" type="button" disabled>合并</button>

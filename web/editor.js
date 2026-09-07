@@ -1942,6 +1942,30 @@
 
   function closeSpeakerDialog() { $("#speakerDialog").classList.add("hidden"); }
 
+  let cueScrollSyncFrame = 0;
+  function syncCueScrollSlider() {
+    if (cueScrollSyncFrame) return;
+    cueScrollSyncFrame = requestAnimationFrame(() => {
+      cueScrollSyncFrame = 0;
+      if ($("#cueScrollbarBottom").hidden) return;
+      const list = $("#cueList");
+      const slider = $("#cueScrollSlider");
+      const maximum = Math.max(0, list.scrollHeight - list.clientHeight);
+      slider.max = String(maximum);
+      slider.value = String(Math.min(maximum, Math.max(0, list.scrollTop)));
+      slider.disabled = maximum === 0;
+      slider.setAttribute("aria-valuetext", `${maximum ? Math.round(list.scrollTop / maximum * 100) : 0}%`);
+    });
+  }
+
+  function applyCueScrollbarPosition(position) {
+    const bottom = position === "bottom";
+    $("#cueScrollbarPosition").value = bottom ? "bottom" : "right";
+    $(".editor-document-pane").classList.toggle("cue-scrollbar-bottom-mode", bottom);
+    $("#cueScrollbarBottom").hidden = !bottom;
+    syncCueScrollSlider();
+  }
+
   function renderCues({preservePage = false} = {}) {
     const list = $("#cueList");
     if (!state.view) {
@@ -3422,6 +3446,7 @@
     }
     ordinaryError("");
     state.projectId = projectId;
+    applyCueScrollbarPosition(localStorage.getItem(`substar.editor.cue-scrollbar-position:${projectId}`) || "right");
     state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
     if ($("#cueSplitView")) $("#cueSplitView").value = state.cueSplitView;
     renderProjectList();
@@ -4336,6 +4361,15 @@
   };
   $("#forwardSnapPreRoll").oninput = selectSmartForwardSnap;
   $("#forwardSnapSensitivity").oninput = selectSmartForwardSnap;
+  $("#cueScrollbarPosition").onchange = event => {
+    const position = event.target.value === "bottom" ? "bottom" : "right";
+    applyCueScrollbarPosition(position);
+    if (state.projectId) localStorage.setItem(`substar.editor.cue-scrollbar-position:${state.projectId}`, position);
+  };
+  $("#cueScrollSlider").oninput = event => {
+    $("#cueList").scrollTop = Number(event.target.value);
+  };
+  new ResizeObserver(syncCueScrollSlider).observe($("#cueList"));
   $("#cueSplitView").onchange = event => {
     state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
     if (state.projectId) {
@@ -4526,10 +4560,12 @@
     };
   });
   $("#cueList").addEventListener("scroll", () => {
+    syncCueScrollSlider();
     positionSelectionMenus();
     positionEditorTutorial();
   }, {passive:true});
   new MutationObserver(() => {
+    syncCueScrollSlider();
     positionEditorTutorial();
   }).observe($("#cueList"), {
     childList:true, subtree:true

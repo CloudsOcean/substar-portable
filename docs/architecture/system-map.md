@@ -1670,7 +1670,7 @@ Invariants:
 
 - Selected project_id never silently falls back to another project
 - The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner
-- Large Cue lists are windowed
+- Large Cue lists are windowed; Cue scrollbar placement is a per-project browser preference: right and bottom controls are mutually exclusive, share track/thumb styling, and the bottom control scrolls only the Cue list with the history island raised clear of its track
 - Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar
 - External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state
 - External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked
