@@ -1261,9 +1261,9 @@ Failure modes:
 
 Recovery: One repair request contains the complete original block and all rejected ranges while accepted ranges remain frozen.
 
-Reuses: `all accepted Cue ranges`; restarts: `one block-wide patch`; terminal behavior: Register remaining gaps as problem subtitles.
+Reuses: `all accepted Cue ranges`; restarts: `one block-wide patch`; terminal behavior: Preserve the latest structurally complete model response with overflows marked for review; use a block placeholder only when no response has valid coverage. Never re-cut or merge model Cues.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_execution_planner.py`, `tests/test_live_progress_projection.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_segmentation_model_delivery.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_execution_planner.py`, `tests/test_live_progress_projection.py`
 
 Change impact modules: `segmentation_worker`<br>`segmentation_model_connector`<br>`segmentation_finalizer`
 

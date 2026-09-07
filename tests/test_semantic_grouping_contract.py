@@ -82,7 +82,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
         self.assertEqual("2026-09-06.17", prompt.version)
         self.assertIn("rejection ceiling", prompt.text)
         self.assertIn("not a preferred length", prompt.text)
-        self.assertIn("never move the boundary later merely to make the Cue longer", prompt.text)
+        self.assertIn("compare the readability of both resulting Cues", prompt.text)
         self.assertNotIn("Choose the latest legal boundary", prompt.text)
 
     def test_english_prompt_covers_clause_markers_and_preposition_roles(self) -> None:
@@ -91,7 +91,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
         self.assertIn("relative `that/which`", prompt)
         self.assertIn("a preposition stays with its minimal object", prompt)
         self.assertIn("a phrasal-verb particle stays with its verb", prompt)
-        self.assertIn("Do not fill to the limit", prompt)
+        self.assertIn("Do not cut at every possible seam", prompt)
         self.assertIn("carry / out an inspection", prompt)
         self.assertNotIn("meaning group", prompt.casefold())
         self.assertNotIn("JSON only", prompt)

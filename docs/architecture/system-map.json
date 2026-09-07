@@ -611,8 +611,8 @@
       "calls": ["segmentation_model_connector"],
       "invariants": ["Every response is fingerprint-bound", "Initial model requests run concurrently over the bootstrap work plan", "The file-backed block ledger may notify its owning Worker after each durable update but never writes RuntimeStore directly", "Valid ranges are frozen before repair", "The provider receives each source word once and never receives persistent IDs", "The finalizer authors canonical structure but never semantic content", "Each unresolved range remains visible as a problem subtitle"],
       "failure_modes": ["Invalid Cue Script", "Coverage gap", "Hard-limit violation", "Provider error"],
-      "recovery": {"strategy": "One repair request contains the complete original block and all rejected ranges while accepted ranges remain frozen.", "reuses": ["all accepted Cue ranges"], "restarts": ["one block-wide patch"], "terminal": "Register remaining gaps as problem subtitles."},
-      "tests": ["tests/test_segmentation_runtime.py", "tests/test_semantic_grouping_contract.py", "tests/test_execution_planner.py", "tests/test_live_progress_projection.py"],
+      "recovery": {"strategy": "One repair request contains the complete original block and all rejected ranges while accepted ranges remain frozen.", "reuses": ["all accepted Cue ranges"], "restarts": ["one block-wide patch"], "terminal": "Preserve the latest structurally complete model response with overflows marked for review; use a block placeholder only when no response has valid coverage. Never re-cut or merge model Cues."},
+      "tests": ["tests/test_segmentation_runtime.py", "tests/test_segmentation_model_delivery.py", "tests/test_semantic_grouping_contract.py", "tests/test_execution_planner.py", "tests/test_live_progress_projection.py"],
       "change_impact": {"modules": ["segmentation_worker", "segmentation_model_connector", "segmentation_finalizer"], "contracts": ["segmentation_material", "semantic_grouping_result", "editor_document"]}
     },
     "segmentation_model_connector": {

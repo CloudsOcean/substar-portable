@@ -1260,6 +1260,7 @@ def request_semantic_grouping_block(
             {"stage": "semantic_grouping", "block_id": block_id},
         )
     original_value = copy.deepcopy(value)
+    delivery_candidates = [original_value]
     # The finalizer is deliberately forbidden from inserting Cue boundaries.
     # Exact lengths are supplied to the model; an over-limit response must be
     # repaired by the model so syntax, discourse and timing remain authoritative.
@@ -1432,6 +1433,7 @@ def request_semantic_grouping_block(
                     max_tokens=getattr(args, "repair_max_tokens", 65536),
                     temperature=getattr(args, "repair_temperature", 0.0),
                 )
+                delivery_candidates.append(copy.deepcopy(repair_value))
                 round_issues = semantic_grouping_overflow_issues(
                     repair_value, units, bounds, chunk_number, binding, args.hard_limit
                 )
@@ -1500,13 +1502,35 @@ def request_semantic_grouping_block(
             if progress is not None:
                 progress.event("semantic_grouping", "accepted", block_id=block_id)
             return chunk_number, spans, groups, corrections, cuts, exceptions
-    # Delivery policy: preserve successful blocks exactly. An unresolved block
-    # becomes one structurally contained problem Cue; the program must not
-    # invent semantic boundaries that compete with the model.
+    # Prefer the latest structurally complete model response, even if its
+    # lengths still fail after the single repair. Never merge or re-cut it.
+    # An entirely unusable response retains the existing block placeholder.
     local_units = units[left : right + 1]
     groups = list(frozen_groups)
     cuts: set[int] = set(frozen_cuts)
     exceptions: list[dict[str, Any]] = []
+    delivery_source = "block_placeholder"
+    for candidate in reversed(delivery_candidates):
+        try:
+            _, candidate_groups, _, candidate_cuts, candidate_exceptions = validate_semantic_grouping_result(
+                candidate, units, bounds, chunk_number, binding,
+                max(args.hard_limit, len(display_text(units, left, right))),
+            )
+            remaining_overflows = semantic_grouping_overflow_issues(
+                candidate, units, bounds, chunk_number, binding, args.hard_limit
+            )
+        except (SegmentationError, ValueError, TypeError, KeyError):
+            continue
+        groups, cuts = candidate_groups, candidate_cuts
+        exceptions = [*candidate_exceptions, *[{
+            "code": "semantic_grouping_unresolved",
+            "block_id": block_id,
+            "alignment_start": int(issue["cue_start"]),
+            "alignment_end": int(issue["cue_end"]),
+            "detail": "LLM 修复后仍超限；保留模型原始边界，待人工复核。",
+        } for issue in remaining_overflows]]
+        delivery_source = "model_response"
+        break
     cursor = first
     for group in [*groups, {"alignment_start": last + 1, "alignment_end": last}]:
         gap_end = int(group["alignment_start"]) - 1
@@ -1539,6 +1563,7 @@ def request_semantic_grouping_block(
         "validation_issue_count": len(overflow_issues),
         "scope_validation": scope_audit,
         "accepted": False,
+        "delivery_source": delivery_source,
         "validation_error": str(last_error),
         "accepted_group_count": len(frozen_groups),
         "problem_cue_count": len(exceptions),
@@ -1644,10 +1669,8 @@ def main(
         help="Treat native ASR sentence boundaries as soft references or hide them.",
     )
     args = parser.parse_args(argv)
-    # The production command may deliver a reviewable draft after model repair
-    # by removing only illegal intermediate display breaks. Direct callers and
-    # validators stay strict unless they opt into this final-delivery policy.
-    args.allow_deterministic_release = True
+    # Only the model creates display boundaries; unresolved lengths are
+    # delivered for review after at most one model repair.
 
     emit_runtime_event("segmentation initialization", {"step": "read_material"})
     master, units = load_segmentation_material(args.material)
