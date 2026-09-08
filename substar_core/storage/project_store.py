@@ -640,7 +640,7 @@ class ProjectStore:
             checkpoint = (
                 latest is None
                 or revision.revision_number % CHECKPOINT_INTERVAL == 0
-                or provenance.operation == "checkpoint"
+                or provenance.operation in {"checkpoint", "segmentation_rebuild"}
             )
             if checkpoint:
                 snapshot_blob, payload_sha = _compress_json(document.to_dict())

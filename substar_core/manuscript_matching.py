@@ -5,11 +5,13 @@ import html
 import hashlib
 import io
 import json
+import math
 import re
 import unicodedata
 import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -42,6 +44,7 @@ class _LexicalSpan:
 
 
 REFERENCE_TOKENIZER_VERSION = "unicode-script-v2"
+REFERENCE_MATCHER_VERSION = "local-reference-v4"
 REFERENCE_BREAK_PRESETS = {
     "zh": "，。？！",
     "en": ".?!",
@@ -251,6 +254,8 @@ def _tokenization_diagnostics(text: str, language: str | None) -> dict[str, Any]
         elif configured in {"en", "de", "fr", "es"}:
             script_mismatch = counts["latin"] == 0
     coverage = covered_count / linguistic_count if linguistic_count else 0.0
+    if not any(unicodedata.category(char).startswith("L") for char in value):
+        script_mismatch = False  # Digits are shared by every supported script.
     return {
         "tokenizer_version": REFERENCE_TOKENIZER_VERSION,
         "configured_language": configured,
@@ -340,160 +345,74 @@ def reference_tokens(
     return result
 
 
-def _unit_tokens(
-    units: Iterable[dict[str, Any]], source_language: str | None = None
-) -> tuple[list[str], list[int]]:
-    values: list[str] = []
-    owners: list[int] = []
-    for position, unit in enumerate(units):
-        for match in _lexical_spans(str(unit.get("text", "")), source_language):
-            values.append(_normalized_lexical(match.lexical))
-            owners.append(position)
-    return values, owners
-
-
-def _reference_to_source_positions(
-    source_values: list[str], reference: list[ReferenceToken]
-) -> tuple[list[int], list[dict[str, Any]], float]:
-    right = [item.normalized for item in reference]
-    matcher = difflib.SequenceMatcher(None, source_values, right, autojunk=False)
-    mapping = [-1] * len(reference)
-    changes: list[dict[str, Any]] = []
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            for offset in range(j2 - j1):
-                mapping[j1 + offset] = i1 + offset
-            continue
-        changes.append(
-            {
-                "kind": tag,
-                "source_token_range": [i1, i2 - 1],
-                "reference_token_range": [j1, j2 - 1],
-                "source_text": " ".join(source_values[i1:i2]),
-                "reference_text": " ".join(item.text for item in reference[j1:j2]),
-            }
-        )
-        source_count = i2 - i1
-        target_count = j2 - j1
-        for offset in range(target_count):
-            if source_count:
-                mapped = i1 + min(source_count - 1, int(offset * source_count / max(1, target_count)))
-            elif i1:
-                mapped = i1 - 1
-            else:
-                mapped = min(i1, len(source_values) - 1)
-            mapping[j1 + offset] = mapped
-    return mapping, changes, matcher.ratio()
-
-
 def materialize_reference_alignment(
-    reference_text: str,
-    alignment: dict[str, Any],
-    source_language: str | None = None,
+    reference_text: str, alignment: dict[str, Any], source_language: str | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
-    source_units = [dict(item) for item in alignment.get("units", [])]
-    evidence_hash = hashlib.sha256(json.dumps(alignment, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    if not source_units:
-        raise ManuscriptMatchError("ASR 对齐为空，无法匹配参考文稿")
-    source_values, token_owners = _unit_tokens(source_units, source_language)
-    reference = reference_tokens(reference_text, source_language)
-    if not source_values or not reference:
-        raise ManuscriptMatchError("ASR 或参考文稿没有可匹配词元")
-    mapping, changes, similarity = _reference_to_source_positions(source_values, reference)
-    reference_only_indexes: set[int] = set()
-    for change in changes:
-        reference_range = change.get("reference_token_range", [])
-        source_range = change.get("source_token_range", [])
-        if len(reference_range) != 2 or len(source_range) != 2:
-            continue
-        reference_start, reference_end = map(int, reference_range)
-        source_start, source_end = map(int, source_range)
-        source_count = max(0, source_end - source_start + 1)
-        kind = str(change.get("kind") or "")
-        if kind == "insert":
-            reference_only_indexes.update(range(reference_start, reference_end + 1))
-        elif kind == "replace":
-            reference_only_indexes.update(
-                range(reference_start + source_count, reference_end + 1)
-            )
-    mapped_owners = [
-        token_owners[max(0, min(len(token_owners) - 1, item))]
-        for item in mapping
-    ]
-    owner_members: dict[int, list[int]] = {}
-    for ref_index, owner in enumerate(mapped_owners):
-        owner_members.setdefault(owner, []).append(ref_index)
-    canonical_units: list[dict[str, Any]] = []
-    provenance: list[dict[str, Any]] = []
-    for ref_index, token in enumerate(reference):
-        owner = mapped_owners[ref_index]
-        source = source_units[owner]
-        siblings = owner_members[owner]
-        slot = siblings.index(ref_index)
-        count = len(siblings)
-        start = float(source.get("start", 0.0))
-        end = max(start, float(source.get("end", start)))
-        width = (end - start) / max(1, count)
-        unit = {
-            **source,
-            "index": ref_index,
-            "text": token.text,
-            "start": start + slot * width,
-            "end": end if slot + 1 == count else start + (slot + 1) * width,
-            "sentence_start": ref_index == 0
-            or bool(re.search(r"[.!?。！？][\"'”’）》〉」』]*$", reference[ref_index - 1].text)),
-            "sentence_end": bool(re.search(r"[.!?。！？][\"'”’）》〉」』]*$", token.text)),
-            "timing_source": (
-                "reference_exact"
-                if source_values[mapping[ref_index]] == token.normalized
-                else "reference_envelope_inherited"
-            ),
-            "timing": {
-                **dict(source.get("timing") or {}),
-                "kind": "subdivided" if count > 1 else "envelope-inherited",
-                "evidence_sha256": (source.get("timing") or {}).get("evidence_sha256", evidence_hash),
-                "native_token_ids": (source.get("timing") or {}).get("native_token_ids", [str(source.get("index", owner))]),
-                "native_start": (source.get("timing") or {}).get("native_start", start),
-                "native_end": (source.get("timing") or {}).get("native_end", end),
-                "source_alignment_index": int(source.get("index", owner)),
-            },
-            "reference_changed": source_values[mapping[ref_index]] != token.normalized,
-            "reference_only": ref_index in reference_only_indexes,
-        }
-        canonical_units.append(unit)
-        provenance.append(
-            {
-                "reference_index": ref_index,
-                "source_alignment_index": int(source.get("index", owner)),
-                "source_text": str(source.get("text", "")),
-                "reference_text": token.text,
-                "changed": bool(unit["reference_changed"]),
-                "reference_only": bool(unit["reference_only"]),
-            }
-        )
-    canonical = dict(alignment)
-    canonical["units"] = canonical_units
-    canonical["master_text"] = reference_text.strip()
-    canonical["reference_manuscript"] = {
-        "authority": "reference_strict",
-        "applied": True,
-        "similarity": round(similarity, 6),
-        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
-        "requires_review": similarity < 0.40,
-    }
-    report = {
-        "schema_version": "substar.reference-manuscript.v1",
-        "similarity": round(similarity, 6),
-        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
-        "requires_review": similarity < 0.40,
-        "source_unit_count": len(source_units),
-        "reference_unit_count": len(canonical_units),
-        "authority": "reference_strict",
-        "changes": changes,
-        "provenance": provenance,
-        "tokenization": _tokenization_diagnostics(reference_text, source_language),
-    }
-    return reference_text.strip(), canonical, report
+    """Project the shared reference decisions into the semantic word ledger."""
+    material, _, report = materialize_reference_script(
+        reference_text, alignment.get("units", []),
+        reference_break_symbols_for_language(source_language), source_language,
+    )
+    source = material["units"]
+    edits = {int(item["source_index"]): item for item in report["replacements"]
+             if item["status"] == "applied"}
+    edits.update({int(item["source_index"]): item for item in report["merges"]})
+    skipped = {index for item in report["merges"] for index in item["source_indexes"][1:]}
+    retained = {item["source_index"]: item for item in report["retained_source"]}
+    insertions: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for item in report["insertions"]:
+        insertions[item["after_source_index"]].append(item)
+    canonical_units = []
+    provenance = []
+    changes = []
+    evidence_hash = hashlib.sha256(json.dumps(alignment, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+    def append(text: str, owners: list[int], *, hidden: bool = False, changed: bool = False) -> None:
+        first, last = source[owners[0]], source[owners[-1]]
+        tokens = reference_tokens(text, source_language)
+        start, end = float(first["start"]), float(last["end"])
+        original = layout_tokens((source[index]["text"] for index in owners), source_language)
+        replacement_group = len(canonical_units) if changed else None
+        for offset, token in enumerate(tokens):
+            index = len(canonical_units)
+            width = (end - start) / len(tokens)
+            canonical_units.append({**first, "index": index, "text": token.text,
+                "start": start + offset * width, "end": end if offset + 1 == len(tokens) else start + (offset + 1) * width,
+                "reference_only": hidden, "reference_changed": changed,
+                "timing_source": "reference_envelope_inherited" if changed or hidden else "reference_exact",
+                "timing": {"kind": "subdivided" if len(tokens) > 1 else "envelope-inherited",
+                           "evidence_sha256": first["timing"].get("evidence_sha256", evidence_hash),
+                           "native_token_ids": list(dict.fromkeys(
+                               token_id for owner in owners
+                               for token_id in source[owner]["timing"]["native_token_ids"])),
+                           "native_start": first["timing"]["native_start"],
+                           "native_end": last["timing"]["native_end"]}})
+            provenance.append({"reference_index": index, "source_alignment_index": owners[0],
+                               "source_text": original, "reference_text": token.text,
+                               "changed": changed or hidden, "reference_only": hidden,
+                               "replacement_group": replacement_group,
+                               "retained_source": not hidden and owners[0] in retained})
+            if changed or hidden:
+                changes.append({"kind": "insert" if hidden else "replace",
+                                "source_token_range": [owners[0], owners[-1]],
+                                "reference_token_range": [index, index]})
+
+    for item in insertions[-1]:
+        append(item["text"], [0], hidden=True)
+    for index, unit in enumerate(source):
+        if index not in skipped:
+            edit = edits.get(index)
+            append(edit["after"] if edit else unit["text"],
+                   edit.get("source_indexes", [index]) if edit else [index], changed=bool(edit))
+        for item in insertions[index]:
+            append(item["text"], [index], hidden=True)
+    canonical = {**alignment, "units": canonical_units, "master_text": reference_text.strip(),
+                 "reference_manuscript": {"authority": "reference_assisted", "applied": True,
+                                          "similarity": report["similarity"], "requires_review": report["requires_review"]}}
+    audit = {**report, "schema_version": "substar.reference-manuscript.v1",
+             "source_unit_count": len(source), "reference_unit_count": len(canonical_units),
+             "changes": changes, "alignment_changes": report["changes"], "provenance": provenance}
+    return reference_text.strip(), canonical, audit
 
 
 def normalize_break_symbols(value: str) -> str:
@@ -560,7 +479,7 @@ def _timed_source_tokens(
                 if offset + 1 < len(matches)
                 else len(raw_text)
             )
-            rendered = raw_text[match.start:rendered_end].strip() or match.lexical
+            rendered = raw_text[0 if offset == 0 else match.start:rendered_end].strip() or match.lexical
             result.append(
                 {
                     "normalized": _normalized_lexical(match.lexical),
@@ -570,9 +489,125 @@ def _timed_source_tokens(
                     "end": token_end,
                     "speaker_id": unit.get("speaker_id"),
                     "source_alignment_index": int(unit.get("index", unit_position)),
+                    "timing": {
+                        **dict(unit.get("timing") or {}),
+                        "kind": "subdivided" if len(matches) > 1 else (unit.get("timing") or {}).get("kind", "envelope-inherited"),
+                        "native_token_ids": (unit.get("timing") or {}).get("native_token_ids", [str(unit.get("index", unit_position))]),
+                        "native_start": (unit.get("timing") or {}).get("native_start", start),
+                        "native_end": (unit.get("timing") or {}).get("native_end", end),
+                    },
                 }
             )
     return result
+
+
+def _reference_frequency(values: list[str]) -> Counter[tuple[str, ...]]:
+    """Count written words and short phrases, never individual Han characters."""
+    counts: Counter[tuple[str, ...]] = Counter()
+    for start, value in enumerate(values):
+        if len(value) > 1 or not _character_script(value[0]):
+            counts[(value,)] += 1
+        for width in range(2, min(6, len(values) - start) + 1):
+            counts[tuple(values[start:start + width])] += 1
+    return counts
+
+
+def _phrase_reference_opcodes(opcodes, reference):
+    """Keep a short moved phrase together between stable outside anchors."""
+    result = []
+    position = 0
+    while position < len(opcodes):
+        if 0 < position and position + 3 < len(opcodes):
+            left = opcodes[position - 1]
+            first, middle, last, right = opcodes[position:position + 4]
+            if (left[0] == right[0] == middle[0] == "equal"
+                    and {first[0], last[0]} == {"insert", "delete"}
+                    and left[2] - left[1] >= 2 and right[2] - right[1] >= 2
+                    and middle[2] - middle[1] <= 3
+                    and max(last[2] - first[1], last[4] - first[3]) <= 12
+                    and not any(re.search(r"[。！？.!?]", token.text)
+                                for token in reference[first[3]:last[4]])):
+                result.append(("replace", first[1], last[2], first[3], last[4]))
+                position += 3
+                continue
+        result.append(opcodes[position])
+        position += 1
+    return result
+
+
+def _local_reference_score(
+    opcodes: list[tuple[str, int, int, int, int]], position: int,
+    source: list[str], reference: list[str], frequencies: Counter[tuple[str, ...]],
+) -> dict[str, Any]:
+    _, i1, i2, j1, j2 = opcodes[position]
+    left = opcodes[position - 1] if position else None
+    right = opcodes[position + 1] if position + 1 < len(opcodes) else None
+    left_size = left[2] - left[1] if left and left[0] == "equal" else 0
+    right_size = right[2] - right[1] if right and right[0] == "equal" else 0
+    # A word counts as a context anchor in alphabetic scripts; CJK needs two
+    # characters so a common particle cannot authorize an arbitrary rewrite.
+    def anchor(size: int, value: str) -> bool:
+        return size >= 2 or (size == 1 and len(value) >= 2)
+    left_anchor = bool(left_size and anchor(left_size, reference[j1 - 1]))
+    right_anchor = bool(right_size and anchor(right_size, reference[j2]))
+    frequency = frequencies[tuple(reference[j1:j2])]
+    # A changed Han character can belong to a recurring name (杨 + 熊).
+    for a, b in ((max(0, j1 - 1), j2), (j1, min(len(reference), j2 + 1))):
+        if 2 <= b - a <= 6:
+            frequency = max(frequency, frequencies[tuple(reference[a:b])])
+    boost = min(0.16, 0.08 * math.log2(max(1, frequency)))
+    lexical = difflib.SequenceMatcher(
+        None, "".join(source[i1:i2]), "".join(reference[j1:j2]), autojunk=False
+    ).ratio()
+    compact = max(i2 - i1, j2 - j1) <= 12
+    balanced = min(i2 - i1, j2 - j1) / max(i2 - i1, j2 - j1) >= 0.5
+    base = 0.74 if left_anchor and right_anchor and compact and balanced else (
+        0.58 if (left_anchor or right_anchor) and compact else 0.0
+    )
+    # A shared document edge supplies the second boundary for a short tail.
+    edge_aligned = ((i2 == len(source) and j2 == len(reference) and left_size >= 4)
+                    or (i1 == j1 == 0 and right_size >= 4))
+    if edge_aligned and balanced and max(i2 - i1, j2 - j1) <= 4:
+        base = max(base, 0.72)
+    source_number = _written_number("".join(source[i1:i2]))
+    reference_number = _written_number("".join(reference[j1:j2]))
+    numeric = source_number is not None and source_number == reference_number
+    score = 1.0 if numeric else min(1.0, base + lexical * 0.25 + boost)
+    return {
+        "score": round(score, 6), "reference_frequency": frequency,
+        "source_token_range": [i1, i2 - 1], "reference_token_range": [j1, j2 - 1],
+        "frequency_boost": round(boost, 6),
+        "left_anchor": left_anchor, "right_anchor": right_anchor,
+        "edge_aligned": edge_aligned,
+        "accepted": numeric or (base > 0 and score >= 0.68),
+    }
+
+
+def _written_number(text: str) -> Decimal | None:
+    text = unicodedata.normalize("NFKC", text).replace(",", "")
+    if re.fullmatch(r"[+-]?\d+(?:\.\d+)?", text):
+        return Decimal(text)
+    digits = {char: value for value, char in enumerate("零一二三四五六七八九")}
+    digits.update({"〇": 0, "两": 2, "兩": 2})
+    scales = {"十": 10, "百": 100, "千": 1000, "万": 10000, "萬": 10000, "亿": 100000000, "億": 100000000}
+    if not text or any(char not in digits and char not in scales for char in text):
+        return None
+    if all(char in digits for char in text):
+        return Decimal("".join(str(digits[char]) for char in text))
+    total = section = number = 0
+    for char in text:
+        if char in digits:
+            number = digits[char]
+        elif scales[char] < 10000:
+            section += (number or 1) * scales[char]
+            number = 0
+        elif scales[char] == 10000:
+            total += (section + number) * 10000
+            section = number = 0
+        else:
+            total = (total + section + number) * 100000000
+            section = number = 0
+    return Decimal(total + section + number)
 
 
 def materialize_reference_script(
@@ -598,195 +633,132 @@ def materialize_reference_script(
     source_values = [str(item["normalized"]) for item in source]
     right = [item.normalized for item in reference]
     matcher = difflib.SequenceMatcher(None, source_values, right, autojunk=False)
-    raw_opcodes = matcher.get_opcodes()
+    raw_opcodes = _phrase_reference_opcodes(matcher.get_opcodes(), reference)
     similarity = matcher.ratio()
 
-    # Learn only repeated, conflict-free corrections from the strongest local
-    # evidence: one source token aligned to one reference token.  This lets a
-    # manuscript consistently correct a recurring name even when one later
-    # occurrence sits inside an unequal phrase rewrite, without treating a
-    # single ambiguous rewrite as permission to overwrite ASR text.
+    frequencies = _reference_frequency(right)
+    local_scores = {
+        pos: _local_reference_score(raw_opcodes, pos, source_values, right, frequencies)
+        for pos, opcode in enumerate(raw_opcodes) if opcode[0] == "replace"
+    }
+    script_mismatch = _tokenization_diagnostics(reference_text, source_language)["script_mismatch"]
     consensus_candidates: dict[str, Counter[str]] = defaultdict(Counter)
-    for tag, i1, i2, j1, j2 in raw_opcodes:
-        if tag != "replace" or i2 - i1 != 1 or j2 - j1 != 1:
-            continue
-        source_value = source_values[i1]
-        reference_value = right[j1]
-        if source_value != reference_value:
-            consensus_candidates[source_value][reference_value] += 1
-    lexical_consensus: dict[str, tuple[str, int]] = {}
-    for source_value, candidates in consensus_candidates.items():
-        if len(candidates) != 1:
-            continue
-        reference_value, evidence_count = candidates.most_common(1)[0]
-        if evidence_count >= 3:
-            lexical_consensus[source_value] = (reference_value, evidence_count)
+    # Include exact uses as counterevidence to an otherwise repeated correction.
+    for pos, (tag, i1, i2, j1, j2) in enumerate(raw_opcodes):
+        if tag == "equal":
+            for offset in range(i2 - i1):
+                consensus_candidates[source_values[i1 + offset]][right[j1 + offset]] += 1
+        elif i2 - i1 == j2 - j1 == 1 and local_scores[pos]["accepted"]:
+            consensus_candidates[source_values[i1]][right[j1]] += 1
+    lexical_consensus = {}
+    for value, candidates in consensus_candidates.items():
+        if len(candidates) == 1:
+            target, count = candidates.most_common(1)[0]
+            if value != target and count >= 3:
+                lexical_consensus[value] = (target, count)
 
     changes: list[dict[str, Any]] = []
     replacements: list[dict[str, Any]] = []
+    merges: list[dict[str, Any]] = []
     insertions: list[dict[str, Any]] = []
     retained_source: list[dict[str, Any]] = []
     reference_to_source: dict[int, int] = {}
+    trusted_reference: set[int] = set()
     direct = 0
 
-    def replacement(
-        source_index: int,
-        reference_index: int,
-        *,
-        apply_lexical_change: bool,
-        consensus_evidence_count: int | None = None,
-    ) -> None:
-        nonlocal direct
-        owner = source[source_index]
-        token = reference[reference_index]
-        exact = str(owner["normalized"]) == token.normalized
-        direct += int(exact)
-        reference_to_source[reference_index] = source_index
-        before = str(owner["text"])
-        after = token.text
-        # Once lexical content is aligned, the reference owns the complete
-        # rendering.  This deliberately records punctuation removal and casing
-        # changes as reversible reference replacements.
-        should_record = before != after and (exact or apply_lexical_change)
-        if should_record:
-            item = {
-                "source_index": source_index,
-                "reference_index": reference_index,
-                "before": before,
-                "after": after,
-                "lexical_match": exact,
-                "status": "applied" if (exact or apply_lexical_change) else "suggested",
-            }
-            if consensus_evidence_count is not None and not exact:
-                item["decision"] = "document_consensus"
-                item["evidence_count"] = consensus_evidence_count
-            replacements.append(item)
-        elif before != after and not exact:
-            replacements.append(
-                {
-                    "source_index": source_index,
-                    "reference_index": reference_index,
-                    "before": before,
-                    "after": after,
-                    "lexical_match": False,
-                    "status": "suggested",
-                }
-            )
+    def retain(start: int, end: int, reason: str) -> None:
+        for index in range(start, end):
+            retained_source.append({"source_index": index, "before": source[index]["text"], "reason": reason})
 
-    for tag, i1, i2, j1, j2 in raw_opcodes:
+    def insert(start: int, end: int, anchor: int, reason: str) -> None:
+        for index in range(start, end):
+            insertions.append({"after_source_index": anchor, "reference_index": index,
+                               "text": reference[index].text, "reason": reason})
+
+    def replacement(i: int, j: int, *, evidence: dict[str, Any] | None = None) -> None:
+        nonlocal direct
+        exact = source_values[i] == right[j]
+        direct += int(exact)
+        reference_to_source[j] = i
+        if not script_mismatch:
+            trusted_reference.add(j)
+        if source[i]["text"] != reference[j].text:
+            replacements.append({"source_index": i, "reference_index": j,
+                                 "before": source[i]["text"], "after": reference[j].text,
+                                 "lexical_match": exact,
+                                 "status": "suggested" if script_mismatch else "applied",
+                                 **(evidence or {})})
+
+    for pos, (tag, i1, i2, j1, j2) in enumerate(raw_opcodes):
         if tag == "equal":
-            for offset in range(j2 - j1):
-                replacement(
-                    i1 + offset,
-                    j1 + offset,
-                    apply_lexical_change=True,
-                )
+            for offset in range(i2 - i1):
+                replacement(i1 + offset, j1 + offset)
             continue
-        changes.append(
-            {
-                "kind": tag,
-                "source_token_range": [i1, i2 - 1],
-                "reference_token_range": [j1, j2 - 1],
-                "source_text": " ".join(source_values[i1:i2]),
-                "reference_text": " ".join(item.text for item in reference[j1:j2]),
-            }
-        )
+        changes.append({"kind": tag, "source_token_range": [i1, i2 - 1],
+                        "reference_token_range": [j1, j2 - 1],
+                        "source_text": layout_tokens(source_values[i1:i2], source_language),
+                        "reference_text": layout_tokens((t.text for t in reference[j1:j2]), source_language)})
         if tag == "delete":
-            for source_index in range(i1, i2):
-                retained_source.append(
-                    {
-                        "source_index": source_index,
-                        "before": str(source[source_index]["text"]),
-                        "reason": "reference_omitted",
-                    }
-                )
+            retain(i1, i2, "reference_omitted")
             continue
         if tag == "insert":
-            anchor = i1 - 1
-            for reference_index in range(j1, j2):
-                reference_to_source[reference_index] = max(0, min(len(source) - 1, anchor))
-                insertions.append(
-                    {
-                        "after_source_index": anchor,
-                        "reference_index": reference_index,
-                        "text": reference[reference_index].text,
-                    }
-                )
+            insert(j1, j2, i1 - 1, "reference_only")
             continue
-        source_count = i2 - i1
-        reference_count = j2 - j1
-        paired = min(source_count, reference_count)
-        # Equal-length spans have an unambiguous token projection. A reliable
-        # manuscript therefore corrects every projected token; adjacent name
-        # fixes often form one opcode despite mapping one-to-one.
-        apply_lexical_change = source_count == reference_count
-        for offset in range(paired):
-            source_index = i1 + offset
-            reference_index = j1 + offset
-            consensus = lexical_consensus.get(source_values[source_index])
-            consensus_evidence_count = (
-                consensus[1]
-                if consensus is not None and consensus[0] == right[reference_index]
-                else None
-            )
-            replacement(
-                source_index,
-                reference_index,
-                apply_lexical_change=(
-                    apply_lexical_change or consensus_evidence_count is not None
-                ),
-                consensus_evidence_count=(
-                    consensus_evidence_count
-                    if not apply_lexical_change
-                    else None
-                ),
-            )
-        if source_count == 1 and reference_count > 1:
-            # Providers keep numeric/alphanumeric runs such as "20" in one
-            # timed token while a CJK manuscript may tokenize the correction as
-            # "二" + "十". This remains one unambiguous source owner, so use
-            # the complete manuscript span instead of falling back to ASR.
-            source_index = i1
-            reference_indexes = list(range(j1, j2))
-            for reference_index in reference_indexes:
-                reference_to_source[reference_index] = source_index
-            replacements = [
-                item
-                for item in replacements
-                if not (
-                    int(item["source_index"]) == source_index
-                    and int(item["reference_index"]) == j1
-                )
-            ]
-            replacements.append(
-                {
-                    "source_index": source_index,
-                    "reference_index": j1,
-                    "reference_indexes": reference_indexes,
-                    "before": str(source[source_index]["text"]),
-                    "after": layout_tokens(
-                        (reference[index].text for index in reference_indexes),
-                        source_language,
-                    ),
-                    "lexical_match": False,
-                    "status": "applied",
-                }
-            )
+        # Resolve a known term before considering an unequal phrase as a whole.
+        # E.g. "kilometers" -> "kilometres further" corrects the spelling and
+        # keeps "further" as a hidden addition, rather than swallowing both.
+        if i2 - i1 != j2 - j1 and not script_mismatch:
+            while i1 < i2 and j1 < j2:
+                consensus = lexical_consensus.get(source_values[i1])
+                spelling = (len(source_values[i1]) > 1 and len(right[j1]) > 1
+                            and difflib.SequenceMatcher(None, source_values[i1], right[j1], autojunk=False).ratio() >= 0.72
+                            and (local_scores[pos]["left_anchor"] or local_scores[pos]["right_anchor"]))
+                if consensus is not None and consensus[0] == right[j1]:
+                    replacement(i1, j1, evidence={"decision": "document_consensus", "evidence_count": consensus[1]})
+                elif spelling:
+                    replacement(i1, j1, evidence={"decision": "local_spelling"})
+                else:
+                    break
+                i1 += 1
+                j1 += 1
+            if i1 == i2:
+                insert(j1, j2, i1 - 1, "reference_only")
+                continue
+            if j1 == j2:
+                retain(i1, i2, "reference_omitted")
+                continue
+            remaining_opcodes = list(raw_opcodes)
+            remaining_opcodes[pos] = (tag, i1, i2, j1, j2)
+            local_scores[pos] = _local_reference_score(remaining_opcodes, pos, source_values, right, frequencies)
+        score = local_scores[pos]
+        evidence = {"decision": "local_alignment", **score}
+        if score["accepted"] and not script_mismatch:
+            if i2 - i1 == j2 - j1:
+                for offset in range(i2 - i1):
+                    replacement(i1 + offset, j1 + offset, evidence=evidence)
+            else:
+                item = {"source_index": i1, "source_indexes": list(range(i1, i2)),
+                        "reference_index": j1, "reference_indexes": list(range(j1, j2)),
+                        "before": layout_tokens((t["text"] for t in source[i1:i2]), source_language),
+                        "after": layout_tokens((t.text for t in reference[j1:j2]), source_language),
+                        "lexical_match": False, "status": "applied", **evidence}
+                (replacements if i2 - i1 == 1 else merges).append(item)
+                for j in range(j1, j2):
+                    reference_to_source[j] = i2 - 1
+                    trusted_reference.add(j)
             continue
-        for source_index in range(i1 + paired, i2):
-            retained_source.append(
-                {
-                    "source_index": source_index,
-                    "before": str(source[source_index]["text"]),
-                    "reason": "reference_shorter_replacement",
-                }
-            )
-        anchor = i1 + paired - 1 if paired else i1 - 1
-        for reference_index in range(j1 + paired, j2):
-            reference_to_source[reference_index] = max(0, min(len(source) - 1, anchor))
-            # Extra words inside a phrase rewrite are not reliable evidence of
-            # an ASR omission.  Keep the spoken track intact; the mismatch is
-            # still present in `changes` for review.
+        # Repeated, conflict-free corrections may resolve the first word of an
+        # unequal rewrite; the remaining source and reference stay inspectable.
+        offset = 0
+        while i1 + offset < i2 and j1 + offset < j2 and not script_mismatch:
+            consensus = lexical_consensus.get(source_values[i1 + offset])
+            if consensus is None or consensus[0] != right[j1 + offset]:
+                break
+            replacement(i1 + offset, j1 + offset, evidence={
+                "decision": "document_consensus", "evidence_count": consensus[1], **score})
+            offset += 1
+        retain(i1 + offset, i2, "ambiguous_reference")
+        insert(j1 + offset, j2, i1 + offset - 1, "ambiguous_reference")
 
     units = [
         {
@@ -795,6 +767,7 @@ def materialize_reference_script(
             "end": float(item["end"]),
             "text": str(item["text"]),
             "speaker_id": item.get("speaker_id"),
+            "timing": dict(item["timing"]),
         }
         for index, item in enumerate(source)
     ]
@@ -812,7 +785,7 @@ def materialize_reference_script(
     boundary_reconciliations: list[dict[str, int]] = []
     for reference_index in reference_boundaries:
         mapped = reference_to_source.get(reference_index)
-        if mapped is None or mapped >= len(source) - 1:
+        if reference_index not in trusted_reference or mapped is None or mapped >= len(source) - 1:
             continue
         next_mapped = next(
             (
@@ -875,7 +848,7 @@ def materialize_reference_script(
     covered_segments = sum(
         1
         for left, right in segment_ranges
-        if any(index in reference_to_source for index in range(left, right + 1))
+        if any(index in trusted_reference for index in range(left, right + 1))
     )
     segment_coverage = covered_segments / len(segment_ranges)
     reference_diagnostics = _tokenization_diagnostics(reference_text, source_language)
@@ -888,15 +861,16 @@ def materialize_reference_script(
         float(source_diagnostics["linguistic_character_coverage"]),
     )
     script_mismatch = bool(reference_diagnostics["script_mismatch"])
+    aligned_ratio = len(trusted_reference) / len(reference)
     if (
-        matched_ratio >= 0.85
+        aligned_ratio >= 0.85
         and segment_coverage >= 0.95
         and coverage >= 0.95
         and not script_mismatch
     ):
         quality = "good"
     elif (
-        matched_ratio >= 0.40
+        aligned_ratio >= 0.40
         and segment_coverage >= 0.50
         and coverage >= 0.80
         and not script_mismatch
@@ -904,14 +878,6 @@ def materialize_reference_script(
         quality = "warning"
     else:
         quality = "failed"
-    if quality == "failed":
-        for item in replacements:
-            if item.get("status") == "applied":
-                item["status"] = "suggested"
-    elif quality == "warning":
-        for item in replacements:
-            if not item.get("lexical_match") and item.get("status") == "applied":
-                item["status"] = "suggested"
     material = {
         "schema_version": "substar.segmentation-material.v1",
         "source_transcript": layout_tokens(
@@ -925,9 +891,14 @@ def materialize_reference_script(
         "quality": quality,
         "break_symbols": symbols,
         "similarity": round(similarity, 6),
-        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
-        "requires_review": similarity < 0.40,
+        "confidence": "high" if quality == "good" else "medium" if quality == "warning" else "low",
+        "requires_review": quality != "good" or any(item["reason"] == "ambiguous_reference" for item in insertions),
+        "matcher_version": REFERENCE_MATCHER_VERSION,
+        "reference_sha256": hashlib.sha256(reference_text.encode("utf-8")).hexdigest(),
+        "merges": merges,
+        "local_decisions": list(local_scores.values()),
         "matched_token_ratio": round(matched_ratio, 6),
+        "aligned_token_ratio": round(aligned_ratio, 6),
         "segment_coverage": round(segment_coverage, 6),
         "source_token_count": len(source),
         "reference_token_count": len(reference),
@@ -969,103 +940,95 @@ def materialize_reference_script(
 
 
 def editor_reference_operations(
-    reference_text: str,
-    units: list[dict[str, Any]],
-    source_language: str | None = None,
+    reference_text: str, units: list[dict[str, Any]], source_language: str | None = None,
 ) -> dict[str, Any]:
-    """Return reference-primary corrections without changing cue boundaries."""
-
-    source_values, token_owners = _unit_tokens(units, source_language)
-    reference = reference_tokens(reference_text, source_language)
-    if not source_values or not reference:
-        raise ManuscriptMatchError("当前编辑稿或参考文稿没有可匹配词元")
-    mapping, raw_changes, similarity = _reference_to_source_positions(source_values, reference)
-    reference_diagnostics = _tokenization_diagnostics(reference_text, source_language)
-    source_diagnostics = _tokenization_diagnostics(
-        "".join(str(item.get("text", "")) for item in units), source_language
+    """Use the creation matcher, then bind lexical decisions to editor tokens."""
+    timed = [{**unit, "start": position, "end": position + 1} for position, unit in enumerate(units)]
+    material, _, report = materialize_reference_script(
+        reference_text, timed, reference_break_symbols_for_language(source_language), source_language,
     )
-    coverage = min(
-        float(reference_diagnostics["linguistic_character_coverage"]),
-        float(source_diagnostics["linguistic_character_coverage"]),
-    )
-    if (
-        similarity >= 0.85
-        and coverage >= 0.95
-        and not reference_diagnostics["script_mismatch"]
-    ):
-        quality = "good"
-    elif (
-        similarity >= 0.40
-        and coverage >= 0.80
-        and not reference_diagnostics["script_mismatch"]
-    ):
-        quality = "warning"
-    else:
-        quality = "failed"
-    reference_by_owner: dict[int, list[int]] = {}
-    for ref_index, source_token in enumerate(mapping):
-        source_token = max(0, min(len(token_owners) - 1, source_token))
-        reference_by_owner.setdefault(token_owners[source_token], []).append(ref_index)
-    edits: list[dict[str, Any]] = []
-    merges: list[dict[str, Any]] = []
-    insertions: list[dict[str, Any]] = []
-    hidden: list[int] = []
-    changes: list[dict[str, Any]] = []
-    consumed: set[int] = set()
-    for owner, ref_indexes in sorted(reference_by_owner.items()):
-        source_index = int(units[owner]["index"])
-        text = " ".join(reference[index].text for index in ref_indexes).strip()
-        original = str(units[owner].get("text", ""))
-        if text == original:
+    lexical = _timed_source_tokens(timed, source_language)
+    owner_by_index = {int(unit["index"]): position for position, unit in enumerate(units)}
+    owners = [owner_by_index[int(item["source_alignment_index"])] for item in lexical]
+    rendered = [str(item["text"]) for item in lexical]
+    changed_owners: set[int] = set()
+    merge_ranges: list[tuple[int, int]] = []
+    for item in report["replacements"]:
+        if item["status"] == "applied":
+            rendered[item["source_index"]] = item["after"]
+            changed_owners.add(owners[item["source_index"]])
+    extra_insertions = []
+    for item in report["merges"]:
+        indexes = item["source_indexes"]
+        group_owners = sorted({owners[index] for index in indexes})
+        cues = {units[owner].get("cue_id") for owner in group_owners}
+        if len(cues) > 1:
+            extra_insertions.append({"after_source_index": indexes[0] - 1,
+                                     "reference_index": item["reference_index"],
+                                     "text": item["after"], "reason": "existing_cue_boundary"})
             continue
-        if quality == "good":
-            edits.append({"index": source_index, "text": text})
-        consumed.add(owner)
-        changes.append(
-            {
-                "id": f"ref-{source_index}",
-                "kind": "reference",
-                "type": "replace",
-                "source_indices": [source_index],
-                "original": original,
-                "text": text,
-                "status": "applied" if quality == "good" else "suggested",
-            }
-        )
-    # A reference manuscript is corrective evidence, never a deletion request.
-    # Source units absent from its alignment remain active and are recorded so
-    # the editor can explain why ASR text was kept.
-    mapped_owners = set(reference_by_owner)
+        rendered[indexes[0]] = item["after"]
+        for index in indexes[1:]:
+            rendered[index] = ""
+        changed_owners.update(group_owners)
+        merge_ranges.append((group_owners[0], group_owners[-1]))
+    lexical_owners = set(owners)
     for owner, unit in enumerate(units):
-        if owner in mapped_owners:
+        if owner in lexical_owners or not str(unit.get("text", "")).strip():
             continue
-        source_index = int(unit["index"])
-        changes.append(
-            {
-                "id": f"ref-retained-{source_index}",
-                "kind": "reference",
-                "type": "retained_source",
-                "source_indices": [source_index],
-                "original": str(unit.get("text", "")),
-                "text": "",
-                "status": "retained",
-            }
-        )
-    return {
-        "schema_version": "substar.reference-editor.v1",
-        "authority": "reference_assisted",
-        "quality": quality,
-        "similarity": round(similarity, 6),
-        "confidence": "high" if similarity >= 0.85 else "medium" if similarity >= 0.40 else "low",
-        "requires_review": similarity < 0.40,
-        "edits": edits,
-        "merges": merges,
-        "insertions": insertions,
-        "hidden": hidden,
-        "reference_changes": changes,
-        "diagnostics": raw_changes,
-        "tokenization": {
-            "reference": reference_diagnostics,
-            "source": source_diagnostics,
-        },
-    }
+        neighbor = owner - 1 if owner else owner + 1
+        if neighbor in lexical_owners and units[neighbor].get("cue_id") == unit.get("cue_id"):
+            # A manually inserted punctuation-only display token belongs to
+            # the adjacent matched word's rendering, not a second punctuation.
+            merge_ranges.append((min(owner, neighbor), max(owner, neighbor)))
+            changed_owners.update((owner, neighbor))
+    # Merge overlapping owner ranges: an editor token may contain several words.
+    groups: list[list[int]] = []
+    for left, right in sorted(merge_ranges + [(owner, owner) for owner in changed_owners]):
+        if groups and left <= groups[-1][-1]:
+            groups[-1] = list(range(groups[-1][0], max(right, groups[-1][-1]) + 1))
+        else:
+            groups.append(list(range(left, right + 1)))
+    replacements, merges, edits, changes = [], [], [], []
+    for group in groups:
+        before = layout_tokens((units[owner]["text"] for owner in group), source_language)
+        after = layout_tokens((text for index, text in enumerate(rendered)
+                               if owners[index] in group and text), source_language)
+        if before == after:
+            continue
+        indexes = [int(units[owner]["index"]) for owner in group]
+        item = {"source_index": indexes[0], "source_indexes": indexes,
+                "reference_index": group[0], "before": before, "after": after,
+                "status": "applied", "lexical_match": False}
+        (merges if len(group) > 1 else replacements).append(item)
+        if len(group) == 1:
+            edits.append({"index": indexes[0], "text": after})
+        changes.append({"id": f"ref-{indexes[0]}", "type": "replace", "kind": "reference",
+                        "source_indices": indexes, "original": before, "text": after, "status": "applied"})
+    insertions = []
+    for item in [*report["insertions"], *extra_insertions]:
+        anchor = item["after_source_index"]
+        owner_index = int(units[owners[anchor]]["index"]) if anchor >= 0 else -1
+        projected = {**item, "after_source_index": owner_index}
+        if anchor >= 0:
+            group = next((group for group in groups if owners[anchor] in group), [owners[anchor]])
+            prefix = layout_tokens((text for index, text in enumerate(rendered)
+                                    if index <= anchor and owners[index] in group and text), source_language)
+            projected["after_source_offset"] = len(prefix)
+        insertions.append(projected)
+    retained = []
+    for item in report["retained_source"]:
+        index = int(units[owners[item["source_index"]]]["index"])
+        retained.append({**item, "source_index": index})
+        changes.append({"id": f"ref-retained-{item['source_index']}", "type": "retained_source",
+                        "kind": "reference", "source_indices": [index],
+                        "original": item["before"], "text": "", "status": "retained"})
+    projected = {**report, "replacements": replacements, "merges": merges,
+                 "insertions": insertions, "retained_source": retained,
+                 "requires_review": report["requires_review"] or bool(extra_insertions)}
+    return {"schema_version": "substar.reference-editor.v1", "authority": "reference_assisted",
+            "quality": report["quality"], "similarity": report["similarity"],
+            "confidence": report["confidence"], "requires_review": projected["requires_review"],
+            "edits": edits, "merges": merges, "insertions": insertions, "hidden": [],
+            "reference_changes": changes, "diagnostics": report["changes"],
+            "tokenization": report["tokenization"], "report": projected}

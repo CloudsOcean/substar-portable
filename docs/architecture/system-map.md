@@ -209,8 +209,8 @@ flowchart LR
 
 | Module | Layer | Responsibility | Code | Inputs | Outputs | Calls |
 |---|---|---|---|---|---|---|
-| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/ai_progress_summary.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
-| `composition_root` | `api` | Own process startup, router composition, uploads, stable project identity, prompt-component HTTP boundaries and the project-creation facade. | `app.py` | `project_creation_request`<br>`task_record`<br>`editor_revision`<br>`credential_reference`<br>`production_prompt_component` | `project_creation_projection`<br>`transcription_request`<br>`segmentation_request`<br>`production_prompt_component` | `creation_graph`<br>`creation_projection`<br>`runtime_api`<br>`editor_api`<br>`credential_store`<br>`model_stage_scheduler` |
+| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/asr_assist.js`<br>`web/ai_progress_summary.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
+| `composition_root` | `api` | Own process startup, router composition, uploads, stable project identity, prompt-component HTTP boundaries and the project-creation facade. | `app.py`<br>`substar_core/asr_assist.py` | `project_creation_request`<br>`task_record`<br>`editor_revision`<br>`credential_reference`<br>`production_prompt_component` | `project_creation_projection`<br>`transcription_request`<br>`segmentation_request`<br>`production_prompt_component` | `creation_graph`<br>`creation_projection`<br>`runtime_api`<br>`editor_api`<br>`credential_store`<br>`model_stage_scheduler` |
 | `creation_graph` | `application` | Freeze prompt/reference snapshots and create transcription then segmentation tasks with an explicit dependency. | `substar_core/creation/graph.py` | `transcription_request`<br>`segmentation_request` | `task_record` | `task_service` |
 | `creation_projection` | `application` | Combine transcription, segmentation and ProjectStore facts into one UI-safe creation status. | `substar_core/creation/projection.py` | `task_record`<br>`editor_revision` | `project_creation_projection` | — |
 | `runtime_api` | `api` | Validate canonical task requests and expose create, list, cancel, retry, events and artifacts. | `substar_core/runtime/api.py` | `task_record` | `task_record`<br>`task_event` | `task_service`<br>`handler_registry` |
@@ -243,10 +243,10 @@ flowchart LR
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
 | `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`scripts/run_reference_match.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
-| `reference_manuscript_service` | `domain_service` | Parse TXT/DOCX/SRT with a Unicode script-aware tokenizer, apply aligned reference spelling, casing, punctuation and boundaries over ASR timing, preserve ASR-only wording with retained-source markers, and produce reversible corrections, insertions and audit records. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
+| `reference_manuscript_service` | `domain_service` | Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
 | `export_service` | `domain_service` | Render verified source, target and bilingual SRT outputs from the current revision and presentation rules. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
-| `project_exchange_service` | `application_service` | Export referenced original media into portable subtitle packages using package-relative paths; reject missing originals before streaming. Native local selection stores media_reference.json without copying the original; browser upload remains explicit copy-import compatibility. Imported packages must not install external media references. Historical external-AI exchange APIs remain backend-compatible. | `substar_core/media_reference.py`<br>`substar_core/media_relink.py`<br>`substar_core/project_exchange.py` | `editor_revision`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `editor_operation`<br>`editor_revision`<br>`project_creation_projection`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `export_service`<br>`editor_domain`<br>`project_store`<br>`task_info_service`<br>`creation_projection`<br>`model_stage_scheduler` |
+| `project_exchange_service` | `application_service` | Export referenced original media into portable subtitle packages using package-relative paths; reject missing originals before streaming. Native local selection stores media_reference.json without copying the original; browser upload remains explicit copy-import compatibility. Imported packages must not install external media references. Historical external-AI exchange APIs remain backend-compatible. | `substar_core/editor/application/srt_import.py`<br>`substar_core/media_reference.py`<br>`substar_core/media_relink.py`<br>`substar_core/project_exchange.py` | `editor_revision`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `editor_operation`<br>`editor_revision`<br>`project_creation_projection`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `export_service`<br>`editor_domain`<br>`project_store`<br>`task_info_service`<br>`creation_projection`<br>`model_stage_scheduler` |
 | `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
 | `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
 | `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
@@ -255,7 +255,7 @@ flowchart LR
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
 | `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
 | `local_environment_service` | `optional_capability` | Diagnose source-install local runtimes and manage optional local model paths/assets outside the cloud-only beta path. | `substar_core/environment_doctor.py`<br>`substar_core/model_assets.py`<br>`substar_core/model_paths.py`<br>`substar_core/asr_longform.py` | `settings_snapshot`<br>`release_manifest` | `settings_snapshot` | — |
-| `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
+| `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js`<br>`web/theme/tokens.css`<br>`web/project_label.js`<br>`web/design-directions.html` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
 | `recognition_contracts` | `contract` | Register supported recognition profiles and validate provider-independent transcription artifacts. | `substar_core/recognition/registry.py`<br>`substar_core/recognition/contracts.py`<br>`substar_core/transcription/contracts.py`<br>`substar_core/transcription/artifacts.py`<br>`substar_core/artifacts.py` | `transcription_request`<br>`recognition_evidence` | `recognition_evidence`<br>`transcription_result` | — |
 | `segmentation_domain` | `domain` | Define chunks, hierarchy, candidate materialization, hard-limit validation and semantic grouping contracts used by the production algorithm. | `substar_core/segmentation/adaptive_chunking.py`<br>`substar_core/segmentation/chunking.py`<br>`substar_core/segmentation/contracts.py`<br>`substar_core/segmentation/document_builder.py`<br>`substar_core/segmentation/hierarchy.py`<br>`substar_core/segmentation/material.py`<br>`substar_core/segmentation/materializer.py`<br>`substar_core/segmentation/optimizer.py`<br>`substar_core/segmentation/semantic_grouping_contract.py`<br>`substar_core/segmentation/validation.py` | `segmentation_material`<br>`semantic_grouping_result` | `segmentation_candidate`<br>`editor_document` | `editor_domain`<br>`reference_manuscript_service` |
 | `translation_domain` | `domain` | Build meaning-unit groups, validate model output and persist translation artifacts used by the translation service. | `substar_core/editor/translation/artifacts.py`<br>`substar_core/editor/translation/contracts.py`<br>`substar_core/editor/translation/grouping.py`<br>`substar_core/semantic_execution.py`<br>`substar_core/translation_atoms.py`<br>`substar_core/translation_context.py` | `editor_revision` | `translation_result` | — |
@@ -312,7 +312,7 @@ flowchart LR
 
 `split_ui` → `composition_root` → `creation_graph` → `task_service` → `runtime_store` → `scheduler` → `transcription_handler` → `worker_supervisor` → `transcription_worker` → `cloud_transcription_pipeline` → `qwen_connector` → `transcription_finalizer` → `segmentation_handler` → `segmentation_worker` → `segmentation_input_contract` → `execution_planner` → `semantic_segmentation_algorithm` → `segmentation_model_connector` → `segmentation_finalizer` → `project_store` → `creation_projection` → `editor_api` → `editor_ui`
 
-Success condition: A readable editor_revision exists and the creation projection is awaiting_edit; reference mode retains ASR-only text, applies auditable reference corrections or insertions, and cuts only at frozen literal symbols.
+Success condition: A readable editor_revision exists and the creation projection is awaiting_edit; both reference-assisted paths retain ASR-only text, apply locally supported corrections and hide unmatched reference insertions; reference mode cuts only at locally matched frozen symbols.
 
 Tests: `tests/test_project_creation_api.py`, `tests/test_transcription_runtime.py`, `tests/test_segmentation_runtime.py`
 
@@ -368,7 +368,7 @@ Tests: `tests/test_qwen_cloud_transcription.py`, `tests/test_project_creation_ap
 
 `editor_ui` → `editor_api_client` → `editor_api` → `reference_manuscript_service` → `editor_application` → `editor_domain` → `project_store` → `presentation_service` → `export_service`
 
-Success condition: Aligned reference replacements and reference-only insertions are active; ASR-only wording remains active with retained-source records; exports render the resulting active tokens from one verified revision.
+Success condition: Aligned reference replacements are active; unmatched reference words are inspectable hidden insertions; ASR-only wording stays active. Restore and rematch preserve Cue boundaries, and export renders only active tokens from one verified revision.
 
 Tests: `tests/test_editor_ai_contracts.py`, `tests/test_project_creation_api.py`, `tests/test_reference_script_mode.py`, `tests/editor_reference_boundary_ui.test.js`
 
@@ -376,9 +376,9 @@ Tests: `tests/test_editor_ai_contracts.py`, `tests/test_project_creation_api.py`
 
 `editor_ui` → `editor_api_client` → `editor_api` → `project_exchange_service` → `project_store` → `creation_projection` → `export_service` → `split_ui`
 
-Success condition: The editor exposes only portable subtitle-project import/export; a verified archive becomes one new project visible from both editor and split without overwriting existing data.
+Success condition: The editor exposes portable subtitle-project import/export and previewed SRT translation-track import; a verified archive becomes one new project visible from both editor and split without overwriting existing data.
 
-Tests: `tests/test_project_exchange.py`, `tests/editor_timeline_manual_cue.test.js`
+Tests: `tests/test_project_exchange.py`, `tests/test_srt_translation_import.py`, `tests/editor_timeline_manual_cue.test.js`
 
 ### Portable package startup, runtime identity and shutdown (`portable_startup_and_shutdown`)
 
@@ -399,6 +399,7 @@ Collect media, source-language-aware normal/reference-script segmentation settin
 Code:
 
 - `web/split.js`
+- `web/asr_assist.js`
 - `web/ai_progress_summary.js` — `summarize`, `format`
 
 Must not:
@@ -410,6 +411,8 @@ Must not:
 
 Invariants:
 
+- ASR-based prompt assistance runs a standalone durable transcription task; internal and external generation reuse it, and changed media or settings cannot receive stale results
+- Creation controls use readable typography without a hero title; one theme-colored tutorial menu offers basic and advanced tutorials, pulses until first start or persisted dismissal, and hides the dismissal option thereafter.
 - Editor link is exposed only when the project read model says awaiting_edit
 - One submitted identity survives polling and refresh
 - A polling failure immediately marks the runtime disconnected and never presents cached queued/running rows as live work
@@ -443,6 +446,7 @@ Own process startup, router composition, uploads, stable project identity, promp
 Code:
 
 - `app.py` — `_application_lifespan`, `create_workbench_split_job`, `_create_workbench_subtitle_tasks`, `list_jobs`
+- `substar_core/asr_assist.py` — `create_assist_task`, `assist_status`, `generation_material`
 
 Must not:
 
@@ -469,7 +473,7 @@ Recovery: Reconcile project creation from durable canonical tasks and ProjectSto
 
 Reuses: `uploaded media`<br>`project_id`<br>`successful parent tasks`; restarts: `uncommitted child task`; terminal behavior: Expose the canonical structured error.
 
-Tests: `tests/test_project_creation_api.py`, `tests/test_creation_projection.py`, `tests/test_runtime_http.py`
+Tests: `tests/test_project_creation_api.py`, `tests/test_creation_projection.py`, `tests/test_runtime_http.py`, `tests/test_asr_assist.py`
 
 Change impact modules: `split_ui`<br>`creation_graph`<br>`creation_projection`<br>`runtime_api`<br>`editor_api`
 
@@ -1134,7 +1138,7 @@ Recovery: Rebuild deterministically from the same immutable evidence.
 
 Reuses: `recognition evidence`; restarts: —; terminal behavior: Reject invalid evidence.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_runtime_contract_schemas.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_runtime_contract_schemas.py`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `transcription_finalizer`<br>`segmentation_worker`<br>`segmentation_finalizer`<br>`semantic_segmentation_algorithm`
 
@@ -1160,16 +1164,13 @@ Must not:
 
 Invariants:
 
-- All candidate source tokens come from canonical ASR material
-- Reference-script corrections may replace or insert display text but never delete ASR-only content
-- Reference-script Cue boundaries come only from locally aligned reference punctuation
-- Configured source language and Unicode tokenizer version are deterministic Worker inputs
-- Failed alignment downgrades every automatic reference replacement to an advisory suggestion
-- Warning alignment applies only exact lexical-anchor presentation changes
-- Ambiguous phrase rewrites retain ASR and remain reversible editor suggestions
+- Worker and Finalizer share the same reference decisions and deterministic word projection
+- Both semantic and reference-script paths preserve ASR-only words and hide unmatched reference wording
+- Reference-script boundaries come only from locally trusted reference punctuation
+- Semantic grouping sees corrected active wording and retains the matching audit for editor review
+- Global quality is diagnostic; local anchors and capped repetition evidence authorize replacements
 - Accepted groups survive partial failure
-- Per-block response, completion, repair and failure counts cross the standard Worker progress protocol while algorithm diagnostics remain isolated from protocol stdout
-- Recovery emits all artifact events before result
+- Per-block progress crosses the standard Worker protocol; recovery emits all artifact events before result
 
 Failure modes:
 
@@ -1182,7 +1183,7 @@ Recovery: Copy and re-register a complete accepted prior artifact set, then reru
 
 Reuses: `accepted groups`<br>`accepted artifact set`; restarts: `rejected gaps`<br>`finalization only`; terminal behavior: Deliver unresolved ranges as problem subtitles.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_semantic_grouping_contract.py`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `segmentation_handler`<br>`segmentation_input_contract`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`segmentation_finalizer`<br>`worker_protocol`
 
@@ -1349,7 +1350,7 @@ Recovery: Use the prior complete accepted artifact set and rerun only registrati
 
 Reuses: `segmentation candidate`<br>`editor document candidate`<br>`validation and manifest`; restarts: `finalization only`; terminal behavior: finalization_failed with exact exception type and bounded reason.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_project_creation_api.py`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_project_creation_api.py`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `segmentation_input_contract`<br>`segmentation_worker`<br>`scheduler`<br>`project_store`<br>`creation_projection`
 
@@ -1416,11 +1417,11 @@ Invariants:
 - Task information changes never rewrite existing ASR, Cue topology, timing or translations
 - A project-selected LLM provider freezes its own endpoint, model and credential reference into each new calibration or translation task
 - Editor reference matching uses the canonical project source language or explicit Auto detection
-- Low-confidence editor reference matches remain advisory and do not mutate the revision
 - External prooftranslation applies only matching Cue and source hashes
 - External segmentation binds the exact revision, document and token sequence and cannot replace existing translations
 - Only one exclusive AI operation runs per project
 - AI results bind the revision they inspected
+- Reference replacements, span merges, hidden insertions and review metadata commit in one expected-revision transaction
 
 Failure modes:
 
@@ -1433,7 +1434,7 @@ Recovery: Reload the latest revision and durable AI operation state.
 
 Reuses: `latest verified revision`<br>`completed AI result`; restarts: `failed AI operation when user requests`; terminal behavior: Return structured conflict or task error.
 
-Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`
+Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1670,7 +1671,9 @@ Invariants:
 
 - Selected project_id never silently falls back to another project
 - The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner
-- Large Cue lists are windowed; Cue scrollbar placement is a per-project browser preference: right and bottom controls are mutually exclusive, share track/thumb styling, and the bottom control scrolls only the Cue list with the history island raised clear of its track
+- Large Cue lists are windowed
+- Editor chrome uses readable 12-15px type, larger controls and proportional sidebar/timeline space; Cue text defaults to 18px with spacious row padding and spacing; source, translation and inline editing share the adjustable font size
+- The Cue list keeps its right scrollbar; the full-width bottom timeline slider maps to the viewport center and synchronizes with timeline panning, zooming and playback following without seeking media
 - Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar
 - External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state
 - External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked
@@ -1694,6 +1697,7 @@ Invariants:
 - Left-clicking remains reserved for token selection
 - Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers
 - Reference choices appear above the selected token and remain reversible
+- Reference review notices appear after matching only; loading or refreshing a saved revision never replays historical review notices
 - Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract
 - Conflicting edits stay unsaved until explicitly resolved.
 - Exports drain all pending edits and pin the saved revision.
@@ -1857,7 +1861,7 @@ Change impact contracts: `editor_operation`<br>`editor_revision`
 
 Layer: `domain_service`
 
-Parse TXT/DOCX/SRT with a Unicode script-aware tokenizer, apply aligned reference spelling, casing, punctuation and boundaries over ASR timing, preserve ASR-only wording with retained-source markers, and produce reversible corrections, insertions and audit records.
+Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions.
 
 Code:
 
@@ -1873,17 +1877,16 @@ Must not:
 
 Invariants:
 
-- Reference input, source language and break symbols are fingerprint-bound
-- Unicode letters, marks, numbers, Han, kana and Hangul are covered by one versioned tokenizer
-- Normalization affects matching identity but never silently rewrites display text
-- Recognition evidence remains the source, wording and timing authority
-- ASR-only text and punctuation remain visible but do not create Cue breaks
-- Reference punctuation remains attached to the resolved spoken sentence ending
-- Reference-only wording may be inserted on its correct boundary side
-- ASR-only wording remains active
-- Script mismatch or failed quality keeps replacements advisory
-- Ambiguous phrase rewrites are suggestions rather than automatic replacements
-- Editor changes are reversible operations
+- Reference input, source language, matcher version and break symbols are auditable
+- Unicode script-aware tokenization preserves display punctuation; CJK layout never inserts word gaps
+- Stable outer anchors absorb short internal reorderings; a shared document edge supports short single-sided replacements; bounded word or phrase frequency and conflict-free repeated corrections raise local confidence
+- Local correspondence, including one-to-many and many-to-one spans, authorizes replacement independently of global similarity
+- ASR-only words remain visible in all entry points; reference-only and unresolved words are visible in review but hidden from export until restored
+- Unmatched positions do not contribute segment coverage or reference Cue boundaries
+- Editor rematching preserves Cue identity, timing and order; cross-Cue replacements remain hidden candidates
+- Recognition evidence remains immutable; replacement time covers the corresponding source envelope
+- Repeated rematching reuses current hidden insertions and retires superseded hidden candidates within the new revision; prior revisions remain unchanged
+- Source-script mismatch keeps lexical replacements advisory and supplies no trusted boundaries
 
 Failure modes:
 
@@ -1896,7 +1899,7 @@ Recovery: Retain the original evidence and expose unmatched ranges for human rev
 
 Reuses: `recognized alignment`<br>`reference snapshot`; restarts: —; terminal behavior: ManuscriptMatchError with no mutation.
 
-Tests: `tests/test_segmentation_runtime.py`, `tests/test_project_creation_api.py`, `tests/test_reference_script_mode.py`, `tests/test_editor_ai_contracts.py`, `tests/split_settings_ui_contract.test.js`
+Tests: `tests/test_segmentation_runtime.py`, `tests/test_project_creation_api.py`, `tests/test_reference_script_mode.py`, `tests/test_editor_ai_contracts.py`, `tests/split_settings_ui_contract.test.js`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `composition_root`<br>`segmentation_domain`<br>`segmentation_worker`<br>`segmentation_finalizer`<br>`editor_api`<br>`split_ui`
 
@@ -1988,6 +1991,7 @@ Export referenced original media into portable subtitle packages using package-r
 
 Code:
 
+- `substar_core/editor/application/srt_import.py` — `parse_srt`, `preview_srt`, `import_srt`
 - `substar_core/media_reference.py`
 - `substar_core/media_relink.py`
 - `substar_core/project_exchange.py` — `external_prooftranslation_files`, `external_split_files`, `inspect_external_prooftranslation`, `apply_external_prooftranslation`, `inspect_external_split`, `apply_external_split`, `export_subtitle_project`, `import_subtitle_project`
@@ -2004,6 +2008,7 @@ Must not:
 
 Invariants:
 
+- SRT import recognizes the four export formats, selects foreign-language tracks as a whole, and updates only uniquely timed translations through a revision-bound idempotent commit
 - Exports use one committed latest revision
 - External prooftranslation carries one prompt that stops for source approval before translation
 - The prompt registry routes prooftranslation by source and target language and segmentation by source language
@@ -2030,7 +2035,7 @@ Recovery: Retain the current revision and remove the temporary import directory;
 
 Reuses: `validated independent correction units`<br>`verified archive entries`; restarts: `package export`<br>`project import`; terminal behavior: Return an explicit validation error without a half-project.
 
-Tests: `tests/test_project_exchange.py`, `tests/editor_timeline_manual_cue.test.js`
+Tests: `tests/test_project_exchange.py`, `tests/test_srt_translation_import.py`, `tests/editor_timeline_manual_cue.test.js`
 
 Change impact modules: `editor_api`<br>`editor_api_client`<br>`editor_ui`<br>`split_ui`<br>`task_info_service`<br>`project_store`<br>`creation_projection`<br>`export_service`<br>`model_stage_scheduler`
 
@@ -2055,6 +2060,7 @@ Must not:
 
 Invariants:
 
+- Settings navigation reserves scrollbar width and stable sidebar sizing across panels. Prompt editing prioritizes search and a wide editor with component tabs and top save actions; file details are collapsed, sidebar captions and decorative counts are removed, and prompt search never dirties settings.
 - Credential fields are purpose/provider named
 - Saved-key presence, verified connectivity and newly entered key are distinct states
 - The provider catalog contains only cloud/API LLM services and excludes local model installers and translation-only engines
@@ -2249,6 +2255,8 @@ Must not:
 
 Invariants:
 
+- Glossary controls use readable typography and proportional list space.
+- Collection creation and empty-state text use semantic theme colors in both light and dark modes
 - Import is validated before replacing the stored glossary
 - Active status and scope are explicit
 
@@ -2409,6 +2417,9 @@ Code:
 
 - `substar_core/web_routes.py` — `creation_page`, `editor_page`, `glossary_page`, `settings_page`
 - `web/theme/personalization.js`
+- `web/theme/tokens.css`
+- `web/project_label.js` — `projectLabel`
+- `web/design-directions.html`
 
 Must not:
 
@@ -2418,8 +2429,13 @@ Must not:
 
 Invariants:
 
+- Light and dark workbenches share neutral surface and semantic control tokens; action, selected, disabled and keyboard-focus states stay distinct without decorative glow
+- Theme and material changes preserve workbench geometry; links, buttons and menu summaries share hover, pressed, disabled and keyboard-focus states
+- Glass is restricted to shell surfaces; Cue rows and text fields stay opaque and viewport-positioned menus remain outside filter containing blocks
+- Legacy Qwen cloud suffixes are stripped from displayed project labels without rewriting project state
 - Navigation targets stable canonical routes
 - Personalization remains presentation-only
+- The standalone design-directions prototype uses isolated demo state and never reads or writes project data
 
 Failure modes:
 
@@ -2522,7 +2538,7 @@ Recovery: Return exact rejected ranges to model repair without altering accepted
 
 Reuses: `valid groups`; restarts: `invalid ranges`; terminal behavior: Create explicit problem-subtitle metadata.
 
-Tests: `tests/test_semantic_grouping_contract.py`, `tests/test_segmentation_runtime.py`, `tests/test_reference_script_mode.py`, `tests/test_visible_character_limits.py`
+Tests: `tests/test_semantic_grouping_contract.py`, `tests/test_segmentation_runtime.py`, `tests/test_reference_script_mode.py`, `tests/test_visible_character_limits.py`, `tests/test_reference_unified_matching.py`
 
 Change impact modules: `segmentation_input_contract`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`segmentation_worker`<br>`segmentation_finalizer`<br>`editor_domain`
 

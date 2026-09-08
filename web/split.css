@@ -367,3 +367,17 @@ summary span { margin-left: 7px; color: #677287; font-size: 13px; }
 .tutorial-pulse > summary { animation:tutorial-entry-breathe 2.6s ease-in-out infinite; }
 @keyframes tutorial-entry-breathe { 0%,100% { box-shadow:0 0 0 0 transparent; } 50% { box-shadow:0 0 0 4px color-mix(in srgb,var(--purple) 20%,transparent); } }
 @media(prefers-reduced-motion:reduce) { .tutorial-pulse > summary { animation:none; } }
+
+.asr-assist-menu { position:relative; flex:none; }
+.qwen-assist-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-left:auto; }
+.qwen-assist-actions .qwen-assist-button { margin:0; white-space:nowrap; }
+.asr-assist-menu .creation-tutorial-menu { top:calc(100% + 6px); left:auto; right:0; z-index:40; min-width:210px; }
+.asr-assist-menu [hidden], .qwen-assist-row [hidden] { display:none !important; }
+.qwen-assist-row { flex-wrap:wrap; }
+.asr-assist-external { width:min(760px,calc(100vw - 40px)); max-height:85vh; overflow:auto; padding:24px; border:1px solid var(--theme-line); border-radius:12px; color:var(--theme-text); background:var(--theme-panel); box-shadow:var(--theme-float-shadow); }
+.asr-assist-external::backdrop { background:rgb(0 0 0 / 55%); }
+.asr-assist-external header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+.asr-assist-external label { display:block; margin:16px 0 10px; font-size:14px; }
+.asr-assist-external textarea { display:block; width:100%; margin-top:8px; padding:12px; resize:vertical; font:14px/1.6 "Microsoft YaHei",sans-serif; }
+.asr-assist-external footer { display:flex; justify-content:flex-end; margin-top:16px; }
+#asrAssistImportStatus { color:var(--theme-danger); }

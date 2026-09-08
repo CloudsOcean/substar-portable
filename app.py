@@ -21,6 +21,8 @@ from typing import Any, Mapping
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from starlette.concurrency import run_in_threadpool
+from substar_core.asr_assist import create_assist_task, assist_status, generation_material
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -398,10 +400,10 @@ class SettingsPayload(BaseModel):
     english_hard_limit: int = 55
     english_count_spaces: bool = True
     english_count_punctuation: bool = True
-    chinese_hard_limit: int = 25
+    chinese_hard_limit: int = 28
     mixed_hard_limit: int = 25
-    japanese_hard_limit: int = 25
-    korean_hard_limit: int = 32
+    japanese_hard_limit: int = 32
+    korean_hard_limit: int = 40
     target_visual_width_limit: int = 48
     minimum_cue_duration_ms: int = 400
     maximum_cue_duration_ms: int = 7000
@@ -502,6 +504,7 @@ class ApiConnectionTestPayload(BaseModel):
 class QwenAssistPayload(BaseModel):
     source_language: str = Field(default="Auto", max_length=40)
     user_prompt: str = Field(min_length=1, max_length=4000)
+    asr_task_id: str | None = Field(default=None, max_length=128)
 
 
 PROJECT_CREATION_MODES = {"subtitle_creation"}
@@ -1741,6 +1744,61 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/qwen-assist/asr")
+async def start_qwen_assist_asr(
+    media: UploadFile = File(...), source_language: str = Form("Auto"),
+    profile_id: str = Form("qwen_cloud"),
+) -> dict[str, Any]:
+    if source_language not in {"Auto", "zh", "en", "ja", "ko", "mixed"}:
+        raise HTTPException(status_code=400, detail="不支持的原文语言")
+    settings = load_settings()
+    try:
+        get_recognition_profile(profile_id)
+        settings["recognition_profile_id"] = profile_id
+        settings["language"] = source_language
+        PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".asr-assist-upload-", dir=PROJECTS_ROOT) as staging:
+            path = Path(staging) / "upload"
+            size = 0
+            with path.open("wb") as output:
+                while chunk := await media.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > 20 * 1024 * 1024 * 1024:
+                        raise HTTPException(status_code=413, detail="媒体文件超过 20 GB")
+                    output.write(chunk)
+            if not size:
+                raise HTTPException(status_code=400, detail="媒体文件为空")
+            return await run_in_threadpool(create_assist_task, _task_service(), PROJECTS_ROOT, path, source_language, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await media.close()
+
+
+@app.get("/api/qwen-assist/asr/{task_id}")
+def qwen_assist_asr_status(task_id: str) -> dict[str, Any]:
+    try:
+        return assist_status(_task_service(), PROJECTS_ROOT, task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="初次听写任务不存在") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _qwen_asr_material(payload: QwenAssistPayload) -> dict[str, str]:
+    row = qwen_assist_asr_status(str(payload.asr_task_id or ""))
+    if "transcript" not in row:
+        raise HTTPException(status_code=409, detail="初次听写尚未完成")
+    settings = load_settings()
+    return generation_material(row["transcript"], payload.source_language, payload.user_prompt,
+        not str(settings.get("qwen_cloud_model", "")).startswith("qwen3-asr-flash-filetrans"))
+
+
+@app.post("/api/qwen-assist/external")
+def export_qwen_assist_material(payload: QwenAssistPayload) -> dict[str, str]:
+    return {"package": _qwen_asr_material(payload)["package"]}
+
+
 @app.post("/api/qwen-assist")
 def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]:
     settings = load_settings(include_secret=True)
@@ -1799,6 +1857,10 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
 4. 每个热词应是真实词语；中文等非 ASCII 热词不超过 15 字，纯拉丁热词不超过 7 个单词。
 5. {"当前 Qwen 模型不支持即时热词，hotwords 必须输出空数组。" if not supports_hotwords else "当前 Qwen 模型支持即时热词。"}
 6. 不要输出解释、Markdown 或额外字段。"""
+    model_input = payload.user_prompt.strip()
+    if payload.asr_task_id:
+        material = _qwen_asr_material(payload)
+        system_prompt, model_input = material["instructions"], material["input"]
     try:
         result: dict[str, Any] | None = None
         last_stage_error: ModelGatewayError | None = None
@@ -1810,7 +1872,7 @@ def fill_qwen_transcription_fields(payload: QwenAssistPayload) -> dict[str, Any]
                     auth_mode=str(settings.get("translation_api_auth_mode", "bearer")),
                     model=assist_model,
                     system_prompt=system_prompt,
-                    groups=[{"user_prompt": payload.user_prompt.strip()}],
+                    groups=[{"user_prompt": model_input}],
                     timeout=min(300, int(settings.get("translation_api_timeout_seconds", 300))),
                     thinking_mode=thinking_mode,
                     reasoning_effort="low",

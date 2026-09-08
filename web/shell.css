@@ -21,6 +21,9 @@
   vector-effect: non-scaling-stroke;
 }
 
+/* Keep shared navigation anchored when page content gains or loses a scrollbar. */
+html:has(body > .app-header) { scrollbar-gutter: stable; }
+
 body > .app-header {
   width: 100%;
   height: 64px;

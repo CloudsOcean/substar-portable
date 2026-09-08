@@ -66,22 +66,49 @@ class LiveProgressProjectionTests(unittest.TestCase):
         self.assertEqual(row["responses"], 1)
         self.assertEqual(row["accepted"], 1)
 
-    def test_semantic_grouping_maps_from_half_to_ninety_five_percent(self) -> None:
+    def test_semantic_grouping_maps_from_thirty_three_to_ninety_five_percent(self) -> None:
         transcription = {"state": "succeeded", "progress": 1.0}
         base = subtitle_creation_projection(
             transcription=transcription,
-            segmentation={"state": "running", "progress": 0.230769},
+            segmentation={"state": "running", "progress": 0.0},
             editor_ready=False,
             cancel_requested=False,
         )
         complete = subtitle_creation_projection(
             transcription=transcription,
-            segmentation={"state": "running", "progress": 0.923077},
+            segmentation={"state": "running", "progress": 0.62 / 0.67},
             editor_ready=False,
             cancel_requested=False,
         )
-        self.assertAlmostEqual(base["progress"], 0.5, places=5)
+        self.assertAlmostEqual(base["progress"], 0.33, places=5)
         self.assertAlmostEqual(complete["progress"], 0.95, places=5)
+
+    def test_asr_and_cancelled_asr_use_same_total_scale(self) -> None:
+        for state, cancelled in [("running", False), ("cancelled", True), ("failed", False)]:
+            with self.subTest(state=state):
+                result = subtitle_creation_projection(
+                    transcription={"state": state, "progress": 0.5},
+                    segmentation={"state": "queued", "progress": 0.0},
+                    editor_ready=False, cancel_requested=cancelled,
+                )
+                self.assertAlmostEqual(result["progress"], 0.165)
+
+    def test_ten_of_eleven_blocks_is_about_eighty_nine_percent_overall(self) -> None:
+        for state in ["running", "failed", "cancelled"]:
+            result = subtitle_creation_projection(
+                transcription={"state": "succeeded", "progress": 1.0},
+                segmentation={"state": state, "progress": (0.62 / 0.67) * (10 / 11)},
+                editor_ready=False, cancel_requested=False,
+            )
+            self.assertAlmostEqual(result["progress"], 0.33 + 0.62 * 10 / 11)
+
+    def test_unpublished_result_never_reaches_one_hundred_percent(self) -> None:
+        result = subtitle_creation_projection(
+            transcription={"state": "succeeded", "progress": 1.0},
+            segmentation={"state": "running", "progress": 1.0},
+            editor_ready=False, cancel_requested=False,
+        )
+        self.assertEqual(result["progress"], 0.99)
 
 
 if __name__ == "__main__":

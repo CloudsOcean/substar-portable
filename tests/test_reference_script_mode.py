@@ -293,7 +293,7 @@ def test_reference_insertion_after_boundary_belongs_to_right_cue() -> None:
     assert report["insertions"][0]["placement"] == "right"
 
 
-def test_reference_phrase_rewrite_is_suggested_without_overwriting_asr() -> None:
+def test_reference_phrase_with_two_local_anchors_replaces_asr() -> None:
     material, breaks, report = materialize_reference_script(
         "快速进攻梁地。",
         _asr_units("快速支援梁地。"),
@@ -306,15 +306,9 @@ def test_reference_phrase_rewrite_is_suggested_without_overwriting_asr() -> None
         reference_report=report,
     )
 
-    assert _cue_texts(document) == ["快速支援梁地。"]
-    suggestions = [
-        item for item in report["replacements"]
-        if item.get("status") == "suggested"
-    ]
-    assert [(item["before"], item["after"]) for item in suggestions] == [
-        ("支", "进"),
-        ("援", "攻"),
-    ]
+    assert _cue_texts(document) == ["快速进攻梁地。"]
+    assert [(item["before"], item["after"]) for item in report["replacements"]
+            if item["status"] == "applied"] == [("支", "进"), ("援", "攻")]
 
 
 def test_repeated_reference_correction_resolves_name_inside_unequal_phrase() -> None:
@@ -356,7 +350,9 @@ def test_repeated_reference_correction_resolves_name_inside_unequal_phrase() -> 
         ("雄", "熊", 3),
     ]
     assert "杨雄" not in "".join(_cue_texts(document))
-    assert "而在杨熊的视角里" in "".join(_cue_texts(document))
+    active = {token.token_id: token.text for token in document.display_tokens if token.state.value == "active"}
+    assert "而在杨熊的视角里" in "".join(active.get(token_id, "") for cue in document.cues for token_id in cue.display_token_ids)
+    assert any(token.text == "眼" and token.state.value == "deleted" for token in document.display_tokens)
 
 
 def test_conflicting_reference_corrections_do_not_form_document_consensus() -> None:

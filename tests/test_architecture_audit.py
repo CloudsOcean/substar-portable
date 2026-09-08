@@ -23,6 +23,18 @@ def op(doc,kind,payload,id='edit'):
     return {'operation_id':id,'type':kind,'payload':payload}
 
 
+def test_segmentation_rebuild_stores_complete_checkpoint(tmp_path):
+    import sqlite3
+    store = ProjectStore.create(tmp_path/'project', project_id='audit')
+    initial = store.save(document(), provenance=ChangeProvenance(ChangeKind.IMPORT, 'init'))
+    rebuilt = document(8)
+    saved = store.save(rebuilt, provenance=ChangeProvenance(ChangeKind.IMPORT, 'segmentation_rebuild'), expected_revision_id=initial.revision_id)
+    with sqlite3.connect(tmp_path/'project'/'project.sqlite3') as connection:
+        row = connection.execute('SELECT snapshot_blob, patch_blob FROM revisions WHERE revision_id=?', (saved.revision_id,)).fetchone()
+    assert row[0] is not None and row[1] is None
+    assert store.load_latest().document.content_hash() == rebuilt.content_hash()
+
+
 def test_deleted_cue_survives_translation():
     doc=document()
     doc=apply_document_operation(doc,op(doc,'delete',{'cue_ids':[doc.cues[0].cue_id]}))

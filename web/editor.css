@@ -101,6 +101,7 @@ body.editor-shell {
 .editor-command-popover.compact { min-width: 138px; display: grid; gap: 6px; }
 .export-menu.disabled { opacity: .36; pointer-events: none; }
 .export-popover { right: 0; left: auto; min-width: 132px; }
+.import-popover button,
 .export-popover button { width: 100%; justify-content: flex-start; }
 .command-right-zone .editor-command-link { min-width: 42px; justify-content: center; white-space: nowrap; }
 .revision-menu-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #252a34; }

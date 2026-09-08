@@ -25,10 +25,10 @@
     followPlayback:false,
     subtitlePolicy:{
       englishHardLimit:55,
-      chineseHardLimit:25,
+      chineseHardLimit:28,
       mixedHardLimit:25,
-      japaneseHardLimit:25,
-      koreanHardLimit:32,
+      japaneseHardLimit:32,
+      koreanHardLimit:40,
       sourceLanguage:"Auto",
       sourceHardLimit:null,
       targetHardLimit:null,
@@ -179,7 +179,7 @@
     const terminalSuccess = ["succeeded", "succeeded_with_issues"].includes(
       state.editorAiTask?.state
     );
-    if ((locked || terminalSuccess) && state.editorAiTask && genericTaskOwnsPanel) {
+    if ((locked || terminalSuccess || state.editorAiTask?.state === "failed") && state.editorAiTask && genericTaskOwnsPanel) {
       const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
         state.editorAiTask.kind
       ] || "AI 任务";
@@ -1434,7 +1434,7 @@
     const progress = Math.max(0, Math.min(100, Number(task?.progress || 0) * 100));
     $("#translationProgressBar").style.width = `${progress}%`;
     renderAiProgress(
-      task?.ai_progress,
+      task?.state === "failed" ? null : task?.ai_progress,
       progress,
       task?.display_error || task?.error?.message || task?.message || "等待启动",
       task?.problem_cue_ids || []
@@ -1492,6 +1492,15 @@
     state.failedTaskKind = kind === "translation" ? "translation" : "calibration";
     const options = state.llmOptions?.options || [];
     const select = $("#failedTaskModel");
+    // Polling must preserve the model choice and an in-flight retry's disabled button.
+    const recoveryKey = JSON.stringify([
+      state.failedTaskKind,
+      kind === "translation" ? state.translationTask?.task_id : state.editorAiTask?.task_id,
+      options,
+      state.llmOptions?.effective_provider_id
+    ]);
+    if (select.dataset.recoveryKey === recoveryKey) return;
+    select.dataset.recoveryKey = recoveryKey;
     select.replaceChildren(...options.map((item, index) => {
       const option = document.createElement("option");
       option.value = item.provider_id;
@@ -1736,10 +1745,10 @@
   function applySubtitlePolicy(settings = {}) {
     state.subtitlePolicy = {
       englishHardLimit:Number(settings.english_hard_limit ?? 55),
-      chineseHardLimit:Number(settings.chinese_hard_limit ?? 25),
+      chineseHardLimit:Number(settings.chinese_hard_limit ?? 28),
       mixedHardLimit:Number(settings.mixed_hard_limit ?? 25),
-      japaneseHardLimit:Number(settings.japanese_hard_limit ?? 25),
-      koreanHardLimit:Number(settings.korean_hard_limit ?? 32),
+      japaneseHardLimit:Number(settings.japanese_hard_limit ?? 32),
+      koreanHardLimit:Number(settings.korean_hard_limit ?? 40),
       sourceLanguage:String(settings.language || "Auto"),
       sourceHardLimit:Number.isFinite(Number(settings.source_hard_limit)) ? Number(settings.source_hard_limit) : null,
       targetHardLimit:Number.isFinite(Number(settings.target_hard_limit)) ? Number(settings.target_hard_limit) : null,
@@ -4373,7 +4382,110 @@
   ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"].forEach(selector => {
     $(selector).onclick = event => convertScript(event.currentTarget.dataset.scriptTarget);
   });
-  $("#importProject").onclick = () => $("#importProjectInput").click();
+  $("#importProject").onclick = event => {
+    event.preventDefault();
+    const menu = $("#importMenu");
+    const opening = !menu.open;
+    if (opening) {
+      document.querySelectorAll(".editor-command-menu[open]").forEach(other => {
+        if (other !== menu) other.open = false;
+      });
+    }
+    menu.open = opening;
+  };
+  $("#importProjectPackage").onclick = () => {
+    $("#importMenu").open = false;
+    $("#importProjectInput").click();
+  };
+  let srtImport = null;
+  let srtPreviewSequence = 0;
+  const closeSrtImport = () => {
+    srtImport = null;
+    srtPreviewSequence += 1;
+    $("#srtImportDialog").classList.add("hidden");
+  };
+  const previewSrtImport = async () => {
+    const session = srtImport;
+    if (!session || session.projectId !== state.projectId) return closeSrtImport();
+    const sequence = ++srtPreviewSequence;
+    $("#applySrtImport").disabled = true;
+    $("#srtImportSummary").textContent = "正在匹配…";
+    $("#srtImportRows").replaceChildren();
+    try {
+      const saved = await ensureOperationQueue().flushAndWait();
+      if (session !== srtImport || sequence !== srtPreviewSequence) return;
+      const request = {text:session.text, format:$("#srtImportFormat").value,
+        expected_revision_id:saved.revision_id, request_id:crypto.randomUUID()};
+      const result = await api(`/api/projects/${encodeURIComponent(session.projectId)}/import-srt-translation`, {
+        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(request)
+      });
+      if (session !== srtImport || sequence !== srtPreviewSequence) return;
+      session.request = request;
+      const labels = {source:"原文单行", target:"译文单行", "ab-single":"双语单行", "ab-double":"双语双行"};
+      $("#srtImportSummary").textContent = `${labels[result.format]} · 可导入 ${result.matched} 条 · 跳过 ${result.skipped} 条 · 覆盖已有译文 ${result.overwrites} 条`;
+      const fragment = document.createDocumentFragment();
+      result.rows.forEach(row => {
+        const item = document.createElement("p");
+        item.textContent = `${row.number} · ${row.importable ? (row.overwrite ? "覆盖译文" : "导入译文") : row.reason}\n${row.target || row.text}`;
+        fragment.append(item);
+      });
+      $("#srtImportRows").append(fragment);
+      $("#applySrtImport").disabled = !result.matched;
+    } catch (error) {
+      if (session === srtImport && sequence === srtPreviewSequence) $("#srtImportSummary").textContent = error.message;
+    }
+  };
+  $("#importSrtTranslation").onclick = () => {
+    $("#importMenu").open = false;
+    if (!state.revision || state.operationPending) return ordinaryError("请先打开项目并等待当前操作完成");
+    $("#importSrtInput").click();
+  };
+  $("#importSrtInput").onchange = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const epoch = projectEpoch;
+    try {
+      if (file.size > 5_000_000) throw new Error("SRT 文件不能超过 5 MB");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const encoding = bytes[0] === 255 && bytes[1] === 254 ? "utf-16le" : bytes[0] === 254 && bytes[1] === 255 ? "utf-16be" : "utf-8";
+      const text = new TextDecoder(encoding, {fatal:true}).decode(bytes);
+      if (epoch !== projectEpoch) return;
+      srtImport = {text, projectId:state.projectId};
+      $("#srtImportFormat").value = "auto";
+      $("#srtImportDialog").classList.remove("hidden");
+      await previewSrtImport();
+    } catch (error) { ordinaryError(`读取 SRT 失败：${error.message}`); }
+  };
+  $("#cancelSrtImport").onclick = closeSrtImport;
+  $("#previewSrtImport").onclick = previewSrtImport;
+  $("#srtImportFormat").onchange = previewSrtImport;
+  $("#applySrtImport").onclick = async () => {
+    const session = srtImport;
+    if (!session?.request || session.projectId !== state.projectId || state.operationPending) return;
+    state.operationPending = true;
+    $("#applySrtImport").disabled = true;
+    $("#cancelSrtImport").disabled = true;
+    $("#previewSrtImport").disabled = true;
+    $("#srtImportFormat").disabled = true;
+    try {
+      const result = await api(`/api/projects/${encodeURIComponent(session.projectId)}/import-srt-translation`, {
+        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({...session.request, apply:true})
+      });
+      setRevision(result.revision);
+      recordCommittedRevision(state.revision, {kind:"import", operation:"srt_translation_import", metadata:{}});
+      closeSrtImport();
+    } catch (error) {
+      $("#srtImportSummary").textContent = `导入失败：${error.message}。可重试；项目变化时请重新匹配。`;
+      $("#applySrtImport").disabled = false;
+    } finally {
+      state.operationPending = false;
+      $("#cancelSrtImport").disabled = false;
+      $("#previewSrtImport").disabled = false;
+      $("#srtImportFormat").disabled = false;
+      renderHeader();
+    }
+  };
   $("#importProjectInput").onchange = async event => {
     const file = event.target.files?.[0];
     event.target.value = "";

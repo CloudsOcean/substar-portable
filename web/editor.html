@@ -9,14 +9,15 @@
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
   <link rel="stylesheet" href="/assets/editor.css?v=20260907-crisp-2">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
-  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260907-crisp-2">
+  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
 </head>
 <body class="editor-shell">
   <div class="editor-command-bar">
     <div class="command-project-zone">
       <details id="projectMenu" class="editor-command-menu"><summary>项目</summary><div class="editor-command-popover project-popover"><span class="project-list-heading">编辑项目</span><div id="projectList" class="project-list" role="listbox" aria-label="编辑项目"><span class="project-list-empty">读取项目…</span></div></div></details>
-      <button id="importProject" type="button">导入</button><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
+      <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importProjectPackage" type="button">字幕工程</button><button id="importSrtTranslation" type="button">SRT 译文轨道</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
+      <input id="importSrtInput" type="file" accept=".srt,application/x-subrip" hidden>
       <details id="taskInfoMenu" class="editor-command-menu task-info-menu disabled">
         <summary id="taskInfo" aria-disabled="true">任务信息</summary>
         <form id="taskInfoForm" class="editor-command-popover task-info-popover" aria-labelledby="taskInfoTitle">
@@ -242,6 +243,17 @@
     </section>
   </div>
 
+  <div id="srtImportDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="srtImportTitle">
+    <section class="text-dialog" style="width:min(820px,94vw)">
+      <strong id="srtImportTitle">导入 SRT 译文轨道</strong>
+      <p>按时间轴匹配当前字幕，仅写入译文。轨道内夹杂的其他语言完整保留。</p>
+      <label>文件格式<select id="srtImportFormat"><option value="auto">自动识别</option><option value="source">原文单行</option><option value="target">译文单行</option><option value="ab-single">双语单行</option><option value="ab-double">双语双行</option></select></label>
+      <p id="srtImportSummary" role="status"></p>
+      <div id="srtImportRows" style="max-height:45vh;overflow:auto;white-space:pre-wrap"></div>
+      <div><button id="cancelSrtImport" type="button">取消</button><button id="previewSrtImport" type="button">重新匹配</button><button id="applySrtImport" class="primary" type="button" disabled>确认导入匹配项</button></div>
+    </section>
+  </div>
+
   <div id="textDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true">
     <form id="textDialogForm" class="text-dialog">
       <strong id="textDialogTitle">编辑文字</strong>
@@ -296,6 +308,6 @@
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2"></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-<script src="/assets/editor.js?v=20260907-crisp-2"></script>
+<script src="/assets/editor.js?v=20260908-task-failure-1"></script>
 </body>
 </html>

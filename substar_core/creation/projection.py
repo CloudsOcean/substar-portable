@@ -85,9 +85,14 @@ def subtitle_creation_projection(
             ),
             "error": "",
         }
-    progress = max(
-        float(transcription.get("progress", 0.0)) * 0.35,
-        min(0.99, 0.35 + float(segmentation.get("progress", 0.0)) * 0.65),
+    # One project-wide scale, including interrupted and cancelled states.
+    # ASR owns 0-33%; segmentation owns 33-99%; readiness alone grants 100%.
+    asr_progress = max(0.0, min(1.0, float(transcription.get("progress", 0.0))))
+    split_progress = max(0.0, min(1.0, float(segmentation.get("progress", 0.0))))
+    progress = (
+        min(0.99, 0.33 + split_progress * 0.67)
+        if transcription_state in _SUCCESS_STATES
+        else asr_progress * 0.33
     )
     if cancel_requested or "cancelling" in {transcription_state, segmentation_state}:
         finished = (
@@ -103,20 +108,20 @@ def subtitle_creation_projection(
     for task, label in ((transcription, "听写"), (segmentation, "字幕切分")):
         state = str(task.get("state", ""))
         if state in {"failed", "interrupted"}:
-            return {"status": state, "progress": float(task.get("progress", 0.0)), "message": f"{label}未完成", "error": _error_message(task)}
+            return {"status": state, "progress": progress, "message": f"{label}未完成", "error": _error_message(task)}
         if state == "cancelled":
-            return {"status": "cancelled", "progress": float(task.get("progress", 0.0)), "message": "任务已取消，项目文件已保留", "error": ""}
+            return {"status": "cancelled", "progress": progress, "message": "任务已取消，项目文件已保留", "error": ""}
     if transcription_state not in _SUCCESS_STATES:
         return {
             "status": "queued" if transcription_state == "queued" else "running",
-            "progress": float(transcription.get("progress", 0.0)) * 0.35,
+            "progress": progress,
             "message": str(transcription.get("progress_message") or "正在生成词级听写证据"),
             "error": "",
         }
     if segmentation_state not in _SUCCESS_STATES:
         return {
             "status": "queued" if segmentation_state == "queued" else "running",
-            "progress": min(0.99, 0.35 + float(segmentation.get("progress", 0.0)) * 0.65),
+            "progress": progress,
             "message": str(segmentation.get("progress_message") or "正在生成可编辑字幕草稿"),
             "error": "",
         }

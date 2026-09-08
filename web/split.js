@@ -1,6 +1,7 @@
 (() => {
   "use strict";
 
+  let asrAssist;
   const $ = (selector) => document.querySelector(selector);
   const SPLIT_WORKFLOWS = new Set(["subtitle_creation"]);
   const QUEUE_WORKFLOWS = new Set(["subtitle_creation", "editor_task"]);
@@ -370,7 +371,7 @@
       status.classList.add("bad");
     } finally {
       button.disabled = false;
-      button.textContent = "AI 智能填写";
+      button.textContent = "直接生成";
     }
   }
 
@@ -830,12 +831,12 @@
     // project glossary after the selector has been removed from the UI.
     $("#glossaryInput").value = "";
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
-    $("#chineseLimitInput").value = effective.chinese_hard_limit || 25;
+    $("#chineseLimitInput").value = effective.chinese_hard_limit || 28;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
     $("#languageRatioThresholdInput").value = effective.language_ratio_threshold_percent ?? 20;
     syncLanguageRatioThreshold();
-    $("#japaneseLimitInput").value = effective.japanese_hard_limit || 25;
-    $("#koreanLimitInput").value = effective.korean_hard_limit || 32;
+    $("#japaneseLimitInput").value = effective.japanese_hard_limit || 32;
+    $("#koreanLimitInput").value = effective.korean_hard_limit || 40;
     $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
     $("#qwenPromptInput").value = effective.context || "";
     $("#qwenHotwordsInput").value = formatTemporaryHotwords(effective.qwen_temporary_hotwords || []);
@@ -891,9 +892,12 @@
   }
 
   function normalizedProgress(job) {
-    const value = Number(job.ai_progress?.progress ?? job.progress ?? 0);
+    const value = Number(job.workflow_mode === "subtitle_creation"
+      ? job.progress ?? 0
+      : job.ai_progress?.progress ?? job.progress ?? 0);
     const stored = value <= 1 ? value * 100 : value;
-    return Math.max(0, Math.min(100, Math.round(stored)));
+    const ceiling = job.workflow_mode === "subtitle_creation" && !["awaiting_edit", "completed"].includes(job.status) ? 99 : 100;
+    return Math.max(0, Math.min(ceiling, Math.round(stored)));
   }
 
   function humanStatus(job) {
@@ -924,6 +928,9 @@
   });
 
   function taskPhase(job) {
+    if (job.workflow_mode === "subtitle_creation") {
+      return job.ai_progress ? `字幕切分 · ${job.message || "处理中"}` : humanStatus(job);
+    }
     return window.SubstarAiProgressSummary?.format(job.ai_progress, {
       problemCueIds: job.problem_cue_ids || [],
     }) || String(job.ai_progress?.message || "")
@@ -987,6 +994,7 @@
   }
 
   function validateForm() {
+    asrAssist?.sync();
     const referenceMode = $("#splitWorkflowInput").value === "reference_script";
     const symbols = $("#referenceBreakSymbolsInput").value.replace(/\s/g, "");
     const valid = state.videos.length > 0
@@ -1693,6 +1701,29 @@
   }
   $("#qwenPromptInput").addEventListener("input", syncQwenEnhancementCounts);
   $("#qwenHotwordsInput").addEventListener("input", syncQwenEnhancementCounts);
+  asrAssist = window.SubstarAsrAssist.init({
+    api, getFiles:() => state.videos, getSettings:() => state.settings,
+    apply(generated) {
+      if (typeof generated.prompt !== "string" || !generated.prompt.trim() || generated.prompt.length > 400) throw new Error("Prompt 必须为 1–400 字符。");
+      if (!Array.isArray(generated.hotwords)) throw new Error("hotwords 必须是数组。");
+      for (const word of generated.hotwords) {
+        if (!word || typeof word !== "object") throw new Error("每个热词必须包含 text 和 weight。");
+        if (typeof word.text !== "string" || !word.text.trim() || !Number.isInteger(word.weight) || ![1,2,3,4,5,50].includes(word.weight)) throw new Error("热词格式无效：text 必须为文字，weight 为 1–5 或 50。");
+      }
+      for (const word of generated.hotwords) {
+        if (/[\r\n]/.test(word.text) || (/[^\x00-\x7f]/.test(word.text) ? [...word.text].length > 15 : word.text.trim().split(/\s+/).length > 7)) throw new Error("热词不能换行；中文等热词最多 15 字，拉丁热词最多 7 个单词。");
+      }
+      const rows = parseTemporaryHotwords(formatTemporaryHotwords(generated.hotwords));
+      const merged = new Map(parseTemporaryHotwords().map(item => [item.text.toLocaleLowerCase(), item]));
+      for (const item of rows) if (!merged.has(item.text.toLocaleLowerCase())) merged.set(item.text.toLocaleLowerCase(), item);
+      const text = formatTemporaryHotwords([...merged.values()]);
+      parseTemporaryHotwords(text);
+      $("#qwenPromptInput").value = generated.prompt.trim();
+      $("#qwenHotwordsInput").value = $("#qwenHotwordsInput").disabled ? "" : text;
+      syncQwenEnhancementCounts();
+      markSettingsDirty();
+    },
+  });
   $("#qwenAssistButton").addEventListener("click", fillQwenEnhancement);
   $("#startButton").addEventListener("click", runPipeline);
   $("#refreshJobsButton").addEventListener("click", refreshJobs);

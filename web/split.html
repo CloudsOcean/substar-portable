@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260907-crisp-2">
-  <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
+  <link rel="stylesheet" href="/assets/split.css?v=20260908-asr-actions-2">
+  <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
-  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260907-crisp-2">
+  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
 </head>
 <body>
@@ -112,7 +112,18 @@
               </label>
               <div class="qwen-assist-row">
                 <span id="qwenAssistStatus" aria-live="polite"></span>
-                <button id="qwenAssistButton" class="primary-button qwen-assist-button" type="button">AI 智能填写</button>
+                <button id="asrAssistCancel" class="text-button" type="button" hidden>取消听写</button>
+                <div class="qwen-assist-actions">
+                  <button id="qwenAssistButton" class="primary-button qwen-assist-button" type="button">直接生成</button>
+                  <div class="asr-assist-menu">
+                    <button id="asrAssistButton" class="primary-button qwen-assist-button" type="button" aria-expanded="false" aria-controls="asrAssistChoices" disabled>根据听写结果生成 ▾</button>
+                    <div id="asrAssistChoices" class="creation-tutorial-menu" hidden>
+                      <button type="button" data-asr-assist="internal">使用内置模型生成</button>
+                      <button type="button" data-asr-assist="external">提交外部模型生成</button>
+                      <button type="button" data-asr-assist="open">打开填写界面</button>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div class="qwen-output-grid">
                 <label class="qwen-field">
@@ -137,10 +148,10 @@
                 <small>其他语言占比不超过该值时按主要语言处理；超过时按混合处理</small>
               </label>
               <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
-              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
-              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="25"><em>字符</em></div></label>
+              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="28"><em>字符</em></div></label>
+              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="32"><em>字符</em></div></label>
               <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
-              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="32"><em>字符</em></div></label>
+              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="40"><em>字符</em></div></label>
             </div>
           </details>
 
@@ -227,6 +238,14 @@
     </section>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="asrAssistExternal" class="asr-assist-external">
+    <header><strong>提交外部模型生成</strong><button id="asrAssistClose" class="text-button" type="button" aria-label="关闭">×</button></header>
+    <label>ASR 文本与生成要求<textarea id="asrAssistPackage" rows="9" readonly></textarea></label>
+    <button id="asrAssistCopy" class="secondary-button" type="button">复制内容包</button>
+    <label>粘贴外部模型返回的 JSON<textarea id="asrAssistResult" rows="6" placeholder='{"prompt":"…","hotwords":[{"text":"…","weight":5}]}'></textarea></label>
+    <div id="asrAssistImportStatus" role="status"></div>
+    <footer><button id="asrAssistApply" class="primary-button" type="button">填入 Prompt 和热词</button></footer>
+  </dialog>
   <div id="renameProjectDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="renameProjectTitle">
     <form id="renameProjectForm" class="text-dialog">
       <strong id="renameProjectTitle">重命名项目</strong>
@@ -236,6 +255,7 @@
   </div>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2" defer></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-<script src="/assets/split.js?v=20260907-crisp-2" defer></script>
+<script src="/assets/asr_assist.js?v=20260908-open-form-1" defer></script>
+  <script src="/assets/split.js?v=20260908-asr-actions-2" defer></script>
 </body>
 </html>

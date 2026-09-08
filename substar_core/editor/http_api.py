@@ -1942,9 +1942,12 @@ async def match_project_reference_manuscript(
     payload = await file.read(50 * 1024 * 1024 + 1)
     if len(payload) > 50 * 1024 * 1024:
         raise HTTPException(status_code=413, detail={"code": "reference_too_large", "message": "参考文稿不能超过 50 MB"})
-    active_ids = {token_id for cue in latest.document.cues if cue.state.value == "active" for token_id in cue.display_token_ids}
-    active_tokens = [token for token in latest.document.display_tokens if token.state.value == "active" and token.token_id in active_ids]
-    units = [{"index": index, "text": token.text} for index, token in enumerate(active_tokens)]
+    token_by_id = {token.token_id: token for token in latest.document.display_tokens}
+    active_tokens = [token_by_id[token_id] for cue in latest.document.cues if cue.state.value == "active"
+                     for token_id in cue.display_token_ids if token_by_id[token_id].state.value == "active"]
+    cue_by_token = {token_id: cue.cue_id for cue in latest.document.cues for token_id in cue.display_token_ids}
+    units = [{"index": index, "text": token.text, "cue_id": cue_by_token[token.token_id]}
+             for index, token in enumerate(active_tokens)]
     configured_language = "Auto"
     try:
         configured_language = str(get_project_task_info(project_id).get("language") or "Auto")
@@ -1960,73 +1963,25 @@ async def match_project_reference_manuscript(
         result = await match_reference(payload, file.filename or "reference.txt", units, source_language, request)
     except (ManuscriptMatchError, ValueError) as exc:
         raise HTTPException(status_code=422, detail={"code": "reference_match_failed", "message": str(exc)}) from exc
-    replacements = []
-    for edit in result.get("edits", []):
-        index = int(edit.get("index", -1))
-        text = str(edit.get("text", "")).strip()
-        if 0 <= index < len(active_tokens) and text and text != active_tokens[index].text:
-            replacements.append(BatchReplacement(
-                token_id=active_tokens[index].token_id,
-                text=text,
-                expected_text=active_tokens[index].text,
-            ))
-    reference_changes = []
-    for raw in result.get("reference_changes", []):
-        source_indices = [
-            int(value) for value in raw.get("source_indices", [])
-            if 0 <= int(value) < len(active_tokens)
-        ]
-        token_ids = [active_tokens[index].token_id for index in source_indices]
-        if not token_ids:
-            continue
-        reference_changes.append({
-            "change_id": str(raw.get("id", f"reference-{len(reference_changes)}")),
-            "type": str(raw.get("type", "replace")),
-            "token_ids": token_ids,
-            "source_indexes": source_indices,
-            "before": str(raw.get("original", "")),
-            "after": str(raw.get("text", "")),
-            "status": str(raw.get("status", "applied")),
-        })
-    reference_metadata = {
-        "filename": file.filename or "reference.txt",
-        "authority": "reference_assisted",
-        "requires_review": bool(result.get("requires_review")),
-        "similarity": result.get("similarity"),
-        "reference_changes": reference_changes,
-        "retained_source_count": sum(
-            1 for item in reference_changes if item["type"] == "retained_source"
-        ),
-    }
-    if not replacements:
-        if not reference_changes:
-            return {"revision": latest.to_dict(), "match": result, "applied": 0}
-        provenance = ChangeProvenance(
-            kind=ChangeKind.IMPORT,
-            operation="reference_manuscript_apply",
-            actor="reference-manuscript",
-            metadata={**reference_metadata, "replacement_count": 0},
-        )
-        document = replace(
-            latest.document,
-            changes=(*latest.document.changes, provenance),
-        )
-        revision = _save_document(
-            project_id,
-            expected_revision_id=latest.revision_id,
-            document=document,
-            operation="reference_manuscript_apply",
-            provenance=provenance,
-        )
-        return {"revision": revision, "match": result, "applied": 0}
-    revision = batch_replace_project(project_id, BatchReplaceRequest(
-        expected_revision_id=latest.revision_id,
-        operation_id=f"op_reference_{latest.revision_id}",
-        replacements=replacements,
-        origin="reference_manuscript",
-        metadata=reference_metadata,
-    ))
-    return {"revision": revision, "match": result, "applied": len(replacements)}
+    from substar_core.segmentation.document_builder import apply_reference_report
+    report = result["report"]
+    if not any(report.get(key) for key in ("replacements", "merges", "insertions", "retained_source")) and not any(
+        token.state.value == "deleted" and token.provenance.operation == "reference_manuscript_insert"
+        for token in latest.document.display_tokens
+    ):
+        return {"revision": latest.to_dict(), "match": result, "applied": 0}
+    document = apply_reference_report(
+        latest.document, report, {index: token.token_id for index, token in enumerate(active_tokens)},
+        operation_prefix=f"reference_{latest.revision_id}",
+    )
+    provenance = document.changes[-1]
+    revision = _save_document(
+        project_id, expected_revision_id=latest.revision_id, document=document,
+        operation="reference_manuscript_apply", provenance=provenance,
+    )
+    return {"revision": revision, "match": result,
+            "applied": len(report["replacements"]) + len(report["merges"])}
+
 
 
 
@@ -2524,6 +2479,33 @@ async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[
         upload_path.unlink(missing_ok=True)
         await file.close()
     return {"schema_version": "substar.subtitle-project-import.v1", "project_id": project_id}
+
+
+class SrtTranslationImportPayload(BaseModel):
+    text: str = Field(max_length=5_000_000)
+    format: Literal['auto', 'source', 'target', 'ab-single', 'ab-double'] = 'auto'
+    expected_revision_id: str
+    request_id: str = Field(min_length=1, max_length=100)
+    apply: bool = False
+
+
+@router.post('/projects/{project_id}/import-srt-translation')
+def import_srt_translation(project_id: str, payload: SrtTranslationImportPayload):
+    from substar_core.editor.application.srt_import import preview_srt, import_srt
+    store = open_project_store(project_id)
+    try:
+        if payload.apply:
+            revision = import_srt(store, text=payload.text, mode=payload.format,
+                                  expected_revision_id=payload.expected_revision_id, request_id=payload.request_id)
+            return {'revision': revision_payload(revision)}
+        latest = store.load_latest()
+        if latest is None or latest.revision_id != payload.expected_revision_id:
+            raise ProjectConflictError('项目已变化，请重新预览')
+        return preview_srt(latest.document, payload.text, payload.format)
+    except ProjectConflictError as exc:
+        raise HTTPException(status_code=409, detail={'message': str(exc)}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={'message': str(exc)}) from exc
 
 
 

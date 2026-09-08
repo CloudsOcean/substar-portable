@@ -626,8 +626,24 @@ html[data-theme] :is(.editor-tool-sidebar .tool-locator-row span,.editor-tool-si
 html[data-theme] .editor-tool-sidebar .tool-accordion { border-color:var(--theme-line) !important; }
 html[data-theme] .editor-preview-pane { background:var(--theme-bg) !important; }
 html[data-theme] .editor-preview-pane .preview-heading { color:var(--theme-text) !important; }
-html[data-theme] .source-token-line.virtual-line .display-token { background:transparent !important; }
+html[data-theme] .source-token-line.virtual-line .display-token:not(.tone-light-blue) { background:transparent !important; }
+/* Calibration is document information, not a neutral control surface. */
+html[data-theme] .source-token-line.virtual-line .display-token.tone-light-blue {
+  background:rgba(41,137,194,.30) !important;
+}
+html[data-theme="light"] .source-token-line.virtual-line .display-token.tone-light-blue {
+  background:rgba(35,130,210,.19) !important;
+}
+html[data-theme] .source-token-line.virtual-line .display-token.tone-light-blue:hover {
+  background:rgba(41,137,194,.40) !important;
+}
+html[data-theme="light"] .source-token-line.virtual-line .display-token.tone-light-blue:hover {
+  background:rgba(35,130,210,.28) !important;
+}
 html[data-theme] .source-token-line.virtual-line .display-token.selected { background:color-mix(in srgb,var(--theme-accent) 15%,transparent) !important; }
+html[data-theme] .source-token-line.virtual-line .display-token.tone-light-blue.selected {
+  background:rgba(41,137,194,.40) !important;
+}
 
 /* Surface and state ownership. These rules change paint only, never geometry. */
 html[data-theme] {
@@ -870,7 +886,7 @@ html[data-surface="glass"][data-theme] :is(.recent-section,.editor-document-pane
 /* Readable controls and labels; Cue text retains the user's font-size setting. */
 html[data-theme] body { font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", system-ui, sans-serif; }
 html[data-theme] :is(.parameter-grid label > span,.fixed-model > span,.section-heading h2,.recent-head h2) { color:var(--theme-text) !important; }
-html[data-theme] :is(.parameter-grid label > span,.fixed-model > span,.recent-item strong,.main-nav a) { font-size:15px; }
+html[data-theme] :is(.parameter-grid label > span,.fixed-model > span,.recent-item strong,.app-nav a) { font-size:15px; }
 html[data-theme] :is(.parameter-grid label > small,.recent-item span,.reference-row strong em,.runtime-log-lines,.queue-job-detail span) { font-size:13px; color:var(--theme-muted) !important; }
 html[data-theme] :is(.recent-actions a,.recent-actions button,.recent-actions .export-menu > summary) { font-size:13px; }
 html[data-theme] :is(.pane-heading,.preview-heading,.timeline-heading,.tool-accordion > summary) { color:var(--theme-text); font-size:14px; }

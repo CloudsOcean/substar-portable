@@ -281,6 +281,13 @@ def _semantic_candidate(
                 document, report, reference_suggestions
             )
     notices = []
+    reference_report = reference_audit.get("report", {})
+    if reference_report.get("requires_review"):
+        notices.append({
+            "code": "reference_alignment_review", "block_id": "reference-manuscript",
+            "alignment_start": 0, "alignment_end": len(document.source_tokens) - 1,
+            "detail": "参考稿中未确定对应位置的文字已默认隐藏，请在编辑器中检查。",
+        })
     for row in raw_result.get("exceptions", []):
         if not isinstance(row, Mapping):
             continue
@@ -759,7 +766,7 @@ def run(command: WorkerCommand) -> int:
         emit(
             WorkerMessageType.PROGRESS,
             {"message": "Preparing immutable recognition input"},
-            progress=0.08,
+            progress=0.0,
             step="segmentation.input_prepare",
         )
         (
@@ -848,10 +855,9 @@ def run(command: WorkerCommand) -> int:
                 if signature == last_semantic_report:
                     return
                 last_semantic_report = signature
-                # In the project projection 0.230769 maps to 50%, while
-                # 0.923077 maps to 95%. Reserve the remainder for validation,
-                # document construction and atomic publication.
-                value = 0.230769 + 0.692308 * (completed / planned)
+                # Model blocks span project progress 33-95%; reserve the tail
+                # for validation, document construction and atomic publication.
+                value = (0.62 / 0.67) * (completed / planned)
                 emit(
                     WorkerMessageType.PROGRESS,
                     {
@@ -877,7 +883,7 @@ def run(command: WorkerCommand) -> int:
                 emit(
                     WorkerMessageType.PROGRESS,
                     {"message": "正在初始化语义切分"},
-                    progress=0.230769,
+                    progress=0.0,
                     step="segmentation.semantic_grouping",
                 )
                 try:
