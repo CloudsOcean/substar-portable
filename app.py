@@ -192,7 +192,7 @@ async def _application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Substar Workbench",
-    version="2.2.0",
+    version="2.2.1",
     lifespan=_application_lifespan,
 )
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()

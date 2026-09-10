@@ -90,3 +90,14 @@ test("ordinary translated tracks must still contain text", () => {
   };
   assert.throws(() => validateDocument(document), /target_text must be non-empty text/);
 });
+
+for (const status of ["translated", "needs_review"]) {
+  test(`intentional omitted filler is accepted for ${status} only with explicit metadata`, () => {
+    const document = documentWithGroupOrigin("segmentation");
+    document.cues[0].target = {target_text:"", language:"zh-CN", translation_status:status,
+      issue_code:"review", provenance:{...provenance(),metadata:{omitted_filler:true}}};
+    assert.doesNotThrow(() => validateDocument(document));
+    document.cues[0].target.provenance.metadata.omitted_filler = "true";
+    assert.throws(() => validateDocument(document), /non-empty/);
+  });
+}

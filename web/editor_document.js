@@ -103,10 +103,11 @@
   function validateTranslationTrack(value, label) {
     const target = requireObject(value, label);
     const status = String(target.translation_status || "translated");
+    const intentionalEmpty = target.target_text === "" && target.provenance?.metadata?.omitted_filler === true;
     if (status === "translated") {
-      requireText(target.target_text, `${label}.target_text`);
+      if (!intentionalEmpty) requireText(target.target_text, `${label}.target_text`);
     } else if (status === "needs_review") {
-      requireText(target.target_text, `${label}.target_text`);
+      if (!intentionalEmpty) requireText(target.target_text, `${label}.target_text`);
       requireText(target.issue_code, `${label}.issue_code`);
     } else if (status === "manual_required") {
       if (typeof target.target_text !== "string") {

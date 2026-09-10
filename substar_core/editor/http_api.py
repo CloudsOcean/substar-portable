@@ -372,6 +372,10 @@ def _collect_generated_hotwords(project_id: str, glossary_id: str) -> list[dict[
 def _project_document_payload(document: EditorDocument) -> dict[str, Any]:
     """Serialize one revision with its non-destructive script projection."""
     value = document.to_dict()
+    # Full model responses belong to the revision audit, not every display token.
+    # Only trim the detached browser projection; stored revisions stay intact.
+    for token in value.get("display_tokens", []):
+        token.get("provenance", {}).get("metadata", {}).pop("execution_blocks", None)
     target = document.properties.script_projection
     if target == "original":
         return value

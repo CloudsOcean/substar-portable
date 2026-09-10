@@ -706,7 +706,7 @@ def _apply_ai_calibration_operations(
             operation="ai_calibration_apply",
             actor="ai-calibration",
             metadata={
-                **dict(calibration_metadata),
+                **{key: value for key, value in calibration_metadata.items() if key != "execution_blocks"},
                 "replacement_count": len(replacements),
                 "merge_count": len(merge_actions),
             },
@@ -741,7 +741,7 @@ def _apply_ai_calibration_operations(
             operation="ai_calibration_merge",
             actor="ai-calibration",
             metadata={
-                **dict(calibration_metadata),
+                **{key: value for key, value in calibration_metadata.items() if key != "execution_blocks"},
                 "ai_calibration": calibration_record,
                 "affects_translation": True,
                 "evidence": list(action.get("evidence", [])),
