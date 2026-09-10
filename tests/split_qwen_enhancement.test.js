@@ -102,5 +102,6 @@ test("temporary hotword parser rejects unsupported numeric weights", () => {
 
 test("glossary hotwords are no longer injected invisibly into transcription", () => {
   assert.doesNotMatch(app, /hotwords = glossary_hotwords\(/);
-  assert.match(html, /接口已预留，暂不自动注入本次听写/);
+  assert.match(html, /id="glossaryInjectionPreview"/);
+  assert.match(html, /id="glossaryInjectionChoices"/);
 });

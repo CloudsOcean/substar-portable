@@ -209,7 +209,7 @@ flowchart LR
 
 | Module | Layer | Responsibility | Code | Inputs | Outputs | Calls |
 |---|---|---|---|---|---|---|
-| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/asr_assist.js`<br>`web/ai_progress_summary.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
+| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/asr_assist.js`<br>`web/glossary_injection.js`<br>`web/ai_progress_summary.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
 | `composition_root` | `api` | Own process startup, router composition, uploads, stable project identity, prompt-component HTTP boundaries and the project-creation facade. | `app.py`<br>`substar_core/asr_assist.py` | `project_creation_request`<br>`task_record`<br>`editor_revision`<br>`credential_reference`<br>`production_prompt_component` | `project_creation_projection`<br>`transcription_request`<br>`segmentation_request`<br>`production_prompt_component` | `creation_graph`<br>`creation_projection`<br>`runtime_api`<br>`editor_api`<br>`credential_store`<br>`model_stage_scheduler` |
 | `creation_graph` | `application` | Freeze prompt/reference snapshots and create transcription then segmentation tasks with an explicit dependency. | `substar_core/creation/graph.py` | `transcription_request`<br>`segmentation_request` | `task_record` | `task_service` |
 | `creation_projection` | `application` | Combine transcription, segmentation and ProjectStore facts into one UI-safe creation status. | `substar_core/creation/projection.py` | `task_record`<br>`editor_revision` | `project_creation_projection` | — |
@@ -242,7 +242,7 @@ flowchart LR
 | `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
-| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`scripts/run_reference_match.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
+| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`substar_core/editor/application/srt_import.py`<br>`scripts/run_reference_match.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions. | `substar_core/manuscript_matching.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
 | `export_service` | `domain_service` | Render verified source, target and bilingual SRT outputs from the current revision and presentation rules. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
@@ -400,6 +400,7 @@ Code:
 
 - `web/split.js`
 - `web/asr_assist.js`
+- `web/glossary_injection.js`
 - `web/ai_progress_summary.js` — `summarize`, `format`
 
 Must not:
@@ -1825,6 +1826,7 @@ Code:
 - `substar_core/editor/infrastructure/sqlite_project_repository.py` — `SQLiteProjectRepository`
 - `substar_core/editor/application/publication.py`
 - `substar_core/editor/application/reference.py`
+- `substar_core/editor/application/srt_import.py`
 - `scripts/run_reference_match.py`
 
 Must not:
@@ -1994,7 +1996,7 @@ Code:
 - `substar_core/editor/application/srt_import.py` — `parse_srt`, `preview_srt`, `import_srt`
 - `substar_core/media_reference.py`
 - `substar_core/media_relink.py`
-- `substar_core/project_exchange.py` — `external_prooftranslation_files`, `external_split_files`, `inspect_external_prooftranslation`, `apply_external_prooftranslation`, `inspect_external_split`, `apply_external_split`, `export_subtitle_project`, `import_subtitle_project`
+- `substar_core/project_exchange.py` — `external_prooftranslation_files`, `external_split_files`, `inspect_external_prooftranslation`, `apply_external_prooftranslation`, `inspect_external_split`, `apply_external_split`, `export_subtitle_project`, `import_subtitle_project`, `external_translation_text`
 
 Must not:
 
@@ -2008,6 +2010,7 @@ Must not:
 
 Invariants:
 
+- External translation clipboard export reuses production translation prompts with an SRT output adapter and original time slots
 - SRT import recognizes the four export formats, selects foreign-language tracks as a whole, and updates only uniquely timed translations through a revision-bound idempotent commit
 - Exports use one committed latest revision
 - External prooftranslation carries one prompt that stops for source approval before translation
@@ -2295,6 +2298,9 @@ Must not:
 
 Invariants:
 
+- Candidate terms require explicit review before becoming glossary entries.
+- Only collections with explicit per-stage injection permissions are consumed.
+- ASR injection preview and submitted hotwords use the same normalization and reject overflow.
 - Task snapshots are immutable
 - Provider-specific compilation derives from one normalized entry set
 - Secrets never enter glossary data
@@ -2310,7 +2316,7 @@ Recovery: Reject the new glossary atomically and retain the previous valid set.
 
 Reuses: `prior glossary`; restarts: —; terminal behavior: Return validation error.
 
-Tests: `tests/test_qwen_cloud_transcription.py`, `tests/test_config_storage.py`
+Tests: `tests/test_glossary_injection.py`, `tests/test_qwen_cloud_transcription.py`, `tests/test_config_storage.py`
 
 Change impact modules: `glossary_ui`<br>`composition_root`<br>`qwen_connector`<br>`segmentation_model_connector`<br>`translation_service`
 

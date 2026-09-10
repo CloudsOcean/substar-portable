@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import re
 import uuid
+import threading
+from functools import wraps
+from datetime import datetime, timezone
 from typing import Any
 
 from .artifacts import atomic_write_json
@@ -11,6 +14,16 @@ from .config import APP_DATA_DIR, GLOSSARY_FILE
 ALLOWED_TYPES = {"person", "organization", "place", "program", "product", "technical", "other"}
 GLOBAL_GLOSSARY_ID = "global"
 GLOSSARY_SCHEMA_VERSION = "substar.glossary-library.v2"
+INJECTION_STAGES = {"asr", "calibration", "translation"}
+_LIBRARY_LOCK = threading.RLock()
+
+def _locked(fn):
+    @wraps(fn)
+    def call(*args, **kwargs):
+        with _LIBRARY_LOCK:
+            return fn(*args, **kwargs)
+    return call
+
 QWEN_HOTWORD_DEFAULT_WEIGHT = 4
 QWEN_HOTWORD_MAX_COUNT = 2000
 
@@ -19,17 +32,21 @@ def _clean_text(value: Any, limit: int = 300) -> str:
     return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(value or "")).strip()[:limit]
 
 
-def normalize_collection(value: dict[str, Any]) -> dict[str, str]:
+def normalize_collection(value: dict[str, Any]) -> dict[str, Any]:
+    raw_permissions = value.get("injection_permissions", [])
+    if not isinstance(raw_permissions, list) or any(stage not in INJECTION_STAGES for stage in raw_permissions if isinstance(stage, str)) or any(not isinstance(stage, str) for stage in raw_permissions):
+        raise ValueError("词库注入权限无效")
+    permissions = [stage for stage in ("asr", "calibration", "translation") if stage in raw_permissions]
     kind = "global" if value.get("kind") == "global" else "project"
     if kind == "global":
-        return {"id": GLOBAL_GLOSSARY_ID, "name": "全局词库", "kind": "global"}
+        return {"id": GLOBAL_GLOSSARY_ID, "name": "未分配", "kind": "global", "injection_permissions": []}
     name = _clean_text(value.get("name"), 100)
     if not name:
         raise ValueError("项目词库名称不能为空")
     collection_id = _clean_text(value.get("id"), 80) or f"glossary_{uuid.uuid4().hex}"
     if collection_id == GLOBAL_GLOSSARY_ID:
         raise ValueError("项目词库 ID 不能使用 global")
-    return {"id": collection_id, "name": name, "kind": "project"}
+    return {"id": collection_id, "name": name, "kind": "project", "injection_permissions": permissions}
 
 
 def normalize_entry(value: dict[str, Any]) -> dict[str, Any]:
@@ -70,6 +87,8 @@ def _normalize_library(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema_version") != GLOSSARY_SCHEMA_VERSION:
         return {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": collections, "entries": []}
     entries_value: Any = value.get("entries", [])
+    global_raw = next((c for c in value.get("collections", []) if isinstance(c, dict) and c.get("id") == GLOBAL_GLOSSARY_ID), {"kind":"global"})
+    collections[0] = normalize_collection({**global_raw, "kind":"global"})
     raw_collections = value.get("collections", [])
     if isinstance(raw_collections, list):
         for item in raw_collections:
@@ -97,7 +116,7 @@ def _normalize_library(value: Any) -> dict[str, Any]:
         if entry["glossary_id"] not in known_ids:
             continue
         entries.append(entry)
-    return {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": collections, "entries": entries}
+    return {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": collections, "entries": entries, "candidates": [c for c in value.get("candidates", []) if isinstance(c, dict)]}
 
 
 def load_glossary_library() -> dict[str, Any]:
@@ -118,10 +137,12 @@ def load_glossary_collections() -> list[dict[str, str]]:
     return load_glossary_library()["collections"]
 
 
-def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[str, Any]]) -> dict[str, Any]:
-    normalized_collections = [normalize_collection({"kind": "global"})]
+@_locked
+def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[str, Any]], *, candidates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    global_raw = next((c for c in collections if c.get("id") == GLOBAL_GLOSSARY_ID), {})
+    normalized_collections = [normalize_collection({**global_raw, "kind": "global"})]
     collection_ids = {GLOBAL_GLOSSARY_ID}
-    collection_names = {"全局词库".casefold()}
+    collection_names = {"未分配".casefold()}
     for raw in collections:
         item = normalize_collection(raw)
         if item["kind"] == "global":
@@ -141,7 +162,7 @@ def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[
         if key in seen:
             raise ValueError(f"术语重复：{item['source']}")
         seen.add(key)
-    library = {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": normalized_collections, "entries": normalized_entries}
+    library = {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": normalized_collections, "entries": normalized_entries, "candidates": load_glossary_library().get("candidates", []) if candidates is None else candidates}
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
     atomic_write_json(GLOSSARY_FILE, library)
     return library
@@ -157,15 +178,75 @@ def glossary_collection_exists(glossary_id: str) -> bool:
     return not normalized_id or any(item["id"] == normalized_id for item in load_glossary_collections())
 
 
-def active_glossary(glossary_id: str = "") -> list[dict[str, Any]]:
-    selected_id = _clean_text(glossary_id, 80)
-    active = [item for item in load_glossary() if item["enabled"]]
-    global_entries = [item for item in active if item["glossary_id"] == GLOBAL_GLOSSARY_ID]
-    if not selected_id or selected_id == GLOBAL_GLOSSARY_ID:
-        return global_entries
-    project_entries = [item for item in active if item["glossary_id"] == selected_id]
-    overrides = {item["source"] if item["case_sensitive"] else item["source"].casefold() for item in project_entries}
-    return [item for item in global_entries if (item["source"] if item["case_sensitive"] else item["source"].casefold()) not in overrides] + project_entries
+def active_glossary(glossary_id: str = "", *, stage: str = "translation", collection_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    if stage not in INJECTION_STAGES:
+        raise ValueError("未知词库注入环节")
+    library = load_glossary_library()
+    permitted = {c["id"] for c in library["collections"] if stage in c.get("injection_permissions", [])}
+    if collection_ids is not None:
+        if not isinstance(collection_ids, list) or any(not isinstance(i, str) for i in collection_ids):
+            raise ValueError("请选择有效词库")
+        denied = set(collection_ids) - permitted
+        if denied:
+            raise ValueError("所选词库不存在或没有该环节的注入权限，请刷新选择")
+        permitted &= set(collection_ids)
+    return [e for e in library["entries"] if e["enabled"] and e["glossary_id"] in permitted]
+
+
+def injection_preview(collection_ids: list[str] | None, temporary: list[dict[str, Any]]) -> dict[str, Any]:
+    from .qwen_enhancement import normalize_qwen_hotwords
+    entries = active_glossary(stage="asr", collection_ids=collection_ids)
+    merged = {r["text"].casefold(): dict(r) for r in normalize_qwen_hotwords(temporary)}
+    for entry in entries:
+        text = entry["source"]
+        if not _qwen_hotword_is_valid(text):
+            raise ValueError(f"词库热词超出长度限制：{text}")
+        merged.setdefault(text.casefold(), {"text": text, "weight": 4})
+    # Use the exact recognizer contract, with explicit errors instead of truncation.
+    hotwords = normalize_qwen_hotwords(list(merged.values()))
+    return {"hotwords": hotwords, "entries": entries, "collection_ids": list(dict.fromkeys(collection_ids)) if collection_ids is not None else [c["id"] for c in load_glossary_library()["collections"] if "asr" in c.get("injection_permissions", [])]}
+
+
+@_locked
+def collect_candidates(rows: list[dict[str, Any]], source: str, project: str = "") -> dict[str, Any]:
+    library = load_glossary_library()
+    if not rows:
+        return library
+    candidates = library.get("candidates", [])
+    known = {e["source"].casefold() for e in library["entries"]}
+    by_word = {c["source"].casefold(): c for c in candidates}
+    for raw in rows:
+        word = _clean_text(raw.get("text") or raw.get("source"))
+        if not word or word.casefold() in known:
+            continue
+        item = by_word.get(word.casefold())
+        if item is None:
+            item = {"id": uuid.uuid4().hex, "source": word, "target": _clean_text(raw.get("target")), "status":"pending", "sources":[], "created_at":datetime.now(timezone.utc).isoformat()}
+            candidates.append(item); by_word[word.casefold()] = item
+        origin = {"kind":_clean_text(source,80), "project":_clean_text(project,100)}
+        if origin not in item["sources"]:
+            item["sources"].append(origin)
+    return save_glossary_library(library["collections"], library["entries"], candidates=candidates)
+
+
+@_locked
+def review_candidates(ids: list[str], action: str, glossary_id: str) -> dict[str, Any]:
+    library = load_glossary_library()
+    if action not in {"approve", "ignore"}:
+        raise ValueError("候选操作无效")
+    if action == "approve" and glossary_id not in {c["id"] for c in library["collections"]}:
+        raise ValueError("目标词库不存在")
+    entries = library["entries"]
+    candidates = library.get("candidates", [])
+    known = {(e["glossary_id"], e["source"].casefold()) for e in entries}
+    for c in candidates:
+        if c["id"] not in ids or c["status"] != "pending":
+            continue
+        if action == "approve" and (glossary_id, c["source"].casefold()) not in known:
+            entries.append(normalize_entry({"source":c["source"], "target":c.get("target", ""), "glossary_id":glossary_id}))
+            known.add((glossary_id, c["source"].casefold()))
+        c["status"] = "approved" if action == "approve" else "ignored"
+    return save_glossary_library(library["collections"], entries, candidates=candidates)
 
 
 def glossary_prompt(entries: list[dict[str, Any]], *, include_target: bool = True) -> str:
@@ -178,7 +259,7 @@ def glossary_prompt(entries: list[dict[str, Any]], *, include_target: bool = Tru
     rule = (
         "命中热词时采用指定译文；do_not_translate=true 时保留原词。"
         if include_target
-        else "这是单语处理，只校正热词写法，不读取译文、不改变语言。"
+        else "这是单语处理，词库仅作为专名写法参考；结合上下文确认后才校正，不因近似拼写强行替换，不读取译文、不改变语言。"
     )
     return f"# ACTIVE_GLOSSARY\n以下是人工锁定的术语。{rule}\n" + json.dumps(rows, ensure_ascii=False)
 

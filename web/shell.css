@@ -301,3 +301,31 @@ body > .app-header .app-status {
     display: none;
   }
 }
+
+/* Shared settings / glossary leave-page dialog. */
+dialog.unsaved-navigation-dialog {
+  box-sizing: border-box;
+  width: min(640px, calc(100vw - 40px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  margin: auto;
+  padding: 32px;
+  border: 1px solid var(--theme-line-strong);
+  border-radius: 16px;
+  color: var(--theme-text);
+  background: var(--theme-panel);
+  box-shadow: 0 20px 64px rgb(0 0 0 / 24%);
+}
+.unsaved-navigation-dialog::backdrop { background: rgb(0 0 0 / 48%); backdrop-filter: blur(4px); }
+.unsaved-navigation-copy { display: grid; gap: 12px; }
+.unsaved-navigation-copy h2 { margin: 0; font-size: 24px; line-height: 1.4; }
+.unsaved-navigation-copy p { margin: 0; color: var(--theme-muted); font-size: 16px; line-height: 1.7; }
+.unsaved-navigation-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 28px; }
+html body .unsaved-navigation-actions button { min-height: 44px; padding: 10px 16px; font-size: 15px; line-height: 1.4; border-radius: 8px; }
+.unsaved-navigation-status { margin: 16px 0 0; color: var(--theme-text); font-size: 15px; line-height: 1.5; }
+.unsaved-navigation-status:empty { display: none; }
+@media (max-width: 620px) {
+  dialog.unsaved-navigation-dialog { padding: 24px; }
+  .unsaved-navigation-actions { align-items: stretch; flex-direction: column-reverse; }
+  .unsaved-navigation-actions button { width: 100%; }
+}

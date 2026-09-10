@@ -21,24 +21,18 @@ class GlossaryLibraryTests(unittest.TestCase):
             with patch.object(glossary, "GLOSSARY_FILE", path), patch.object(glossary, "APP_DATA_DIR", root):
                 library = glossary.load_glossary_library()
                 self.assertEqual(library["schema_version"], glossary.GLOSSARY_SCHEMA_VERSION)
-                self.assertEqual(library["collections"], [{"id": "global", "name": "全局词库", "kind": "global"}])
+                self.assertEqual(library["collections"], [{"id": "global", "name": "未分配", "kind": "global", "injection_permissions": []}])
                 self.assertEqual(library["entries"], [])
 
-    def test_selected_project_glossary_overrides_global(self) -> None:
+    def test_permissions_replace_implicit_global_injection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / "glossary.json"
-            collections = [{"id": "show", "name": "节目词库", "kind": "project"}]
-            entries = [
-                {"source": "Nova", "target": "诺瓦", "glossary_id": "global"},
-                {"source": "Nova", "target": "新星", "glossary_id": "show"},
-                {"source": "OpenAI", "target": "OpenAI", "glossary_id": "global"},
-            ]
-            with patch.object(glossary, "GLOSSARY_FILE", path), patch.object(glossary, "APP_DATA_DIR", root):
-                glossary.save_glossary_library(collections, entries)
-                active = glossary.active_glossary("show")
-                self.assertEqual({item["source"]: item["target"] for item in active}, {"OpenAI": "OpenAI", "Nova": "新星"})
-                self.assertEqual([item["source"] for item in glossary.active_glossary()], ["Nova", "OpenAI"])
+            with patch.object(glossary, "GLOSSARY_FILE", root / "glossary.json"), patch.object(glossary, "APP_DATA_DIR", root):
+                glossary.save_glossary_library([
+                    {"id":"show", "name":"节目", "kind":"project", "injection_permissions":["translation"]}
+                ], [{"source":"Nova", "target":"新星", "glossary_id":"show"}, {"source":"Global", "glossary_id":"global"}])
+                self.assertEqual([e["source"] for e in glossary.active_glossary("show")], ["Nova"])
+                self.assertEqual(glossary.active_glossary(stage="asr"), [])
 
     def test_single_language_prompt_does_not_expose_translation(self) -> None:
         entry = glossary.normalize_entry({"source": "Codex", "target": "代码助手"})

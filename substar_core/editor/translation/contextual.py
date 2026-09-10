@@ -1136,10 +1136,14 @@ def materialize_presentation(
             source_cue = cue_by_id[row["cue_id"]]
             unit = unit_by_id[row["meaning_unit_id"]]
             target_text = unit["target_text"]
+            omitted_filler = target_text.strip() == "[OMIT]"
+            if omitted_filler:
+                target_text = ""
             target_provenance = replace(
                 provenance,
                 metadata={
                     **dict(provenance.metadata),
+                    "omitted_filler": omitted_filler,
                     "meaning_unit_id": row["meaning_unit_id"],
                     "source_evidence_cue_ids": unit["source_evidence_cue_ids"],
                 },

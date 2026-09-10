@@ -825,6 +825,12 @@ async function loadSettings() {
 }
 
 function renderModelCatalogOptions(models) {
+  if (selectedModelProvider === "deepseek") {
+    const previewModel = "deepseek-v4.1-flash-expires-on-0910";
+    if (!models.some(item => (typeof item === "string" ? item : item.id) === previewModel)) {
+      models = [...models, {id: previewModel}];
+    }
+  }
   const list = $("#officialModelIds");
   list.replaceChildren(...models.map((item) => {
     const option = document.createElement("option");

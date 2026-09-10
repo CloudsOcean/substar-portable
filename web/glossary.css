@@ -469,7 +469,8 @@ textarea {
 .collection-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 30px;
+  grid-template-columns: minmax(0, 1fr);
+  position: relative;
   align-items: center;
   gap: 4px;
 }
@@ -479,6 +480,8 @@ textarea {
   cursor: pointer;
 }
 .collection-delete {
+  position: absolute;
+  right: 8px;
   width: 28px;
   height: 28px;
   display: grid;
@@ -671,3 +674,27 @@ dialog.collection-modal::backdrop { background: #07080dbd; backdrop-filter: blur
     grid-column: auto;
   }
 }
+
+.glossary-permissions,.candidate-pool { padding:16px; border:1px solid var(--theme-line); border-radius:10px; background:var(--theme-panel); margin-bottom:16px; }
+.permission-row { display:flex; flex-wrap:wrap; align-items:center; gap:18px; padding:10px 0; }
+.permission-row strong { flex:1; min-width:140px; }
+.permission-row label,.candidate-actions label { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+.candidate-pool summary { cursor:pointer; font-weight:600; }
+.candidate-actions { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:16px 0; }
+.candidate-actions select { flex:1; min-width:140px; }
+.candidate-row { display:grid; grid-template-columns:20px 1fr 1fr 2fr; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--theme-line); }
+.candidate-row small { color:var(--theme-muted); overflow-wrap:anywhere; }
+#candidateList { max-height:360px; overflow:auto; }
+
+.entry-target input { width:100%; min-width:0; }
+
+.enable-toggle { position:relative; }
+.enable-toggle input { inset:0; width:30px; height:18px; margin:0; }
+
+.asset-sidebar .collection-list .collection-row .asset-sidebar-item { padding-right: 44px; }
+.collection-permissions { margin: 0; padding: 12px; border: 1px solid var(--theme-line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 16px; }
+.collection-permissions legend { padding: 0 4px; color: var(--theme-text); font-size: 14px; }
+.collection-permissions label { display: inline-flex; align-items: center; gap: 6px; color: var(--theme-text); }
+.collection-permissions input { width: 16px; height: 16px; margin: 0; accent-color: var(--theme-accent); }
+
+.glossary-permissions[hidden] { display: none; }

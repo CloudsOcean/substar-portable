@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>词库 · Substar</title>
-    <link rel="stylesheet" href="/assets/glossary.css?v=20260907-collection-theme-1" />
-    <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1" />
+    <link rel="stylesheet" href="/assets/glossary.css?v=20260909-unassigned-1" />
+    <link rel="stylesheet" href="/assets/shell.css?v=20260909-unsaved-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1" />
     <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
@@ -47,11 +47,7 @@
             ><span class="asset-sidebar-copy"
               ><b>全部词条</b></span
             ><i class="asset-sidebar-meta" id="allCount">0</i></button
-          ><button class="asset-sidebar-item" data-glossary="global" type="button">
-            <span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#search"></use></svg></span
-            ><span class="asset-sidebar-copy"
-              ><b>全局词库</b></span
-            ></button>
+          >
         </div>
         <div class="collection-heading"><span>项目词库</span></div>
         <div id="collectionList" class="collection-list asset-sidebar-list"></div>
@@ -64,14 +60,14 @@
           <div><strong id="projectCount">0</strong><span>项目词库</span></div>
         </div>
         <p class="library-note">
-          ASR、翻译、切分与保守校准读取同一份项目词库；项目词优先于全局词。
+          候选词经审核入库后，按词库权限用于听写、校准或翻译。
         </p>
       </aside>
 
       <section class="glossary-content">
         <div class="content-heading">
           <div>
-            <h2 id="contentTitle">全部术语</h2>
+            <h2 id="contentTitle">全部词条</h2>
             <p>填写热词和指定译文；系统按项目语言方向使用对应关系。</p>
           </div>
           <div class="toolbar">
@@ -94,6 +90,11 @@
             </button>
           </div>
         </div>
+        <section id="glossaryPermissions" class="glossary-permissions"></section>
+        <details class="candidate-pool"><summary>候选池 <span id="candidateCount">0</span></summary>
+          <div class="candidate-actions"><label><input id="candidateSelectAll" type="checkbox"> 全选</label><select id="candidateDestination" aria-label="候选词目标词库"></select><button id="approveCandidates" class="primary" type="button">加入词库</button><button id="ignoreCandidates" class="secondary" type="button">忽略</button></div>
+          <div id="candidateList"></div><p id="candidateMessage"></p>
+        </details>
         <div id="emptyState" class="empty-state" hidden>
           <h3>还没有术语</h3>
           <p>添加常用人名、机构、品牌或容易误识别的词。</p>
@@ -131,7 +132,7 @@
           <span>→</span
           ><input
             data-field="target"
-            placeholder="指定译文（留空则只作为 ASR 热词）"
+            placeholder="可选译文"
             maxlength="300"
           />
         </div>
@@ -145,7 +146,12 @@
           <button class="dialog-close" value="cancel" type="submit" aria-label="关闭">×</button>
         </div>
         <label class="dialog-field"><span>词库名称</span><input id="collectionName" maxlength="100" placeholder="例如：科技访谈 · 第三季" autocomplete="off" /><small id="collectionNameError"></small></label>
-        <div class="dialog-note"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg><span>创建项目时可以直接选择；全局词库仍会同时生效。</span></div>
+        <fieldset class="collection-permissions" id="collectionPermissions">
+          <legend>注入权限</legend>
+          <label><input type="checkbox" value="asr"> Qwen 听写</label>
+          <label><input type="checkbox" value="calibration"> AI 校准</label>
+          <label><input type="checkbox" value="translation"> 翻译</label>
+        </fieldset>
         <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirmCollection" value="default" class="primary">创建词库</button></div>
       </form>
     </dialog>
@@ -160,7 +166,19 @@
         <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirmDeleteCollection" value="default" class="danger-button">删除词库</button></div>
       </form>
     </dialog>
+    <dialog id="unsavedNavigationDialog" class="unsaved-navigation-dialog" aria-labelledby="unsavedNavigationTitle">
+      <div class="unsaved-navigation-copy">
+        <h2 id="unsavedNavigationTitle">保存当前修改？</h2>
+        <p>尚未保存的修改会在离开后丢失。</p>
+      </div>
+      <div class="unsaved-navigation-actions">
+        <button type="button" class="secondary" data-unsaved-navigation="stay">留在此页</button>
+        <button type="button" class="secondary danger" data-unsaved-navigation="discard">放弃更改并前往</button>
+        <button type="button" class="primary" data-unsaved-navigation="save">保存并前往</button>
+      </div>
+      <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
+    </dialog>
     <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
-    <script src="/assets/glossary.js?v=20260828-project-library-2"></script>
+    <script src="/assets/glossary.js?v=20260909-unassigned-1"></script>
   </body>
 </html>

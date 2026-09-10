@@ -392,6 +392,26 @@ def _can_join_qwen_fragments(previous: str, current: str) -> bool:
     )
 
 
+def _split_qwen_unit_text(text: str) -> list[str]:
+    """Split embedded separators, retaining punctuation on the preceding word."""
+    parts: list[str] = []
+    for chunk in text.split():
+        # URL/email punctuation is lexical, not a speech boundary.
+        if re.match(r"(?:https?://|www\.)", chunk, re.I) or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", chunk):
+            parts.append(chunk)
+            continue
+        start = 0
+        for match in re.finditer(r"\.{2,}|[…，、；;!?！？]+|,", chunk):
+            if match.group() == "," and match.start() > 0 and match.end() < len(chunk) and chunk[match.start()-1].isdigit() and chunk[match.end()].isdigit():
+                continue
+            if match.end() < len(chunk):
+                parts.append(chunk[start:match.end()])
+                start = match.end()
+        if chunk[start:]:
+            parts.append(chunk[start:])
+    return parts
+
+
 def _natural_qwen_units(
     words: list[Any], sentence: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], int, int]:
@@ -411,7 +431,20 @@ def _natural_qwen_units(
         pending["kind"] = (
             "character" if len(core) == 1 and _CJK_TEXT.search(core) else "word"
         )
-        result.append(pending)
+        parts = _split_qwen_unit_text(str(pending["text"]))
+        if len(parts) > 1:
+            start, end = float(pending["start"]), float(pending["end"])
+            total = sum(len(part) for part in parts)
+            offset = 0
+            for part in parts:
+                next_offset = offset + len(part)
+                result.append({**pending, "text": part, "kind": "word",
+                    "start": round(start + (end-start) * offset / total, 3),
+                    "end": round(start + (end-start) * next_offset / total, 3),
+                    "timing_source": "qwen_cloud_estimated"})
+                offset = next_offset
+        else:
+            result.append(pending)
         pending = None
 
     for word in words:
@@ -438,7 +471,13 @@ def _natural_qwen_units(
             pending is None
             or boundary_before_next
             or bool(raw_core[:1].isspace())
+            or bool(pending and re.search(r"(?:\.{2,}|[…，、,；;!?！？])$", str(pending["text"])))
         )
+        if pending is not None and (re.fullmatch(r"[…，、,；;!?！？]+|\.{2,}", token) or (token == "." and str(pending["text"]).endswith("."))):
+            pending["text"] = f"{pending['text']}{token}"
+            pending["end"] = max(float(pending["end"]), end)
+            boundary_before_next = True
+            continue
         if not starts_new and pending is not None and _can_join_qwen_fragments(
             str(pending["_core"]), core
         ):
@@ -455,7 +494,7 @@ def _natural_qwen_units(
                 "timing_source": "qwen_cloud_native",
                 "_core": core,
             }
-        boundary_before_next = False
+        boundary_before_next = bool(punctuation)
     flush()
     return result, raw_fragment_count, joined_fragment_count
 
@@ -526,7 +565,8 @@ def _parse_result(
             "schema_version": "substar.asr-ingest-report.v1",
             "status": "pass",
             "engine": model,
-            "timing_source": "qwen_cloud_native",
+            "timing_source": "qwen_cloud_mixed" if any(u["timing_source"] == "qwen_cloud_estimated" for u in units) else "qwen_cloud_native",
+            "estimated_word_count": sum(u["timing_source"] == "qwen_cloud_estimated" for u in units),
             "sentence_count": len(chunks),
             "word_count": len(units),
             "raw_word_fragment_count": raw_word_fragment_count,

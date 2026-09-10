@@ -381,3 +381,11 @@ summary span { margin-left: 7px; color: #677287; font-size: 13px; }
 .asr-assist-external textarea { display:block; width:100%; margin-top:8px; padding:12px; resize:vertical; font:14px/1.6 "Microsoft YaHei",sans-serif; }
 .asr-assist-external footer { display:flex; justify-content:flex-end; margin-top:16px; }
 #asrAssistImportStatus { color:var(--theme-danger); }
+
+.glossary-injection { border-top:1px solid var(--theme-line); padding-top:14px; }
+.glossary-injection-grid { display:grid; grid-template-columns:1.2fr 1fr; gap:16px; margin:10px 0; }
+.glossary-injection-grid textarea { width:100%; min-height:100px; resize:vertical; }
+#glossaryInjectionChoices { max-height:150px; overflow:auto; display:grid; gap:8px; padding:8px 0; }
+#glossaryInjectionChoices label { display:flex; gap:8px; align-items:center; }
+#glossaryInjectionStatus { color:var(--theme-muted); }
+@media(max-width:900px){.glossary-injection-grid {grid-template-columns:1fr;}}

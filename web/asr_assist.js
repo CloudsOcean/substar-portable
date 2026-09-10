@@ -1,6 +1,6 @@
 (function () {
   "use strict";
-  window.SubstarAsrAssist = {init({api, getFiles, getSettings, apply}) {
+  window.SubstarAsrAssist = {init({api, getFiles, getSettings, getGlossaryIds = () => [], apply}) {
     const $ = selector => document.querySelector(selector);
     const button = $("#asrAssistButton"), menu = $("#asrAssistChoices");
     const status = $("#qwenAssistStatus"), cancel = $("#asrAssistCancel");
@@ -8,7 +8,7 @@
     const cache = new WeakMap();
     let dialogFile = null, dialogConfig = null;
     let busy = false, activeTask = null, cancelled = false, selectedFile = null, selectedConfig = null;
-    const config = () => JSON.stringify([$("#languageInput").value, $("#recognitionProfileInput").value, getSettings()]);
+    const config = () => JSON.stringify([$("#languageInput").value, $("#recognitionProfileInput").value, getSettings(), getGlossaryIds()]);
     const unchanged = () => getFiles().length === 1 && getFiles()[0] === selectedFile && config() === selectedConfig;
     function sync() {
       button.disabled = busy || getFiles().length !== 1 || !getSettings();
@@ -27,6 +27,7 @@
           status.textContent = "正在上传媒体并准备初次听写…";
           const body = new FormData();
           body.append("media", file, file.name);
+          body.append("asr_glossary_ids", JSON.stringify(getGlossaryIds()));
           body.append("source_language", $("#languageInput").value);
           body.append("profile_id", $("#recognitionProfileInput").value || "qwen_cloud");
           row = await api("/api/qwen-assist/asr", {method:"POST", body});
@@ -68,7 +69,8 @@
       $("#qwenAssistButton").disabled = true; cancel.hidden = false; cancel.disabled = false;
       status.className = ""; sync();
       try {
-        const row = await recognize(selectedFile, selectedConfig);
+        const injection = await api("/api/glossary/injection-preview", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({collection_ids:getGlossaryIds()})});
+        const row = await recognize(selectedFile, selectedConfig + JSON.stringify(injection.hotwords));
         if (cancelled) throw new Error("已取消。");
         if (!unchanged()) throw new Error("媒体或听写设置已更改，请重新点击生成。");
         cancel.hidden = true;
@@ -107,7 +109,7 @@
       try {
         if (getFiles().length !== 1 || getFiles()[0] !== dialogFile || config() !== dialogConfig) throw new Error("媒体或听写设置已更改，请重新打开填写界面。");
         const raw = $("#asrAssistResult").value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-        apply(JSON.parse(raw)); dialog.close(); status.textContent = "已填入外部模型的 Prompt，并合并热词。"; status.className = "good";
+        apply(JSON.parse(raw), "external"); dialog.close(); status.textContent = "已填入外部模型的 Prompt，并合并热词。"; status.className = "good";
       } catch (error) { $("#asrAssistImportStatus").textContent = error instanceof SyntaxError ? "请粘贴包含 prompt 和 hotwords 的完整 JSON。" : error.message; }
     });
     sync();

@@ -8,6 +8,8 @@ import shutil
 import threading
 from pathlib import Path
 
+from substar_core.qwen_enhancement import qwen_hotword_mapping
+
 from substar_core.transcription.contracts import (
     TRANSCRIPTION_INPUT_SCHEMA, TRANSCRIPTION_OPTION_KEYS, build_transcription_request,
 )
@@ -23,7 +25,8 @@ def create_assist_task(service, root: Path, media: Path, language: str, settings
             digest.update(chunk)
     options = {key: settings[key] for key in sorted(TRANSCRIPTION_OPTION_KEYS) if key in settings}
     profile = str(settings.get("recognition_profile_id", "qwen_cloud"))
-    identity = json.dumps([digest.hexdigest(), language, profile, options], sort_keys=True, ensure_ascii=False)
+    hotwords = qwen_hotword_mapping(settings.get("asr_injected_hotwords", []))
+    identity = json.dumps([digest.hexdigest(), language, profile, options, hotwords], sort_keys=True, ensure_ascii=False)
     project_id = "asr-assist-" + hashlib.sha256(identity.encode()).hexdigest()
     project = root / project_id
     with _LOCK:
@@ -35,7 +38,7 @@ def create_assist_task(service, root: Path, media: Path, language: str, settings
             temporary.replace(target)
         request = build_transcription_request(
             media_path=target, project_directory=project, profile_id=profile,
-            language=language, prompt="", hotwords={}, settings=settings,
+            language=language, prompt="", hotwords=hotwords, settings=settings,
         )
         task = service.create_task(
             task_type="transcription", input_schema=TRANSCRIPTION_INPUT_SCHEMA,

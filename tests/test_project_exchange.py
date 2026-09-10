@@ -343,3 +343,44 @@ def test_project_task_info_is_one_project_scoped_authority(tmp_path: Path, monke
     assert result["target_hard_limit"] == 22
     assert http_api.get_project_task_info(project_id)["source_hard_limit"] == 48
     assert not (tmp_path / project_id / "editor_preferences.json").exists()
+
+
+def test_external_translation_uses_production_prompt_and_original_times():
+    from types import SimpleNamespace
+    from substar_core.project_exchange import external_translation_text
+    from substar_core.prompt_registry import render_prompt
+    from substar_core.export import render_document_srt
+    document = _document()
+    for mode in ('many_to_many', 'one_to_one'):
+        text = external_translation_text(SimpleNamespace(document=document), source_language='en',
+            target_language='zh-CN', target_hard_limit=20, mapping_mode=mode)
+        assert render_prompt('contextual_translation', variant='en_to_zh', mode=mode).text in text
+        assert render_document_srt(document, 'source') in text
+        assert 'TARGET_LIMIT：20' in text
+        assert '只输出译文 SRT' in text
+        assert '[OMIT]' in text
+
+
+def test_model_omission_is_accepted_without_changing_source_or_exporting_marker():
+    from substar_core.cue_script import render_translation_request, finalize_translation
+    from substar_core.editor.translation.contextual import complete_results, materialize_presentation
+    from substar_core.export import render_document_srt
+    document = _document()
+    cue = document.cues[0]
+    groups = [{'group_id':'g1', 'cues':[{'cue_id':cue.cue_id,'source_text':'um','hard_limit':20}]}]
+    _, ledger = render_translation_request(groups, mapping_mode='one_to_one')
+    response = finalize_translation('1|[OMIT]', groups, ledger, mapping_mode='one_to_one')
+    assert not response['_cue_script_issues']
+    plans, report = complete_results(settings={}, repair_prompt='', groups=groups,
+        response=response, mapping_mode='one_to_one')
+    assert not report['invalid_group_ids']
+    candidate, report = materialize_presentation(document, plans, 'zh-CN')
+    active = [c for c in candidate.cues if c.state.value == 'active']
+    assert len(active) == 1
+    assert active[0].target.target_text == ''
+    assert active[0].target.provenance.metadata['omitted_filler'] is True
+    assert active[0].target.translation_status == 'translated'
+    assert (active[0].start,active[0].end,active[0].display_token_ids) == (cue.start,cue.end,cue.display_token_ids)
+    assert candidate.source_tokens == document.source_tokens
+    assert render_document_srt(candidate,'target') == ''
+    assert '[OMIT]' not in render_document_srt(candidate,'ab-double')

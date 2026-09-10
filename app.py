@@ -63,6 +63,9 @@ from substar_core.api_testing import (
 from substar_core.qwen_cloud_asr import QwenCloudAsrError, test_connection as test_qwen_cloud_connection
 from substar_core.glossary import (
     active_glossary,
+    injection_preview,
+    collect_candidates,
+    review_candidates,
     glossary_collection_exists,
     load_glossary,
     load_glossary_library,
@@ -189,7 +192,7 @@ async def _application_lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Substar Workbench",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=_application_lifespan,
 )
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
@@ -1115,7 +1118,7 @@ def _workbench_transcription_request(
     job: Job, settings: dict[str, Any]
 ) -> dict[str, Any]:
     try:
-        hotwords = qwen_hotword_mapping(settings.get("qwen_temporary_hotwords", []))
+        hotwords = qwen_hotword_mapping(settings.get("asr_injected_hotwords", settings.get("qwen_temporary_hotwords", [])))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return build_transcription_request(
@@ -1140,7 +1143,8 @@ def _create_workbench_subtitle_tasks(
     reference_snapshot = reference_document_snapshot(
         job.job_dir, _project_reference_path(job)
     )
-    glossary_snapshot = active_glossary(str(settings.get("glossary_id") or ""))
+    glossary_snapshot = []  # Segmentation does not receive glossary injection.
+    collect_candidates(settings.get("qwen_temporary_hotwords", []), "manual", job.id)
     transcription, segmentation = create_subtitle_creation_graph(
         service=service,
         project_id=job.id,
@@ -1244,6 +1248,7 @@ def _automatic_settings_from_payload(
         "qwen_cloud_temporary_upload",
         "context",
         "qwen_temporary_hotwords",
+        "asr_glossary_ids",
         "glossary_id",
     } | stage_keys
     # Settings snapshots can outlive the UI/backend build that created them.
@@ -1366,7 +1371,20 @@ def _automatic_settings_from_payload(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    try:
+        selected_ids = raw.get("asr_glossary_ids", [])
+        if not isinstance(selected_ids, list):
+            raise ValueError("词库选择必须为数组")
+        if selected_ids and str(raw.get("qwen_cloud_model", saved.get("qwen_cloud_model", ""))).startswith("qwen3-asr-flash-filetrans"):
+            raise ValueError("当前听写模型不支持热词注入")
+        injection = injection_preview(selected_ids, temporary_hotwords)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     overrides = {
+        "asr_glossary_ids": injection["collection_ids"],
+        "asr_glossary_snapshot": injection["entries"],
+        "asr_injected_hotwords": injection["hotwords"],
         "workflow_mode": "subtitle_creation",
         "active_model_provider": provider_id,
         "translation_api_base_url": base_url.rstrip("/"),
@@ -1684,6 +1702,38 @@ def put_settings(payload: SettingsPayload) -> dict[str, Any]:
     return save_settings(payload.model_dump())
 
 
+class GlossaryCandidatePayload(BaseModel):
+    rows: list[dict[str, Any]] = Field(default_factory=list, max_length=2000)
+    source: str = Field(default="manual", max_length=80)
+    project: str = Field(default="", max_length=100)
+
+class GlossaryReviewPayload(BaseModel):
+    ids: list[str] = Field(max_length=2000)
+    action: str
+    glossary_id: str = "global"
+
+class GlossaryInjectionPayload(BaseModel):
+    collection_ids: list[str] = Field(default_factory=list, max_length=200)
+    temporary: list[dict[str, Any]] = Field(default_factory=list, max_length=2000)
+
+@app.post("/api/glossary/candidates")
+def add_glossary_candidates(payload: GlossaryCandidatePayload) -> dict[str, Any]:
+    return collect_candidates(payload.rows, payload.source, payload.project)
+
+@app.post("/api/glossary/candidates/review")
+def review_glossary_candidates(payload: GlossaryReviewPayload) -> dict[str, Any]:
+    try:
+        return review_candidates(payload.ids, payload.action, payload.glossary_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.post("/api/glossary/injection-preview")
+def preview_glossary_injection(payload: GlossaryInjectionPayload) -> dict[str, Any]:
+    try:
+        return injection_preview(payload.collection_ids, payload.temporary)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 @app.get("/api/glossary")
 def get_glossary() -> dict[str, Any]:
     return load_glossary_library()
@@ -1748,6 +1798,7 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
 async def start_qwen_assist_asr(
     media: UploadFile = File(...), source_language: str = Form("Auto"),
     profile_id: str = Form("qwen_cloud"),
+    asr_glossary_ids: str = Form("[]"),
 ) -> dict[str, Any]:
     if source_language not in {"Auto", "zh", "en", "ja", "ko", "mixed"}:
         raise HTTPException(status_code=400, detail="不支持的原文语言")
@@ -1756,6 +1807,13 @@ async def start_qwen_assist_asr(
         get_recognition_profile(profile_id)
         settings["recognition_profile_id"] = profile_id
         settings["language"] = source_language
+        selected_ids = json.loads(asr_glossary_ids)
+        if not isinstance(selected_ids, list):
+            raise ValueError("词库选择必须为数组")
+        if selected_ids and str(settings.get("qwen_cloud_model", "")).startswith("qwen3-asr-flash-filetrans"):
+            raise ValueError("当前听写模型不支持热词注入")
+        injection = injection_preview(selected_ids, [])
+        settings["asr_injected_hotwords"] = injection["hotwords"]
         PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".asr-assist-upload-", dir=PROJECTS_ROOT) as staging:
             path = Path(staging) / "upload"

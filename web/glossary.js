@@ -1,8 +1,9 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-let collections = [{ id: "global", name: "全局词库", kind: "global" }];
+let collections = [{ id: "global", name: "未分配", kind: "global" }];
 let activeGlossaryId = "all";
 let dirty = false;
+let candidates = [];
 let pendingDeleteCollectionId = "";
 
 async function api(url, options = {}) {
@@ -31,7 +32,7 @@ function collectionOptions(selectedId) {
   return collections.map((item) => {
     const option = document.createElement("option");
     option.value = item.id;
-    option.textContent = item.name;
+    option.textContent = item.id === "global" ? "未分配" : item.name;
     option.selected = item.id === selectedId;
     return option;
   });
@@ -91,7 +92,9 @@ function activateGlossary(id) {
   activeGlossaryId = id;
   $$('[data-glossary]').forEach((node) => node.classList.toggle("active", node.dataset.glossary === id));
   const item = collections.find((value) => value.id === id);
-  $("#contentTitle").textContent = id === "all" ? "全部术语" : item?.name || "项目词库";
+  $("#contentTitle").textContent = id === "all" ? "全部词条" : item?.name || "项目词库";
+  renderPermissions();
+  $("#candidateDestination").replaceChildren(...collectionOptions(id === "all" ? "global" : id));
   applyFilter();
 }
 
@@ -105,7 +108,8 @@ function renderCollections() {
     button.type = "button";
     button.className = "asset-sidebar-item";
     button.dataset.glossary = item.id;
-    button.innerHTML = `<span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg></span><span class="asset-sidebar-copy"><b></b><small>仅用于选中的项目</small></span><i class="asset-sidebar-meta"></i>`;
+    button.classList.toggle("active", item.id === activeGlossaryId);
+    button.innerHTML = `<span class="asset-sidebar-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg></span><span class="asset-sidebar-copy"><b></b></span><i class="asset-sidebar-meta"></i>`;
     $("b", button).textContent = item.name;
     $("i", button).textContent = collectEntries().filter((entry) => entry.glossary_id === item.id).length;
     button.addEventListener("click", () => activateGlossary(item.id));
@@ -140,22 +144,26 @@ function updateCounts() {
 }
 
 function renderLibrary(value) {
+  candidates = value.candidates || [];
   collections = Array.isArray(value.collections) && value.collections.length ? value.collections : collections;
   $("#entryList").innerHTML = "";
   (value.entries || []).slice().reverse().forEach((entry) => addEntry(entry, false));
   renderCollections();
   activateGlossary(collections.some((item) => item.id === activeGlossaryId) ? activeGlossaryId : "all");
   updateCounts();
+  renderCandidates();
 }
 
 async function loadGlossary() {
   try {
     const result = await api("/api/glossary");
+    if (!result.collections?.every(c => Array.isArray(c.injection_permissions))) throw new Error("服务仍是旧版本，请重启 Substar 后使用词库注入与候选池。");
     renderLibrary(result);
     dirty = false;
     setHeader(`已载入 ${result.entries?.length || 0} 条`, "saved");
     $("#formMessage").textContent = "词库尚未修改";
   } catch (error) {
+    $("#saveButton").disabled = true;
     setHeader("读取失败", "error");
     $("#formMessage").textContent = error.message;
     $("#formMessage").className = "error";
@@ -177,10 +185,12 @@ async function saveGlossary() {
     dirty = false;
     setHeader(`已保存 ${result.entries.length} 条`, "saved");
     $("#formMessage").textContent = `已保存 ${result.entries.length} 条术语`;
+    return true;
   } catch (error) {
     $("#formMessage").textContent = error.message;
     $("#formMessage").className = "error";
     setHeader("保存失败", "error");
+    return false;
   } finally {
     button.disabled = false;
     button.textContent = "保存词库";
@@ -227,7 +237,7 @@ function createCollection(event) {
     $("#collectionName").focus();
     return;
   }
-  const item = { id: `glossary_${crypto.randomUUID().replaceAll("-", "")}`, name, kind: "project" };
+  const item = { id: `glossary_${crypto.randomUUID().replaceAll("-", "")}`, name, kind: "project", injection_permissions: $$("#collectionPermissions input:checked").map(input => input.value) };
   collections.push(item);
   $("#collectionDialog").close();
   $("#collectionName").value = "";
@@ -263,6 +273,52 @@ function deleteCollection(event) {
   updateCounts();
 }
 
+function renderPermissions() {
+  const panel = $("#glossaryPermissions");
+  panel.replaceChildren();
+  panel.hidden = !collections.some(c => c.kind === "project" && (activeGlossaryId === "all" || c.id === activeGlossaryId));
+  for (const collection of collections.filter(c => c.kind === "project" && (activeGlossaryId === "all" || c.id === activeGlossaryId))) {
+    const row = document.createElement("div"); row.className = "permission-row";
+    const title = document.createElement("strong"); title.textContent = collection.name; row.append(title);
+    for (const [stage, label] of [["asr","Qwen 听写"],["calibration","AI 校准"],["translation","翻译"]]) {
+      const field = document.createElement("label"), check = document.createElement("input"); check.type = "checkbox";
+      check.checked = (collection.injection_permissions || []).includes(stage);
+      check.addEventListener("change", () => {const permissions = new Set(collection.injection_permissions || []); check.checked ? permissions.add(stage) : permissions.delete(stage); collection.injection_permissions = [...permissions]; markDirty();});
+      field.append(check, document.createTextNode(label)); row.append(field);
+    }
+    panel.append(row);
+  }
+}
+function renderCandidates() {
+  $("#candidateDestination").replaceChildren(...collectionOptions(activeGlossaryId === "all" ? "global" : activeGlossaryId));
+  const pending = candidates.filter(c => c.status === "pending");
+  $("#candidateCount").textContent = pending.length;
+  $("#candidateSelectAll").checked = false;
+  $("#candidateList").replaceChildren();
+  for (const candidate of pending) {
+    const row = document.createElement("label"); row.className = "candidate-row";
+    const check = document.createElement("input"); check.type = "checkbox"; check.value = candidate.id;
+    const word = document.createElement("strong"); word.textContent = candidate.source;
+    const target = document.createElement("span"); target.textContent = candidate.target || "—";
+    const origin = document.createElement("small"); origin.textContent = (candidate.sources || []).map(s => ({manual:"手动填写",ai_direct:"AI 生成",ai_asr:"听写生成",external:"外部模型",asr_generated:"听写生成"}[s.kind] || s.kind) + (s.project ? ` · ${s.project}` : "")).join("；");
+    row.append(check, word, target, origin); $("#candidateList").append(row);
+  }
+  $("#candidateMessage").textContent = pending.length ? "审核后才参与词库注入。" : "暂无待审核热词";
+}
+async function reviewCandidates(action) {
+  const ids = $$("#candidateList input:checked").map(n=>n.value);
+  const destination = $("#candidateDestination").value;
+  if (!ids.length) { $("#candidateMessage").textContent = "请先选择候选词"; return; }
+  try {
+    if (dirty && !await saveGlossary()) return;
+    const result = await api("/api/glossary/candidates/review", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ids, action, glossary_id:destination})});
+    renderLibrary(result); setHeader("已保存", "saved");
+  } catch(e) { $("#candidateMessage").textContent = e.message; }
+}
+$("#candidateSelectAll").addEventListener("change", e=>$$("#candidateList input").forEach(n=>n.checked=e.target.checked));
+$("#approveCandidates").addEventListener("click", ()=>reviewCandidates("approve"));
+$("#ignoreCandidates").addEventListener("click", ()=>reviewCandidates("ignore"));
+
 $("#addEntry").addEventListener("click", () => addEntry());
 $("#addEntryTop").addEventListener("click", () => addEntry());
 $("#emptyState button").addEventListener("click", () => addEntry());
@@ -271,6 +327,7 @@ $$('[data-glossary]').forEach((button) => button.addEventListener("click", () =>
 $("#addCollection").addEventListener("click", () => {
   $("#collectionName").value = "";
   $("#collectionNameError").textContent = "";
+  $$("#collectionPermissions input").forEach(input => { input.checked = false; });
   $("#collectionDialog").showModal();
   $("#collectionName").focus();
 });
@@ -281,5 +338,37 @@ $("#importButton").addEventListener("click", () => $("#importFile").click());
 $("#importFile").addEventListener("change", importGlossary);
 $$('[data-export]').forEach((button) => button.addEventListener("click", exportGlossary));
 $("#saveButton").addEventListener("click", saveGlossary);
-window.addEventListener("beforeunload", (event) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } });
+window.addEventListener("beforeunload", (event) => { if (dirty && !navigationInProgress) { event.preventDefault(); event.returnValue = ""; } });
+let navigationInProgress = false;
+let pendingNavigationUrl = "";
+let navigationSaving = false;
+const navigationDialog = $("#unsavedNavigationDialog");
+document.addEventListener("click", (event) => {
+  const link = event.target.closest(".app-header a[href]");
+  if (!link || navigationInProgress || !dirty || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target === "_blank") return;
+  const target = new URL(link.href, window.location.href);
+  if (target.origin !== window.location.origin || (target.pathname === window.location.pathname && target.search === window.location.search)) return;
+  event.preventDefault();
+  pendingNavigationUrl = target.href;
+  $("#unsavedNavigationStatus").textContent = "";
+  navigationDialog.showModal();
+}, true);
+navigationDialog.addEventListener("cancel", event => { if (navigationSaving) event.preventDefault(); });
+navigationDialog.addEventListener("close", () => { if (!navigationInProgress) pendingNavigationUrl = ""; });
+navigationDialog.addEventListener("click", async (event) => {
+  const action = event.target.closest("[data-unsaved-navigation]")?.dataset.unsavedNavigation;
+  if (!action || navigationSaving) return;
+  if (action === "stay") { navigationDialog.close(); return; }
+  if (action === "save") {
+    navigationSaving = true;
+    const buttons = $$("[data-unsaved-navigation]", navigationDialog);
+    buttons.forEach(button => { button.disabled = true; });
+    $("#unsavedNavigationStatus").textContent = "正在保存…";
+    const saved = await saveGlossary();
+    navigationSaving = false;
+    buttons.forEach(button => { button.disabled = false; });
+    if (!saved) { $("#unsavedNavigationStatus").textContent = $("#formMessage").textContent || "保存失败，请重试"; return; }
+  }
+  if (pendingNavigationUrl) { navigationInProgress = true; window.location.assign(pendingNavigationUrl); }
+});
 loadGlossary();

@@ -287,7 +287,7 @@
     for (const [index, raw] of String(text || "").split(/\r?\n/).entries()) {
       const line = raw.trim();
       if (!line) continue;
-      const weighted = line.match(/^(.*)[:：](\d+)$/);
+      const weighted = line.match(/^(.*)[:：]\s*(\d+)$/);
       const word = String(weighted?.[1] ?? line).trim();
       const weight = Number(weighted?.[2] ?? 4);
       if (!word) throw new Error(`第 ${index + 1} 行热词不能为空`);
@@ -333,6 +333,7 @@
       $("#qwenAssistStatus").textContent = `${model} 仅填写 Prompt；当前模型不支持即时热词。`;
     }
     syncQwenEnhancementCounts();
+    glossaryInjection?.refresh();
   }
 
   async function fillQwenEnhancement() {
@@ -366,6 +367,7 @@
       markSettingsDirty();
       status.textContent = `已填写 Prompt，并合并 ${generated.hotwords?.length || 0} 个 AI 热词。`;
       status.classList.add("good");
+      glossaryInjection?.collect(generated.hotwords || [], "ai_direct");
     } catch (error) {
       status.textContent = errorMessage(error);
       status.classList.add("bad");
@@ -375,6 +377,8 @@
     }
   }
 
+  let glossaryInjection;
+
   function taskConfigFromControls() {
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
@@ -382,6 +386,7 @@
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
       glossary_id: $("#glossaryInput").value,
+      asr_glossary_ids: glossaryInjection?.ids() || [],
       segmentation_enabled: segmentationEnabled,
       reference_script_mode: workflow === "reference_script",
       reference_break_symbols: $("#referenceBreakSymbolsInput").value,
@@ -1054,6 +1059,7 @@
       alignment_language: alignmentLanguage($("#languageInput").value),
       target_language_mode: $("#targetLanguageInput").value,
       glossary_id: $("#glossaryInput").value,
+      asr_glossary_ids: glossaryInjection?.ids() || [],
       segmentation_enabled: segmentationEnabled,
       reference_script_mode: workflow === "reference_script",
       reference_break_symbols: $("#referenceBreakSymbolsInput").value,
@@ -1701,9 +1707,10 @@
   }
   $("#qwenPromptInput").addEventListener("input", syncQwenEnhancementCounts);
   $("#qwenHotwordsInput").addEventListener("input", syncQwenEnhancementCounts);
+  glossaryInjection = window.SubstarGlossaryInjection.init({api, getTemporary:parseTemporaryHotwords, getProject:()=>state.videos.map(f=>f.name).join(", ").slice(0,100)});
   asrAssist = window.SubstarAsrAssist.init({
-    api, getFiles:() => state.videos, getSettings:() => state.settings,
-    apply(generated) {
+    api, getFiles:() => state.videos, getSettings:() => state.settings, getGlossaryIds:()=>glossaryInjection.ids(),
+    apply(generated, origin = "ai_asr") {
       if (typeof generated.prompt !== "string" || !generated.prompt.trim() || generated.prompt.length > 400) throw new Error("Prompt 必须为 1–400 字符。");
       if (!Array.isArray(generated.hotwords)) throw new Error("hotwords 必须是数组。");
       for (const word of generated.hotwords) {
@@ -1722,6 +1729,7 @@
       $("#qwenHotwordsInput").value = $("#qwenHotwordsInput").disabled ? "" : text;
       syncQwenEnhancementCounts();
       markSettingsDirty();
+      glossaryInjection?.collect(generated.hotwords || [], origin);
     },
   });
   $("#qwenAssistButton").addEventListener("click", fillQwenEnhancement);

@@ -21,10 +21,10 @@ test("release keeps the non-dubbing editor tool contract", () => {
 
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
-    "editor.css":"20260904-nav-hover-1",
-    "editor.js":"20260904-editor-lock-1",
+    "editor.css":"20260907-crisp-2",
+    "editor.js":"20260909-external-translation-1",
     "editor_document.js":"20260903-delivery-1",
-    "editor_timeline.js":"20260828-shortcuts-1",
+    "editor_timeline.js":"20260907-crisp-2",
     "editor_tutorial.js":"20260831-v2-contract-1",
   };
   for (const [asset, version] of Object.entries(fingerprints)) {

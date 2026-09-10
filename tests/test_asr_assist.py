@@ -94,6 +94,16 @@ class AsrAssistTests(unittest.TestCase):
         self.assertIn("原始 ASR 全文 XYZ", model.call_args.kwargs["groups"][0]["user_prompt"])
         self.assertEqual(model.call_args.kwargs["system_prompt"], material["instructions"])
 
+    def test_glossary_hotwords_are_frozen_and_change_cache_identity(self):
+        settings = {"recognition_profile_id":"qwen_cloud", "asr_injected_hotwords":[{"text":"Nova","weight":4}]}
+        from substar_core.asr_assist import create_assist_task
+        first = create_assist_task(self.service,self.projects,self.media,"en",settings)
+        payload = self.service.get_task_input(first["task_id"])
+        self.assertEqual(payload["hotwords"],[{"text":"Nova","weight":4}])
+        settings["asr_injected_hotwords"] = []
+        second = create_assist_task(self.service,self.projects,self.media,"en",settings)
+        self.assertNotEqual(first["task_id"],second["task_id"])
+
     def test_first_pass_runs_through_existing_asr_worker(self):
         with wave.open(str(self.media), "wb") as output:
             output.setnchannels(1)

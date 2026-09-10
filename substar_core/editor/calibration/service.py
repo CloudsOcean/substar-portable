@@ -786,7 +786,7 @@ def compute_calibration(
             "standard_source": row.get("standard_source"),
             "aliases": row.get("aliases", []),
         }
-        for row in (settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(load_task_info(project_root, project_id).get("glossary_id") or "")))
+        for row in (settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(load_task_info(project_root, project_id).get("glossary_id") or ""), stage="calibration"))
     ]
     configured_source_language = str(settings.get("language") or "Auto")
     resolved_source_language = (

@@ -4184,6 +4184,22 @@
       ordinaryError("已载入保存版本。未保存编辑的恢复副本已留在本浏览器。", "completed");
     } catch (error) { ordinaryError(`恢复副本未能保存：${error.message}`); }
   };
+  $("#externalTranslation").onclick = async () => {
+    const epoch = projectEpoch;
+    $("#exportMenu").open = false;
+    try {
+      const saved = await ensureOperationQueue().flushAndWait();
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
+      const query = new URLSearchParams({revision_id:saved.revision_id,
+        source_language:$("#translationSourceLanguage").value,
+        target_language:$("#translationTargetLanguage").value,
+        mapping_mode:$("#translationMappingMode").value});
+      const built = await api(projectPath(`/exchange/external-translation?${query}`));
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
+      await navigator.clipboard.writeText(built.text);
+      ordinaryError("已复制上行字幕和翻译提示词，可粘贴给外部 AI 生成译文 SRT", "completed");
+    } catch (error) { ordinaryError(`复制外部翻译内容失败：${error.message}`); }
+  };
   $("#exportMenu").addEventListener("click", async event => {
     const exportEpoch = projectEpoch;
     const exchange = event.target.closest("[data-exchange-export]");

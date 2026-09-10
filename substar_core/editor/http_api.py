@@ -31,7 +31,7 @@ from substar_core.model_routing import resolve_stage_request
 from substar_core.chinese_script import convert_chinese_script
 from substar_core.config import load_settings, settings_for_model_provider
 from substar_core.glossary import (
-    active_glossary,
+    active_glossary, collect_candidates,
     glossary_prompt,
     load_glossary,
     normalize_entry,
@@ -365,41 +365,7 @@ def _collect_generated_hotwords(project_id: str, glossary_id: str) -> list[dict[
     generated = payload.get("hotwords") if isinstance(payload, dict) else None
     if not isinstance(generated, list):
         return active_glossary(glossary_id)
-    existing = load_glossary()
-    by_key = {
-        (
-            str(item.get("glossary_id", "global")),
-            str(item.get("source", "")).casefold(),
-        ): item
-        for item in existing
-    }
-    changed = False
-    for item in generated:
-        if not isinstance(item, dict) or not str(item.get("text") or item.get("source") or "").strip():
-            continue
-        text = str(item.get("text") or item.get("source")).strip()
-        destination_id = glossary_id or "global"
-        key = (destination_id, text.casefold())
-        previous = by_key.get(key)
-        candidate = normalize_entry(
-            {
-                "id": item.get("id") or (previous or {}).get("id", ""),
-                "source": text,
-                "standard_source": item.get("standard_source") or text,
-                "target": item.get("target", ""),
-                "aliases": item.get("aliases", []),
-                "type": item.get("type", "other"),
-                "glossary_id": destination_id,
-                "enabled": True,
-                "hotword_weight": item.get("weight", item.get("hotword_weight", 4)),
-                "notes": item.get("notes", "ASR 增强候选热词"),
-            }
-        )
-        if by_key.get(key) != candidate:
-            by_key[key] = candidate
-            changed = True
-    if changed:
-        save_glossary(list(by_key.values()))
+    collect_candidates(generated, "asr_generated", project_id)
     return active_glossary(glossary_id)
 
 
@@ -2121,7 +2087,7 @@ def ai_calibrate_project(
         key: asdict(render_prompt(key, variant=calibration_variant(language)))
         for key in ("calibration", "calibration_repair")
     }
-    frozen_settings["glossary_snapshot"] = active_glossary(_project_glossary_id(project_id))
+    frozen_settings["glossary_snapshot"] = active_glossary(_project_glossary_id(project_id), stage="calibration")
     task_input = {
         "schema_version": CALIBRATION_INPUT_SCHEMA,
         "expected_revision_id": latest.revision_id,
@@ -2254,6 +2220,27 @@ def export_external_ai_generation(project_id: str, revision_id: str | None = Non
         "external-ai-generation",
         lambda path: write_bytes_zip(path, files),
     )
+
+
+@router.get("/projects/{project_id}/exchange/external-translation")
+def export_external_translation(project_id: str, revision_id: str,
+                                source_language: str = "Auto", target_language: str = "zh-CN",
+                                mapping_mode: Literal["many_to_many", "one_to_one"] = "many_to_many"):
+    from substar_core.project_exchange import external_translation_text
+    revision = open_project_store(project_id).load_revision(revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="项目版本不存在")
+    options = _exchange_prompt_options(project_id)
+    info = get_project_task_info(project_id)
+    limit_key = {"zh-CN":"chinese_hard_limit", "en":"english_hard_limit", "ja":"japanese_hard_limit", "ko":"korean_hard_limit"}.get(target_language)
+    target_limit = int(info.get(limit_key) or options["target_hard_limit"])
+    try:
+        text = external_translation_text(revision, source_language=source_language,
+            target_language=target_language, target_hard_limit=target_limit,
+            mapping_mode=mapping_mode, glossary=options["glossary"])
+    except (ProjectExchangeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"text": text, "revision_id": revision.revision_id}
 
 
 @router.get("/projects/{project_id}/exchange/subtitle-project")

@@ -258,10 +258,13 @@ class TranslationTrack:
             raise DocumentValidationError(
                 f"unsupported translation status: {self.translation_status!r}"
             )
+        intentional_empty = self.target_text == "" and self.provenance.metadata.get("omitted_filler") is True
         if self.translation_status == "translated":
-            _require_text(self.target_text, "target_text")
+            if not intentional_empty:
+                _require_text(self.target_text, "target_text")
         elif self.translation_status == "needs_review":
-            _require_text(self.target_text, "target_text")
+            if not intentional_empty:
+                _require_text(self.target_text, "target_text")
             _require_text(self.issue_code, "needs_review issue_code")
         elif not self.editable or self.issue_code != "translation_unresolved":
             raise DocumentValidationError(
