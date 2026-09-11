@@ -383,8 +383,7 @@ summary span { margin-left: 7px; color: #677287; font-size: 13px; }
 #asrAssistImportStatus { color:var(--theme-danger); }
 
 .glossary-injection { border-top:1px solid var(--theme-line); padding-top:14px; }
-.glossary-injection-grid { display:grid; grid-template-columns:1.2fr 1fr; gap:16px; margin:10px 0; }
-.glossary-injection-grid textarea { width:100%; min-height:100px; resize:vertical; }
+.glossary-injection-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:0 0 10px; }
 #glossaryInjectionChoices { max-height:150px; overflow:auto; display:grid; gap:8px; padding:8px 0; }
 #glossaryInjectionChoices label { display:flex; gap:8px; align-items:center; }
 #glossaryInjectionStatus { color:var(--theme-muted); }

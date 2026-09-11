@@ -436,6 +436,7 @@ class SettingsPayload(BaseModel):
 class GlossaryPayload(BaseModel):
     collections: list[dict[str, Any]] = Field(default_factory=list)
     entries: list[dict[str, Any]]
+    imported_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 
@@ -1736,13 +1737,13 @@ def preview_glossary_injection(payload: GlossaryInjectionPayload) -> dict[str, A
 
 @app.get("/api/glossary")
 def get_glossary() -> dict[str, Any]:
-    return load_glossary_library()
+    return {**load_glossary_library(), "transfer_version": 1}
 
 
 @app.put("/api/glossary")
 def put_glossary(payload: GlossaryPayload) -> dict[str, Any]:
     try:
-        return save_glossary_library(payload.collections, payload.entries)
+        return save_glossary_library(payload.collections, payload.entries, imported_candidates=payload.imported_candidates)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -11,8 +11,9 @@
         const result=await api("/api/glossary/injection-preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({collection_ids:ids(),temporary:getTemporary()})});
         if(epoch!==version)return;
         const supported=!$("#qwenHotwordsInput").disabled;
-        $("#glossaryInjectionPreview").value=supported?result.hotwords.map(r=>r.text).join("、"):"当前听写模型不支持热词注入";
-        $("#glossaryInjectionStatus").textContent=supported?`${result.hotwords.length} / 2000 个 · 已合并临时热词并去重`:"切换到支持热词的 Qwen 模型后生效";
+        if (!Array.isArray(result.glossary_hotwords)) throw new Error("请重启 Substar，使词库热词统一按权重 5 注入");
+        $("#glossaryInjectionPreview").value=supported?result.glossary_hotwords.map(r=>`${r.text}：${r.weight}`).join("\n"):"";
+        $("#glossaryInjectionStatus").textContent=supported?`${result.glossary_hotwords.length} 个词库热词 · 权重 5 · 已排除临时热词中的重复项（合计 ${result.hotwords.length} / 2000）`:"切换到支持热词的 Qwen 模型后生效";
       } catch(e) {if(epoch===version){$("#glossaryInjectionPreview").value="";$("#glossaryInjectionStatus").textContent=e.message;}}
     }
     async function load() {

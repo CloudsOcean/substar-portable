@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>词库 · Substar</title>
-    <link rel="stylesheet" href="/assets/glossary.css?v=20260909-unassigned-1" />
+    <link rel="stylesheet" href="/assets/glossary.css?v=20260911-transfer-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260909-unsaved-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1" />
@@ -28,14 +28,7 @@
           <div>
             <h1>词库</h1>
           </div>
-          <button
-            id="addEntryTop"
-            class="square-button"
-            type="button"
-            title="新增术语"
-          >
-            ＋
-          </button>
+
         </div>
         <label class="search"
           ><span>⌕</span
@@ -49,50 +42,43 @@
             ><i class="asset-sidebar-meta" id="allCount">0</i></button
           >
         </div>
-        <div class="collection-heading"><span>项目词库</span></div>
+        <div class="collection-heading"><span>项目词库</span><span id="projectCount">0</span></div>
         <div id="collectionList" class="collection-list asset-sidebar-list"></div>
         <button id="addCollection" class="collection-create" type="button">
           <span class="collection-create-icon">＋</span>
           <span><b>新建项目词库</b></span>
         </button>
-        <div class="library-summary">
-          <div><strong id="enabledCount">0</strong><span>已启用</span></div>
-          <div><strong id="projectCount">0</strong><span>项目词库</span></div>
-        </div>
-        <p class="library-note">
-          候选词经审核入库后，按词库权限用于听写、校准或翻译。
-        </p>
+
       </aside>
 
       <section class="glossary-content">
         <div class="content-heading">
           <div>
             <h2 id="contentTitle">全部词条</h2>
-            <p>填写热词和指定译文；系统按项目语言方向使用对应关系。</p>
+
           </div>
           <div class="toolbar">
-            <button id="importButton" class="secondary" type="button">
-              导入</button
-            ><input
-              id="importFile"
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              hidden
-            />
-            <details class="export-menu">
-              <summary class="secondary">导出</summary>
+            <details id="injectionMenu" class="injection-menu">
+              <summary class="secondary">注入管理</summary>
+              <section id="glossaryPermissions" class="glossary-permissions" aria-label="项目词库注入管理"></section>
+            </details>
+            <details id="importMenu" class="export-menu">
+              <summary class="secondary">导入</summary>
               <div>
-                <button data-export="xlsx" type="button">热词表（Excel）</button>
+                <button id="importButton" type="button">导入词库文件</button>
+                <button id="copyExternalPrompt" type="button">提交外部模型生成</button>
+                <button id="openImportEditor" type="button">打开填写界面</button>
               </div>
             </details>
+            <input id="importFile" type="file" accept=".json,.xlsx" hidden />
+            <button id="exportLibrary" class="secondary" type="button">导出</button>
             <button id="addEntry" class="primary" type="button">
               ＋ 新增术语
             </button>
           </div>
         </div>
-        <section id="glossaryPermissions" class="glossary-permissions"></section>
         <details class="candidate-pool"><summary>候选池 <span id="candidateCount">0</span></summary>
-          <div class="candidate-actions"><label><input id="candidateSelectAll" type="checkbox"> 全选</label><select id="candidateDestination" aria-label="候选词目标词库"></select><button id="approveCandidates" class="primary" type="button">加入词库</button><button id="ignoreCandidates" class="secondary" type="button">忽略</button></div>
+          <div class="candidate-actions"><label><input id="candidateSelectAll" type="checkbox"> 全选</label><span id="candidateSelectedCount" aria-live="polite">已选 0</span><select id="candidateDestination" aria-label="候选词目标词库"></select><button id="approveCandidates" class="primary" type="button">加入词库</button><button id="ignoreCandidates" class="secondary" type="button">忽略</button></div>
           <div id="candidateList"></div><p id="candidateMessage"></p>
         </details>
         <div id="emptyState" class="empty-state" hidden>
@@ -123,19 +109,19 @@
               maxlength="300"
             />
           </div>
-          <select data-field="glossary_id" aria-label="保存到词库"></select>
-          <button class="delete-entry" type="button" aria-label="删除术语">
-            ⌫
-          </button>
-        </div>
         <div class="entry-target">
-          <span>→</span
-          ><input
+          <input
             data-field="target"
             placeholder="可选译文"
             maxlength="300"
           />
         </div>
+          <select data-field="glossary_id" aria-label="保存到词库"></select>
+          <button class="delete-entry" type="button" aria-label="删除术语">
+            ⌫
+          </button>
+        </div>
+
       </article>
     </template>
     <dialog id="collectionDialog" class="collection-modal">
@@ -178,7 +164,23 @@
       </div>
       <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
     </dialog>
+    <dialog id="importEditor" class="transfer-dialog" aria-labelledby="importEditorTitle">
+      <h2 id="importEditorTitle">填写词库</h2>
+      <p>每行填写：热词；译文；项目词库。译文和项目可留空，也可粘贴外部模型生成的 JSON。</p>
+      <textarea id="importText" aria-label="词库内容" placeholder="Cyrus Janssen；赛勒斯·詹森；WCICO"></textarea>
+      <p id="importEditorError" role="status"></p>
+      <div class="dialog-actions"><button class="secondary" data-close="importEditor">关闭</button><button id="previewText" class="primary">预览导入</button></div>
+    </dialog>
+    <dialog id="importPreview" class="transfer-dialog" aria-labelledby="importPreviewTitle">
+      <h2 id="importPreviewTitle">导入预览</h2>
+      <p id="importSummary"></p>
+      <div id="importProjects"></div>
+      <div id="importConflicts"></div>
+      <p>增量合并，保留现有词条。应用后点击“保存词库”生效。</p>
+      <div class="dialog-actions"><button class="secondary" data-close="importPreview">取消</button><button id="applyImport" class="primary">应用导入</button></div>
+    </dialog>
+    <script src="/assets/glossary_transfer.js?v=20260911-transfer-1"></script>
     <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
-    <script src="/assets/glossary.js?v=20260909-unassigned-1"></script>
+    <script src="/assets/glossary.js?v=20260911-transfer-1"></script>
   </body>
 </html>

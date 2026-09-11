@@ -15,6 +15,23 @@ class GlossaryInjectionTests(unittest.TestCase):
         self.collections=[{"id":"global","kind":"global","injection_permissions":["translation"]},{"id":"show","name":"节目","kind":"project","injection_permissions":["asr","calibration"]}]
         g.save_glossary_library(self.collections,[{"source":"Global","target":"全局","glossary_id":"global"},{"source":"Nova","target":"新星","glossary_id":"show"}])
 
+    def test_candidate_import_preserves_background_and_terminal_states(self):
+        g.collect_candidates([{"text": "Ignored"}, {"text": "Background"}], "manual")
+        initial = g.load_glossary_library()
+        ignored = next(c for c in initial["candidates"] if c["source"] == "Ignored")
+        g.review_candidates([ignored["id"]], "ignore", "global")
+        imported = [{"id": ignored["id"], "source": "New", "target": "新增", "status": "pending", "glossary_id": "show"},
+                    {"source": "Ignored", "status": "pending"}]
+        saved = g.save_glossary_library(initial["collections"], initial["entries"], imported_candidates=imported)
+        self.assertEqual(len(saved["candidates"]), 3)
+        self.assertEqual(next(c for c in saved["candidates"] if c["source"] == "Ignored")["status"], "ignored")
+        self.assertEqual(len({c["id"] for c in saved["candidates"]}), 3)
+        repeated = g.save_glossary_library(initial["collections"], initial["entries"], imported_candidates=imported)
+        self.assertEqual(saved, repeated)
+        with self.assertRaises(ValueError):
+            g.save_glossary_library(initial["collections"], initial["entries"], imported_candidates=[{"source":"Bad","status":"invalid"}])
+        self.assertEqual(g.load_glossary_library(), saved)
+
     def test_permissions_survive_save_and_separate_stages(self):
         self.assertEqual([e["source"] for e in g.active_glossary(stage="asr")],["Nova"])
         self.assertEqual([e["source"] for e in g.active_glossary(stage="calibration")],["Nova"])
@@ -39,8 +56,20 @@ class GlossaryInjectionTests(unittest.TestCase):
     def test_merge_preserves_manual_value_without_priority_or_translation(self):
         preview=g.injection_preview(["show"],[{"text":"NOVA","weight":5}])
         self.assertEqual(preview["hotwords"],[{"text":"NOVA","weight":5}])
-        self.assertEqual(g.injection_preview(["show"],[])["hotwords"],[{"text":"Nova","weight":4}])
+        self.assertEqual(g.injection_preview(["show"],[])["hotwords"],[{"text":"Nova","weight":5}])
         self.assertNotIn("新星",str(preview["hotwords"]))
+
+    def test_glossary_preview_excludes_temporary_and_deduplicates_collections(self):
+        library = g.load_glossary_library()
+        library["collections"].append({"id":"second","name":"另一个节目","kind":"project","injection_permissions":["asr"]})
+        library["entries"].extend([{"source":"NOVA","glossary_id":"second","hotword_weight":1}, {"source":"Cyrus","glossary_id":"second","hotword_weight":2}])
+        g.save_glossary_library(library["collections"], library["entries"])
+        result = g.injection_preview(["show","second"], [{"text":"nova","weight":50}])
+        self.assertEqual(result["glossary_hotwords"], [{"text":"Cyrus","weight":5}])
+        self.assertEqual(result["hotwords"], [{"text":"nova","weight":50},{"text":"Cyrus","weight":5}])
+        result = g.injection_preview(["show","second"], [])
+        self.assertEqual(result["glossary_hotwords"], [{"text":"Nova","weight":5},{"text":"Cyrus","weight":5}])
+        self.assertEqual(g.injection_preview([], [{"text":"nova","weight":4}])["glossary_hotwords"], [])
 
     def test_overflow_is_an_error_not_truncation(self):
         with self.assertRaises(ValueError):g.injection_preview(["show"],[{"text":f"term{i}","weight":4} for i in range(2000)])
@@ -91,4 +120,4 @@ class GlossaryInjectionTests(unittest.TestCase):
         g.save_glossary_library([],[])
         with patch.object(app,"build_transcription_request",side_effect=lambda **kwargs:kwargs):
             request=app._workbench_transcription_request(SimpleNamespace(input_path=Path("media.wav"),job_dir=Path("project")),settings)
-        self.assertEqual(request["hotwords"],{"Manual":5,"Nova":4})
+        self.assertEqual(request["hotwords"],{"Manual":5,"Nova":5})

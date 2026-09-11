@@ -138,7 +138,7 @@ def load_glossary_collections() -> list[dict[str, str]]:
 
 
 @_locked
-def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[str, Any]], *, candidates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[str, Any]], *, candidates: list[dict[str, Any]] | None = None, imported_candidates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     global_raw = next((c for c in collections if c.get("id") == GLOBAL_GLOSSARY_ID), {})
     normalized_collections = [normalize_collection({**global_raw, "kind": "global"})]
     collection_ids = {GLOBAL_GLOSSARY_ID}
@@ -163,6 +163,26 @@ def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[
             raise ValueError(f"术语重复：{item['source']}")
         seen.add(key)
     library = {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": normalized_collections, "entries": normalized_entries, "candidates": load_glossary_library().get("candidates", []) if candidates is None else candidates}
+    # Merge imports while holding the library lock; background ASR additions and
+    # terminal review states must survive a browser's older draft.
+    by_word = {c["source"].strip().casefold(): c for c in library["candidates"]}
+    candidate_ids = {c.get("id") for c in library["candidates"]}
+    for raw in imported_candidates or []:
+        source = _clean_text(raw.get("source"))
+        status = raw.get("status", "pending")
+        if not source or status not in {"pending", "approved", "ignored"}:
+            raise ValueError("导入候选词或状态无效")
+        existing = by_word.get(source.casefold())
+        if existing:
+            if existing.get("status") == "pending":
+                existing["target"] = _clean_text(raw.get("target"))
+            continue
+        item = {**raw, "source": source, "target": _clean_text(raw.get("target")), "status": status}
+        if not item.get("id") or item["id"] in candidate_ids:
+            item["id"] = uuid.uuid4().hex
+        candidate_ids.add(item["id"])
+        library["candidates"].append(item)
+        by_word[source.casefold()] = item
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
     atomic_write_json(GLOSSARY_FILE, library)
     return library
@@ -197,14 +217,18 @@ def injection_preview(collection_ids: list[str] | None, temporary: list[dict[str
     from .qwen_enhancement import normalize_qwen_hotwords
     entries = active_glossary(stage="asr", collection_ids=collection_ids)
     merged = {r["text"].casefold(): dict(r) for r in normalize_qwen_hotwords(temporary)}
+    glossary_only = []
     for entry in entries:
         text = entry["source"]
         if not _qwen_hotword_is_valid(text):
             raise ValueError(f"词库热词超出长度限制：{text}")
-        merged.setdefault(text.casefold(), {"text": text, "weight": 4})
+        if text.casefold() not in merged:
+            word = {"text": text, "weight": 5}
+            merged[text.casefold()] = word
+            glossary_only.append(word)
     # Use the exact recognizer contract, with explicit errors instead of truncation.
     hotwords = normalize_qwen_hotwords(list(merged.values()))
-    return {"hotwords": hotwords, "entries": entries, "collection_ids": list(dict.fromkeys(collection_ids)) if collection_ids is not None else [c["id"] for c in load_glossary_library()["collections"] if "asr" in c.get("injection_permissions", [])]}
+    return {"hotwords": hotwords, "glossary_hotwords": glossary_only, "entries": entries, "collection_ids": list(dict.fromkeys(collection_ids)) if collection_ids is not None else [c["id"] for c in load_glossary_library()["collections"] if "asr" in c.get("injection_permissions", [])]}
 
 
 @_locked

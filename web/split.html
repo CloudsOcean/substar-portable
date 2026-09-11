@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260908-glossary-2">
+  <link rel="stylesheet" href="/assets/split.css?v=20260911-glossary-weight-5">
   <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
@@ -135,7 +135,7 @@
                   <textarea id="qwenHotwordsInput" rows="5" placeholder="英伟达：50&#10;超微电子：5&#10;AMD：4&#10;&#10;1–5 = 普通热词权重，数字越大优先级越高；4 = 默认，5 = 最高。50 = 必须重点命中的超级热词。中英文冒号均可，保存时会自动统一。"></textarea>
                 </label>
               </div>
-              <section class="glossary-injection"><b>词库热词注入</b><div class="glossary-injection-grid"><label>本次实际注入<textarea id="glossaryInjectionPreview" readonly rows="4"></textarea></label><div><span>选择词库</span><div id="glossaryInjectionChoices"></div><a href="/glossary" target="_blank" rel="noopener">管理注入权限</a></div></div><small id="glossaryInjectionStatus">读取词库…</small></section>
+              <section class="glossary-injection"><div class="glossary-injection-grid"><label class="qwen-field"><span>词库热词</span><textarea id="glossaryInjectionPreview" readonly rows="5" placeholder="所选词库中去重后的热词"></textarea></label><div><span>选择词库</span><div id="glossaryInjectionChoices"></div><a href="/glossary" target="_blank" rel="noopener">管理注入权限</a></div></div><small id="glossaryInjectionStatus">读取词库…</small></section>
             </div>
           </details>
 
@@ -255,7 +255,7 @@
   </div>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2" defer></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-<script src="/assets/glossary_injection.js?v=20260909-unassigned-1" defer></script>
+<script src="/assets/glossary_injection.js?v=20260911-glossary-weight-5" defer></script>
 <script src="/assets/asr_assist.js?v=20260908-glossary-2" defer></script>
   <script src="/assets/split.js?v=20260908-glossary-2" defer></script>
 </body>
