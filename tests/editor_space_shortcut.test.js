@@ -25,7 +25,8 @@ test("playback, cue hiding, and timeline zoom read configurable shortcuts", () =
   assert.match(timeline, /options\.hideCueShortcut/);
 });
 
-test("runtime log labels stages and offers copy", () => {
-  assert.match(split, /<summary>任务进度（仅阶段与报错）<\/summary>/);
-  assert.match(split, /id="copyRuntimeLog"/);
+test("task cards replace the standalone runtime log", () => {
+  assert.doesNotMatch(split, /id="runtimeLog"|id="copyRuntimeLog"/);
+  const code = fs.readFileSync(path.join(__dirname, "..", "web", "split.js"), "utf8");
+  assert.match(code, /copyText\(errorText,/);
 });

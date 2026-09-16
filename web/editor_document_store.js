@@ -92,6 +92,11 @@
           }
         });
         break;
+      case "set_source_text": {
+        const cue = cueById.get(String(payload.cue_id));
+        if (cue && cue.source_text != null) cue.source_text = String(payload.text);
+        break;
+      }
       case "set_target": {
         const cue = cueById.get(String(payload.cue_id));
         if (cue) {
@@ -285,8 +290,9 @@
       },
       enqueue(operation) {
         if (!pending.some(item => item.operation_id === operation.operation_id)) {
+          const next = projected ? reducer(projected, operation) : null;
           pending.push(operation);
-          projected = projected ? reducer(projected, operation) : null;
+          projected = next;
         }
         options.onChange?.(snapshot());
         return projected;

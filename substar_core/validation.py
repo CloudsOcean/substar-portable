@@ -127,6 +127,8 @@ def _character_count(
 def source_cue_text(document: EditorDocument, cue_id: str) -> str:
     tokens = {token.token_id: token for token in document.display_tokens}
     cue = next(cue for cue in document.cues if cue.cue_id == cue_id)
+    if cue.source_text is not None:
+        return cue.source_text
     return layout_tokens(
         [
             tokens[token_id].text

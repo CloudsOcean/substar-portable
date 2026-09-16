@@ -14,7 +14,7 @@ test("reference upload covers AI and punctuation workflows while break input sta
   assert.match(splitHtml, /class="[^"]*reference-row[^"]*hidden[^"]*" id="referenceRow"/);
   assert.match(splitJs, /#referenceRow"\)\.classList\.toggle\("hidden", !referenceEnabled\)/);
   assert.match(splitJs, /workflow !== "disabled" && references\.length/);
-  assert.match(splitJs, /const matchedReferences = referenceEnabled/);
+  assert.match(splitJs, /await submitSingle\(mediaFiles\[0\], references\)/);
   assert.match(splitCss, /select, input\[type="number"\], #referenceBreakSymbolsInput \{[^}]*box-sizing: border-box;[^}]*width: 100%;/s);
   assert.doesNotMatch(splitHtml, /任务配置已保留；多个素材将共用此配置/);
 });

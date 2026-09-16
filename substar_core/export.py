@@ -29,6 +29,11 @@ def render_document_srt(
     """Render the current revision only; completion is never an export gate."""
 
     mode = SubtitleExportMode(mode)
+    if mode is SubtitleExportMode.AB_SINGLE:
+        # Track-major SRT: complete A followed by complete B, original clocks.
+        tracks = [render_document_srt(document, track) for track in (SubtitleExportMode.SOURCE, SubtitleExportMode.TARGET)]
+        records = [block for text in tracks for block in text.strip().split("\n\n") if block]
+        return "\n\n".join(f"{index}\n{block.split(chr(10), 1)[1]}" for index, block in enumerate(records, 1)) + ("\n" if records else "")
     tokens = {token.token_id: token for token in document.display_tokens}
     blocks: list[str] = []
     output_index = 0
@@ -40,6 +45,8 @@ def render_document_srt(
             for token_id in cue.display_token_ids
             if tokens[token_id].state is EntityState.ACTIVE
         )
+        if cue.source_text is not None:
+            source = cue.source_text
         target = cue.target.target_text.strip() if cue.target is not None else ""
         source, target = project_cue_lines(document, source=source, target=target)
         projection = document.properties.script_projection
@@ -50,8 +57,6 @@ def render_document_srt(
             lines = [source]
         elif mode is SubtitleExportMode.TARGET:
             lines = [target]
-        elif mode is SubtitleExportMode.AB_SINGLE:
-            lines = [" ".join(value for value in (source, target) if value).strip()]
         elif document.presentation.display_order is DisplayOrder.SOURCE_ABOVE_TARGET:
             lines = [value for value in (source, target) if value]
         else:

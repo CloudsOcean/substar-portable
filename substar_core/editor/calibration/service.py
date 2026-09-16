@@ -760,6 +760,45 @@ def _apply_ai_calibration_operations(
         })
     return result
 
+def calibration_prompts(settings, cues, calibration_glossary, instruction=""):
+    configured_source_language = str(settings.get("language") or "Auto")
+    resolved_source_language = (
+        source_language_for_text(
+            " ".join(
+                str(token["text"])
+                for cue in cues
+                for token in cue["tokens"]
+            )
+        )
+        if configured_source_language.strip().lower() in {"", "auto", "automatic"}
+        else normalize_source_language(configured_source_language)
+    )
+    calibration_prompt_variant = calibration_variant(resolved_source_language)
+    calibration_prompt = frozen_prompt(settings,
+        "calibration", variant=calibration_prompt_variant
+    ).text
+    calibration_repair_prompt = frozen_prompt(settings,
+        "calibration_repair", variant=calibration_prompt_variant
+    ).text
+    if calibration_glossary:
+        glossary_section = glossary_prompt(calibration_glossary, include_target=False)
+        calibration_prompt += "\n\n" + glossary_section
+        calibration_repair_prompt += "\n\n" + glossary_section
+    if instruction.strip():
+        instruction_section = (
+            "\n\n用户本次补充校准要求：\n"
+            + instruction.strip()
+            + "\n补充要求只能在既有校准动作契约允许的范围内执行；不得改变 Cue 时间或结构。"
+        )
+        calibration_prompt += instruction_section
+        calibration_repair_prompt += instruction_section
+    # Keep the machine grammar last so neither glossary data nor a bounded
+    # user instruction can accidentally shadow the output protocol.
+    calibration_prompt += "\n\n" + output_contract("CALIBRATE")
+    calibration_repair_prompt += "\n\n" + output_contract("CALIBRATE")
+    return calibration_prompt, calibration_repair_prompt
+
+
 def compute_calibration(
     project_id: str,
     payload: AiCalibrationRequest,
@@ -788,41 +827,7 @@ def compute_calibration(
         }
         for row in (settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(load_task_info(project_root, project_id).get("glossary_id") or ""), stage="calibration"))
     ]
-    configured_source_language = str(settings.get("language") or "Auto")
-    resolved_source_language = (
-        source_language_for_text(
-            " ".join(
-                str(token["text"])
-                for cue in cues
-                for token in cue["tokens"]
-            )
-        )
-        if configured_source_language.strip().lower() in {"", "auto", "automatic"}
-        else normalize_source_language(configured_source_language)
-    )
-    calibration_prompt_variant = calibration_variant(resolved_source_language)
-    calibration_prompt = frozen_prompt(settings,
-        "calibration", variant=calibration_prompt_variant
-    ).text
-    calibration_repair_prompt = frozen_prompt(settings,
-        "calibration_repair", variant=calibration_prompt_variant
-    ).text
-    if calibration_glossary:
-        glossary_section = glossary_prompt(calibration_glossary, include_target=False)
-        calibration_prompt += "\n\n" + glossary_section
-        calibration_repair_prompt += "\n\n" + glossary_section
-    if payload.instruction.strip():
-        instruction_section = (
-            "\n\n用户本次补充校准要求：\n"
-            + payload.instruction.strip()
-            + "\n补充要求只能在既有校准动作契约允许的范围内执行；不得改变 Cue 时间或结构。"
-        )
-        calibration_prompt += instruction_section
-        calibration_repair_prompt += instruction_section
-    # Keep the machine grammar last so neither glossary data nor a bounded
-    # user instruction can accidentally shadow the output protocol.
-    calibration_prompt += "\n\n" + output_contract("CALIBRATE")
-    calibration_repair_prompt += "\n\n" + output_contract("CALIBRATE")
+    calibration_prompt, calibration_repair_prompt = calibration_prompts(settings, cues, calibration_glossary, payload.instruction)
     tracker = {
         "planned": len(blocks), "completed": 0,
         "primary_accepted": 0, "repair_planned": 0,

@@ -79,6 +79,18 @@
 
     const reuseOrPatchRow = (existing, next) => {
       if (!existing || existing.dataset.cueId !== next.dataset.cueId) return next;
+      // A previous edit's asynchronous save can refresh the list while the user
+      // is already typing in another row. Never replace that live textarea:
+      // doing so loses focus, selection, composition and its unsaved draft.
+      const focus = document.activeElement;
+      const nextTarget = next.querySelector(focus?.matches?.("[data-source-edit]") ? "[data-source-edit]" : "[data-target-edit]");
+      if ((focus?.matches?.("[data-target-edit]") || focus?.matches?.("[data-source-edit]")) && existing.contains?.(focus)
+          && nextTarget && !nextTarget.disabled) {
+        const number = existing.querySelector(".cue-meta strong");
+        const nextNumber = next.querySelector(".cue-meta strong");
+        if (number && nextNumber) number.textContent = nextNumber.textContent;
+        return existing;
+      }
       if (existing.isEqualNode(next)) return existing;
       const existingNumber = existing.querySelector(".cue-meta strong");
       const nextNumber = next.querySelector(".cue-meta strong");

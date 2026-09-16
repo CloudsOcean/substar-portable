@@ -124,7 +124,7 @@
     const handle = await chooseHandle(spec, dependencies);
     if (!handle) return {cancelled:true};
     const fetcher = dependencies.fetch || globalThis.fetch.bind(globalThis);
-    const response = await fetcher(spec.url);
+    const response = await fetcher(typeof spec.url === "function" ? await spec.url() : spec.url);
     if (!response.ok) throw new Error(await responseError(response));
     if (response.body && typeof response.body.pipeTo === "function") {
       const writable = await handle.createWritable();
@@ -138,7 +138,7 @@
   async function saveBlob(spec, blob, dependencies = {}) {
     const handle = await chooseHandle(spec, dependencies);
     if (!handle) return {cancelled:true};
-    await writeBlob(handle, blob);
+    await writeBlob(handle, typeof blob === "function" ? await blob() : blob);
     return {cancelled:false, filename:handle.name || spec.suggestedName};
   }
 

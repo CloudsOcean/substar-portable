@@ -59,6 +59,13 @@ def render_track(
     if mode not in {"a", "b", "ab_two_line", "ab_inline"}:
         raise ValueError(f"unknown subtitle export mode: {mode}")
     rendered: list[str] = []
+    if mode == "ab_inline":
+        for attribute in ("source", "target"):
+            for block in blocks:
+                body = getattr(block, attribute)
+                if body.strip():
+                    rendered.append(f"{len(rendered) + 1}\n{block.timing}\n{body}")
+        return "\n\n".join(rendered) + ("\n" if rendered else "")
     for position, block in enumerate(blocks, start=1):
         if mode == "a":
             body = block.source

@@ -360,6 +360,7 @@ class DisplayCue:
     group_id: str | None = None
     mapping: Mapping[str, Any] = field(default_factory=dict)
     translation: InitVar[str | None] = None
+    source_text: str | None = None
 
     def __post_init__(self, translation: str | None) -> None:
         object.__setattr__(self, "index", int(self.index))
@@ -377,7 +378,12 @@ class DisplayCue:
         if self.index < 0:
             raise DocumentValidationError("cue index must be non-negative")
         object.__setattr__(self, "display_token_ids", tuple(self.display_token_ids))
-        if not self.display_token_ids:
+        if self.source_text is not None:
+            if not isinstance(self.source_text, str) or self.display_token_ids:
+                raise DocumentValidationError("text cues must contain text and no display tokens")
+            if not self.source_text.strip() and self.target is None:
+                raise DocumentValidationError("text cue must have at least one non-empty track")
+        elif not self.display_token_ids:
             raise DocumentValidationError("a cue must contain at least one display token")
         if len(set(self.display_token_ids)) != len(self.display_token_ids):
             raise DocumentValidationError("a cue cannot repeat a display token")
@@ -432,6 +438,8 @@ class DisplayCue:
             value["group_id"] = self.group_id
         if self.mapping:
             value["mapping"] = dict(self.mapping)
+        if self.source_text is not None:
+            value["source_text"] = self.source_text
         return value
 
     @classmethod
@@ -451,6 +459,7 @@ class DisplayCue:
             state=EntityState(value["state"]),
             group_id=(str(value["group_id"]) if value.get("group_id") else None),
             mapping=dict(value.get("mapping", {})),
+            source_text=value.get("source_text"),
         )
 
 

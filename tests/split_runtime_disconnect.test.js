@@ -17,14 +17,14 @@ test("split UI stops presenting cached active jobs as live after backend loss", 
   assert.match(source, /state\.runtimeConnected\s*=\s*false/);
   assert.match(source, /后端已断开/);
   assert.match(source, /disconnectedActive/);
-  assert.match(source, /页面已停止把缓存状态显示为正在运行/);
+  assert.match(source, /systemNode.dataset.runtimeDisconnected = "true"/);
 });
 
-test("runtime log wraps long messages without a horizontal scrollbar", () => {
-  assert.match(styles, /\.runtime-log-lines \{[^}]*overflow-x: hidden/);
-  assert.match(styles, /\.runtime-log-lines pre \{[^}]*white-space: pre-wrap/);
-  assert.match(styles, /\.runtime-log-lines pre \{[^}]*overflow-wrap: anywhere/);
-  assert.doesNotMatch(styles, /\.runtime-log-lines pre \{[^}]*min-width: max-content/);
+test("task cards retain error copying without a duplicate runtime panel", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "web", "split.html"), "utf8");
+  assert.doesNotMatch(html, /id="(?:runtimeLog|statusPill|copyRuntimeLog)"/);
+  assert.doesNotMatch(source, /renderRuntimeLog|renderTaskProgress|runtimeJobId|#statusPill/);
+  assert.match(source, /copyText\(errorText, "报错已复制"\)/);
 });
 
 test("creation calibration and translation retain independent task cards", () => {

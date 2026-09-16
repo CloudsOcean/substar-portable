@@ -204,6 +204,8 @@ _UVICORN_SERVER: Any | None = None
 app.mount("/assets", StaticFiles(directory=str(WEB_DIR)), name="assets")
 app.include_router(web_router)
 app.include_router(editor_api_router)
+from substar_core.editor.subtitle_api import router as subtitle_api_router
+app.include_router(subtitle_api_router)
 app.include_router(task_runtime_router)
 
 
@@ -403,10 +405,10 @@ class SettingsPayload(BaseModel):
     english_hard_limit: int = 55
     english_count_spaces: bool = True
     english_count_punctuation: bool = True
-    chinese_hard_limit: int = 28
+    chinese_hard_limit: int = 20
     mixed_hard_limit: int = 25
-    japanese_hard_limit: int = 32
-    korean_hard_limit: int = 40
+    japanese_hard_limit: int = 24
+    korean_hard_limit: int = 28
     target_visual_width_limit: int = 48
     minimum_cue_duration_ms: int = 400
     maximum_cue_duration_ms: int = 7000

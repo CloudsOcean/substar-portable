@@ -31,10 +31,10 @@ class SubtitlePolicy:
     english_hard_limit: int = 55
     english_count_spaces: bool = True
     english_count_punctuation: bool = True
-    chinese_hard_limit: int = 28
+    chinese_hard_limit: int = 20
     mixed_hard_limit: int = 25
-    japanese_hard_limit: int = 32
-    korean_hard_limit: int = 40
+    japanese_hard_limit: int = 24
+    korean_hard_limit: int = 28
     target_visual_width_limit: int = 48
     minimum_cue_duration_ms: int = 400
     maximum_cue_duration_ms: int = 7000

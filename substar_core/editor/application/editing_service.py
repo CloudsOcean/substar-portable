@@ -140,7 +140,9 @@ class EditingService:
         }
         if any(base.get(key) != value for key, value in expected_base.items()):
             can_rebase = base.get("document_id") == expected_base["document_id"] and all(
-                op.get("type") == "replace" and "expected_text" in op.get("payload", {}) for op in operations
+                (op.get("type") == "replace" and "expected_text" in op.get("payload", {}))
+                or (op.get("type") == "set_target" and "expected_target_text" in op.get("payload", {}))
+                for op in operations
             )
             if not can_rebase:
                 raise StaleOperationError(expected_base)

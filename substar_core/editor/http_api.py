@@ -277,6 +277,97 @@ def project_job_path(project_id: str) -> Path:
     return project_store_path(project_id).parent
 
 
+class ReviewNoteRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    expected_revision_id: str
+    action: Literal["add", "reply", "resolve", "reopen", "relocate", "accept", "reject", "delete", "keep_local"]
+    note_id: str = ""
+    cue_id: str = ""
+    track: Literal["source", "target"] = "source"
+    token_ids: list[str] = Field(default_factory=list, max_length=10000)
+    text_range: list[int] | None = None
+    text: str = Field(default="", max_length=10000)
+    author: str = Field(default="", max_length=100)
+
+
+@router.get("/projects/{project_id}/review-notes")
+def get_review_notes(project_id: str):
+    from .application.review_notes import project_note
+    from .application.review_store import read_reviews
+    latest = open_project_store(project_id).load_latest()
+    if latest is None:
+        raise HTTPException(404, detail={"message": "工程没有字幕"})
+    value = read_reviews(project_job_path(project_id) / "review" / "notes.json")
+    return {**value, "revision_id": latest.revision_id,
+            "notes": [project_note(latest.document, note) for note in value["notes"] if note.get("status") != "deleted" or note.get("import_conflicts")]}
+
+
+class ReviewImportRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    expected_revision_id: str
+    package: dict[str, Any]
+
+
+@router.get("/projects/{project_id}/review-opinions/export")
+def export_review_opinions(project_id: str):
+    from .application.review_exchange import export_opinions
+    from .application.review_store import read_reviews
+    latest = open_project_store(project_id).load_latest()
+    if latest is None:
+        raise HTTPException(404, detail={"message": "工程没有字幕"})
+    value = read_reviews(project_job_path(project_id) / "review" / "notes.json")
+    return export_opinions(project_id, latest.revision_id, value["notes"])
+
+
+@router.post("/projects/{project_id}/review-opinions/import")
+def import_review_opinions(project_id: str, payload: ReviewImportRequest):
+    from .application.review_exchange import validate_package, merge_opinions
+    from .application.review_store import update_reviews
+    latest = open_project_store(project_id).load_latest()
+    if latest is None or latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(409, detail={"message": "字幕版本已变化，请刷新后重新导入"})
+    try:
+        if len(json.dumps(payload.package, ensure_ascii=False)) > 10_000_000:
+            raise ValueError("审阅意见文件不能超过 10 MB")
+        incoming = validate_package(payload.package, project_id)
+        summary = {}
+        def mutate(notes):
+            summary.update(merge_opinions(notes, incoming))
+        update_reviews(project_job_path(project_id) / "review" / "notes.json", payload.expected_version, mutate)
+    except ValueError as exc:
+        raise HTTPException(409, detail={"message": str(exc)}) from exc
+    return {**get_review_notes(project_id), "import_summary": summary}
+
+
+@router.post("/projects/{project_id}/review-notes")
+def save_review_note(project_id: str, payload: ReviewNoteRequest):
+    from .application.review_notes import add_note, change_note, anchor_for, upsert_note
+    from .application.review_store import update_reviews
+    latest = open_project_store(project_id).load_latest()
+    if latest is None or latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(409, detail={"message": "字幕版本已变化，请刷新后重新批注"})
+    def mutate(notes):
+        if payload.action == "add":
+            upsert_note(notes, add_note(latest.document, cue_id=payload.cue_id, track=payload.track,
+                                  text=payload.text, author=payload.author, token_ids=payload.token_ids, text_range=payload.text_range))
+        else:
+            index = next((i for i, note in enumerate(notes) if note["id"] == payload.note_id), None)
+            if index is None:
+                raise ValueError("批注不存在")
+            if payload.action == "relocate":
+                updated = dict(notes[index])
+                updated["anchor_history"] = [*updated.get("anchor_history", []), updated["anchor"]]
+                updated["anchor"] = anchor_for(latest.document, payload.cue_id, payload.track, payload.token_ids, payload.text_range)
+                notes[index] = updated
+            else:
+                notes[index] = change_note(notes[index], action=payload.action, text=payload.text, author=payload.author)
+    try:
+        update_reviews(project_job_path(project_id) / "review" / "notes.json", payload.expected_version, mutate)
+    except ValueError as exc:
+        raise HTTPException(409, detail={"message": str(exc)}) from exc
+    return get_review_notes(project_id)
+
+
 def _tutorial_project(project_id: str) -> dict[str, Any] | None:
     path = project_job_path(project_id) / "tutorial_project.json"
     try:
@@ -591,6 +682,7 @@ def list_projects() -> dict[str, Any]:
                     "revision_count": value["revision_count"],
                     "complete": value["complete"],
                     "updated_at": value["updated_at"],
+                    "subtitle_basis": "sentence" if (directory / "subtitle_import.json").is_file() else "word",
                     "tutorial_case_id": str(tutorial["case_id"]) if tutorial else "",
                 }
             if display_name:
@@ -2047,6 +2139,8 @@ def ai_calibrate_project(
 ) -> dict[str, Any]:
     """Apply model-authored punctuation, casing, terminology and ASR corrections."""
     latest = open_project_store(project_id).load_latest()
+    if latest and any(cue.source_text is not None for cue in latest.document.cues):
+        raise HTTPException(422, detail={"message": "无词元字幕项目不支持 AI 校准"})
     if latest is None:
         raise HTTPException(status_code=404, detail={
             "code": "empty_project", "message": "项目还没有文稿版本"
@@ -2224,6 +2318,47 @@ def export_external_ai_generation(project_id: str, revision_id: str | None = Non
         "external-ai-generation",
         lambda path: write_bytes_zip(path, files),
     )
+
+
+@router.get("/projects/{project_id}/exchange/external-calibration")
+def export_external_calibration(project_id: str, revision_id: str, instruction: str = Query(default="", max_length=4000)):
+    from substar_core.editor.calibration.exchange import export_calibration
+    revision = open_project_store(project_id).load_revision(revision_id)
+    if revision is None:
+        raise HTTPException(status_code=404, detail="项目版本不存在")
+    info = get_project_task_info(project_id)
+    try:
+        text = export_calibration(project_id, revision, task_info_settings(info),
+            active_glossary(_project_glossary_id(project_id), stage="calibration"), instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"text": text, "revision_id": revision.revision_id}
+
+
+@router.post("/projects/{project_id}/external-calibration")
+async def import_external_calibration(project_id: str, request: Request, file: UploadFile = File(...), apply: bool = Form(default=False)):
+    from substar_core.editor.calibration.exchange import inspect_calibration
+    active = request.app.state.task_service.list_tasks(
+        project_id=project_id, states=["queued", "running", "cancelling"], limit=20)
+    if any(task["task_type"] in {"translation", "calibration"} for task in active):
+        raise HTTPException(status_code=423, detail="当前项目已有 AI 任务正在运行，请等待完成后导入")
+    revision = open_project_store(project_id).load_latest()
+    if revision is None:
+        raise HTTPException(status_code=404, detail="项目版本不存在")
+    try:
+        raw = await file.read(20 * 1024 * 1024 + 1)
+        if len(raw) > 20 * 1024 * 1024:
+            raise ValueError("校准结果文件不能超过 20 MB")
+        payload = json.loads(raw.decode("utf-8-sig"))
+        document, provenance, result = inspect_calibration(project_id, revision, payload)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await file.close()
+    if apply:
+        result["revision"] = _save_document(project_id, expected_revision_id=revision.revision_id,
+            document=document, operation="ai_calibration_apply", provenance=provenance)
+    return result
 
 
 @router.get("/projects/{project_id}/exchange/external-translation")
@@ -2561,6 +2696,9 @@ def start_project_translation(
     project_id: str, payload: TranslationStartRequest, request: Request
 ) -> dict[str, Any]:
     job_dir = project_job_path(project_id)
+    document_revision = open_project_store(project_id).load_latest()
+    if document_revision and any(cue.source_text is not None for cue in document_revision.document.cues):
+        raise HTTPException(422, detail={"message": "字幕导入模式不启用 AI 翻译，请直接编辑文本"})
     try:
         settings = _project_llm_settings(project_id, include_secret=False)
     except ValueError as exc:

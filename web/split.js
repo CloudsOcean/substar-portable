@@ -31,8 +31,6 @@
     jobs: [],
     removedProjectIds: new Set(),
     toastTimer: 0,
-    runtimeJobId: "",
-    runtimeLogText: "",
     runtimeEvents: new Map(),
     runtimeSnapshots: new Map(),
     activeQueueCount: 0,
@@ -108,11 +106,8 @@
     $("#pipelinePanel").classList.toggle("hidden", showQuickStart);
     syncTutorialEntry();
     $("#pipelineTitle").textContent = showQuickStart ? "快速开始" : "流水线作业";
-    const statusPill = $("#statusPill");
     if (showQuickStart) {
       const completeCount = Number(quickProviderComplete("qwen")) + Number(quickProviderComplete("glm"));
-      statusPill.className = `status-pill ${completeCount === 2 ? "completed" : "idle"}`;
-      statusPill.textContent = completeCount === 2 ? "配置完成" : `${2 - completeCount} 项待完成`;
       $("#quickStartProgress").textContent = `完成 ${completeCount} / 2`;
     }
     renderQuickProvider("qwen");
@@ -387,6 +382,10 @@
       target_language_mode: $("#targetLanguageInput").value,
       glossary_id: $("#glossaryInput").value,
       asr_glossary_ids: glossaryInjection?.ids() || [],
+      creation_workflow: workflow,
+      subtitle_format: $("#subtitleFormat")?.value || "single",
+      subtitle_first_track: $("#subtitleFirstTrack")?.value || "source",
+      subtitle_separator: $("#subtitleSeparator")?.value ?? "|",
       segmentation_enabled: segmentationEnabled,
       reference_script_mode: workflow === "reference_script",
       reference_break_symbols: $("#referenceBreakSymbolsInput").value,
@@ -416,7 +415,8 @@
   function syncWorkflowControl() {
     const workflow = $("#splitWorkflowInput").value;
     const referenceMode = workflow === "reference_script";
-    const referenceEnabled = workflow === "one_step" || referenceMode;
+    const subtitleMode = workflow === "subtitle";
+    const referenceEnabled = workflow === "one_step" || referenceMode || subtitleMode;
     $("#referenceRow").classList.toggle("hidden", !referenceEnabled);
     $("#referenceBreakSymbolsField").classList.toggle("hidden", !referenceMode);
     $("#referenceRequirement").textContent = referenceMode ? "必选" : "选填";
@@ -428,6 +428,7 @@
       : workflow === "one_step"
         ? "由 AI 根据无句界词级时间轴、语义和字符上限重新组织字幕；参考稿选填"
         : "直接使用听写结果的句级边界";
+    syncSubtitleImportControls();
   }
 
   function selectedRecognitionProfile() {
@@ -836,17 +837,18 @@
     // project glossary after the selector has been removed from the UI.
     $("#glossaryInput").value = "";
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
-    $("#chineseLimitInput").value = effective.chinese_hard_limit || 28;
+    $("#chineseLimitInput").value = effective.chinese_hard_limit || 20;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
     $("#languageRatioThresholdInput").value = effective.language_ratio_threshold_percent ?? 20;
     syncLanguageRatioThreshold();
-    $("#japaneseLimitInput").value = effective.japanese_hard_limit || 32;
-    $("#koreanLimitInput").value = effective.korean_hard_limit || 40;
+    $("#japaneseLimitInput").value = effective.japanese_hard_limit || 24;
+    $("#koreanLimitInput").value = effective.korean_hard_limit || 28;
     $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
     $("#qwenPromptInput").value = effective.context || "";
     $("#qwenHotwordsInput").value = formatTemporaryHotwords(effective.qwen_temporary_hotwords || []);
     syncQwenEnhancementModel();
-    $("#splitWorkflowInput").value = effective.reference_script_mode
+    $("#splitWorkflowInput").value = ["subtitle", "disabled", "one_step", "reference_script"].includes(effective.creation_workflow)
+      ? effective.creation_workflow : effective.reference_script_mode
       ? "reference_script"
       : effective.segmentation_enabled === false ? "disabled" : "one_step";
     const configuredBreakSymbols = String(effective.reference_break_symbols || "");
@@ -855,15 +857,15 @@
       : referenceBreakPreset($("#languageInput").value);
     if (state.edition === "slim") {
       $("#recognitionProfileInput").value = "qwen_cloud";
-      $("#splitWorkflowInput").value = effective.reference_script_mode
-        ? "reference_script"
-        : effective.segmentation_enabled === false ? "disabled" : "one_step";
     }
     $("#chunkSecondsInput").value = settings.segmentation_chunk_seconds || 90;
     $("#workersInput").value = settings.translation_workers || 16;
     $("#retryInput").value = settings.http_retry_attempts ?? 3;
     state.settingsDirty = false;
     state.taskConfigLoaded = true;
+    $("#subtitleFormat").value = ["single", "two-files", "bilingual-lines", "bilingual-inline"].includes(effective.subtitle_format) ? effective.subtitle_format : "single";
+    $("#subtitleFirstTrack").value = effective.subtitle_first_track === "target" ? "target" : "source";
+    $("#subtitleSeparator").value = effective.subtitle_separator ?? "|";
     setSettingsSaveState("任务配置已保留；多个素材将共用此配置", "saved");
     syncWorkflowControl();
     validateForm();
@@ -888,7 +890,8 @@
     if (job.workflow_mode === "editor_task") {
       return ({translation:"翻译", calibration:"AI 校准", review:"AI 审阅"})[job.task_kind] || "编辑器任务";
     }
-    if (job.workflow_mode === "subtitle_creation") return "词级字幕创建";
+    if (job.subtitle_basis === "sentence") return "基于句级字幕";
+    if (job.workflow_mode === "subtitle_creation") return "基于词级字幕";
     return job.settings_overrides?.recognition_profile_label || "云端听写";
   }
 
@@ -971,6 +974,7 @@
   function chooseVideo(files) {
     const selected = [...(files || [])];
     if (!selected.length) return;
+    if (selected.length > 1) { toast("每次只配置一个项目，请选择一个视频或音频"); return; }
     const accepted = selected;
     state.videos = accepted;
     state.submissionKey = crypto.randomUUID();
@@ -985,42 +989,78 @@
     maybeAdvanceTutorial();
   }
 
-  function chooseReferences(files) {
+  let referenceEpoch = 0;
+  let referenceParsing = false;
+  let referenceParseError = "";
+  async function chooseReferences(files) {
     const selected = [...(files || [])];
-    state.references = selected.filter((file) => /\.(txt|docx|srt)$/i.test(file.name));
-    if (state.references.length !== selected.length) toast("已忽略不支持的参考文稿");
-    const label = $("#referenceFileName");
-    label.textContent = state.references.length === 0
-      ? "未添加"
-      : (state.references.length === 1 ? state.references[0].name : `${state.references.length} 份参考文稿`);
-    label.title = state.references.map((file) => file.name).join("\n");
-    validateForm();
+    if (!selected.length) return;
+    if (selected.some(file => !/\.(txt|docx|srt)$/i.test(file.name))) return toast("请选择 TXT、DOCX 或 SRT");
+    const allSrt = selected.every(file => /\.srt$/i.test(file.name));
+    const previous = state.references.every(file => /\.srt$/i.test(file.name)) ? state.references : [];
+    const combined = allSrt ? [...previous, ...selected].filter((file,index,array) => array.findIndex(x => x.name===file.name && x.size===file.size && x.lastModified===file.lastModified)===index) : selected;
+    if (combined.length > (allSrt ? 2 : 1)) return toast("当前项目最多添加两个 SRT，或一份 TXT / DOCX；请先移除不需要的文件");
+    state.references = combined;
+    state.submissionKey = crypto.randomUUID();
+    await updateReferenceSelection();
+    $("#referenceInput").value = "";
     maybeAdvanceTutorial();
+  }
+  async function updateReferenceSelection() {
+    const epoch = ++referenceEpoch;
+    const files = [...state.references];
+    referenceParsing = true; referenceParseError = ""; validateForm();
+    const label = $("#referenceFileName");
+    label.replaceChildren();
+    if (!files.length) label.textContent = "未添加";
+    for (const file of files) {
+      const chip = document.createElement("span"), remove = document.createElement("button");
+      chip.append(document.createTextNode(file.name + " "));
+      remove.type="button"; remove.textContent="×"; remove.setAttribute("aria-label",`移除 ${file.name}`);
+      remove.addEventListener("click", () => {state.references=state.references.filter(f=>f!==file);updateReferenceSelection();});
+      chip.append(remove); label.append(chip);
+    }
+    if(files.length && files.every(f=>/\.srt$/i.test(f.name))) {
+      try {
+        const texts=await Promise.all(files.map(f=>f.text()));
+        if(epoch!==referenceEpoch)return;
+        if(texts.some(t=>!SubstarSubtitleInput.blocks(t).length)) throw new Error("未读取到有效 SRT 字幕，请检查文件");
+        const result=SubstarSubtitleInput.infer(texts,$("#languageInput").value,$("#targetLanguageInput").value);
+        $("#subtitleFormat").value=result.format; $("#subtitleFirstTrack").value=result.firstTrack; $("#subtitleSeparator").value=result.separator;
+        if(result.source) $("#languageInput").value=result.source;
+        if(result.target) $("#targetLanguageInput").value=result.target;
+      } catch(e) {referenceParseError = errorMessage(e); toast(referenceParseError);}
+    }
+    referenceParsing = false;
+    syncSubtitleImportControls(); validateForm();
   }
 
   function validateForm() {
+    const subtitleMode = $("#splitWorkflowInput").value === "subtitle";
     asrAssist?.sync();
     const referenceMode = $("#splitWorkflowInput").value === "reference_script";
     const symbols = $("#referenceBreakSymbolsInput").value.replace(/\s/g, "");
-    const valid = state.videos.length > 0
+    const srtValid = !state.references.some(f=>/\.srt$/i.test(f.name)) || state.references.length === ($("#subtitleFormat").value === "two-files" ? 2 : 1);
+    const valid = !referenceParsing && !referenceParseError && srtValid && state.videos.length === 1 && (!subtitleMode || (state.videos.length === 1 && state.references.length === ($("#subtitleFormat").value === "two-files" ? 2 : 1) && state.references.every(file => /\.srt$/i.test(file.name))))
       && (!referenceMode || (state.references.length > 0 && symbols.length > 0));
     $("#startButton").disabled = !valid || !state.settings || state.submitting || state.savingSettings;
     const message = $("#formMessage");
     message.classList.remove("error");
     if (!state.settings) message.textContent = "正在读取已保存设置…";
     else if (state.submitting) message.textContent = "正在接收素材并创建任务…";
-    else if (!state.videos.length) message.textContent = "选择一个或多个素材后即可开始";
+    else if (!state.videos.length) message.textContent = "选择一个素材后即可开始";
+    else if (referenceParsing) message.textContent = "正在识别字幕格式与语言…";
+    else if (referenceParseError) message.textContent = referenceParseError;
+    else if (!srtValid) message.textContent = "字幕文件数量与所选格式不匹配";
+    else if (subtitleMode && !state.references.length) message.textContent = "请添加 SRT 字幕文件";
     else if (referenceMode && !state.references.length) message.textContent = "按参考稿标点切分必须选择参考文稿";
     else if (referenceMode && !symbols.length) message.textContent = "请填写至少一个切分符号";
-    else message.textContent = state.videos.length > 1
-      ? `${state.videos.length} 个素材已就绪，将分别创建项目`
-      : "素材已就绪";
-    $("#startButton span").textContent = state.submitting
-      ? "正在投递"
-      : (state.videos.length > 1 ? `创建 ${state.videos.length} 个项目` : "创建项目");
+    else message.textContent = "素材已就绪";
+    $("#startButton span").textContent = state.submitting ? "正在投递" : "创建项目";
   }
 
   function clearSubmission() {
+    ++referenceEpoch; referenceParsing = false; referenceParseError = "";
     state.videos = [];
     state.references = [];
     state.submissionKey = "";
@@ -1031,6 +1071,7 @@
     $("#referenceFileName").textContent = "未添加";
     $("#referenceFileName").removeAttribute("title");
     clearTaskSpecificFields();
+    syncSubtitleImportControls();
     validateForm();
   }
 
@@ -1104,7 +1145,11 @@
     if (media.token) form.append("media_reference_token", media.token);
     else form.append("media", media, media.name);
     if (workflow !== "disabled" && references.length) {
-      form.append("reference_document", references[0], references[0].name);
+      if (references.every(file => /\.srt$/i.test(file.name))) {
+        const texts = await Promise.all(references.map(file=>file.text()));
+        const text = SubstarSubtitleInput.reference(texts,$("#subtitleFormat").value,$("#subtitleFirstTrack").value,$("#subtitleSeparator").value);
+        form.append("reference_document", new Blob([text],{type:"text/plain"}), "reference.txt");
+      } else form.append("reference_document", references[0], references[0].name);
     }
     form.append("settings_json", JSON.stringify(automaticSettings()));
     if (state.tutorial.active && state.tutorial.kind === "beginner") form.append("tutorial_case_id", "reference-script-v1");
@@ -1115,34 +1160,15 @@
     });
   }
 
-  async function submitBatch(mediaFiles, references) {
-    const form = new FormData();
-    form.append("mode", "asr");
-    mediaFiles.forEach((file) => form.append("media", file, file.name));
-    const mediaStems = new Set(mediaFiles.map((file) => file.name.replace(/\.[^.]+$/, "").toLocaleLowerCase()));
-    const referenceEnabled = $("#splitWorkflowInput").value !== "disabled";
-    const matchedReferences = referenceEnabled
-      ? references.filter((file) => mediaStems.has(file.name.replace(/\.[^.]+$/, "").toLocaleLowerCase()))
-      : [];
-    matchedReferences.forEach((file) => form.append("reference_documents", file, file.name));
-    if (references.length > matchedReferences.length) toast(`${references.length - matchedReferences.length} 份参考文稿因未找到同名素材而未提交`);
-    form.append("settings_json", JSON.stringify(automaticSettings()));
-    return api("/api/project-batches", {
-      method: "POST",
-      headers: {"Idempotency-Key": state.submissionKey},
-      body: form,
-    });
-  }
-
   async function runPipeline() {
     if (state.submitting || !state.settings || !state.videos.length) return;
+    if ($("#splitWorkflowInput").value === "subtitle") return runSubtitleImport();
     const mediaFiles = [...state.videos];
     const references = [...state.references];
     state.submitting = true;
     validateForm();
     try {
-      if (mediaFiles.length > 1) await submitBatch(mediaFiles, references);
-      else await submitSingle(mediaFiles[0], references);
+      await submitSingle(mediaFiles[0], references);
       state.submitting = false;
       clearSubmission();
       toast(`${mediaFiles.length} 个任务已进入流水线`);
@@ -1182,47 +1208,6 @@
     }
   }
 
-  function renderRuntimeLog() {
-    const container = $("#runtimeLogLines");
-    const followingTail = container.scrollHeight - container.scrollTop - container.clientHeight < 28;
-    const output = document.createElement("pre");
-    output.textContent = state.runtimeLogText || "暂无日志";
-    container.replaceChildren(output);
-    if (followingTail) container.scrollTop = container.scrollHeight;
-  }
-
-  function displayTaskMessage(job) {
-    return taskPhase(job);
-  }
-
-  function renderTaskProgress(job) {
-    if (job.workflow_mode === "editor_task") {
-      state.runtimeLogText = [
-        `${jobLabel(job)} · ${routeLabel(job)} · ${normalizedProgress(job)}%`,
-        displayTaskMessage(job),
-        ...(taskError(job) ? [`错误：${taskError(job)}`] : []),
-      ].join("\n");
-      renderRuntimeLog();
-      return;
-    }
-    const summary = [
-      `${jobLabel(job)} · ${normalizedProgress(job)}%`,
-      displayTaskMessage(job),
-    ];
-    if (taskError(job)) summary.push(`错误：${taskError(job)}`);
-    state.runtimeLogText = summary.join("\n");
-    renderRuntimeLog();
-  }
-
-  function updateRuntimeLog(active) {
-    const selected = active.find((job) => job.id === state.runtimeJobId) || active[0];
-    if (!selected) return;
-    if (state.runtimeJobId !== selected.id) {
-      state.runtimeJobId = selected.id;
-    }
-    renderTaskProgress(selected);
-  }
-
   function renderQueue(jobs) {
     // A creation, calibration or translation task keeps its own immutable card
     // identity for its complete lifecycle.  Combining jobs by project made the
@@ -1234,24 +1219,12 @@
     state.activeQueueCount = active.length;
     $("#emptyPipeline").classList.toggle("hidden", active.length > 0);
     container.classList.toggle("hidden", active.length === 0);
-    $("#statusPill").className = `status-pill ${!state.runtimeConnected ? "failed" : active.length ? "running" : "idle"}`;
-    $("#statusPill").textContent = !state.runtimeConnected
-      ? "后端已断开"
-      : active.length ? `${active.length} 个任务` : "等待任务";
     syncPrimaryPanel();
-    updateRuntimeLog(active);
     container.replaceChildren(...active.map((job) => {
       const percent = normalizedProgress(job);
       const card = document.createElement("article");
       const disconnectedActive = !state.runtimeConnected && ["queued", "running"].includes(job.status);
       card.className = `queue-job ${disconnectedActive ? "interrupted" : job.status}`;
-      card.classList.toggle("log-selected", job.id === state.runtimeJobId);
-      card.title = "点击查看此任务的阶段进度";
-      card.addEventListener("click", () => {
-        state.runtimeJobId = job.id;
-        renderTaskProgress(job);
-        container.querySelectorAll(".queue-job").forEach((node) => node.classList.toggle("log-selected", node === card));
-      });
       const head = document.createElement("div");
       head.className = "queue-job-head";
       const identity = document.createElement("div");
@@ -1345,6 +1318,7 @@
       panel.style.left = `${Math.max(8, Math.min(rect.right - panel.offsetWidth, window.innerWidth - panel.offsetWidth - 8))}px`;
       panel.style.top = `${Math.max(8, rect.top - panel.offsetHeight - 7)}px`;
     };
+    details.repositionExportPanel = positionPanel;
     const renderOptions = () => {
     panel.replaceChildren();
     const translated = hasTranslation(job);
@@ -1360,7 +1334,17 @@
       const reason = contract?.reason || "尚无译文";
       const link = document.createElement("a");
       link.textContent = enabled ? label : `${label} · ${reason}`;
-      link.href = enabled ? (contract?.url || exportEndpoint(job.id, kind)) : "#";
+      const projectMode = ({a:"source", b:"target", ab_single:"ab-single", ab_double:"ab-double"})[kind];
+      link.href = enabled ? (contract?.url || (job.project_only ? `/api/projects/${encodeURIComponent(job.id)}/export/${projectMode}` : exportEndpoint(job.id, kind))) : "#";
+      if (enabled) link.addEventListener("click", async event => {
+        event.preventDefault();
+        try {
+          const mode = ({a:"source", b:"target", ab_single:"ab-single", ab_double:"ab-double"})[kind];
+          const saver = window.SubstarSystemSaveAs;
+          const result = await saver.saveUrl(saver.subtitleSpec(jobLabel(job), mode, 1, link.href));
+          if (!result.cancelled) toast(`已保存：${result.filename}`);
+        } catch (error) { toast(`导出失败：${errorMessage(error)}`); }
+      });
       if (!enabled) {
         link.className = "disabled";
         link.setAttribute("aria-disabled", "true");
@@ -1385,8 +1369,9 @@
       } finally { loading = false; positionPanel(); }
     });
     details.append(summary, panel);
-    details.addEventListener("mouseenter", () => { details.open = true; });
-    details.addEventListener("mouseleave", () => { details.open = false; });
+    panel.addEventListener("click", event => {
+      if (event.target.closest("a:not(.disabled)")) details.open = false;
+    });
     return details;
   }
 
@@ -1489,11 +1474,34 @@
 
   function renderRecent(jobs) {
     const container = $("#recentJobs");
-    const scrollTop = container.scrollTop;
-    container.onscroll = () => {
-      container.querySelectorAll(".export-menu[open]").forEach(menu => { menu.open = false; });
-    };
+    if (!container.exportPositioningReady) {
+      const reposition = () => container.querySelectorAll(".export-menu[open]").forEach(menu => menu.repositionExportPanel?.());
+      container.addEventListener("scroll", reposition);
+      window.addEventListener("scroll", reposition, true);
+      window.addEventListener("resize", reposition);
+      document.addEventListener("click", event => {
+        container.querySelectorAll(".export-menu[open]").forEach(menu => {
+          if (!menu.contains(event.target)) menu.open = false;
+        });
+      });
+      document.addEventListener("keydown", event => {
+        if (event.key !== "Escape") return;
+        container.querySelectorAll(".export-menu[open]").forEach(menu => {
+          menu.open = false;
+          menu.querySelector("summary").focus();
+        });
+      });
+      container.exportPositioningReady = true;
+    }
     const complete = jobs.filter((job) => COMPLETE_STATUSES.has(job.status));
+    const signature = JSON.stringify(complete.map(job => [job.id, jobLabel(job), routeLabel(job), humanStatus(job), job.created_at,
+      job.complete, job.tutorial_case_id, job.project_only, hasTranslation(job), job.export_availability]));
+    if (container.recentRenderSignature === signature) return;
+    // Keep native details, hover and keyboard focus intact during interaction.
+    // The next poll applies any deferred changes after the interaction ends.
+    if (container.querySelector(".export-menu[open]") || container.contains(document.activeElement) || container.matches(":hover")) return;
+    container.recentRenderSignature = signature;
+    const scrollTop = container.scrollTop;
     if (!complete.length) {
       container.innerHTML = '<p class="recent-empty">还没有完成的切分任务，成稿会自动移到这里。</p>';
       return;
@@ -1569,22 +1577,24 @@
         .filter(project => !state.removedProjectIds.has(project.project_id))
         .filter(project => project.complete === true)
         .map(project => project.project_id));
+      const catalogById = new Map((projects.projects || []).map(project => [project.project_id, project]));
       state.jobs = jobs
         .filter((job) => !state.removedProjectIds.has(job.id))
         .filter((job) => SPLIT_WORKFLOWS.has(job.workflow_mode))
-        .map(job => ({...job, complete:completeProjects.has(job.id)}));
+        .map(job => ({...job, subtitle_basis:catalogById.get(job.id)?.subtitle_basis, complete:completeProjects.has(job.id)}));
       const knownProjectIds = new Set(state.jobs.map(job => job.id));
       const tutorialProjectRows = (projects.projects || [])
         .filter(project => !state.removedProjectIds.has(project.project_id))
-        .filter(project => project.tutorial_case_id && !knownProjectIds.has(project.project_id))
+        .filter(project => !knownProjectIds.has(project.project_id))
         .map(project => ({
           id:project.project_id,
           project_id:project.project_id,
           display_name:project.display_name || project.project_id,
           workflow_mode:"subtitle_creation",
+          subtitle_basis:project.subtitle_basis,
           status:"awaiting_edit",
           progress:1,
-          message:"教程已准备完成",
+          message:"项目已创建，可以进入编辑模式",
           created_at:Math.max(0, Date.parse(project.updated_at || "") / 1000 || 0),
           tutorial_case_id:project.tutorial_case_id,
           complete:project.complete === true,
@@ -1619,8 +1629,6 @@
         systemNode.querySelector("span").textContent = "后端已断开";
       }
       renderQueue(state.jobs);
-      state.runtimeLogText = "后端连接已断开。页面已停止把缓存状态显示为正在运行；请从任务栏中的 Substar 后端窗口确认并重新启动。";
-      renderRuntimeLog();
       if (!state.jobs.length) $("#recentJobs").innerHTML = `<p class="recent-empty">${errorMessage(error)}</p>`;
     } finally {
       state.refreshing = false;
@@ -1772,7 +1780,6 @@
   $("#quickStartAdvancedTutorial").addEventListener("click", startAdvancedSplitTutorial);
   $("#qwenQuickTest").addEventListener("click", () => testQuickProvider("qwen"));
   $("#glmQuickTest").addEventListener("click", () => testQuickProvider("glm"));
-  $("#copyRuntimeLog")?.addEventListener("click", () => copyText(state.runtimeLogText, "任务进度已复制"));
   document.querySelectorAll(".quick-reveal").forEach((button) => button.addEventListener("click", () => {
     const input = $(`#${button.dataset.reveal}`);
     const reveal = input.type === "password";
@@ -1802,5 +1809,84 @@
   window.addEventListener("scroll", positionSplitTutorial, true);
   window.addEventListener("focus", refreshSharedSettings);
 
+  function initializeSubtitleImport() {
+    const option = document.createElement("option");
+    option.value = "subtitle";
+    option.textContent = "导入已有字幕";
+    $("#splitWorkflowInput").append(option);
+    const panel = document.createElement("div");
+    panel.id = "subtitleImportOptions";
+    panel.className = "parameter-panel subtitle-import-panel hidden";
+    panel.innerHTML = `<div class="subtitle-import-heading"><strong>字幕导入</strong><span>保留原始时间轴 · 无需听写</span></div>
+      <div class="parameter-grid subtitle-import-grid">
+        <label><span>字幕格式</span><select id="subtitleFormat"><option value="single">单语 SRT</option><option value="two-files">双语 · 两个 SRT 文件</option><option value="bilingual-lines">双语 · 同条分行</option><option value="bilingual-inline">双语 · 同行分隔</option></select></label>
+        <label><span id="subtitleTrackLabel">字幕归属</span><select id="subtitleFirstTrack"><option value="source">原文</option><option value="target">译文</option></select></label>
+        <label id="subtitleSeparatorField" class="hidden"><span>同行分隔符</span><input id="subtitleSeparator" type="text" value="|" maxlength="12" aria-label="同行分隔符" placeholder="例如 |"></label>
+      </div><p id="subtitleFormatHelp" class="subtitle-import-help"></p>`;
+    $("#referenceRow").after(panel);
+    panel.addEventListener("input", markSettingsDirty);
+    panel.addEventListener("change", markSettingsDirty);
+  }
+
+  function syncSubtitleImportControls() {
+      const panel = $("#subtitleImportOptions");
+      if (!panel) return;
+      const enabled = $("#splitWorkflowInput").value === "subtitle";
+      const hasSrt = state.references.length > 0 && state.references.every(file=>/\.srt$/i.test(file.name));
+      panel.classList.toggle("hidden", !enabled && !hasSrt);
+      $("#subtitleImportOptions .subtitle-import-heading span").textContent = enabled ? "保留原始时间轴 · 无需听写" : "按字幕格式提取原文，用于参考文稿";
+      $("#referenceRow").classList.toggle("hidden", !enabled && $("#splitWorkflowInput").value === "disabled");
+      const strong = $("#referenceRow strong");
+      strong.firstChild.textContent = enabled ? "字幕文件 " : "参考文稿 ";
+      $("#chooseReferenceButton").textContent = enabled ? "选择字幕文件" : "选择参考文稿";
+      if (enabled) {
+        $("#referenceRequirement").textContent = "必填";
+        $("#referenceHelp").textContent = "支持一个或两个 SRT；创建无词元字幕工程，不执行听写";
+        $("#splitWorkflowHelp").textContent = "媒体和字幕均必填；普通文本双轨编辑与审阅";
+      }
+      $("#referenceInput").accept = enabled ? ".srt" : ".txt,.docx,.srt";
+      document.querySelectorAll(".qwen-enhancement-settings").forEach(node => node.classList.toggle("hidden", enabled));
+      const format = $("#subtitleFormat").value;
+      $("#subtitleSeparatorField").classList.toggle("hidden", format !== "bilingual-inline");
+      $("#subtitleSeparator").disabled = format !== "bilingual-inline";
+      $("#subtitleTrackLabel").textContent = ({single:"字幕归属", "two-files":"第一个文件", "bilingual-lines":"第一行", "bilingual-inline":"分隔符左侧"})[format];
+      $("#subtitleFormatHelp").textContent = ({single:"一个单语文件；原有换行将保留，不会自动拆成双语。", "two-files":"按所选轨道顺序读取两个文件；未配对字幕保留各自的时间。", "bilingual-lines":"每条字幕的两行分别对应原文、译文，按所选顺序导入。", "bilingual-inline":"使用指定分隔符区分两种语言，例如 Hello | 你好。"})[format];
+  }
+
+  async function runSubtitleImport() {
+    state.submitting = true;
+    validateForm();
+    try {
+      const files = [...state.references];
+      const media = state.videos[0];
+      const form = new FormData();
+      form.append("subtitle", files[0]);
+      if (files[1]) form.append("secondary", files[1]);
+      form.append("mode", $("#subtitleFormat").value);
+      form.append("first_track", $("#subtitleFirstTrack").value);
+      form.append("separator", $("#subtitleSeparator").value);
+      const preview = await api("/api/subtitle-projects/preview", {method:"POST", body:form});
+      if (!preview.can_import) {
+        const issues = preview.issues || [];
+        throw new Error(issues.slice(0, 5).map(issue => `第 ${issue.entry + 1} 条：${issue.message}`).join("；") || "字幕格式无效，请检查所选格式和文件");
+      }
+      form.append("confirmation", preview.confirmation);
+      if (media.token) form.append("media_reference_token", media.token);
+      else form.append("media", media, media.name);
+      form.append("source_language", $("#languageInput").value);
+      form.append("target_language", $("#targetLanguageInput").value);
+      const limitFor = language => Number($(({zh:"#chineseLimitInput", "zh-CN":"#chineseLimitInput", en:"#englishLimitInput", ja:"#japaneseLimitInput", ko:"#koreanLimitInput"})[language] || "#mixedLimitInput").value);
+      form.append("source_hard_limit", String(limitFor($("#languageInput").value)));
+      form.append("target_hard_limit", String(limitFor($("#targetLanguageInput").value)));
+      $("#formMessage").textContent = "正在生成波形并保存字幕工程，不执行 ASR 或 AI…";
+      const result = await api("/api/subtitle-projects", {method:"POST", body:form});
+      clearSubmission();
+      toast("字幕项目已创建，可以继续配置下一个项目");
+      await refreshJobs();
+    } catch (error) {toast(errorMessage(error));}
+    finally {state.submitting = false; validateForm();}
+  }
+
+  initializeSubtitleImport();
   loadInitialState();
 })();

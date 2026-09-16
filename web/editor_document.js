@@ -14,7 +14,7 @@
   const DELETED = "deleted";
   const CHANGE_KINDS = new Set(["source", "import", "manual", "ai", "normalization"]);
   const OPERATION_TYPES = new Set([
-    "replace", "set_target", "set_cue_time", "set_cue_times", "insert_cue",
+    "replace", "set_target", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
     "merge", "delete", "purge_cue", "restore", "insert", "split_cue", "merge_cues",
     "set_cue_speaker", "set_speaker_names", "batch_replace", "set_ai_calibration"
   ]);
@@ -240,7 +240,9 @@
       requireState(cue.state, `cues[${index}].state`);
       requireTimeRange(cue.start, cue.end, `cues[${index}]`);
       const members = requireArray(cue.display_token_ids, `cues[${index}].display_token_ids`);
-      if (!members.length) throw new Error("cue must reference at least one display token");
+      if (cue.source_text !== undefined && cue.source_text !== null) {
+        if (typeof cue.source_text !== "string" || members.length || (!cue.source_text.trim() && !cue.target)) throw new Error("invalid text cue");
+      } else if (!members.length) throw new Error("cue must reference at least one display token");
       assertUnique(members, "display token within cue");
       members.forEach(id => {
         if (!knownDisplay.has(id)) throw new Error(`cue references unknown display token: ${id}`);
@@ -345,6 +347,7 @@
       index:cue.index,
       display_token_ids:[...cue.display_token_ids],
       active_display_token_ids:cue.display_token_ids.filter(id => displayById.get(id)?.state === ACTIVE),
+      source_text:cue.source_text ?? null,
       start:cue.start,
       end:cue.end,
       target:cue.target === null ? null : clone(cue.target),
@@ -565,6 +568,7 @@
     return createOperation(revisionPayload, "set_target", {
       cue_id:cue.cue_id,
       target_text:String(targetText || ""),
+      expected_target_text:cue.target?.target_text || "",
       original_text:options.original_text ?? cue.target?.original_text ?? cue.target?.target_text ?? "",
       language:options.language ?? cue.target?.language ?? "zh-CN",
       provenance:provenanceInput(provenance, "set_target")

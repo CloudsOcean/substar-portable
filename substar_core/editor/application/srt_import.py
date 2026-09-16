@@ -78,6 +78,17 @@ def preview_srt(document, text, mode='auto'):
     cues = sorted((c for c in document.cues if c.state is EntityState.ACTIVE), key=lambda c: c.start)
     # Use the export projection, including punctuation and Chinese-script preferences.
     source_rows = parse_srt(render_document_srt(document, 'source'))
+    if mode in {'auto', 'ab-single'} and len(rows) > len(source_rows) and all(
+        (row['start'], row['end'], norm(row['text'])) == (source['start'], source['end'], norm(source['text']))
+        for row, source in zip(rows, source_rows)
+    ):
+        # Standard track-major AB export: source prefix is verified, not guessed
+        # from a time reset or a 50/50 record count.
+        target_blocks = text.lstrip('\ufeff').replace('\r\n', '\n').replace('\r', '\n').strip()
+        target_text = '\n\n'.join(re.split(r'\n[ \t]*\n+', target_blocks)[len(source_rows):])
+        result = preview_srt(document, target_text, mode='target')
+        result['format'] = 'ab-single'
+        return result
     by_time = {(r['start'], r['end']): r['text'] for r in source_rows}
     starts = [round(c.start * 1000) for c in cues]
     matches = []

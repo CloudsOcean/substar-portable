@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20260911-glossary-weight-5">
+  <link rel="stylesheet" href="/assets/split.css?v=20260916-task-cards-only-1">
   <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
@@ -44,7 +44,7 @@
         </div>
 
         <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
-          <input id="videoInput" type="file" multiple accept="video/*,audio/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden>
+          <input id="videoInput" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden>
           <span class="drop-icon" aria-hidden="true"><svg class="ui-icon"><use href="/assets/ui-icons.svg?v=20260828-upload-media-1#upload-media"></use></svg></span>
           <strong id="dropTitle">拖入视频或音频</strong>
           <span id="dropHint">MP4 / MOV / MKV / WEBM / MP3 / WAV / M4A</span>
@@ -148,10 +148,10 @@
                 <small>其他语言占比不超过该值时按主要语言处理；超过时按混合处理</small>
               </label>
               <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
-              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="28"><em>字符</em></div></label>
-              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="32"><em>字符</em></div></label>
+              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="20"><em>字符</em></div></label>
+              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="24"><em>字符</em></div></label>
               <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
-              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="40"><em>字符</em></div></label>
+              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="28"><em>字符</em></div></label>
             </div>
           </details>
 
@@ -171,7 +171,6 @@
       <aside class="pipeline-card" aria-labelledby="pipelineTitle">
         <div class="section-heading compact">
           <div><span class="step-number">02</span><h2 id="pipelineTitle">流水线作业</h2></div>
-          <span class="status-pill idle" id="statusPill">等待任务</span>
         </div>
         <section id="quickStartPanel" class="quick-start hidden" aria-label="快速开始">
           <div class="quick-start-intro">
@@ -215,11 +214,6 @@
             <p>开始后可以离开本页，任务会在后台继续运行。</p>
           </div>
           <div class="pipeline-jobs hidden" id="pipelineJobs" aria-live="polite"></div>
-          <details class="runtime-log" id="runtimeLog" open>
-            <summary>任务进度（仅阶段与报错）</summary>
-            <div class="runtime-log-lines" id="runtimeLogLines"><p>暂无进度</p></div>
-            <div class="runtime-log-footer"><button id="copyRuntimeLog" type="button">复制全部</button></div>
-          </details>
         </div>
       </aside>
     </div>
@@ -257,6 +251,8 @@
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
 <script src="/assets/glossary_injection.js?v=20260911-glossary-weight-5" defer></script>
 <script src="/assets/asr_assist.js?v=20260908-glossary-2" defer></script>
-  <script src="/assets/split.js?v=20260908-glossary-2" defer></script>
+  <script src="/assets/system_save_as.js?v=20260911-export-track-major-1" defer></script>
+  <script src="/assets/subtitle_input.js?v=20260911-single-project-1"></script>
+<script src="/assets/split.js?v=20260916-language-limits-1" defer></script>
 </body>
 </html>

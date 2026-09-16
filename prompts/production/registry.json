@@ -48,7 +48,7 @@
       "title": "上下文翻译",
       "category": "translation",
       "description": "由公共规则、执行阶段、映射模式和语言规则组合生成翻译提示词。",
-      "version": "2026-09-06.16",
+      "version": "2026-09-15.2",
       "shared": ["translation/common/base.md", "translation/common/primary.md"],
       "default_mode": "many_to_many",
       "modes": {
@@ -99,7 +99,7 @@
       "title": "上下文翻译修复",
       "category": "translation",
       "description": "使用同一映射模式契约，一次修复原块内全部缺失或无效 Cue。",
-      "version": "2026-09-06.16",
+      "version": "2026-09-15.2",
       "shared": ["translation/common/base.md", "translation/common/repair.md"],
       "default_mode": "many_to_many",
       "modes": {

@@ -420,13 +420,13 @@ def build_segmentation_request(
         "constraints": {
             "target_seconds": int(settings.get("segmentation_chunk_seconds", 90)),
             "english_hard_limit": int(settings.get("english_hard_limit", 55)),
-            "chinese_hard_limit": int(settings.get("chinese_hard_limit", 28)),
+            "chinese_hard_limit": int(settings.get("chinese_hard_limit", 20)),
             "mixed_hard_limit": int(settings.get("mixed_hard_limit", 25)),
             "language_ratio_threshold_percent": int(
                 settings.get("language_ratio_threshold_percent", 20)
             ),
-            "japanese_hard_limit": int(settings.get("japanese_hard_limit", 32)),
-            "korean_hard_limit": int(settings.get("korean_hard_limit", 40)),
+            "japanese_hard_limit": int(settings.get("japanese_hard_limit", 24)),
+            "korean_hard_limit": int(settings.get("korean_hard_limit", 28)),
             "sentence_boundary_policy": str(settings.get("sentence_boundary_policy", "unpunctuated")),
             "repair_attempts": 1,
             "request_timeout_seconds": min(int(settings.get("translation_api_timeout_seconds", 300)), 3600),

@@ -243,3 +243,38 @@ function ids(container) {
 }
 
 console.log("editor_cue_list_view: ok");
+
+{
+  const {container} = fixture();
+  const renderCue = (value, index) => {
+    const node = row(value, index);
+    node.target = {value:value.text, disabled:!!value.disabled, selectionStart:2, selectionEnd:4, matches:selector=>selector === "[data-target-edit]"};
+    const query = node.querySelector.bind(node);
+    node.querySelector = selector => selector === "[data-target-edit]" ? node.target : query(selector);
+    node.contains = target => target === node.target;
+    const equal = node.isEqualNode.bind(node);
+    node.isEqualNode = other => equal(other) && node.target.disabled === other.target.disabled;
+    return node;
+  };
+  const view = createCueListView({container, renderCue});
+  const render = cues => view.render({cues, tokenById:new Map(), activeCueId:"b", preservePage:true});
+  render([cue("a","A"),cue("b","B")]);
+  const editing = container.children[1];
+  document.activeElement = editing.target;
+  editing.target.value = "unsaved composition";
+  render([cue("a","A saved"),cue("b","B server refreshed")]);
+  assert.equal(container.children[0].text,"A saved", "other rows update normally");
+  assert.equal(container.children[1],editing,"saving previous cue keeps the active row");
+  assert.equal(editing.target.value,"unsaved composition");
+  assert.equal(editing.target.selectionStart,2);
+  assert.equal(editing.target.selectionEnd,4);
+  document.activeElement = null;
+  render([cue("a","A saved"),cue("b","B saved")]);
+  assert.notEqual(container.children[1],editing,"after blur authoritative content updates");
+  document.activeElement = container.children[1].target;
+  const unlocked = container.children[1];
+  render([cue("a","A saved"),{...cue("b","B saved"),disabled:true}]);
+  assert.notEqual(container.children[1],unlocked,"task locks still replace active edits");
+  render([cue("a","A saved")]);
+  assert.deepEqual(ids(container),["a"],"deleted cues are not retained");
+}

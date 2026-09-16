@@ -73,8 +73,8 @@ def test_mixed_source_translation_uses_explicit_target_routes() -> None:
             repair = render_prompt(
                 "contextual_translation_repair", variant=route, mode=mode
             )
-            assert prompt.version == "2026-09-06.16"
-            assert repair.version == "2026-09-06.16"
+            assert prompt.version == "2026-09-15.2"
+            assert repair.version == "2026-09-15.2"
             assert "production/translation/mixed/rules.md" in prompt.files
             assert "production/translation/mixed/rules.md" in repair.files
             assert "编号|译文" in prompt.text

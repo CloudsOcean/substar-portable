@@ -495,6 +495,17 @@ def _set_presentation(
     )
 
 
+def _set_source_text(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
+    payload = operation["payload"]
+    cue = _find_cue(document, str(payload["cue_id"]))
+    text = str(payload.get("text", ""))
+    if cue.source_text is None or not text.strip() or len(text) > 20000:
+        raise DocumentOperationError("普通字幕原文必须为非空文本")
+    updated = replace(cue, source_text=text)
+    provenance = _provenance(operation, "set_source_text")
+    return replace(document, cues=tuple(updated if c.cue_id == cue.cue_id else c for c in document.cues), changes=(*document.changes, provenance))
+
+
 def _set_target(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
     """Edit the target track without changing source/cue topology.
 
@@ -506,6 +517,12 @@ def _set_target(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     payload = operation["payload"]
     cue = _find_cue(document, str(payload["cue_id"]))
     text = str(payload.get("target_text", "")).strip()
+    current_text = cue.target.target_text if cue.target else ""
+    if "expected_target_text" in payload:
+        if current_text == text:
+            return document
+        if current_text != payload["expected_target_text"]:
+            raise DocumentOperationError("译文已被其他编辑修改，原输入已保留，请处理内容冲突")
     provenance = _provenance(operation, "set_target")
     target = None
     if text:
@@ -1134,6 +1151,7 @@ _APPLIERS = {
     "set_ai_calibration": _set_ai_calibration,
     "set_presentation": _set_presentation,
     "set_target": _set_target,
+    "set_source_text": _set_source_text,
     "set_cue_time": _set_cue_time,
     "set_cue_times": _set_cue_times,
     "insert_cue": _insert_cue,
@@ -1209,6 +1227,8 @@ def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
     operation_type = str(operation.get("type", ""))
+    if any(cue.source_text is not None for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times"}:
+        raise DocumentOperationError("字幕导入项目仅支持文本和时间编辑，不支持词元操作")
     if operation_type not in _APPLIERS:
         raise DocumentOperationError(f"unsupported operation: {operation_type}")
     if not str(operation.get("operation_id", "")).strip():

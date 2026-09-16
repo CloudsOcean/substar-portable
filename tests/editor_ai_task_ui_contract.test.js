@@ -47,11 +47,11 @@ test("an active calibration or translation task dims every editor-writing comman
     '["#aiCalibrationMenu", "#aiCalibrate"]',
     '["#scriptProjectionMenu", "#scriptProjectionSummary"]',
   ]) assert.ok(editorJs.includes(pair));
-  assert.match(editorJs, /const editingCommandDisabled = !revision \|\| locked;/);
+  assert.match(editorJs, /const editingCommandDisabled = !revision \|\| locked \|\| textProject;/);
 });
 
 test("blank manual translation tracks still render editable rows", () => {
-  assert.match(editorJs, /const hasTarget = Boolean\(cue\.target\);/);
+  assert.match(editorJs, /const hasTarget = Boolean\(cue\.target\) && \$\("#showTranslations"\)\.checked;/);
   assert.doesNotMatch(
     editorJs,
     /const hasTarget = Boolean\(String\(cue\.target\?\.target_text \|\| ""\)\.trim\(\)\);/,

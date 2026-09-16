@@ -38,8 +38,9 @@
         end:number(cue.end),
         state:String(cue.state || "active"),
         speaker:cue.speaker ?? null,
+        target_text:String(cue.target?.target_text || ""),
         display_token_ids:[...(cue.display_token_ids || [])],
-        text:languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
+        text:cue.source_text ?? languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
           .map(id => tokens.get(String(id))?.text || "").filter(Boolean))
       }));
   }
@@ -50,6 +51,13 @@
       ...(view?.cue_views || []).map(cue => number(cue.end)),
       0.001
     );
+  }
+
+  function separatedGeometry(height, hasTarget) {
+    const tracks = hasTarget ? 2 : 1;
+    const trackHeight = Math.min(29, Math.max(20, (height - 60) / tracks));
+    const cueTop = height - 6 - tracks * (trackHeight + 4);
+    return {cueTop, trackHeight, tracks, waveformBottom:cueTop - 7};
   }
 
   function waveformSampleRange(start, end, windowStart, windowEnd, sampleCount) {
@@ -276,6 +284,7 @@
     let suppressClick = false;
     let preview = null;
     let timelineCues = [];
+    let sourceOnlyTimelineCues = [];
     let animationFrame = 0;
     let playbackFrame = 0;
     let followEnabled = false;
@@ -308,7 +317,7 @@
     }
 
     function cues() {
-      return timelineCues;
+      return options.getShowTranslations?.() === false ? sourceOnlyTimelineCues : timelineCues;
     }
 
     function visibleCues(cueRanges) {
@@ -412,8 +421,9 @@
 
     function drawWaveform(context, width, height) {
       if (!waveform.length) return;
+      const separated = options.getLayout?.() === "separated";
       const top = timelineTheme().light ? 66 : 36;
-      const bottom = height - 10;
+      const bottom = separated ? separatedGeometry(height, cues().some(cue => cue.target_text)).waveformBottom : height - 10;
       const center = (top + bottom) / 2;
       const amplitude = (bottom - top) * 0.37;
       const statsKey = `${waveformStart}:${waveformEnd}:${viewStart.toFixed(3)}:${viewEnd.toFixed(3)}:${width}`;
@@ -578,6 +588,41 @@
       });
     }
 
+    function drawSeparatedCues(context, width, height, cueRanges) {
+      const colors = timelineTheme();
+      const geometry = separatedGeometry(height, cues().some(cue => cue.target_text));
+      const {cueTop, trackHeight, tracks} = geometry;
+      context.font = "500 12px 'Microsoft YaHei', 'Segoe UI', sans-serif";
+      context.textBaseline = "middle";
+      for (let track = 0; track < tracks; track++) {
+        const top = cueTop + track * (trackHeight + 4);
+        for (const cue of cueRanges) {
+          if (track ? !cue.target_text : !cue.text) continue;
+          const left = xAt(cue.start, width), right = xAt(cue.end, width);
+          const speakerColors = {speaker_0:colors.speaker0, speaker_1:colors.speaker1, speaker_2:colors.speaker2, speaker_3:colors.speaker3};
+          context.fillStyle = speakerColors[cue.speaker] || colors.cue;
+          context.fillRect(left, top, Math.max(1, right - left - 1), trackHeight);
+          context.strokeStyle = cue.cue_id === activeCueId ? colors.selected : colors.outline;
+          context.lineWidth = cue.cue_id === activeCueId ? 2 : 1;
+          context.strokeRect(left + .5, top + .5, Math.max(0, right - left - 2), trackHeight - 1);
+          context.save();
+          context.beginPath();
+          context.rect(Math.max(0, left + 4), top, Math.max(0, Math.min(width, right) - Math.max(0, left + 4) - 4), trackHeight);
+          context.clip();
+          let label = `${cue.index + 1} ${track ? cue.target_text : cue.text}`.replace(/\s+/g, ' ');
+          const available = Math.max(0, Math.min(width, right) - Math.max(0, left) - 12);
+          if (context.measureText(label).width > available) {
+            while (label && context.measureText(label + '…').width > available) label = label.slice(0, -1);
+            label += '…';
+          }
+          context.fillStyle = colors.text;
+          context.fillText(label, Math.max(0, left) + 6, top + trackHeight / 2);
+          context.restore();
+        }
+      }
+      context.lineWidth = 1;
+    }
+
     function boundaryModeFor(target) {
       const override = boundaryModeOverride
         && boundaryModeOverride.cueId === target?.cueId
@@ -651,10 +696,21 @@
       drawRuler(context, width);
       const cueRanges = applyPreview(cues(), preview);
       const drawRanges = visibleCues(cueRanges);
-      drawCues(context, width, height, drawRanges);
-      drawWaveform(context, width, height);
-      drawCueLabels(context, width, height, drawRanges);
+      if (options.getLayout?.() === "separated") {
+        drawWaveform(context, width, height);
+        drawSeparatedCues(context, width, height, drawRanges);
+      } else {
+        drawCues(context, width, height, drawRanges);
+        drawWaveform(context, width, height);
+        drawCueLabels(context, width, height, drawRanges);
+      }
       drawBoundaryHighlight(context, width, height);
+      const reviewed = new Set(options.getReviewCueIds?.() || []);
+      context.fillStyle = "#f6c85f";
+      for (const cue of drawRanges) {
+        if (!reviewed.has(cue.cue_id)) continue;
+        context.beginPath(); context.arc(Math.max(5, xAt(cue.start, width) + 5), 21, 3, 0, Math.PI * 2); context.fill();
+      }
     }
 
     function drawNow() {
@@ -728,7 +784,15 @@
       }
       const cueRanges = applyPreview(cues(), preview);
       let nearest = null;
+      let lane = null;
+      if (options.getLayout?.() === "separated") {
+        const geometry = separatedGeometry(canvasSize(canvas).height, cues().some(cue => cue.target_text));
+        const offset = pointer.y - geometry.cueTop;
+        lane = Math.floor(offset / (geometry.trackHeight + 4));
+        if (offset < 0 || lane >= geometry.tracks || offset % (geometry.trackHeight + 4) > geometry.trackHeight) return {kind:"blank", time:timeAt(pointer.x, pointer.width)};
+      }
       cueRanges.forEach((cue, cueIndex) => {
+        if (lane === 0 && !cue.text || lane === 1 && !cue.target_text) return;
         [["start", cue.start], ["end", cue.end]].forEach(([edge, time]) => {
           const distance = Math.abs(xAt(time, pointer.width) - pointer.x);
           const selectedSideWinsTie = nearest
@@ -742,7 +806,7 @@
       });
       if (nearest) return nearest;
       const time = timeAt(pointer.x, pointer.width);
-      const cue = cueAtTime(cueRanges, time);
+      const cue = cueAtTime(cueRanges.filter(cue => lane === null || (lane === 0 ? cue.text : cue.target_text)), time);
       return cue ? {kind:"cue", cueId:cue.cue_id, time} : {kind:"blank", time};
     }
 
@@ -960,6 +1024,7 @@
         const previousSpan = visibleSpan();
         view = nextView || null;
         timelineCues = activeCues(view);
+        sourceOnlyTimelineCues = timelineCues.map(cue => ({...cue, target_text:""}));
         duration = timelineDuration(view, media?.duration);
         const span = Math.min(duration, hadView ? previousSpan : DEFAULT_WINDOW_SECONDS);
         viewStart = clamp(viewStart, 0, Math.max(0, duration - span));
@@ -1077,6 +1142,7 @@
     activeCues,
     cueAtTime,
     waveformSampleRange,
+    separatedGeometry,
     rangesTouch,
     boundaryMode,
     previewBoundaryChange,

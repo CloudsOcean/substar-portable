@@ -8,6 +8,10 @@
   const systemSaveAs = window.SubstarSystemSaveAs;
   const $ = selector => document.querySelector(selector);
   const CUE_PAGE_SIZE = 160;
+  let reviewEnabled = false;
+  let reviewData = {version:0, notes:[]};
+  let reviewSelection = null;
+  let syncTokenReviewForm = () => {};
   const state = {
     projects:[],
     projectId:"",
@@ -25,10 +29,10 @@
     followPlayback:false,
     subtitlePolicy:{
       englishHardLimit:55,
-      chineseHardLimit:28,
+      chineseHardLimit:20,
       mixedHardLimit:25,
-      japaneseHardLimit:32,
-      koreanHardLimit:40,
+      japaneseHardLimit:24,
+      koreanHardLimit:28,
       sourceLanguage:"Auto",
       sourceHardLimit:null,
       targetHardLimit:null,
@@ -81,6 +85,7 @@
     playbackFrameHandle:0,
     playbackLastUiAt:0,
     cueSplitView:"virtual",
+    timelineLayout:"composite",
     referenceChangeByTokenId:new Map(),
     cuePageStart:0,
     indexes:null,
@@ -525,6 +530,7 @@
   }
 
   function cueSourceText(cueView) {
+    if (cueView.source_text != null) return cueView.source_text;
     const cached = state.indexes?.sourceTextByCueId?.get(cueView.cue_id);
     if (cached !== undefined) return cached;
     const tokens = state.indexes?.tokenById || new Map();
@@ -551,7 +557,7 @@
       if (cue.state === "active") activeTokenOrder.push(...cue.active_display_token_ids);
       sourceTextByCueId.set(
         cue.cue_id,
-        languageLayout.layoutTokens(
+        cue.source_text ?? languageLayout.layoutTokens(
           cue.active_display_token_ids.map(id => tokenById.get(id)?.text || "").filter(Boolean)
         )
       );
@@ -878,8 +884,8 @@
   }
 
   function syncRevisionControls() {
-    $("#undoDocument").disabled = state.historyNavigationPending || !state.undoRevisionIds.length;
-    $("#redoDocument").disabled = state.historyNavigationPending || !state.redoRevisionIds.length;
+    $("#undoDocument").disabled = editorAiTaskLocksEditor() || state.historyNavigationPending || !state.undoRevisionIds.length;
+    $("#redoDocument").disabled = editorAiTaskLocksEditor() || state.historyNavigationPending || !state.redoRevisionIds.length;
     $("#resetDocument").disabled = !state.revisions.some(item =>
       item.provenance?.operation === "checkpoint" && !item.is_latest
     );
@@ -975,16 +981,54 @@
     }
   }
 
+  async function flushActiveEditorInput() {
+    const active = document.activeElement;
+    if (active?.closest?.("#cueList") && active.matches?.("input,textarea,[contenteditable]")) active.blur();
+    await Promise.resolve();
+    await ensureOperationQueue().flushAndWait();
+  }
+
+  let idleRevisionCheck = false;
+  async function syncIdleRevision() {
+    if (idleRevisionCheck || !state.revision || state.operationPending || state.historyNavigationPending
+      || state.structuralPreparationPending || state.restorePreparationPending || editorAiTaskLocksEditor()
+      || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
+    idleRevisionCheck = true;
+    const project = state.projectId, revision = state.revision.revision_id;
+    try {
+      const latest = contract.consumeRevision(await api(projectPath()));
+      if (project !== state.projectId || revision !== state.revision?.revision_id || state.operationPending
+        || state.historyNavigationPending || state.structuralPreparationPending || state.restorePreparationPending
+        || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
+      if (latest.revision_id !== revision) { setRevision(latest); await loadRevisionHistory(); }
+    } catch (error) { console.warn("Idle revision check failed", error); }
+    finally { idleRevisionCheck = false; }
+  }
+  window.addEventListener("focus", syncIdleRevision);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) syncIdleRevision(); });
+
   async function restoreRevision(revisionId, {
     navigation = "direct", undoRevisionIds = null, redoRevisionIds = null
   } = {}) {
-    if (!state.revision || !revisionId) return;
+    if (!state.revision || !revisionId || state.restorePreparationPending) return;
+    state.restorePreparationPending = true;
     const nextUndoRevisionIds = Array.isArray(undoRevisionIds)
       ? undoRevisionIds.slice()
       : [...state.undoRevisionIds, state.revision.revision_id];
     const nextRedoRevisionIds = Array.isArray(redoRevisionIds)
       ? redoRevisionIds.slice() : [];
     try {
+      const before = state.revision.revision_id;
+      await flushActiveEditorInput();
+      state.restoreWriting = true;
+      $("#editorWorkbench").inert = true;
+      const latest = contract.consumeRevision(await api(projectPath()));
+      if (before !== state.revision.revision_id || latest.revision_id !== state.revision.revision_id) {
+        setRevision(latest);
+        await loadRevisionHistory();
+        ordinaryError("当前编辑已同步，版本历史已更新；请重新选择撤销或恢复目标");
+        return null;
+      }
       const revision = await api(projectPath("/restore"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1011,8 +1055,16 @@
       syncRevisionControls();
       return revision;
     } catch (error) {
-      ordinaryError(`版本恢复失败：${error.message}`);
+      if (error.status === 409 && !state.operationQueue?.getState().hasUnsavedChanges) {
+        try { setRevision(await api(projectPath())); await loadRevisionHistory(); }
+        catch (_) { /* Preserve the original restore failure. */ }
+      }
+      ordinaryError(`版本恢复失败：${error.message}。输入保留，请核对最新版本历史后重试`);
       return null;
+    } finally {
+      state.restoreWriting = false;
+      state.restorePreparationPending = false;
+      $("#editorWorkbench").inert = false;
     }
   }
 
@@ -1042,6 +1094,7 @@
   }
 
   async function undoLatestRevision() {
+    if (editorAiTaskLocksEditor()) return;
     if (state.historyNavigationPending || !state.revision) return;
     await loadRevisionHistory();
     if (!state.undoRevisionIds.length) return;
@@ -1056,6 +1109,7 @@
   }
 
   async function redoLatestRevision() {
+    if (editorAiTaskLocksEditor()) return;
     if (state.historyNavigationPending || !state.redoRevisionIds.length || !state.revision) return;
     const target = state.redoRevisionIds[state.redoRevisionIds.length - 1];
     const redoRevisionIds = state.redoRevisionIds.slice(0, -1);
@@ -1205,9 +1259,10 @@
     $("#toggleComplete").title = complete ? "完成只是属性；取消后仍是同一可编辑项目" : "标记后仍可继续编辑";
     $("#exportMenu").classList.toggle("disabled", !revision);
     $("#exportDocument").setAttribute("aria-disabled", String(!revision));
-    $("#translateDocument").disabled = !revision || locked
+    const textProject = state.view?.cue_views.some(cue => cue.source_text != null);
+    $("#translateDocument").disabled = !revision || locked || textProject
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
-    const editingCommandDisabled = !revision || locked;
+    const editingCommandDisabled = !revision || locked || textProject;
     [
       ["#translationMenu", "#translationMenuSummary"],
       ["#aiCalibrationMenu", "#aiCalibrate"],
@@ -1223,7 +1278,7 @@
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",
       "#lowerPunctuationRemove", "#lowerPunctuationSpace", "#applyPunctuation",
       "#runAiCalibration", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
-    ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked; });
+    ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked || textProject; });
     ["#toolReplaceCurrent", "#toolReplaceAll"].forEach(selector => {
       const node = $(selector);
       if (node) node.disabled = node.disabled || state.operationPending;
@@ -1266,15 +1321,16 @@
       searchInput.placeholder = state.searchScope === "target" ? "查找译文" : "查找源语词元或短语";
     }
     const referenceButton = $("#referenceManuscript");
-    if (referenceButton) referenceButton.disabled = !revision || locked;
+    if (referenceButton) referenceButton.disabled = !revision || locked || textProject;
     const reviewMenu = $("#aiReviewMenu");
-    const reviewDisabled = !revision || locked;
+    const reviewDisabled = !revision || locked || textProject;
+    $("#cueSplitView").disabled = Boolean(textProject || locked);
     reviewMenu?.classList.toggle("disabled", reviewDisabled);
     if (reviewDisabled && reviewMenu?.open) reviewMenu.open = false;
     $("#aiReview")?.setAttribute("aria-disabled", String(reviewDisabled));
     ["#copyExternalReview", "#downloadExternalReview"].forEach(selector => {
       const control = $(selector);
-      if (control) control.disabled = !revision || locked;
+      if (control) control.disabled = !revision || locked || textProject;
     });
   }
 
@@ -1718,6 +1774,10 @@
     }
     const externalClass = token.provenance?.operation === "external_ai_prooftranslation" ? " external-ai-prooftranslation" : "";
     button.className = `display-token tone-${tone}${referenceClass}${externalClass}${token.state === "deleted" ? " deleted" : ""}${state.selectedTokenIds.has(token.token_id) ? " selected" : ""}`;
+    const annotated = reviewEnabled && reviewData.notes.some(note => note.status !== "deleted" && note.anchor.track === "source" && note.anchor_status !== "needs_relocation"
+      && (note.anchor.token_ids?.length ? note.anchor.token_ids.includes(token.token_id)
+        : !note.anchor.text_range && state.indexes?.tokenToCueId?.get(token.token_id) === note.anchor.cue_id));
+    button.classList.toggle("review-annotated", annotated);
     if (interactive) button.dataset.tokenId = token.token_id;
     const label = document.createElement("b");
     const projectedText = projectedSourceTokenText(token.text);
@@ -1745,10 +1805,10 @@
   function applySubtitlePolicy(settings = {}) {
     state.subtitlePolicy = {
       englishHardLimit:Number(settings.english_hard_limit ?? 55),
-      chineseHardLimit:Number(settings.chinese_hard_limit ?? 28),
+      chineseHardLimit:Number(settings.chinese_hard_limit ?? 20),
       mixedHardLimit:Number(settings.mixed_hard_limit ?? 25),
-      japaneseHardLimit:Number(settings.japanese_hard_limit ?? 32),
-      koreanHardLimit:Number(settings.korean_hard_limit ?? 40),
+      japaneseHardLimit:Number(settings.japanese_hard_limit ?? 24),
+      koreanHardLimit:Number(settings.korean_hard_limit ?? 28),
       sourceLanguage:String(settings.language || "Auto"),
       sourceHardLimit:Number.isFinite(Number(settings.source_hard_limit)) ? Number(settings.source_hard_limit) : null,
       targetHardLimit:Number.isFinite(Number(settings.target_hard_limit)) ? Number(settings.target_hard_limit) : null,
@@ -1825,13 +1885,15 @@
     // A target track is a real editable deliverable even when the model left
     // its text blank and marked it for manual completion.  Rendering based on
     // non-empty text hid exactly the recovery row the user needed to fill.
-    const hasTarget = Boolean(cue.target);
+    const hasTarget = Boolean(cue.target) && $("#showTranslations").checked;
     const sourceMetric = subtitleLengthMetric(projected.source, state.trackLanguages.source, "source");
     const targetMetric = subtitleLengthMetric(projected.target, state.trackLanguages.target, "target");
     const overLimit = sourceMetric.count > sourceMetric.limit
-      || (hasTarget && targetMetric.count > targetMetric.limit);
+      || (Boolean(cue.target) && targetMetric.count > targetMetric.limit);
     row.className = `cue-row${hasTarget ? " has-target" : " source-only"}${cue.cue_id === state.activeCueId ? " current" : ""}${cue.state === "deleted" ? " deleted" : ""}${overLimit ? " over-limit" : ""}`;
     row.dataset.cueId = cue.cue_id;
+    const noteCount = reviewEnabled ? reviewData.notes.filter(note => note.anchor.cue_id === cue.cue_id && note.status === "open").length : 0;
+    if (noteCount) {row.dataset.reviewCount = String(noteCount); row.title = `${noteCount} 条未解决修订`;}
     if (cue.speaker) row.dataset.speaker = cue.speaker;
     const meta = document.createElement("button");
     meta.type = "button";
@@ -1846,10 +1908,22 @@
     line.className = `source-token-line${virtual ? " virtual-line" : ""}`;
     const hasNext = index < state.view.cue_views.length - 1
       && state.view.cue_views[index + 1].state === "active" && cue.state === "active";
+    const reviewGroupByToken = new Map();
+    if (reviewEnabled) reviewData.notes.forEach(note => {
+      if (note.status === "deleted" || note.anchor.track !== "source" || note.anchor.cue_id !== cue.cue_id || note.anchor_status === "needs_relocation") return;
+      const ids = note.anchor.token_ids?.length ? note.anchor.token_ids : !note.anchor.text_range ? cue.display_token_ids : [];
+      ids.forEach(id => reviewGroupByToken.set(id, note.id));
+    });
     cue.display_token_ids.forEach((id, tokenIndex) => {
       const token = tokenById.get(id);
       if (!token) return;
-      line.append(tokenElement(token, {interactive:cue.state === "active"}));
+      const group = reviewGroupByToken.get(id);
+      const joinsPrevious = !!group && group === reviewGroupByToken.get(cue.display_token_ids[tokenIndex - 1]);
+      const joinsNext = !!group && group === reviewGroupByToken.get(cue.display_token_ids[tokenIndex + 1]);
+      const tokenNode = tokenElement(token, {interactive:cue.state === "active"});
+      tokenNode.classList.toggle("review-joins-previous", joinsPrevious);
+      tokenNode.classList.toggle("review-joins-next", joinsNext);
+      line.append(tokenNode);
       const atEnd = tokenIndex === cue.display_token_ids.length - 1;
       if (virtual && !atEnd) {
         const nextToken = tokenById.get(cue.display_token_ids[tokenIndex + 1]);
@@ -1858,6 +1932,7 @@
           token.text, nextToken?.text || "", state.trackLanguages?.source
         );
         boundary.className = `virtual-boundary ${boundaryKind}-based`;
+        boundary.classList.toggle("review-group-bridge", joinsNext);
         if (boundaryKind === "word") line.classList.add("word-based");
         if (cue.state === "active") {
           boundary.type = "button";
@@ -1899,6 +1974,18 @@
       line.append(connector);
     });
     content.append(line);
+    if (cue.source_text != null) {
+      line.remove();
+      const source = document.createElement("textarea");
+      source.className = "translation-track source-text-track";
+      source.rows = 1;
+      source.value = cue.source_text;
+      source.dataset.sourceEdit = cue.cue_id;
+      source.dataset.originalSource = cue.source_text;
+      source.setAttribute("aria-label", "原文字幕");
+      source.disabled = cue.state !== "active" || editorAiTaskLocksEditor();
+      content.append(source);
+    }
     if (hasTarget) {
       const target = document.createElement("textarea");
       target.rows = 1;
@@ -1921,6 +2008,7 @@
       <button type="button" class="danger" data-cue-action="purge" title="永久删除 Cue（可用全局撤销恢复）"><svg class="ui-icon"><use href="/assets/ui-icons.svg#trash"></use></svg></button>
       <button type="button" class="speaker${cue.speaker ? ` ${cue.speaker.replace("_", "-")}` : ""}" data-cue-action="speaker" title="${speakerLabel(cue.speaker)}；点击切换"><svg class="ui-icon"><use href="/assets/ui-icons.svg#user"></use></svg></button>`;
     row.append(meta, content, actions);
+    if (cue.source_text != null || editorAiTaskLocksEditor()) actions.querySelectorAll("button").forEach(node => {node.disabled = true;});
     return row;
   }
 
@@ -2033,6 +2121,7 @@
     $("#mergeTokens").disabled = !mergeable;
     const menu = $("#tokenSelectionMenu");
     menu.classList.toggle("hidden", !ids.length);
+    syncTokenReviewForm();
     renderReferenceSelectionMenu();
     if (ids.length) requestAnimationFrame(positionSelectionMenus);
   }
@@ -2128,6 +2217,17 @@
 
   function renderPreview() {
     const cue = currentCue();
+    if (state.view?.cue_views.some(item => item.source_text != null)) {
+      const time = activeMedia()?.currentTime || 0;
+      const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time);
+      const lines = visible.map(projectedCueLines);
+      const source = lines.map(line => line.source).filter(Boolean).join("\n");
+      const target = lines.map(line => line.target).filter(Boolean).join("\n");
+      const upper = lines[0]?.sourceUpper ?? true;
+      $("#previewSource").textContent = upper ? source : target;
+      $("#previewTarget").textContent = upper ? target : source;
+      return;
+    }
     if (!cue) {
       $("#previewSource").textContent = "";
       $("#previewTarget").textContent = "";
@@ -2143,6 +2243,7 @@
   }
 
   function renderTimeline({deferDraw = false} = {}) {
+    updateTimelineHeight();
     const track = $("#timelineTrack");
     if (state.timelineController) {
       if (state.timelineSelectedCueId && !state.view?.cue_views.some(cue =>
@@ -2541,27 +2642,18 @@
           return revision;
         } catch (error) {
           if (isDanglingEntityOperation(error)) {
-            // A topology edit can legitimately retire cue/token IDs. A saved
-            // browser journal from the pre-topology view must not retry those
-            // impossible operations forever. The server remains authoritative:
-            // discard only this rejected batch and rebuild from its latest
-            // revision without creating a new edit.
-            const latest = contract.consumeRevision(await api(queuePath()));
-            const operationIds = batch.operations.map(operation => operation.operation_id);
-            state.documentStore?.discard(operationIds);
-            const projection = state.documentStore?.replaceAcknowledged(latest) || latest;
-            setRevision(projection, {
-              localProjection:true
-            });
-            recordCommittedRevision(latest, {
-              kind:"manual", operation:"dangling_operation_reconcile", metadata:{operation_ids:operationIds}
-            });
-            ordinaryError("Cue 结构已变化，已自动同步最新版本；过期编辑未重复执行");
-            return latest;
+            // A rejected batch is atomic: keep every operation and its recovery journal.
+            error.message = "部分编辑引用的字幕已变化；整批输入仍已保留，请处理冲突";
+            throw error;
           }
           if (error.status !== 409) throw error;
           const latestPayload = await api(queuePath());
           const latest = contract.consumeRevision(latestPayload);
+          const guarded = batch.operations.every(operation =>
+            (operation.type === "replace" && Object.hasOwn(operation.payload, "expected_text"))
+            || (operation.type === "set_target" && Object.hasOwn(operation.payload, "expected_target_text")));
+          const alreadyApplied = batch.operations.every(operation => appliedOperationIds(latest).has(operation.operation_id));
+          if (!guarded && !alreadyApplied) throw error;
           const projection = state.documentStore?.replaceAcknowledged(latest) || latest;
           setRevision(projection, {
             localProjection:true
@@ -2617,32 +2709,37 @@
     ordinaryError("");
     suspendPlaybackFollow();
     if (editorAiTaskLocksEditor()) {
-      ordinaryError(`正在执行${state.editorAiTask?.kind || "AI"}任务，完成前编辑器为只读`);
+      const kind = {translation:"翻译", calibration:"校准"}[state.editorAiTask?.kind] || "AI";
+      ordinaryError(`${kind}任务正在排队或执行中，完成前编辑器为只读`);
       return null;
     }
+    if (state.restoreWriting) { ordinaryError("正在恢复版本，请稍候再编辑"); return null; }
     const topology = isTopologyOperation(operation);
-    if (state.topologyOperationPending || (topology && state.operationPending)) {
+    if (state.topologyOperationPending || (topology && state.structuralPreparationPending)) {
       ordinaryError("Cue 结构正在更新，请稍候再编辑");
       return null;
     }
-    if (topology) state.topologyOperationPending = true;
+    if (topology) state.structuralPreparationPending = true;
     try {
-      if (topology && document.activeElement?.closest?.("#cueList")) {
-        document.activeElement.blur?.();
+      if (topology) {
+        await flushActiveEditorInput();
+        state.topologyOperationPending = true;
       }
       const projection = state.documentStore?.enqueue(operation);
+      const saving = ensureOperationQueue().enqueue(operation);
+      saving.catch(() => {});
       if (projection) {
         setRevision(projection, {
           deferTimeline:activeMedia()?.paused === false,
           localProjection:true
         });
       }
-      return await ensureOperationQueue().enqueue(operation);
+      return await saving;
     } catch (error) {
       ordinaryError(`编辑尚未保存：${error.message}`);
       return null;
     } finally {
-      if (topology) state.topologyOperationPending = false;
+      if (topology) { state.topologyOperationPending = false; state.structuralPreparationPending = false; }
     }
   }
 
@@ -2675,7 +2772,7 @@
   }
 
   function beginInlineTokenEdit(button) {
-    if (state.topologyOperationPending) return;
+    if (state.topologyOperationPending || editorAiTaskLocksEditor()) return;
     const tokenId = button?.dataset.tokenId;
     const token = state.view?.token_views.find(item => item.token_id === tokenId);
     const label = button?.querySelector("b");
@@ -3206,6 +3303,9 @@
     state.timelineController?.destroy?.();
     state.waveformCache = window.EditorWaveformCache?.createWaveformCache?.({limit:16}) || null;
     state.timelineController = factory.createTimelineController({
+      getLayout:() => state.timelineLayout,
+      getShowTranslations:() => $("#showTranslations").checked,
+      getReviewCueIds:() => reviewEnabled ? reviewData.notes.filter(note => note.status === "open").map(note => note.anchor.cue_id) : [],
       onViewportChange({start, end, duration}) {
         const slider = $("#timelineScrollSlider");
         const halfSpan = Math.min(duration, end - start) / 2;
@@ -3427,6 +3527,15 @@
       return;
     }
     const epoch = ++projectEpoch;
+    reviewEnabled = false;
+    $("#editorWorkbench").classList.remove("review-mode");
+    reviewData = {version:0, notes:[]};
+    reviewSelection = null;
+    $(".review-notes-panel")?.classList.add("hidden");
+    if ($("#reviewModeToggle")) {
+      $("#reviewModeToggle").textContent = "启动修订";
+      $("#reviewModeToggle").setAttribute("aria-pressed", "false");
+    }
     state.operationQueue?.destroy();
     state.operationQueue = null;
     state.operationQueueProjectId = "";
@@ -3443,6 +3552,8 @@
     }
     ordinaryError("");
     state.projectId = projectId;
+    state.timelineLayout = localStorage.getItem(`substar.editor.timeline-layout:${projectId}`) === "separated" ? "separated" : "composite";
+    $("#timelineLayout").value = state.timelineLayout;
     state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
     if ($("#cueSplitView")) $("#cueSplitView").value = state.cueSplitView;
     renderProjectList();
@@ -3465,9 +3576,14 @@
       configureTranslationLanguageDefaults(taskInfo);
       state.mediaInfo = mediaInfo;
       configureMedia(mediaInfo?.kind);
+      const textProject = revision.document.cues.some(cue => cue.source_text != null);
+      if (textProject && !localStorage.getItem(`substar.editor.timeline-layout:${projectId}`)) {
+        state.timelineLayout = "separated";
+        $("#timelineLayout").value = "separated";
+      }
       setRevision(revision, {preserveCueViewport:false});
       $("#editorWorkbench").inert = false;
-      const aiTaskReady = refreshEditorAiTask();
+      const aiTaskReady = textProject ? Promise.resolve(null) : refreshEditorAiTask();
       if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
       loadRevisionHistory().catch(() => {});
@@ -3481,8 +3597,8 @@
       state.timelineController?.redraw();
       await aiTaskReady;
       if (!current()) return;
-      startEditorAiTaskPoll();
-      if (restoreTranslation) {
+      if (!textProject) startEditorAiTaskPoll();
+      if (restoreTranslation && !textProject) {
         const task = await refreshTranslationTask();
         if (task && ["queued", "running", "cancelling"].includes(task.state)) {
           followTranslationTask(task);
@@ -4184,10 +4300,55 @@
       ordinaryError("已载入保存版本。未保存编辑的恢复副本已留在本浏览器。", "completed");
     } catch (error) { ordinaryError(`恢复副本未能保存：${error.message}`); }
   };
+  $("#externalCalibration").onclick = async () => {
+    const epoch = projectEpoch;
+    $("#exportMenu").open = false;
+    try {
+      const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部校准生成.txt`, description:"外部校准提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
+      const saved = await ensureOperationQueue().flushAndWait();
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
+      const query = new URLSearchParams({revision_id:saved.revision_id, instruction:$("#aiCalibrationInstruction").value});
+      const built = await api(projectPath(`/exchange/external-calibration?${query}`));
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
+      return new Blob([built.text], {type:"text/plain;charset=utf-8"});
+      });
+      if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .json 文件`, "completed");
+    } catch(error) { ordinaryError(`生成外部校准材料失败：${error.message}`); }
+  };
+  $("#importExternalCalibration").onclick = () => {
+    $("#importMenu").open = false;
+    if (!state.revision || state.operationPending || editorAiTaskLocksEditor()) return ordinaryError("请先打开项目并等待当前操作完成");
+    $("#externalCalibrationInput").click();
+  };
+  $("#externalCalibrationInput").onchange = async event => {
+    const file = event.target.files?.[0]; event.target.value = "";
+    if (!file) return;
+    const epoch = projectEpoch;
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error("校准结果文件不能超过 20 MB");
+      await ensureOperationQueue().flushAndWait();
+      if (epoch !== projectEpoch) return;
+      const submit = apply => {
+        const form = new FormData(); form.append("file",file); form.append("apply",String(apply));
+        return api(projectPath("/external-calibration"),{method:"POST",body:form});
+      };
+      const preview = await submit(false);
+      if (epoch !== projectEpoch) return;
+      if (!window.confirm(`校准结果：修改 ${preview.replacement_count} 个词元，合并 ${preview.merge_count} 组，待复核 ${preview.review_count} 项。应用到当前版本？`)) return;
+      state.operationPending = true;
+      const result = await submit(true);
+      if (epoch !== projectEpoch) return;
+      setRevision(result.revision);
+      await loadRevisionHistory();
+      ordinaryError("外部校准已应用，可通过 AI 校准定位和版本链查看或撤销", "completed");
+    } catch(error) {ordinaryError(`导入校准结果失败：${error.message}`);}
+    finally {if(epoch === projectEpoch) {state.operationPending = false; renderHeader();}}
+  };
   $("#externalTranslation").onclick = async () => {
     const epoch = projectEpoch;
     $("#exportMenu").open = false;
     try {
+      const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部翻译生成.txt`, description:"外部翻译提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
       const saved = await ensureOperationQueue().flushAndWait();
       if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
       const query = new URLSearchParams({revision_id:saved.revision_id,
@@ -4196,9 +4357,10 @@
         mapping_mode:$("#translationMappingMode").value});
       const built = await api(projectPath(`/exchange/external-translation?${query}`));
       if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
-      await navigator.clipboard.writeText(built.text);
-      ordinaryError("已复制上行字幕和翻译提示词，可粘贴给外部 AI 生成译文 SRT", "completed");
-    } catch (error) { ordinaryError(`复制外部翻译内容失败：${error.message}`); }
+      return new Blob([built.text], {type:"text/plain;charset=utf-8"});
+      });
+      if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .srt 文件`, "completed");
+    } catch (error) { ordinaryError(`生成外部翻译材料失败：${error.message}`); }
   };
   $("#exportMenu").addEventListener("click", async event => {
     const exportEpoch = projectEpoch;
@@ -4206,15 +4368,15 @@
     if (exchange && state.projectId && state.revision) {
       $("#exportMenu").open = false;
       try {
-        const savedBase = await ensureOperationQueue().flushAndWait();
-        if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
         const sequence = nextExportSequence();
-        const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
         const spec = systemSaveAs.exchangeSpec(
           window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
-          exchange.dataset.exchangeExport,
-          sequence.value,
-          projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`)
+          exchange.dataset.exchangeExport, sequence.value, async () => {
+            const savedBase = await ensureOperationQueue().flushAndWait();
+            if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+            const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
+            return projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`);
+          }
         );
         const result = await systemSaveAs.saveUrl(spec);
         if (result.cancelled) return;
@@ -4371,6 +4533,18 @@
   $("#forwardSnapSensitivity").oninput = selectSmartForwardSnap;
   $("#timelineScrollSlider").oninput = event => {
     state.timelineController?.revealTime(Number(event.target.value), true);
+  };
+  function updateTimelineHeight() {
+    const hasTarget = $("#showTranslations").checked && (state.view?.cue_views || []).some(cue => cue.state !== "deleted" && cue.target?.target_text);
+    const extra = state.timelineLayout === "separated" ? (hasTarget ? 69 : 36) : 0;
+    $("#editorWorkbench").style.setProperty("--timeline-extra-height", `${extra}px`);
+  }
+
+  $("#timelineLayout").onchange = event => {
+    state.timelineLayout = event.target.value === "separated" ? "separated" : "composite";
+    if (state.projectId) localStorage.setItem(`substar.editor.timeline-layout:${state.projectId}`, state.timelineLayout);
+    updateTimelineHeight();
+    state.timelineController?.redraw();
   };
   $("#cueSplitView").onchange = event => {
     state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
@@ -4540,6 +4714,9 @@
   $("#fontIncrease").onclick = () => { state.fontSize = Math.min(22, state.fontSize + 1); render(); };
   $("#showTranslations").onchange = event => {
     document.body.classList.toggle("hide-editor-translations", !event.target.checked);
+    renderCues({preservePage:true});
+    updateTimelineHeight();
+    state.timelineController?.redraw();
   };
   $("#refreshDocumentBottom").onclick = () => state.projectId && loadProject(state.projectId);
   $("#undoDocument").onclick = undoLatestRevision;
@@ -4570,7 +4747,11 @@
       event.stopPropagation();
       return;
     }
-    if (event.target.closest("[data-target-edit]")) return;
+    const translation = event.target.closest("[data-target-edit]");
+    if (translation) {
+      activateTranslationCue(translation);
+      return;
+    }
     const token = event.target.closest("[data-token-id]");
     if (token) {
       selectToken(token.dataset.tokenId, {
@@ -4633,10 +4814,26 @@
     const target = event.target.closest("[data-target-edit]");
     if (target) resizeTranslationField(target);
   });
+  function activateTranslationCue(target) {
+    if (target.disabled) return;
+    suspendPlaybackFollow();
+    state.selectedTokenIds.clear();
+    state.selectionAnchorTokenId = null;
+    activateCue(target.dataset.targetEdit);
+    refreshTokenSelectionUi();
+  }
   $("#cueList").addEventListener("focusin", event => {
+    const source = event.target.closest("[data-source-edit]");
+    if (source && !source.disabled) {
+      suspendPlaybackFollow();
+      state.selectedTokenIds.clear();
+      state.selectionAnchorTokenId = null;
+      activateCue(source.dataset.sourceEdit);
+      refreshTokenSelectionUi();
+    }
     const target = event.target.closest("[data-target-edit]");
     if (target) {
-      state.activeCueId = target.dataset.targetEdit;
+      activateTranslationCue(target);
       if (target.dataset.rawEditing !== "true") {
         target.value = target.dataset.originalTarget || "";
         target.dataset.rawEditing = "true";
@@ -4645,6 +4842,13 @@
     }
   });
   $("#cueList").addEventListener("focusout", event => {
+    const source = event.target.closest("[data-source-edit]");
+    if (source && !source.readOnly && source.value !== source.dataset.originalSource) {
+      const text = source.value;
+      sendOperation(contract.createOperation(state.revision, "set_source_text", {cue_id:source.dataset.sourceEdit, text, provenance:manualProvenance("set_source_text")}))
+        .then(result => {if (result) source.dataset.originalSource = text;})
+        .catch(error => ordinaryError(error.message));
+    }
     const target = event.target.closest("[data-target-edit]");
     if (target) commitInlineTarget(target);
   });
@@ -4816,6 +5020,450 @@
     });
   });
 
+  function initializeReviewNotes() {
+    const importOpinions = document.createElement("button");
+    importOpinions.type = "button";
+    importOpinions.id = "importReviewOpinions";
+    importOpinions.textContent = "审阅意见";
+    $("#importMenu .editor-command-popover").append(importOpinions);
+    const opinionFile = document.createElement("input");
+    opinionFile.type = "file";
+    opinionFile.accept = ".json,application/json";
+    opinionFile.hidden = true;
+    importOpinions.after(opinionFile);
+    const exportOpinions = document.createElement("button");
+    exportOpinions.type = "button";
+    exportOpinions.id = "exportReviewOpinions";
+    exportOpinions.textContent = "审阅意见";
+    $("#exportMenu .export-popover").append(exportOpinions);
+    exportOpinions.onclick = async () => {
+      $("#exportMenu").open = false;
+      if (!state.projectId) return;
+      try {
+        const epoch = projectEpoch;
+        const result = await systemSaveAs.saveBlob({
+          suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_审阅意见.json`,
+          description:"审阅意见", mimeType:"application/json", extension:".json"
+        }, async () => {
+          await ensureOperationQueue().flushAndWait();
+          if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+          const packageData = await api(projectPath("/review-opinions/export"));
+          if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+          return new Blob([JSON.stringify(packageData, null, 2)], {type:"application/json;charset=utf-8"});
+        });
+        if (!result.cancelled) ordinaryError(`已保存：${result.filename}`, "completed");
+      } catch (error) {ordinaryError(error.status === 404 ? "请重启 Substar 以加载审阅意见导入、导出功能" : error.message);}
+    };
+    importOpinions.onclick = () => {
+      $("#importMenu").open = false;
+      if (state.projectId) opinionFile.click();
+    };
+    opinionFile.onchange = async () => {
+      const file = opinionFile.files[0];
+      opinionFile.value = "";
+      if (!file) return;
+      const project = state.projectId;
+      importOpinions.disabled = true;
+      try {
+        if (file.size > 10_000_000) throw new Error("审阅意见文件不能超过 10 MB");
+        let packageData;
+        try {packageData = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));}
+        catch {throw new Error("审阅意见文件不是有效的 JSON");}
+        await ensureOperationQueue().flushAndWait();
+        await refresh();
+        if (project !== state.projectId) return;
+        reviewData = await api(projectPath("/review-opinions/import"), {method:"POST", body:JSON.stringify({
+          expected_version:reviewData.version, expected_revision_id:state.revision.revision_id, package:packageData
+        })});
+        display();
+        setEnabled(true);
+        const result = reviewData.import_summary;
+        ordinaryError(`审阅意见已导入：新增 ${result.added}，未变化 ${result.unchanged}，冲突 ${result.conflicts}。本地字幕保持当前版本。`, "completed");
+      } catch (error) {ordinaryError(error.status === 404 ? "请重启 Substar 以加载审阅意见导入、导出功能" : error.message);}
+      finally {importOpinions.disabled = false;}
+    };
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "reviewModeToggle";
+    button.textContent = "启动修订";
+    button.setAttribute("aria-pressed", "false");
+    const selector = $("#timelineLayout").parentElement;
+    selector.before(button);
+    const panel = document.createElement("section");
+    panel.className = "review-notes-panel hidden";
+    panel.setAttribute("aria-label", "字幕修订");
+    const toolbar = document.createElement("div");
+    toolbar.className = "tool-locator-row";
+    const heading = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = "修订";
+    const counter = document.createElement("span");
+    heading.append(title, counter);
+    const navigation = document.createElement("div");
+    navigation.className = "tool-button-pair";
+    toolbar.append(heading, navigation);
+    const list = document.createElement("div");
+    panel.append(toolbar, list);
+    $("#editorTools [data-tool-panel='locator'] .tool-panel").append(panel);
+    document.addEventListener("pointerdown", event => {
+      if (event.target.closest?.(".display-token")) reviewSelection = null;
+    });
+    document.addEventListener("click", event => {
+      const token = event.target.closest?.(".display-token.review-annotated");
+      if (!reviewEnabled || !token) return;
+      const index = reviewData.notes.findIndex(note => note.status !== "deleted" && note.anchor.track === "source" && note.anchor_status !== "needs_relocation"
+        && (note.anchor.token_ids?.includes(token.dataset.tokenId)
+          || (!note.anchor.token_ids?.length && note.anchor.cue_id === token.closest("[data-cue-id]")?.dataset.cueId)));
+      if (index < 0) return;
+      position = index;
+      updateNavigation();
+      list.querySelectorAll(".review-note-card").forEach(card => {
+        const active = card.dataset.noteId === reviewData.notes[index].id;
+        card.classList.toggle("active", active);
+        if (active) card.scrollIntoView({block:"nearest"});
+      });
+    });
+    document.addEventListener("select", event => {
+      const field = event.target;
+      if (!field.matches?.(".translation-track")) return;
+      reviewSelection = field.selectionEnd > field.selectionStart ? {
+        cueId:field.closest("[data-cue-id]")?.dataset.cueId,
+        track:field.classList.contains("source-text-track") ? "source" : "target",
+        range:[Array.from(field.value.slice(0, field.selectionStart)).length, Array.from(field.value.slice(0, field.selectionEnd)).length]
+      } : null;
+    });
+    function control(label, action) {
+      const node = document.createElement("button");
+      node.type = "button";
+      node.textContent = label;
+      node.onclick = () => Promise.resolve(action()).catch(error => ordinaryError(error.message));
+      return node;
+    }
+    async function refresh() {
+      const project = state.projectId;
+      const data = await api(projectPath("/review-notes"));
+      if (project !== state.projectId) return;
+      reviewData = data;
+      display();
+    }
+    async function write(payload) {
+      const project = state.projectId;
+      const data = await api(projectPath("/review-notes"), {method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({...payload, expected_version:reviewData.version, expected_revision_id:state.revision.revision_id})});
+      if (project !== state.projectId) return;
+      reviewData = data;
+      display();
+    }
+    function locate(note) {
+      position = reviewData.notes.findIndex(item => item.id === note.id);
+      updateNavigation();
+      list.querySelectorAll(".review-note-card").forEach(card => {
+        card.classList.toggle("active", card.dataset.noteId === note.id);
+        if (card.dataset.noteId === note.id) card.scrollIntoView({block:"nearest"});
+      });
+      activateCue(note.anchor.cue_id, {seek:true, scroll:true, revealTimeline:true});
+      state.selectedTokenIds = new Set(note.anchor.token_ids || []);
+      refreshTokenSelectionUi();
+      const field = [...document.querySelectorAll("#cueList [data-cue-id]")].find(row => row.dataset.cueId === note.anchor.cue_id)?.querySelector(note.anchor.track === "source" ? ".source-text-track" : ".translation-track:not(.source-text-track)");
+      if (field && note.anchor.text_range && note.anchor_status === "current") {
+        field.focus();
+        const chars = Array.from(field.value);
+        field.setSelectionRange(chars.slice(0, note.anchor.text_range[0]).join('').length, chars.slice(0, note.anchor.text_range[1]).join('').length);
+      }
+      if (note.anchor_status === "needs_relocation") ordinaryError("原字幕已变化，修订需重新定位；原文快照已保留");
+    }
+    let position = -1;
+    function updateNavigation() {
+      const total = reviewData.notes.length;
+      if (position >= total) position = -1;
+      counter.textContent = `${position + 1} / ${total}`;
+      previous.disabled = next.disabled = !total;
+    }
+    function navigate(step) {
+      const notes = reviewData.notes;
+      if (!notes.length) return;
+      position = position < 0 ? (step < 0 ? notes.length - 1 : 0) : (position + step + notes.length) % notes.length;
+      locate(notes[position]);
+      updateNavigation();
+    }
+    async function add(fromTokens = false, suppliedText = null) {
+      const cueId = state.activeCueId;
+      const project = state.projectId;
+      if (!cueId || !project) return;
+      if (editorAiTaskLocksEditor()) throw new Error("请等待当前 AI 任务完成");
+      const cue = state.view.cue_views.find(cue => cue.cue_id === cueId);
+      if (!cue) return;
+      const track = !fromTokens && reviewSelection?.cueId === cueId ? reviewSelection.track : "source";
+      const tokenIds = track === "source" ? [...state.selectedTokenIds].filter(id => cue.display_token_ids.includes(id)) : [];
+      const range = !fromTokens && reviewSelection?.cueId === cueId && reviewSelection.track === track ? reviewSelection.range : null;
+      if (fromTokens && !tokenIds.length) return;
+      await ensureOperationQueue().flushAndWait();
+      if (project !== state.projectId) return;
+      const revisionId = state.revision?.revision_id;
+      await refresh();
+      let text = suppliedText;
+      if (text == null) {
+        setEnabled(true);
+        const snapshot = tokenIds.length ? tokenIds.map(id => state.indexes.tokenById.get(id)?.text || "").join(" ") : "当前所选字幕";
+        text = await compose(panel, "新修订", snapshot);
+      }
+      if (!text) return;
+      if (project !== state.projectId || revisionId !== state.revision?.revision_id) throw new Error("字幕版本已变化，请重新选择修订位置");
+      await write({action:"add", cue_id:cueId, track, token_ids:range ? [] : tokenIds, text_range:range, text});
+      setEnabled(true);
+      return true;
+    }
+    const previous = control("上一条", () => navigate(-1));
+    const next = control("下一条", () => navigate(1));
+    navigation.append(previous, next);
+    list.className = "review-notes-list";
+    const tokenForm = document.createElement("form");
+    tokenForm.id = "tokenReviewForm";
+    tokenForm.className = "token-review-form";
+    const tokenInput = document.createElement("input");
+    tokenInput.type = "text";
+    tokenInput.placeholder = "输入修订…";
+    tokenInput.setAttribute("aria-label", "修订内容");
+    tokenInput.maxLength = 10000;
+    tokenInput.autocomplete = "off";
+    const confirm = document.createElement("button");
+    confirm.type = "submit";
+    confirm.textContent = "添加";
+    confirm.disabled = true;
+    const removeNote = document.createElement("button");
+    removeNote.type = "button";
+    removeNote.textContent = "删除";
+    removeNote.setAttribute("aria-label", "删除修订");
+    removeNote.className = "hidden";
+    tokenForm.append(tokenInput, confirm, removeNote);
+    $("#tokenSelectionMenu").append(tokenForm);
+    let submitting = false;
+    function selectedNote() {
+      const ids = [...state.selectedTokenIds];
+      if (!ids.length) return null;
+      return reviewData.notes.find(note => note.status !== "deleted" && note.anchor.track === "source"
+        && ids.every(id => note.anchor.token_ids?.includes(id))) || null;
+    }
+    function selectionConflict() {
+      const ids = [...state.selectedTokenIds];
+      if (!ids.length) return "请选择词元";
+      if (new Set(ids.map(id => state.indexes?.tokenToCueId?.get(id))).size !== 1) return "请选择同一字幕中的词元";
+      const overlaps = reviewData.notes.filter(note => note.status !== "deleted" && note.anchor.track === "source"
+        && ids.some(id => note.anchor.token_ids?.includes(id)));
+      if (overlaps.length && (overlaps.length !== 1 || !selectedNote())) return "不能与已有修订组重叠";
+      return "";
+    }
+    syncTokenReviewForm = (force = false) => {
+      if (submitting) return;
+      const key = [...state.selectedTokenIds].sort().join("|");
+      const note = selectedNote();
+      const signature = `${key}:${note?.id || ""}:${note?.text || ""}`;
+      if (!force && tokenForm.dataset.selectionKey === signature) return;
+      tokenForm.dataset.selectionKey = signature;
+      tokenInput.value = note?.text || "";
+      const conflict = selectionConflict();
+      tokenInput.disabled = !!conflict;
+      tokenInput.placeholder = conflict || "输入修订…";
+      confirm.textContent = note ? "保存" : "添加";
+      confirm.disabled = tokenInput.disabled || !tokenInput.value.trim();
+      removeNote.classList.toggle("hidden", !note);
+    };
+    function cancelTokenNote() {
+      if (submitting) return;
+      syncTokenReviewForm(true);
+    }
+    tokenInput.oninput = () => {confirm.disabled = submitting || !tokenInput.value.trim();};
+    tokenForm.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelTokenNote();
+        tokenInput.blur();
+        $("#tokenSelectionMenu").classList.add("hidden");
+      }
+      if (event.key === "Enter" && event.isComposing) event.preventDefault();
+    });
+    document.addEventListener("pointerdown", event => {
+      if (!reviewEnabled || event.target.closest?.("#tokenReviewForm")) return;
+      cancelTokenNote();
+      if (!event.target.closest?.(".display-token,#tokenSelectionMenu")) $("#tokenSelectionMenu").classList.add("hidden");
+    });
+    tokenForm.onsubmit = async event => {
+      event.preventDefault();
+      const text = tokenInput.value.trim();
+      if (!reviewEnabled || !text || submitting || selectionConflict()) return;
+      submitting = true;
+      tokenInput.readOnly = true;
+      confirm.disabled = true;
+      try {
+        if (await add(true, text)) {
+          tokenForm.reset();
+          tokenInput.blur();
+          $("#tokenSelectionMenu").classList.add("hidden");
+        }
+      } catch (error) {ordinaryError(error.message);}
+      finally {
+        submitting = false;
+        tokenInput.readOnly = false;
+        syncTokenReviewForm(true);
+      }
+    };
+    removeNote.onclick = async () => {
+      const note = selectedNote();
+      if (!reviewEnabled || !note || submitting) return;
+      submitting = true;
+      removeNote.disabled = confirm.disabled = true;
+      tokenInput.readOnly = true;
+      try {
+        await write({action:"delete", note_id:note.id});
+      } catch (error) {
+        const outdated = error.status === 422 && Array.isArray(error.detail)
+          && error.detail.some(item => item.loc?.includes("action") && item.type === "literal_error");
+        ordinaryError(outdated ? "当前后端尚未加载删除修订功能，请重启 Substar 后再删除；修订仍保留。" : error.message);
+      }
+      finally {
+        submitting = false;
+        removeNote.disabled = false;
+        tokenInput.readOnly = false;
+        syncTokenReviewForm(true);
+      }
+    };
+    updateNavigation();
+    let cancelComposer = null;
+    function compose(container, label, snapshot = "") {
+      cancelComposer?.();
+      return new Promise(resolve => {
+        const form = document.createElement("form");
+        form.className = "review-note-composer";
+        const title = document.createElement("strong");
+        title.textContent = label;
+        const quote = document.createElement("blockquote");
+        quote.textContent = snapshot;
+        const field = document.createElement("textarea");
+        field.setAttribute("aria-label", label === "回复修订" ? "回复内容" : "修订内容");
+        field.placeholder = label === "回复修订" ? "输入回复…" : "输入修订…";
+        field.rows = 2;
+        field.maxLength = 10000;
+        const actions = document.createElement("div");
+        actions.className = "review-note-actions";
+        const finish = value => {form.remove(); cancelComposer = null; resolve(value);};
+        cancelComposer = () => finish(null);
+        const submit = document.createElement("button");
+        submit.type = "submit";
+        submit.textContent = "保存";
+        submit.disabled = true;
+        field.oninput = () => {submit.disabled = !field.value.trim();};
+        form.onsubmit = event => {event.preventDefault(); if (field.value.trim()) finish(field.value.trim());};
+        actions.append(control("取消", () => finish(null)), submit);
+        form.append(title);
+        if (snapshot) form.append(quote);
+        form.append(field, actions);
+        if (container === panel) list.before(form); else container.append(form);
+        form.scrollIntoView({block:"nearest"});
+        field.focus();
+      });
+    }
+    function display() {
+      renderCues({preservePage:true});
+      state.timelineController?.redraw();
+      list.replaceChildren();
+      updateNavigation();
+      for (const note of reviewData.notes) {
+        const card = document.createElement("article");
+        card.className = "review-note-card";
+        card.classList.toggle("resolved", note.status !== "open");
+        card.classList.toggle("active", reviewData.notes[position]?.id === note.id);
+        card.dataset.noteId = note.id;
+        card.tabIndex = 0;
+        card.setAttribute("aria-label", `修订：${note.anchor.text_snapshot}`);
+        card.onclick = event => {if (!event.target.closest("button,textarea,form,details")) locate(note);};
+        card.onkeydown = event => {
+          if (event.target === card && (event.key === "Enter" || event.key === " ")) {event.preventDefault(); locate(note);}
+        };
+        const header = document.createElement("header");
+        const author = document.createElement("strong");
+        author.textContent = note.author || "修订";
+        const date = document.createElement("time");
+        const created = new Date(note.created_at);
+        date.dateTime = note.created_at || "";
+        date.textContent = Number.isNaN(created.getTime()) ? "" : created.toLocaleString("zh-CN", {month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false});
+        date.title = Number.isNaN(created.getTime()) ? "" : created.toLocaleString("zh-CN");
+        header.append(author, date);
+        const quote = document.createElement("blockquote");
+        quote.textContent = note.anchor.text_snapshot;
+        const text = document.createElement("p");
+        text.textContent = note.text;
+        const status = document.createElement("small");
+        status.textContent = `${({open:"待处理", accepted:"已接受", rejected:"已拒绝", resolved:"已解决"})[note.status] || "待处理"}`
+          + (note.anchor_status === "text_changed" ? " · 原文已变化" : note.anchor_status === "needs_relocation" ? " · 无法定位" : "")
+          + (note.status === "deleted" ? " · 本地已删除" : "");
+        const actions = document.createElement("div");
+        actions.className = "review-note-actions";
+        for (const [action, symbol, label, value] of [["accept", "✓", "接受修订", "accepted"], ["reject", "×", "拒绝修订", "rejected"]]) {
+          const decision = control(symbol, () => write({action, note_id:note.id}));
+          decision.title = label;
+          decision.setAttribute("aria-label", label);
+          decision.setAttribute("aria-pressed", String(note.status === value));
+          decision.className = `review-decision review-${action}`;
+          actions.append(decision);
+        }
+        const footer = document.createElement("div");
+        footer.className = "review-note-footer";
+        footer.append(status, actions);
+        card.append(header, quote, text);
+        if (note.import_conflicts?.length) {
+          const conflict = document.createElement("details");
+          conflict.className = "review-import-conflict";
+          const label = document.createElement("summary");
+          label.textContent = `导入冲突（${note.import_conflicts.length}）：已保留本地版本`;
+          conflict.append(label);
+          for (const variant of note.import_conflicts) {
+            const incoming = document.createElement("p");
+            incoming.textContent = `导入版本：${variant.anchor.text_snapshot} → ${variant.text}（${({open:"待处理",accepted:"已接受",rejected:"已拒绝",resolved:"已解决",deleted:"已删除"})[variant.status]}）`;
+            conflict.append(incoming);
+          }
+          conflict.append(control("保留本地并清除冲突", () => write({action:"keep_local", note_id:note.id})));
+          card.append(conflict);
+        }
+        for (const reply of note.replies) {
+          const text = document.createElement("p");
+          text.className = "review-note-reply";
+          text.textContent = `${reply.author || "回复"}：${reply.text}`;
+          card.append(text);
+        }
+        list.append(card);
+        card.append(footer);
+      }
+    }
+    function setEnabled(enabled) {
+      if (!enabled) cancelComposer?.();
+      if (!enabled) cancelTokenNote();
+      reviewEnabled = enabled;
+      syncTokenReviewForm(true);
+      $("#editorWorkbench").classList.toggle("review-mode", enabled);
+      panel.classList.toggle("hidden", !reviewEnabled);
+      if (reviewEnabled) $("#editorTools [data-tool-panel='locator']").open = true;
+      button.textContent = reviewEnabled ? "退出修订" : "启动修订";
+      button.setAttribute("aria-pressed", String(reviewEnabled));
+      render();
+      syncRevisionControls();
+    }
+    button.onclick = async () => {
+      try {
+        if (!state.projectId) return;
+        if (!reviewEnabled) {
+          if (editorAiTaskLocksEditor()) throw new Error("请等待当前 AI 任务完成");
+          const project = state.projectId;
+          await ensureOperationQueue().flushAndWait();
+          await refresh();
+          if (project !== state.projectId) return;
+        }
+        setEnabled(!reviewEnabled);
+      } catch (error) {ordinaryError(error.message);}
+    };
+  }
+
+  initializeReviewNotes();
   initializeCueTimeController();
   initializeCueListView();
   configureMedia("video");

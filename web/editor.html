@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260907-crisp-2">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260916-import-buttons-2">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
@@ -16,7 +16,8 @@
   <div class="editor-command-bar">
     <div class="command-project-zone">
       <details id="projectMenu" class="editor-command-menu"><summary>项目</summary><div class="editor-command-popover project-popover"><span class="project-list-heading">编辑项目</span><div id="projectList" class="project-list" role="listbox" aria-label="编辑项目"><span class="project-list-empty">读取项目…</span></div></div></details>
-      <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importProjectPackage" type="button">字幕工程</button><button id="importSrtTranslation" type="button">SRT 译文轨道</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
+      <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importExternalCalibration" type="button">外部校准结果</button><button id="importSrtTranslation" type="button">外部翻译结果</button><button id="importProjectPackage" type="button">字幕工程</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
+      <input id="externalCalibrationInput" type="file" accept=".json,application/json" hidden>
       <input id="importSrtInput" type="file" accept=".srt,application/x-subrip" hidden>
       <details id="taskInfoMenu" class="editor-command-menu task-info-menu disabled">
         <summary id="taskInfo" aria-disabled="true">任务信息</summary>
@@ -107,6 +108,7 @@
           <button type="button" data-export-mode="target">下行字幕</button>
           <button type="button" data-export-mode="ab-single">上下行单行字幕</button>
           <button type="button" data-export-mode="ab-double">上下行双行字幕</button>
+          <button type="button" id="externalCalibration">外部校准生成</button>
           <button type="button" id="externalTranslation">外部翻译生成</button>
           <button type="button" data-exchange-export="subtitle-project" title="包含媒体和当前修订的完整可迁移工程">字幕工程</button>
         </section>
@@ -147,6 +149,7 @@
       <div class="pane-heading">
         <div><strong>Cue 编辑区</strong></div>
         <div class="pane-live-controls">
+          <label>时间轴 <select id="timelineLayout" aria-label="时间轴布局"><option value="composite">复合</option><option value="separated">分离</option></select></label>
           <label id="cueSplitViewLabel">视图 <select id="cueSplitView" aria-label="Cue 视图"><option value="virtual" selected>光标</option><option value="auxiliary">辅助点</option></select></label>
           <button id="fontDecrease" type="button">A−</button><output id="fontValue">18</output><button id="fontIncrease" type="button">A+</button>
           <label class="tool-check"><input id="showTranslations" type="checkbox" checked>显示译文</label>
@@ -215,7 +218,6 @@
     </aside>
 
     <section class="cue-timeline-panel" aria-label="Cue 时间轴">
-      <div class="timeline-heading"><strong>时间轴</strong><span>单击 Cue 选择 · 拖动边界 · Alt＋滚轮缩放 · 空白处右键新增</span></div>
       <div id="timelineTrack" class="timeline-track" tabindex="0" aria-label="字幕时间轴">
         <canvas id="timelineCanvas" aria-label="字幕波形与 Cue 时间轴"></canvas>
       </div>
@@ -245,13 +247,13 @@
   </div>
 
   <div id="srtImportDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="srtImportTitle">
-    <section class="text-dialog" style="width:min(820px,94vw)">
+    <section class="text-dialog srt-import-panel">
       <strong id="srtImportTitle">导入 SRT 译文轨道</strong>
-      <p>按时间轴匹配当前字幕，仅写入译文。轨道内夹杂的其他语言完整保留。</p>
+      <p class="srt-import-description">按时间轴匹配字幕并导入译文，保留轨道内的混合语言内容。</p>
       <label>文件格式<select id="srtImportFormat"><option value="auto">自动识别</option><option value="source">原文单行</option><option value="target">译文单行</option><option value="ab-single">双语单行</option><option value="ab-double">双语双行</option></select></label>
       <p id="srtImportSummary" role="status"></p>
-      <div id="srtImportRows" style="max-height:45vh;overflow:auto;white-space:pre-wrap"></div>
-      <div><button id="cancelSrtImport" type="button">取消</button><button id="previewSrtImport" type="button">重新匹配</button><button id="applySrtImport" class="primary" type="button" disabled>确认导入匹配项</button></div>
+      <div id="srtImportRows" aria-label="译文匹配预览" tabindex="0"></div>
+      <div class="srt-import-actions"><button id="cancelSrtImport" type="button">取消</button><button id="previewSrtImport" type="button">重新匹配</button><button id="applySrtImport" class="primary" type="button" disabled>确认导入匹配项</button></div>
     </section>
   </div>
 
@@ -297,18 +299,18 @@
 
   <script src="/assets/editor_cue_ordering.js?v=20260809-cue-order-1"></script>
   <script src="/assets/editor_language.js?v=20260822-virtual-line-3"></script>
-  <script src="/assets/editor_document.js?v=20260910-omitted-filler-1"></script>
-  <script src="/assets/editor_document_store.js?v=20260903-delivery-1"></script>
+  <script src="/assets/editor_document.js?v=20260916-save-safety-1"></script>
+  <script src="/assets/editor_document_store.js?v=20260916-save-safety-1"></script>
   <script src="/assets/editor_operation_queue.js?v=20260809-refactor-final-1"></script>
   <script src="/assets/editor_waveform_cache.js?v=20260809-refactor-final-1"></script>
-  <script src="/assets/editor_timeline.js?v=20260907-crisp-2"></script>
+  <script src="/assets/editor_timeline.js?v=20260911-translation-visibility-1"></script>
   <script src="/assets/editor_cue_time_controller.js?v=20260809-cue-order-1"></script>
-  <script src="/assets/editor_cue_list_view.js?v=20260827-keyed-cue-reconcile-1"></script>
+  <script src="/assets/editor_cue_list_view.js?v=20260911-subtitle-review-2"></script>
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
   <script src="/assets/editor_tutorial.js?v=20260831-v2-contract-1"></script>
-  <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
+  <script src="/assets/system_save_as.js?v=20260916-deferred-save-1"></script>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2"></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-<script src="/assets/editor.js?v=20260909-external-translation-1"></script>
+<script src="/assets/editor.js?v=20260916-external-save-1"></script>
 </body>
 </html>
