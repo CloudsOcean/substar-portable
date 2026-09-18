@@ -7,6 +7,7 @@ requests==2.34.2
 python-multipart==0.0.32
 orjson==3.11.9
 opencc-python-reimplemented==0.1.7
+pypinyin==0.55.0
 numpy==2.2.6
 cryptography==43.0.3
 cffi==2.1.1

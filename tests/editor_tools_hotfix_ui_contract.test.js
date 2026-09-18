@@ -21,8 +21,8 @@ test("release keeps the non-dubbing editor tool contract", () => {
 
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
-    "editor.css":"20260916-import-buttons-2",
-    "editor.js":"20260916-external-save-1",
+    "editor.css":"20260918-cue-scroll-2",
+    "editor.js":"20260918-cue-scroll-2",
     "editor_document.js":"20260916-save-safety-1",
     "editor_timeline.js":"20260911-translation-visibility-1",
     "editor_tutorial.js":"20260831-v2-contract-1",

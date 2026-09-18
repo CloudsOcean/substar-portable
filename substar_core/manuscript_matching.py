@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from substar_core.language_layout import layout_tokens
+from substar_core.reference_phonetics import phonetic_score, refine_opcodes
 
 
 REFERENCE_EXTENSIONS = {".txt", ".srt", ".docx"}
@@ -44,7 +45,7 @@ class _LexicalSpan:
 
 
 REFERENCE_TOKENIZER_VERSION = "unicode-script-v2"
-REFERENCE_MATCHER_VERSION = "local-reference-v4"
+REFERENCE_MATCHER_VERSION = "local-reference-v5-phonetic"
 REFERENCE_BREAK_PRESETS = {
     "zh": "，。？！",
     "en": ".?!",
@@ -637,8 +638,25 @@ def materialize_reference_script(
     similarity = matcher.ratio()
 
     frequencies = _reference_frequency(right)
+    # Keep existing reliable corrections and numeric mappings intact. Mandarin
+    # pronunciation must not influence Japanese or Korean reference matching.
+    phonetic_enabled = _language_key(source_language) in {"zh", "auto", "mixed"}
+    if phonetic_enabled:
+        accepted_positions = {
+            pos for pos, opcode in enumerate(raw_opcodes)
+            if opcode[0] == "replace"
+            and _local_reference_score(raw_opcodes, pos, source_values, right, frequencies)["accepted"]
+        }
+        raw_opcodes = _phrase_reference_opcodes(
+            refine_opcodes(raw_opcodes, source_values, right, accepted_positions), reference
+        )
+
+    def score_reference(opcodes, position):
+        score = _local_reference_score(opcodes, position, source_values, right, frequencies)
+        return phonetic_score(opcodes, position, source_values, right, score) if phonetic_enabled else score
+
     local_scores = {
-        pos: _local_reference_score(raw_opcodes, pos, source_values, right, frequencies)
+        pos: score_reference(raw_opcodes, pos)
         for pos, opcode in enumerate(raw_opcodes) if opcode[0] == "replace"
     }
     script_mismatch = _tokenization_diagnostics(reference_text, source_language)["script_mismatch"]
@@ -729,7 +747,7 @@ def materialize_reference_script(
                 continue
             remaining_opcodes = list(raw_opcodes)
             remaining_opcodes[pos] = (tag, i1, i2, j1, j2)
-            local_scores[pos] = _local_reference_score(remaining_opcodes, pos, source_values, right, frequencies)
+            local_scores[pos] = score_reference(remaining_opcodes, pos)
         score = local_scores[pos]
         evidence = {"decision": "local_alignment", **score}
         if score["accepted"] and not script_mismatch:

@@ -244,6 +244,20 @@ body.editor-shell {
 .cue-list::-webkit-scrollbar { width: 12px; height: 12px; }
 .cue-list::-webkit-scrollbar-track { background: #12151b; }
 .cue-list::-webkit-scrollbar-thumb { background: #474d5b; border-radius: 5px; }
+.editor-document-pane .cue-list { margin-right: 20px; scrollbar-width: none; }
+.editor-document-pane .cue-list::-webkit-scrollbar { display: none; }
+.cue-scroll-slider {
+  position: absolute; top: 62px; right: 3px; bottom: 10px;
+  width: 14px; height: calc(100% - 72px); margin: 0; padding: 0;
+  writing-mode: vertical-lr; direction: ltr; appearance: none;
+  background: transparent; cursor: pointer; z-index: 2;
+}
+.cue-scroll-slider::-webkit-slider-runnable-track { width: 4px; background: #252c38; border-radius: 4px; }
+.cue-scroll-slider::-webkit-slider-thumb { appearance: none; width: 12px; height: 32px; margin-left: -4px; background: #697b93; border-radius: 6px; }
+.cue-scroll-slider::-moz-range-track { width: 4px; background: #252c38; border-radius: 4px; }
+.cue-scroll-slider::-moz-range-thumb { width: 12px; height: 32px; border: 0; background: #697b93; border-radius: 6px; }
+.cue-scroll-slider:focus-visible { outline: 1px solid var(--editor-accent, #9670e8); outline-offset: 1px; }
+.cue-scroll-slider:disabled { opacity: .3; cursor: default; }
 .timeline-scrollbar { padding: 5px 0 0; }
 .timeline-scrollbar input { display: block; width: 100%; height: 12px; margin: 0; padding: 0; appearance: none; border: 0; border-radius: 6px; background: #12151b; cursor: default; }
 .timeline-scrollbar input::-webkit-slider-thumb { appearance: none; width: 48px; height: 10px; border-radius: 5px; background: #474d5b; }

@@ -800,7 +800,7 @@
       "layer": "domain_service",
       "role": "Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions.",
       "must_not": ["Delete content merely because the reference omits it", "Silently change Cue topology in the editor", "Mutate immutable recognition evidence", "Use filename matching as content authority"],
-      "code": [{"path": "substar_core/manuscript_matching.py", "symbols": ["extract_reference_text", "reference_break_symbols_for_language", "materialize_reference_alignment", "materialize_reference_script", "editor_reference_operations"]}, {"path": "substar_core/filenames.py", "symbols": []}],
+      "code": [{"path": "substar_core/manuscript_matching.py", "symbols": ["extract_reference_text", "reference_break_symbols_for_language", "materialize_reference_alignment", "materialize_reference_script", "editor_reference_operations"]}, {"path": "substar_core/reference_phonetics.py", "symbols": ["refine_opcodes", "phonetic_score"]}, {"path": "substar_core/filenames.py", "symbols": []}],
       "inputs": ["reference_document", "recognition_evidence", "editor_revision", "segmentation_request"],
       "outputs": ["reference_document", "segmentation_material", "editor_operation"],
       "calls": ["editor_domain"],

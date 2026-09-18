@@ -3381,6 +3381,7 @@
     if (!factory?.createCueListView) return;
     state.cueListView = factory.createCueListView({
       container:$("#cueList"),
+      positionSlider:$("#cueScrollSlider"),
       pageSize:CUE_PAGE_SIZE,
       renderCue:cueElement,
       onWindowChange:page => { state.cuePageStart = page.start; }

@@ -245,6 +245,39 @@ function ids(container) {
 console.log("editor_cue_list_view: ok");
 
 {
+  const {container, fireScroll, flushFrames} = fixture({dynamic:true});
+  container.getBoundingClientRect = () => ({top:0});
+  const handlers = {};
+  const slider = {value:"0", disabled:true, addEventListener:(name,fn)=>{handlers[name]=fn;}, setAttribute(){}};
+  const renderCue = (value,index) => {
+    const node = row(value,index);
+    node.getBoundingClientRect = () => {
+      const top = container.children.indexOf(node)*80 + (parseFloat(container.style.paddingTop)||0) - container.scrollTop;
+      return {top,bottom:top+80,height:80};
+    };
+    return node;
+  };
+  const view=createCueListView({container,renderCue,positionSlider:slider});
+  const cues=Array.from({length:10000},(_,i)=>cue(`position_${i}`,String(i)));
+  view.render({cues,tokenById:new Map(),activeCueId:cues[0].cue_id});
+  assert.equal(slider.disabled,false);
+  slider.value="50"; handlers.input();
+  assert.ok(ids(container).includes("position_5000"),"global midpoint loads distant cue directly");
+  assert.ok(container.children.length<=160,"jump only renders a bounded window");
+  assert.ok(Math.abs(Number(slider.value)-50)<.02);
+  container.scrollTop+=800;fireScroll();flushFrames();
+  assert.ok(Number(slider.value)>50,"wheel position updates global percentage");
+  slider.value="100";handlers.input();
+  assert.equal(ids(container).at(-1),"position_9999");
+  assert.equal(Number(slider.value),100);
+  slider.value="0";handlers.input();
+  assert.equal(ids(container)[0],"position_0");
+  assert.equal(container.scrollTop,0);
+  view.render({cues:[],tokenById:new Map(),activeCueId:null});
+  assert.equal(slider.disabled,true);
+}
+
+{
   const {container} = fixture();
   const renderCue = (value, index) => {
     const node = row(value, index);

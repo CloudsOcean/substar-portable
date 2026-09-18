@@ -9,3 +9,5 @@ Windows Beta 包包含 FFmpeg 7.1.1 essentials build（Gyan.dev），其构建�
 - https://www.gyan.dev/ffmpeg/builds/
 
 云端模型及服务不随本软件分发，其条款由阿里云百炼、Qwen、DeepSeek 或用户自行配置的兼容服务提供方决定。
+
+中文参考稿匹配使用 pypinyin 0.55.0（MIT License）；完整许可证随 Python 运行时的 pypinyin 包元数据分发。

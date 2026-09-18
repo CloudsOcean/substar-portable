@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import pytest
 from unittest.mock import patch
 
 from starlette.datastructures import UploadFile
@@ -62,6 +63,41 @@ def rematch_doc(reference, source, language='zh', breaks=None):
     result = editor_reference_operations(reference, source, language)
     return apply_reference_report(doc, result['report'],
                                   {i: token.token_id for i, token in enumerate(doc.display_tokens)}), result
+
+
+@pytest.mark.parametrize('build', [script_doc, semantic_doc, rematch_doc])
+@pytest.mark.parametrize('reference,source,expected', [
+    ('自当使彼安居止兵罢攻夫虚妄之徒虽拒真理之人',
+     '自当使彼安居止兵罢工夫妄虚之徒虽具真理之人',
+     '自当使彼安居止兵罢攻夫虚妄之徒虽拒真理之人'),
+    ('若兵衅既开朕将凭主之佑兴师伐汝',
+     '若兵系既开朕即将平主之友兴师伐辱',
+     '若兵衅既开朕即将凭主之佑兴师伐汝'),
+    ('平平平平', '凭凭凭凭', '凭凭凭凭'),
+])
+def test_phonetic_alignment_all_entries_preserve_spoken_extras_and_timing(build, reference, source, expected):
+    original = units(source)
+    doc, _ = build(reference, original)
+    assert visible(doc) == expected
+    assert [(t.start, t.end) for t in doc.source_tokens] == [
+        (u['start'], u['end']) for u in original
+    ]
+    # The semantic fixture constructs its document from the projected material;
+    # the other entry points construct it directly from the original ledger.
+    if build is not semantic_doc:
+        assert ''.join(t.text for t in doc.source_tokens) == source
+    assert all(t.source_token_ids for t in doc.display_tokens if t.state.value == 'active')
+
+
+def test_mandarin_sound_does_not_apply_to_japanese():
+    _, _, ja = materialize_reference_script('前文平后文', units('前文凭后文'), '。', 'ja')
+    assert not any(item.get('phonetic_support') for item in ja['local_decisions'])
+
+
+def test_phonetic_assistance_preserves_existing_multichar_and_numeric_corrections():
+    for reference, source in [('仅仅拥有军队财富', '仅仅用军队财富'), ('海拔超过一千米的山脉', ['海拔超过', '1000', '米的山脉'])]:
+        doc, _ = script_doc(reference, units(source))
+        assert visible(doc) == reference
 
 
 def test_all_entries_preserve_asr_extras_and_hide_reference_extras():
@@ -221,7 +257,7 @@ def test_isolated_matching_subprocess_returns_shared_report():
                                          units('甲乙丙丁'), 'zh', Request()))
     assert result['edits'] == []
     assert result['insertions'][0]['text'] == '新'
-    assert result['report']['matcher_version'] == 'local-reference-v4'
+    assert result['report']['matcher_version'] == 'local-reference-v5-phonetic'
 
 
 def test_editor_endpoint_commits_hidden_insertions_atomically():
