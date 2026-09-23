@@ -195,6 +195,19 @@ class CheckpointRequest(BaseModel):
     label: str = Field(default="", max_length=120)
 
 
+class SelectiveRestoreRequest(BaseModel):
+    expected_revision_id: str
+    revision_id: str
+    cue_ids: list[str] = Field(min_length=1, max_length=10000)
+    scope: Literal["text", "timing", "translation", "style"]
+
+
+class SplitTokenRequest(BaseModel):
+    expected_revision_id: str
+    token_id: str
+    offset: int = Field(gt=0)
+
+
 class RestoreRevisionRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
     revision_id: str = Field(min_length=1)
@@ -1851,6 +1864,38 @@ def create_project_checkpoint(
         operation="checkpoint",
         provenance=provenance,
     )
+
+
+@router.post("/projects/{project_id}/restore-selection")
+def restore_project_selection(project_id: str, payload: SelectiveRestoreRequest) -> dict[str, Any]:
+    from substar_core.editor.application.selective_restore import restore_fields
+    store = open_project_store(project_id)
+    latest = store.load_latest()
+    if latest is None or latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(409, detail="项目已更新，请刷新后重试")
+    try:
+        target = store.load_revision(payload.revision_id)
+        document = restore_fields(latest.document, target.document, payload.cue_ids, payload.scope)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    provenance = ChangeProvenance(kind=ChangeKind.MANUAL, operation="selective_restore", actor="editor",
+        metadata={"restored_revision_id":target.revision_id, "scope":payload.scope, "cue_ids":payload.cue_ids})
+    return _save_document(project_id, expected_revision_id=latest.revision_id, document=document,
+                          operation="selective_restore", provenance=provenance)
+
+
+@router.post("/projects/{project_id}/split-token")
+def split_project_token(project_id: str, payload: SplitTokenRequest) -> dict[str, Any]:
+    from substar_core.editor.application.selective_restore import split_token
+    latest = open_project_store(project_id).load_latest()
+    if latest is None or latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(409, detail="项目已更新，请刷新后重试")
+    try:
+        document = split_token(latest.document, payload.token_id, payload.offset)
+    except ValueError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
+    return _save_document(project_id, expected_revision_id=latest.revision_id, document=document,
+                          operation="split_token", provenance=document.changes[-1])
 
 
 @router.post("/projects/{project_id}/restore")

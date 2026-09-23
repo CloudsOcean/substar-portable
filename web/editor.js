@@ -21,8 +21,8 @@
     revision:null,
     view:null,
     selectedTokenIds:new Set(),
+    cueSelection:window.EditorCueSelection.createSelection(),
     selectionAnchorTokenId:null,
-    marquee:null,
     activeCueId:null,
     playbackCueId:null,
     timelineSelectedCueId:null,
@@ -326,6 +326,8 @@
     viewport.style.height = `${Math.max(1, media.videoHeight * scale)}px`;
   }
 
+  let lastAudibleVolume = 1;
+
   function syncMediaControls() {
     const media = activeMedia();
     const duration = Number.isFinite(media?.duration) ? media.duration : 0;
@@ -334,7 +336,17 @@
     $("#mediaTime").textContent = `${mediaTimeLabel(media?.currentTime)} / ${mediaTimeLabel(duration)}`;
     $("#mediaPlayToggle").textContent = media?.paused === false ? "❚❚" : "▶";
     $("#mediaPlayToggle").ariaLabel = media?.paused === false ? "暂停" : "播放";
-    $("#mediaMute").textContent = media?.muted ? "🔇" : "🔊";
+    const silent = !!media?.muted || media?.volume === 0;
+    const volume = silent ? 0 : Math.round((media?.volume ?? 1) * 100);
+    if (media?.volume > 0) lastAudibleVolume = media.volume;
+    $("#mediaVolume").value = String(volume);
+    $("#mediaVolume").title = `音量 ${volume}%`;
+    if ($("#mediaVolumeValue")) $("#mediaVolumeValue").textContent = `${volume}%`;
+    $("#mediaVolume").setAttribute("aria-valuetext", `${volume}%`);
+    $("#mediaMute").textContent = silent ? "🔇" : "🔊";
+    $("#mediaMute").setAttribute("aria-label", silent ? "取消静音" : "静音");
+    $("#mediaMute").setAttribute("aria-pressed", String(silent));
+    $("#mediaMute").title = silent ? "已静音，点击恢复声音" : "静音";
     const speed = Number(media?.playbackRate) || 1;
     $("#mediaSpeed").value = String(speed);
     $("#mediaSpeedValue").textContent = `${speed.toFixed(2)}x`;
@@ -709,9 +721,11 @@
 
   function adoptRevisionWithoutRender(payload) {
     const previousActiveCue = state.view?.cue_views.find(cue => cue.cue_id === state.activeCueId) || null;
+    if (state.revision?.document?.document_id !== payload.document?.document_id) state.cueSelection.clear();
     state.revision = contract.consumeRevision(payload);
     state.view = contract.buildEditorView(state.revision);
     rebuildViewIndexes();
+    assPanel?.sync();
     const activeCues = state.view.cue_views.filter(cue => cue.state === "active");
     state.activeCueId = reconciledActiveCueId(previousActiveCue, activeCues, state.view.cue_views);
   }
@@ -739,6 +753,7 @@
     const previousActiveCue = preserveCueViewport
       ? state.view?.cue_views.find(cue => cue.cue_id === state.activeCueId) || null
       : null;
+    if (state.revision?.document?.document_id !== payload.document?.document_id) state.cueSelection.clear();
     state.revision = contract.consumeRevision(payload);
     if (!localProjection) {
       const factory = window.EditorDocumentStore;
@@ -763,6 +778,8 @@
       const input = document.getElementById(id);
       if (input) input.value = value;
     });
+    state.cueSelection.reconcile(activeCues.map(cue => cue.cue_id));
+    assPanel?.sync();
     rebuildViewIndexes();
     try {
       render({deferTimeline, preserveCueViewport});
@@ -838,17 +855,21 @@
   function revisionTitle(item) {
     const provenance = item.provenance || {};
     const baseName = currentProjectBaseName();
-    if (provenance.operation === "checkpoint") return `${baseName} · 第${checkpointNumber(item)}稿`;
+    if (provenance.operation === "checkpoint") return `${baseName} · ${provenance.metadata?.label || `第${checkpointNumber(item)}稿`}`;
     if (item.is_latest && item.complete) return `${baseName} · 完成稿`;
     if (item.is_latest) return `${baseName} · 当前编辑`;
-    return `修订 r${item.revision_number}`;
+    const operation = provenance.metadata?.user_action || provenance.operation;
+    const names = {merge:"合并", split_token:"拆分词元", replace:"修改文字", batch_replace:"批量修改文字",
+      set_cue_times:"调整时间", set_cue_time:"调整时间", split_cue:"字幕换行", merge_cues:"合并字幕",
+      set_target:"修改译文", selective_restore:"选择性恢复", delete:"删除", restore_revision:"恢复版本"};
+    return `${names[operation] || operation || "编辑"} · r${item.revision_number}`;
   }
 
   function renderRevisionMenu() {
     const menu = $("#revisionMenu");
     if (!menu) return;
-    const visible = state.revisions.filter(item =>
-      item.is_latest || item.provenance?.operation === "checkpoint"
+    const visible = state.revisions.filter((item, index) =>
+      index < 30 || item.is_latest || item.provenance?.operation === "checkpoint"
     );
     if (!visible.length) {
       menu.innerHTML = '<span class="muted">暂无人工暂存</span>';
@@ -864,8 +885,20 @@
       restore.type = "button";
       restore.dataset.restoreRevision = item.revision_id;
       restore.disabled = item.is_latest;
-      restore.textContent = item.is_latest ? "当前" : "打开";
+      restore.textContent = item.is_latest ? "当前" : "恢复整版";
       row.append(label, restore);
+      if (!item.is_latest) {
+        const scope = document.createElement("select");
+        scope.setAttribute("aria-label", "选择性恢复范围");
+        [["text", "仅文字"], ["timing", "仅时间"], ["translation", "仅译文"], ["style", "仅字幕样式"]].forEach(([value, text]) => {
+          scope.add(new Option(text, value));
+        });
+        const selected = document.createElement("button");
+        selected.type = "button";
+        selected.textContent = "恢复所选字幕";
+        selected.onclick = () => restoreSelectedFields(item.revision_id, scope.value);
+        row.append(scope, selected);
+      }
       fragment.append(row);
     });
     menu.replaceChildren(fragment);
@@ -1068,12 +1101,25 @@
     }
   }
 
+  function setCheckpointNaming(open) {
+    $("#checkpointNaming").hidden = !open;
+    $("#confirmCheckpoint").hidden = !open;
+    $("#saveCheckpoint").textContent = open ? "取消" : "暂存";
+    $("#saveCheckpoint").setAttribute("aria-expanded", String(open));
+    if (open) {
+      $("#checkpointName").value = "";
+      $("#checkpointName").focus();
+    }
+  }
+
   async function createCheckpoint() {
     if (!state.revision) return;
+    await flushActiveEditorInput();
     await loadRevisionHistory();
     const count = state.revisions.filter(item => item.provenance?.operation === "checkpoint").length;
     const checkpointNumber = count + 1;
-    const label = `第${checkpointNumber}稿`;
+    const label = $("#checkpointName").value.trim();
+    if (!label) { $("#checkpointName").focus(); return; }
     try {
       const revision = await api(projectPath("/checkpoints"), {
         method:"POST",
@@ -1087,7 +1133,8 @@
       recordCommittedRevision(state.revision, {
         kind:"manual", operation:"checkpoint", metadata:{label, checkpoint_number:checkpointNumber}
       });
-      $("#draftState").textContent = `已暂存：${currentProjectBaseName()} · 第${checkpointNumber}稿`;
+      $("#draftState").textContent = `已暂存：${currentProjectBaseName()} · ${label}`;
+      setCheckpointNaming(false);
     } catch (error) {
       ordinaryError(`暂存失败：${error.message}`);
     }
@@ -2052,6 +2099,7 @@
       pageStart:state.cuePageStart, preservePage
     });
     if (page) state.cuePageStart = page.start;
+    refreshCueSelection();
     if (state.translationResizeFrame) cancelAnimationFrame(state.translationResizeFrame);
     state.translationResizeFrame = requestAnimationFrame(() => {
       state.translationResizeFrame = 0;
@@ -2332,7 +2380,9 @@
     if (fontValue) fontValue.textContent = String(state.fontSize);
   }
 
+  let cueCenterGeneration = 0;
   function centerCueInList(cue) {
+    const generation = ++cueCenterGeneration;
     if (!cue) return;
     if (!document.querySelector(`.cue-row[data-cue-id="${CSS.escape(cue.cue_id)}"]`)) {
       const index = state.view?.cue_views.findIndex(item => item.cue_id === cue.cue_id) ?? -1;
@@ -2349,13 +2399,26 @@
     // Centering is invoked only on a cue transition or a completed seek.
     const centerOffset = (listRect.height - rowRect.height) / 2;
     list.scrollTop += rowRect.top - listRect.top - centerOffset;
+    // Offscreen rows use content-visibility estimates. Re-measure after layout
+    // reveals their real heights, without overriding a newer seek or user scroll.
+    let expectedScroll = list.scrollTop;
+    const settle = remaining => requestAnimationFrame(() => {
+      if (generation !== cueCenterGeneration || state.activeCueId !== cue.cue_id
+          || Math.abs(list.scrollTop - expectedScroll) > 1 || !row.isConnected) return;
+      const rect = row.getBoundingClientRect(), bounds = list.getBoundingClientRect();
+      list.scrollTop += rect.top - bounds.top - (bounds.height - rect.height) / 2;
+      expectedScroll = list.scrollTop;
+      if (remaining > 1) settle(remaining - 1);
+    });
+    settle(3);
   }
 
   function activateCue(cueId, {
     seek = false,
     scroll = false,
     revealTimeline = false,
-    centerTimeline = false
+    centerTimeline = false,
+    explicitNavigation = false
   } = {}) {
     state.activeCueId = cueId || null;
     const cue = currentCue();
@@ -2372,13 +2435,13 @@
     // Keep the broader guard for in-place edits, where playback-follow scrolling
     // would otherwise pull the row away while the user is typing.
     const searchHasFocus = document.activeElement === $("#toolSearch");
-    if (scroll && cue && (!isEditingText || searchHasFocus)) centerCueInList(cue);
+    if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) centerCueInList(cue);
   }
 
   function selectCue(cueId, seek = false, scroll = false) {
     if (seek) syncPlaybackFollowAfterSeek();
     else suspendPlaybackFollow();
-    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek});
+    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek, explicitNavigation:seek});
   }
 
   function orderedSelectableTokenIds() {
@@ -2399,6 +2462,8 @@
   function selectToken(tokenId, {toggle = false, range = false} = {}) {
     const token = state.indexes?.tokenById?.get(tokenId);
     if (!token) return;
+    state.cueSelection.clear();
+    refreshCueSelection();
     // Deleted display tokens remain selectable so the selection menu can
     // expose the independent “恢复” operation.  They must not enter active
     // token range selection, merge, delete, or AI-calibration actions.
@@ -2445,42 +2510,6 @@
       right:Math.max(startX, endX), bottom:Math.max(startY, endY),
       width:Math.abs(endX - startX), height:Math.abs(endY - startY)
     };
-  }
-
-  function updateTokenMarquee(event) {
-    if (!state.marquee) return;
-    const rect = marqueeRect(state.marquee.x, state.marquee.y, event.clientX, event.clientY);
-    if (rect.width < 4 && rect.height < 4) return;
-    state.marquee.dragged = true;
-    const node = $("#tokenMarquee");
-    node.classList.remove("hidden");
-    Object.assign(node.style, {
-      left:`${rect.left}px`, top:`${rect.top}px`, width:`${rect.width}px`, height:`${rect.height}px`
-    });
-  }
-
-  function finishTokenMarquee(event) {
-    if (!state.marquee) return;
-    const marquee = state.marquee;
-    state.marquee = null;
-    $("#tokenMarquee").classList.add("hidden");
-    if (!marquee.dragged) {
-      if (!marquee.additive) {
-        state.selectedTokenIds.clear();
-        refreshTokenSelectionUi();
-      }
-      return;
-    }
-    const rect = marqueeRect(marquee.x, marquee.y, event.clientX, event.clientY);
-    const selected = [...document.querySelectorAll(".display-token")].filter(node => {
-      const tokenRect = node.getBoundingClientRect();
-      return tokenRect.right >= rect.left && tokenRect.left <= rect.right
-        && tokenRect.bottom >= rect.top && tokenRect.top <= rect.bottom;
-    }).map(node => node.dataset.tokenId);
-    if (!marquee.additive) state.selectedTokenIds.clear();
-    selected.forEach(id => state.selectedTokenIds.add(id));
-    if (selected.length) state.selectionAnchorTokenId = selected.at(-1);
-    refreshTokenSelectionUi();
   }
 
   function askText(title, label, value = "") {
@@ -2563,6 +2592,7 @@
     let wasBusy = false;
     state.operationQueueProjectId = state.projectId;
     state.operationQueue = factory.createOperationQueue({
+      groupByUserAction:true,
       debounceMs:60,
       maxBatchSize:100,
       maxRetries:3,
@@ -2635,6 +2665,7 @@
             operation:"operation_batch",
             metadata:{
               batch_id:batch.batch_id,
+              user_action:batch.operations.length === 1 ? batch.operations[0].type : "batch_edit",
               operation_ids:operationIds
             }
           });
@@ -3339,7 +3370,7 @@
       onSelectCue(cueId) {
         syncPlaybackFollowAfterSeek();
         state.timelineSelectedCueId = cueId || null;
-        if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false});
+        if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false, explicitNavigation:true});
         else activateCue(null);
       },
       onSeek(time) {
@@ -3349,7 +3380,8 @@
         );
         if ((cue?.cue_id || null) !== state.activeCueId) activateCue(cue?.cue_id || null, {
           scroll:true,
-          revealTimeline:false
+          revealTimeline:false,
+          explicitNavigation:true
         });
       },
       onZoom(detail) {
@@ -3396,9 +3428,140 @@
     const positions = state.indexes?.activeTokenPosition || new Map();
     selected.sort((left, right) => positions.get(left.token_id) - positions.get(right.token_id));
     const text = selected.map(token => token.text).join(" ").trim();
-    await sendOperation(contract.mergeOperation(
-      state.revision, selected.map(token => token.token_id), text, manualProvenance("merge")
-    ));
+    await flushActiveEditorInput();
+    const button = [...$("#cueList").querySelectorAll("[data-token-id]")]
+      .find(item => item.dataset.tokenId === selected[0].token_id);
+    const label = button?.querySelector("b");
+    if (!label) return;
+    const hidden = [...$("#cueList").querySelectorAll("[data-token-id]")]
+      .filter(item => selected.slice(1).some(token => token.token_id === item.dataset.tokenId));
+    hidden.forEach(item => { item.hidden = true; });
+    const input = document.createElement("input");
+    input.className = "inline-token-editor";
+    input.value = text;
+    input.size = Math.max(5, [...text].length + 1);
+    label.replaceWith(input);
+    let finished = false;
+    const finish = async commit => {
+      if (finished) return;
+      finished = true;
+      const value = input.value.trim();
+      input.replaceWith(label);
+      hidden.forEach(item => { item.hidden = false; });
+      if (!commit || !value) return;
+      await sendOperation(contract.mergeOperation(
+        state.revision, selected.map(token => token.token_id), value, manualProvenance("merge")
+      ));
+    };
+    input.onkeydown = event => {
+      event.stopPropagation();
+      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+      if (event.key === "Escape") { event.preventDefault(); finish(false); }
+    };
+    input.onclick = event => event.stopPropagation();
+    input.onblur = () => finish(true);
+    input.focus(); input.select();
+  }
+
+  async function restoreSelectedFields(revisionId, scope) {
+    if (editorAiTaskLocksEditor() || state.historyNavigationPending || state.restorePreparationPending) return;
+    const hasSelection = state.selectedTokenIds.size > 0;
+    const ids = state.view.cue_views.filter(cue => cue.state === "active" &&
+      (state.cueSelection.ids.size ? state.cueSelection.ids.has(cue.cue_id) : hasSelection ? cue.display_token_ids.some(id => state.selectedTokenIds.has(id)) : cue.cue_id === state.activeCueId))
+      .map(cue => cue.cue_id);
+    if (!ids.length) { ordinaryError("请先在编辑区选择要恢复的字幕"); return; }
+    const project = state.projectId;
+    state.restorePreparationPending = true;
+    try {
+      await flushActiveEditorInput();
+      state.restoreWriting = true;
+      $("#editorWorkbench").inert = true;
+      const revision = await api(projectPath("/restore-selection"), {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({
+          expected_revision_id:state.revision.revision_id, revision_id:revisionId, cue_ids:ids, scope
+        })});
+      if (project !== state.projectId) return;
+      setRevision(revision); await loadRevisionHistory({force:true});
+      $("#draftState").textContent = "已恢复所选内容，其他编辑已保留";
+    } catch (error) { ordinaryError(`选择性恢复失败：${error.message}`); }
+    finally { state.restoreWriting = false; state.restorePreparationPending = false; $("#editorWorkbench").inert = false; }
+  }
+
+  let tokenSplitMode = false;
+  let tokenSplitCaret = null;
+  function hideTokenSplitCaret() {
+    if (tokenSplitCaret) tokenSplitCaret.hidden = true;
+  }
+
+  function tokenSplitPoint(event) {
+    const button = event.target.closest?.("[data-token-id]");
+    const label = button?.querySelector("b");
+    if (!label || editorAiTaskLocksEditor() || state.restorePreparationPending) return null;
+    const token = state.view?.token_views.find(item => item.token_id === button.dataset.tokenId);
+    if (!token || token.state !== "active") return null;
+    const caret = document.caretPositionFromPoint?.(event.clientX, event.clientY);
+    const range = caret ? null : document.caretRangeFromPoint?.(event.clientX, event.clientY);
+    const node = caret?.offsetNode || range?.startContainer;
+    const offset = caret?.offset ?? range?.startOffset;
+    if (!node || !label.contains(node) || node.nodeType !== Node.TEXT_NODE) return null;
+    const prefix = document.createRange();
+    prefix.selectNodeContents(label); prefix.setEnd(node, offset);
+    const index = [...prefix.toString()].length;
+    const chars = [...token.text];
+    if (index < 1 || index >= chars.length || !chars.slice(0,index).join("").trim()
+        || !chars.slice(index).join("").trim()) return null;
+    const position = document.createRange();
+    position.setStart(node, offset); position.collapse(true);
+    const rect = position.getBoundingClientRect();
+    if (!rect.height) return null;
+    return {token, index, rect, fontSize:parseFloat(getComputedStyle(label).fontSize)};
+  }
+
+  function showTokenSplitCaret(event) {
+    const point = tokenSplitMode ? tokenSplitPoint(event) : null;
+    if (!point) { hideTokenSplitCaret(); return; }
+    if (!tokenSplitCaret) {
+      tokenSplitCaret = document.createElement("span");
+      tokenSplitCaret.className = "token-split-caret";
+      tokenSplitCaret.setAttribute("aria-hidden", "true");
+      document.body.append(tokenSplitCaret);
+    }
+    tokenSplitCaret.style.left = `${point.rect.left}px`;
+    const height = point.fontSize * 1.3;
+    tokenSplitCaret.style.top = `${point.rect.top + (point.rect.height - height) / 2}px`;
+    tokenSplitCaret.style.height = `${height}px`;
+    tokenSplitCaret.hidden = false;
+  }
+
+  function setTokenSplitMode(enabled) {
+    tokenSplitMode = enabled;
+    hideTokenSplitCaret();
+    $("#splitTokens").setAttribute("aria-pressed", String(enabled));
+    $("#cueList").classList.toggle("token-split-mode", enabled);
+    positionSelectionMenus();
+    $("#draftState").textContent = enabled ? "在词元内部右键切分，时间均分；点击其他位置退出" : "已退出词元拆分";
+  }
+
+  async function splitTokenAtPointer(event) {
+    event.preventDefault(); event.stopPropagation();
+    const point = tokenSplitPoint(event);
+    hideTokenSplitCaret();
+    if (!point) { ordinaryError("请在词元内部两个字符之间切分"); return; }
+    const {token, index} = point;
+    const project = state.projectId;
+    state.restorePreparationPending = true;
+    try {
+      await flushActiveEditorInput();
+      state.restoreWriting = true;
+      $("#editorWorkbench").inert = true;
+      const revision = await api(projectPath("/split-token"), {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({
+          expected_revision_id:state.revision.revision_id, token_id:token.token_id, offset:index
+        })});
+      if (project !== state.projectId) return;
+      setRevision(revision); await loadRevisionHistory({force:true});
+    } catch (error) { ordinaryError(`拆分失败：${error.message}`); }
+    finally { state.restoreWriting = false; state.restorePreparationPending = false; $("#editorWorkbench").inert = false; }
   }
 
   async function deleteSelectedTokens() {
@@ -4245,7 +4408,36 @@
     $("#projectMenu").open = false;
     loadProject(button.dataset.projectId);
   });
-  $("#saveCheckpoint").onclick = createCheckpoint;
+  $("#saveCheckpoint").onclick = async () => {
+    if (!$("#checkpointNaming").hidden) { setCheckpointNaming(false); return; }
+    await flushActiveEditorInput();
+    setCheckpointNaming(true);
+  };
+  $("#versionMenu").addEventListener("toggle", () => {
+    if ($("#versionMenu").open) loadRevisionHistory({force:true});
+  });
+  $("#revisionMenu").addEventListener("click", event => {
+    const button = event.target.closest("[data-restore-revision]");
+    if (!button || button.disabled || editorAiTaskLocksEditor()) return;
+    $("#versionMenu").open = false;
+    restoreRevision(button.dataset.restoreRevision);
+  });
+  $("#confirmCheckpoint").onclick = createCheckpoint;
+  $("#checkpointName").onkeydown = event => {
+    event.stopPropagation();
+    if (event.key === "Enter") { event.preventDefault(); createCheckpoint(); }
+    if (event.key === "Escape") setCheckpointNaming(false);
+  };
+  $("#splitTokens").onclick = () => setTokenSplitMode(!tokenSplitMode);
+  $("#cueList").addEventListener("pointermove", showTokenSplitCaret);
+  $("#cueList").addEventListener("pointerleave", hideTokenSplitCaret);
+  document.addEventListener("scroll", hideTokenSplitCaret, true);
+  window.addEventListener("resize", hideTokenSplitCaret);
+
+  document.addEventListener("pointerdown", event => {
+    if (tokenSplitMode && !event.target.closest("#splitTokens") &&
+        !(event.button === 2 && event.target.closest("#cueList [data-token-id]"))) setTokenSplitMode(false);
+  }, true);
   $("#taskInfoMenu").addEventListener("toggle", () => {
     if ($("#taskInfoMenu").open) openTaskInfoMenu();
   });
@@ -4769,12 +4961,12 @@
     }
     const cue = event.target.closest("[data-cue-select]");
     if (cue) {
-      selectCue(cue.dataset.cueSelect, true);
+      selectCueGroup(cue.dataset.cueSelect, event);
       return;
     }
     const row = event.target.closest(".cue-row");
     const interactive = event.target.closest("button, textarea, input, select, a, [contenteditable='true']");
-    if (row && !interactive) selectCue(row.dataset.cueId, true);
+    if (row && !interactive) selectCueGroup(row.dataset.cueId, event);
   });
   $("#cueList").addEventListener("dblclick", event => {
     const connector = event.target.closest("[data-token-connector]");
@@ -4796,6 +4988,7 @@
     beginInlineTokenEdit(token);
   });
   $("#cueList").addEventListener("contextmenu", event => {
+    if (tokenSplitMode) { splitTokenAtPointer(event); return; }
     const boundary = event.target.closest("[data-boundary-control]");
     if (!boundary || boundary.disabled) return;
     event.preventDefault();
@@ -4861,15 +5054,121 @@
       target.blur();
     }
   });
+  let cueDrag = null, suppressCueClick = false;
+  function cueOrder() { return (state.view?.cue_views || []).filter(c => c.state === "active").map(c => c.cue_id); }
+  function refreshCueSelection() {
+    const ids=state.cueSelection.ids;
+    $("#cueList").querySelectorAll(".cue-row[data-cue-id]").forEach(row => {
+      row.classList.toggle("cue-selected", ids.has(row.dataset.cueId));
+      row.setAttribute("aria-selected", String(ids.has(row.dataset.cueId)));
+    });
+    assPanel?.selectionChanged();
+  }
+  function selectCueGroup(id, event) {
+    if (suppressCueClick) { suppressCueClick=false; return; }
+    state.selectedTokenIds.clear();
+    state.selectionAnchorTokenId=null;
+    refreshTokenSelectionUi();
+    state.cueSelection.select(id, cueOrder(), {range:event.shiftKey,toggle:event.ctrlKey || event.metaKey});
+    refreshCueSelection();
+    selectCue(id, !event.shiftKey && !event.ctrlKey && !event.metaKey);
+  }
+  // A gesture keeps the target chosen on pointerdown, even when crossing other regions.
+  document.body.append($("#tokenMarquee"));
+  function stepCueDrag(schedule = true, scroll = true) {
+    if (!cueDrag) return;
+    const list=$("#cueList"), bounds=list.getBoundingClientRect();
+    if (cueDrag.moved) {
+      const delta=cueDrag.y<bounds.top+32 ? -12 : cueDrag.y>bounds.bottom-32 ? 12 : 0;
+      if (scroll && delta) list.scrollTop+=delta;
+      const offset=list.scrollTop-cueDrag.startScroll;
+      const box=marqueeRect(cueDrag.startX,cueDrag.startY-offset,cueDrag.x,cueDrag.y);
+      const marquee=$("#tokenMarquee");
+      marquee.classList.remove('hidden');marquee.dataset.mode=cueDrag.mode;
+      const left=Math.max(bounds.left,box.left), top=Math.max(bounds.top,box.top);
+      Object.assign(marquee.style,{left:`${left}px`,top:`${top}px`,
+        width:`${Math.max(2,Math.min(bounds.right,box.right)-left)}px`,
+        height:`${Math.max(2,Math.min(bounds.bottom,box.bottom)-top)}px`});
+      if (cueDrag.mode==='tokens') {
+        state.cueSelection.clear();refreshCueSelection();
+        // Content coordinates remain stable while scrolling and retain rows leaving the DOM window.
+        list.querySelectorAll('.cue-row:not(.deleted) .display-token').forEach(node => {
+          const rect=node.getBoundingClientRect();
+          cueDrag.tokenBoxes.set(node.dataset.tokenId,{left:rect.left,right:rect.right,
+            top:rect.top+list.scrollTop,bottom:rect.bottom+list.scrollTop});
+        });
+        const contentRect=marqueeRect(cueDrag.startX,cueDrag.startY+cueDrag.startScroll,
+          cueDrag.x,cueDrag.y+list.scrollTop);
+        const ids=window.EditorCueSelection.intersectingTokens(cueDrag.tokenBoxes,contentRect);
+        state.selectedTokenIds=new Set([...cueDrag.originalTokens,...ids]);
+        if (ids.length) state.selectionAnchorTokenId=ids.at(-1);
+        list.querySelectorAll('.display-token').forEach(node =>
+          node.classList.toggle('selected',state.selectedTokenIds.has(node.dataset.tokenId)));
+      } else {
+        state.selectedTokenIds.clear();state.selectionAnchorTokenId=null;
+        list.querySelectorAll('.display-token.selected').forEach(node=>node.classList.remove('selected'));
+        const rows=[...list.querySelectorAll('.cue-row:not(.deleted)')];
+        const row=rows.find(r => r.getBoundingClientRect().bottom>=Math.max(bounds.top,Math.min(bounds.bottom-1,cueDrag.y))) || rows.at(-1);
+        if (row) state.cueSelection.drag(cueDrag.first,row.dataset.cueId,cueOrder(),cueDrag.original);
+        refreshCueSelection();
+      }
+      $("#tokenSelectionMenu").classList.add('hidden');
+    }
+    if (schedule) cueDrag.frame=requestAnimationFrame(() => stepCueDrag());
+  }
   $("#cueList").addEventListener("pointerdown", event => {
-    if (event.button !== 0 || event.target.closest("button,input,textarea,.token-selection-menu")) return;
-    state.followPlayback = false;
-    state.marquee = {
-      x:event.clientX, y:event.clientY, dragged:false,
-      additive:event.ctrlKey || event.metaKey
-    };
+    if (event.button!==0) return;
+    cueCenterGeneration++;
+    const mode=window.EditorCueSelection.dragMode(event.target);
+    if (!mode || event.target.closest('.cue-row.deleted')) return;
+    const row=event.target.closest('.cue-row:not(.deleted)') ||
+      [...event.currentTarget.querySelectorAll('.cue-row:not(.deleted)')].find(node => node.getBoundingClientRect().bottom>=event.clientY);
+    if (!row) return;
+    suppressCueClick=false;
+    const additive=event.ctrlKey || event.metaKey;
+    cueDrag={mode,id:event.pointerId,first:row.dataset.cueId,startX:event.clientX,x:event.clientX,
+      startY:event.clientY,y:event.clientY,startScroll:event.currentTarget.scrollTop,moved:false,tokenBoxes:new Map(),
+      original:additive ? [...state.cueSelection.ids] : [],originalTokens:additive ? [...state.selectedTokenIds] : []};
+    // A pending drag must not cancel focus/blur or ordinary clicks.
+    stepCueDrag();
   });
+  window.addEventListener('pointermove',event => {
+    if (!cueDrag || cueDrag.id!==event.pointerId) return;
+    cueDrag.x=event.clientX;cueDrag.y=event.clientY;
+    if (Math.hypot(event.clientX-cueDrag.startX,event.clientY-cueDrag.startY)>4) {
+      if (!cueDrag.moved) suspendPlaybackFollow();
+      cueDrag.moved=true;
+      const list=$("#cueList");
+      if (!list.hasPointerCapture(event.pointerId)) list.setPointerCapture(event.pointerId);
+      stepCueDrag(false,false);
+      event.preventDefault();
+    }
+  });
+  function endCueDrag(event) {
+    if (!cueDrag || event.pointerId!==cueDrag.id) return;
+    if (event.type==='pointerup') {
+      cueDrag.x=event.clientX;cueDrag.y=event.clientY;
+      if (Math.hypot(event.clientX-cueDrag.startX,event.clientY-cueDrag.startY)>4) {
+        if (!cueDrag.moved) suspendPlaybackFollow();
+        cueDrag.moved=true;
+      }
+      stepCueDrag(false,false);
+    }
+    cancelAnimationFrame(cueDrag.frame);
+    suppressCueClick=cueDrag.moved;cueDrag=null;
+    $("#tokenMarquee").classList.add('hidden');
+    if ($("#cueList").hasPointerCapture(event.pointerId)) $("#cueList").releasePointerCapture(event.pointerId);
+    if (suppressCueClick) refreshTokenSelectionUi();
+    setTimeout(() => { suppressCueClick=false; },0);
+  }
+  $("#cueList").addEventListener('click',event => {
+    if (!suppressCueClick) return;
+    event.preventDefault();event.stopImmediatePropagation();suppressCueClick=false;
+  },true);
+  window.addEventListener('pointerup',endCueDrag);
+  window.addEventListener('pointercancel',endCueDrag);
   $("#cueList").addEventListener("wheel", event => {
+    cueCenterGeneration++;
     if (event.ctrlKey || event.metaKey || event.shiftKey || !event.deltaY) return;
     const list = event.currentTarget;
     const lineHeight = parseFloat(getComputedStyle(list).lineHeight) || 16;
@@ -4883,13 +5182,12 @@
   }, {passive:true});
   new MutationObserver(() => {
     positionEditorTutorial();
+    refreshCueSelection();
   }).observe($("#cueList"), {
     childList:true, subtree:true
   });
-  window.addEventListener("pointermove", updateTokenMarquee);
-  window.addEventListener("pointerup", finishTokenMarquee);
   document.addEventListener("pointerdown", event => {
-    if (event.target.closest(".display-token,.token-selection-menu,.reference-selection-menu")) return;
+    if (event.target.closest(".display-token,.token-selection-menu,.reference-selection-menu,#revisionMenu,#versionMenu")) return;
     if (event.target.closest("#cueList")) return;
     if (!state.selectedTokenIds.size) return;
     state.selectedTokenIds.clear();
@@ -4938,6 +5236,55 @@
   window.addEventListener("online", () => {
     if (state.mediaLoadFailed) scheduleMediaRetry();
   });
+  let assPanelPosition = null;
+  let assPanelDrag = null;
+  function positionAssPanel(x, y) {
+    const panel = $("#assForm");
+    const rect = panel.getBoundingClientRect();
+    const left = Math.max(12, Math.min(x, window.innerWidth - rect.width - 12));
+    const top = Math.max(12, Math.min(y, window.innerHeight - rect.height - 12));
+    panel.style.left = `${left}px`; panel.style.top = `${top}px`;
+    assPanelPosition = {x:left, y:top};
+  }
+  function openAssPanelPosition() {
+    const anchor = $("#assMenu summary").getBoundingClientRect();
+    const rect = $("#assForm").getBoundingClientRect();
+    positionAssPanel(assPanelPosition?.x ?? anchor.right - rect.width,
+      assPanelPosition?.y ?? anchor.bottom + 6);
+  }
+  $("#assPanelHandle").addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    const rect = $("#assForm").getBoundingClientRect();
+    assPanelDrag = {id:event.pointerId, x:event.clientX-rect.left, y:event.clientY-rect.top};
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.currentTarget.classList.add("dragging");
+    event.preventDefault();
+  });
+  $("#assPanelHandle").addEventListener("pointermove", event => {
+    if (assPanelDrag?.id !== event.pointerId) return;
+    positionAssPanel(event.clientX-assPanelDrag.x, event.clientY-assPanelDrag.y);
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(name => {
+    $("#assPanelHandle").addEventListener(name, event => {
+      if (assPanelDrag?.id !== event.pointerId) return;
+      assPanelDrag = null; event.currentTarget.classList.remove("dragging");
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    });
+  });
+  $("#assClose").onclick = () => {
+    $("#assMenu").open = false;
+    $("#assMenu summary").focus();
+  };
+  $("#assForm").addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); $("#assClose").click(); }
+  });
+  window.addEventListener("resize", () => { if ($("#assMenu").open) openAssPanelPosition(); });
+
+  const assPanel = window.EditorAssPanel.create({state, api, projectPath, activeMedia, systemSaveAs,
+    flush:flushActiveEditorInput, setRevision, loadRevisionHistory,
+    askText, onError:ordinaryError});
+  $("#assMenu").addEventListener("toggle", () => { if ($("#assMenu").open) openAssPanelPosition(); });
+
   $("#mediaSpeed").addEventListener("input", event => {
     const speed = Math.max(0.25, Math.min(3, Number(event.currentTarget.value) || 1));
     if (activeMedia()) activeMedia().playbackRate = speed;
@@ -4951,15 +5298,26 @@
       item.state === "active" && time >= Number(item.start) && time < Number(item.end)
     );
     syncPlaybackFollowAfterSeek();
-    if ((cue?.cue_id || null) !== state.activeCueId) {
-      activateCue(cue?.cue_id || null, {scroll:true, revealTimeline:true});
-    }
+    activateCue(cue?.cue_id || null, {scroll:true, revealTimeline:true, explicitNavigation:true});
     state.timelineController?.revealTime(time, false);
+    syncMediaControls();
+  });
+  $("#mediaVolume").addEventListener("input", event => {
+    const media = activeMedia();
+    if (!media) return;
+    const volume = Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0)) / 100;
+    if (volume > 0) lastAudibleVolume = volume;
+    media.volume = volume;
+    media.muted = volume === 0;
     syncMediaControls();
   });
   $("#mediaMute").onclick = () => {
     const media = activeMedia();
-    if (media) media.muted = !media.muted;
+    if (!media) return;
+    if (media.muted || media.volume === 0) {
+      if (media.volume === 0) media.volume = lastAudibleVolume;
+      media.muted = false;
+    } else { media.muted = true; }
     syncMediaControls();
   };
   $("#mediaFullscreen").onclick = () => {

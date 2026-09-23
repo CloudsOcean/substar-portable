@@ -626,7 +626,7 @@ class ProjectStore:
             # Completion describes the latest accepted document, not the
             # project forever. Any later document revision invalidates that
             # acceptance unless this revision is explicitly setting it.
-            if document.complete and provenance.operation != "set_complete_attribute":
+            if document.complete and provenance.operation not in {"set_complete_attribute", "checkpoint"}:
                 document = replace(
                     document,
                     properties=replace(document.properties, complete=False),

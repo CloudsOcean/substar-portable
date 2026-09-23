@@ -25,6 +25,9 @@ Fixed-row projection example: `1|The report says` plus `2|鍖椾含浠婂ぉ鍙�
 
 ## Safety policy
 
+- For Latin-script spans, never treat a subtitle row, language switch, or processing-block boundary as a sentence start. Use surrounding read-only CONTEXT and the actual punctuation returned to determine casing.
+- Correct erroneous capitals in ordinary words as well as missing sentence-initial capitals. Preserve authoritative acronyms and internal brand/name casing such as NASA, iPhone, OpenAI and McDonald; never title-case whole rows. Resolve ambiguous May/may and US/us by meaning, keeping the input when evidence is insufficient.
+
 - Preserve meaning, word order, language switches, row boundaries, timing, ownership, speaker identity and translation.
 - Spaces in an input row are token-alignment separators, not a request to change the active script's typography. Preserve them exactly unless adjacent fragments must be joined into one certain conventional written form.
 - Make the smallest defensible correction. Do not translate, transliterate, paraphrase, summarize, delete emphasis, or normalize one language into another.

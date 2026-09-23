@@ -1098,6 +1098,13 @@ def import_subtitle_project(source: BinaryIO, *, projects_root: Path) -> str:
         input_dir = temporary / "input"
         media = next((path for path in input_dir.iterdir() if path.is_file()), None) if input_dir.is_dir() else None
         filename = media.name if media else f"{project_id}.srt"
+        atomic_write_json(temporary / "project_creation.json", {
+            "schema_version": "substar.project-creation.v2",
+            "input_mode": "subtitle_project_import",
+            "source_file": filename,
+            "settings_overrides": {},
+            "created_at": datetime.now().timestamp(),
+        })
         atomic_write_json(temporary / "creation_state.json", {
             "id": project_id,
             "filename": filename,

@@ -30,6 +30,7 @@
     refreshing: false,
     jobs: [],
     removedProjectIds: new Set(),
+    removedTaskIds: new Set(),
     toastTimer: 0,
     runtimeEvents: new Map(),
     runtimeSnapshots: new Map(),
@@ -1420,6 +1421,7 @@
         toast("已请求取消任务");
       } else {
         await api(`/api/tasks/${encodeURIComponent(taskId)}`, {method:"DELETE"});
+        state.removedTaskIds.add(taskId);
         item.classList.add("removing");
         window.setTimeout(() => item.remove(), 180);
         toast("任务卡已删除，项目成果已保留");
@@ -1550,7 +1552,10 @@
   let projectCatalog = {projects:[]};
   let projectCatalogUpdatedAt = 0;
   async function refreshJobs(refreshCatalog = true) {
-    if (state.refreshing) return;
+    if (state.refreshing) {
+      if (refreshCatalog) state.refreshCatalogPending = true;
+      return;
+    }
     state.refreshing = true;
     try {
       const [jobs, editorTasks, projects] = await Promise.all([
@@ -1600,7 +1605,9 @@
           complete:project.complete === true,
           project_only:true,
         }));
-      const taskJobs = (editorTasks.tasks || []).map((task) => ({
+      const taskJobs = (editorTasks.tasks || [])
+        .filter(task => !state.removedTaskIds.has(task.task_id) && !state.removedProjectIds.has(task.project_id))
+        .map((task) => ({
         id:`editor:${task.project_id}:${task.task_id}`,
         runtime_task_id:task.task_id,
         project_id:task.project_id,
@@ -1632,6 +1639,10 @@
       if (!state.jobs.length) $("#recentJobs").innerHTML = `<p class="recent-empty">${errorMessage(error)}</p>`;
     } finally {
       state.refreshing = false;
+      if (state.refreshCatalogPending) {
+        state.refreshCatalogPending = false;
+        refreshJobs(true);
+      }
     }
   }
 

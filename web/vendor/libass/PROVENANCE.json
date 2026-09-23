@@ -1,0 +1,19 @@
+{
+  "package": "libass-wasm",
+  "version": "4.1.0",
+  "source": "https://github.com/libass/JavascriptSubtitlesOctopus",
+  "dist": {
+    "shasum": "21a6b63ff8fe259dd59f16dc15d188a45e4890e9",
+    "tarball": "https://registry.npmjs.org/libass-wasm/-/libass-wasm-4.1.0.tgz",
+    "fileCount": 8,
+    "integrity": "sha512-+RbYT/uuI6VHExCmGyUuMg3A2gQOaCRTzSn8GGDSf3q4cEoUNiINd9u4RGfZXA1UKafW+Hv8bmcKIX4FKbSh0Q==",
+    "signatures": [
+      {
+        "sig": "MEQCIAxA6od66Gibkw4XyX6aGS7VS8aT9Vzr4Y6T96GDmC3uAiBnIjlbWhzTxoJxiBhBC+moD9gwN294g9wQFIoQ9IgtFw==",
+        "keyid": "SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA"
+      }
+    ],
+    "unpackedSize": 7689103,
+    "npm-signature": "-----BEGIN PGP SIGNATURE-----\r\nVersion: OpenPGP.js v4.10.10\r\nComment: https://openpgpjs.org\r\n\r\nwsFzBAEBCAAGBQJji/qqACEJED1NWxICdlZqFiEECWMYAoorWMhJKdjhPU1b\r\nEgJ2VmqKdg/+LdaI/ja44pmhHaM2/BtdW6aCaVP7aAE4eGBc/G2OHvcyhrkw\r\nLHr3U94M6KDpANtt7ynXT9Ehqq4Ev6DfZokf5wTr9oP/TW6kZT9dO4xfaJ8m\r\ngmBE5VxGbW3SQxQMK3+1iauA/Hiovo8yRT53of14MOhjBCaSEj0az6HOq60A\r\nUj4/BFWtKlvLF24tPbTXFLxghA0sdJ79mRFu3FKxcieS9C1zaDo9j8pdO3sx\r\n+LA4vP9Cx/q9V3zNlP+EC4qCRVsZ9Bpt3eu2kFESmPB/gxQBfRFjI8rN+zDF\r\nOre29/7O42xFPe0TjBlSoLOg/HbywklmUxbI2bafFQjn053KoI+17J+P6dMv\r\nlmluoJj3BzRcB3c4L6nRdXvNxF5amC5wjjJyp/3xkcRrLRU7+nvgdPCEoUCn\r\nDaABfe9ibWifHwNawv9dYxYcS/y4ftoAvy2w3S9A7rQMXTsdGMiP0ksu1piz\r\nUOzls4G9ePC5436QCC9u0IHSyZKnyBYzq+A+lOuCrDXIx5y7/5gOLvxBue4Z\r\nslCAnaUomuRSaHhTkwqVdlY5vI/ogetsVMjjAczwqt0GTQ0TqOMVk8h2qCB9\r\nL3mXWKwl1yru9GD6888Iz7TDT9cUvRBHh+SOvRnHxqzuwIkrqEKWCUZt9q09\r\njBiEp0yt8OZRF2VT8Dx3NeDFb2Js3T7bH4k=\r\n=JGwr\r\n-----END PGP SIGNATURE-----\r\n"
+  }
+}

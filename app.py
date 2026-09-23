@@ -12,6 +12,7 @@ import time
 import uuid
 import webbrowser
 import wave
+import requests
 from array import array
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -207,6 +208,8 @@ app.include_router(editor_api_router)
 from substar_core.editor.subtitle_api import router as subtitle_api_router
 app.include_router(subtitle_api_router)
 app.include_router(task_runtime_router)
+from substar_core.ass_api import router as ass_router
+app.include_router(ass_router)
 
 
 def _claim_backend_instance() -> None:
@@ -738,9 +741,15 @@ BATCH_SUBMISSION_LOCK = threading.Lock()
 def _has_durable_job_identity(job_dir: Path) -> bool:
     """Reject orphan state files left after a project directory was removed."""
 
-    return (job_dir / "project_creation.json").is_file() or (
-        job_dir / "tutorial_project.json"
-    ).is_file()
+    if (job_dir / "project_creation.json").is_file() or (job_dir / "tutorial_project.json").is_file():
+        return True
+    # Older portable imports have a real document but no creation recipe.
+    if not (job_dir / "project" / "manifest.json").is_file():
+        return False
+    try:
+        return ProjectStore(job_dir / "project").load_summary() is not None
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _prune_missing_jobs() -> None:
@@ -980,6 +989,8 @@ def _refresh_canonical_job_projection(job: Job) -> None:
         else None
     )
     with JOBS_LOCK:
+        if not _has_durable_job_identity(job.job_dir):
+            return
         changed = any(
             getattr(job, field) != projection[field]
             for field in ("status", "progress", "message", "error")
@@ -1549,14 +1560,14 @@ def delete_workbench_split_job(job_id: str) -> dict[str, Any]:
         if job.status not in {"completed", "awaiting_edit", "failed", "interrupted", "cancelled"}:
             raise HTTPException(status_code=409, detail="当前任务状态不能删除")
         job_dir = job.job_dir.resolve()
+        root = _relay_output_root().resolve()
+        if root not in job_dir.parents or not job_dir.is_dir():
+            raise HTTPException(status_code=404, detail="切分任务目录不存在")
+        trash_root = root / ".trash"
+        trash_root.mkdir(parents=True, exist_ok=True)
+        destination = trash_root / f"{job_id}_{time.time_ns()}"
+        shutil.move(str(job_dir), str(destination))
         JOBS.pop(job_id, None)
-    root = _relay_output_root().resolve()
-    if root not in job_dir.parents or not job_dir.is_dir():
-        raise HTTPException(status_code=404, detail="切分任务目录不存在")
-    trash_root = root / ".trash"
-    trash_root.mkdir(parents=True, exist_ok=True)
-    destination = trash_root / f"{job_id}_{int(time.time())}"
-    shutil.move(str(job_dir), str(destination))
     return {"deleted": job_id, "recoverable_to": str(destination)}
 
 
@@ -2677,6 +2688,56 @@ def request_runtime_shutdown(request: Request) -> dict[str, Any]:
     }
 
 
+@app.get("/api/updates/status")
+def get_update_status():
+    from substar_core.updater import update_status
+    result = update_status()
+    result.pop("staged", None)
+    return result
+
+
+@app.get("/api/updates/check")
+def check_app_update():
+    from substar_core.updater import check_update
+    try:
+        result = check_update()
+        result.pop("asset",None)
+        return result
+    except (ValueError, OSError, requests.RequestException) as exc:
+        raise HTTPException(502, detail=f"检查更新失败：{exc}") from exc
+
+
+@app.post("/api/updates/download", status_code=202)
+def download_app_update(request: Request):
+    if request.headers.get("x-substar-instance-id") != APP_INSTANCE_ID:
+        raise HTTPException(403,detail="runtime instance identity mismatch")
+    from substar_core.updater import download_update
+    result = download_update()
+    result.pop("staged",None)
+    return result
+
+
+@app.post("/api/updates/install", status_code=202)
+def install_app_update(request: Request):
+    if request.headers.get("x-substar-instance-id") != APP_INSTANCE_ID:
+        raise HTTPException(403,detail="runtime instance identity mismatch")
+    if _UVICORN_SERVER is None:
+        raise HTTPException(503,detail="当前启动方式不能自动重启")
+    from substar_core.ass_api import busy as ass_busy
+    from substar_core.updater import prepare_install
+    scheduler = getattr(app.state,"task_scheduler",None)
+    if ass_busy() or _task_service().list_tasks(states=("queued", "running", "cancelling"), limit=1) or (scheduler and scheduler.snapshot().get("active")):
+        raise HTTPException(409,detail="请等待识别、翻译或字幕渲染任务完成后更新")
+    try:
+        if scheduler:
+            scheduler.shutdown(grace_seconds=5)
+        prepare_install(startup_port())
+    except (ValueError,OSError) as exc:
+        if scheduler: scheduler.start()
+        raise HTTPException(409,detail=str(exc)) from exc
+    return request_runtime_shutdown(request)
+
+
 @app.post("/api/project-creations/{job_id}/retry")
 def retry_workbench_split_job(job_id: str) -> JSONResponse:
     _restore_persisted_jobs(job_id)
@@ -3032,7 +3093,8 @@ def _restore_persisted_jobs(wanted_id: str = "") -> None:
     if restored:
         with JOBS_LOCK:
             for job in restored:
-                JOBS.setdefault(job.id, job)
+                if _has_durable_job_identity(job.job_dir):
+                    JOBS.setdefault(job.id, job)
 
 
 @app.get("/api/project-creations")

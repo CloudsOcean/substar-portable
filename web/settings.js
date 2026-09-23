@@ -544,7 +544,7 @@ function setHeader(text, state = "") {
 
 function switchPanel(name) {
   if (name === "environment") name = "api";
-  if (["shortcuts", "advanced"].includes(name)) name = "general";
+  if (["shortcuts", "advanced", "updates"].includes(name)) name = "general";
   $$(".category").forEach((button) =>
     button.classList.toggle("active", button.dataset.panel === name),
   );

@@ -60,7 +60,14 @@
 
     async function flush() {
       if (destroyed || inFlight || failed.length || !pending.length) return null;
-      const entries = pending.splice(0, maxBatchSize);
+      let count = maxBatchSize;
+      if (options.groupByUserAction && pending.length) {
+        const action = entry => entry.operation.payload?.provenance?.metadata?.user_action_id || entry.operation.operation_id;
+        const first = action(pending[0]);
+        count = 1;
+        while (count < pending.length && count < maxBatchSize && action(pending[count]) === first) count++;
+      }
+      const entries = pending.splice(0, count);
       const batch = {
         schema_version:"substar.editor-operation-batch.v1",
         batch_id:`batch_${Date.now().toString(36)}_${(++sequence).toString(36)}`,

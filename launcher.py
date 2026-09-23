@@ -845,4 +845,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+    if "--smoke-import" not in sys.argv:
+        from substar_core.updater import launch_pending_update
+        launch_pending_update()
+    raise SystemExit(exit_code)

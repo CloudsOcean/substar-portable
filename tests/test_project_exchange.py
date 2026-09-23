@@ -241,6 +241,25 @@ def test_subtitle_project_round_trip_registers_one_new_project(tmp_path: Path) -
     task_info = json.loads((imported / "task_info.json").read_text(encoding="utf-8"))
     assert task_info["source_hard_limit"] == 44
     assert task_info["display_name"] == "Clip task"
+    assert json.loads((imported / "project_creation.json").read_text(encoding="utf-8"))["input_mode"] == "subtitle_project_import"
+    import app
+    from unittest.mock import patch
+    # Both UI import entries share this importer. Registration must survive restart.
+    with patch.object(app, "_relay_output_root", return_value=destination), patch.object(app, "JOBS", {}):
+        app._restore_persisted_jobs(imported_id)
+        assert app.JOBS[imported_id].status == "awaiting_edit"
+        # Previously imported packages did not carry a creation recipe.
+        (imported / "project_creation.json").unlink()
+        app.JOBS.clear()
+        app._restore_persisted_jobs(imported_id)
+        assert imported_id in app.JOBS
+        result = app.delete_workbench_split_job(imported_id)
+        assert result["deleted"] == imported_id
+        app._restore_persisted_jobs()
+        assert imported_id not in app.JOBS
+        assert not imported.exists()
+
+
 
 
 def test_subtitle_project_rejects_path_traversal(tmp_path: Path) -> None:

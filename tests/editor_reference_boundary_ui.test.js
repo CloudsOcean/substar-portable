@@ -61,7 +61,7 @@ test("editor chrome exposes the bounded project list and concise usage guide", (
   assert.match(editorHtml, /右键字词间隙或辅助点：切分/);
   assert.doesNotMatch(editorHtml, /id="documentSummary"/);
   assert.doesNotMatch(editorHtml, /id="refreshDocument"/);
-  assert.match(editorHtml, /撤销<\/button><button[^>]+>恢复<\/button><button[^>]+>暂存<\/button><button[^>]+>重置<\/button><button[^>]+>刷新<\/button>/);
+  assert.match(editorHtml, /id="checkpointControls"><span id="checkpointNaming" hidden>.*?id="checkpointName".*?<\/span><button id="saveCheckpoint"[^>]+>暂存<\/button><button id="confirmCheckpoint"[^>]+hidden>确定<\/button>/);
 });
 
 test("regional Chinese conversion choices remain explicit", () => {

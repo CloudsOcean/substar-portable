@@ -14,7 +14,19 @@ The ASR-derived source may lack all grammatical punctuation and authoritative ca
 
 Example of projection across fixed rows: `1|The talks are over` plus `2|according to officials` is one sentence, so return `1|The talks are over` and `2|according to officials.` The alias is only a binding address and must not appear inside the corrected text.
 
-## Check every row for
+## Casing decisions across subtitle rows
+
+- A subtitle row, OWN/CONTEXT boundary, or processing-block boundary is not a sentence boundary. Never title-case rows or capitalize every row's first word.
+- Infer complete sentences from the surrounding discourse before assigning case. A sentence continued in the next row normally starts there with lowercase, unless the word is independently a proper noun, acronym, or the pronoun I.
+- Correct both missing capitals and erroneous capitals in ordinary sentence-internal words. Do not lowercase proper names, acronyms, or deliberately cased product names to achieve this.
+- Preserve established internal casing such as iPhone, OpenAI, eBay and McDonald. Do not apply a generic capitalize/title-case transformation to a whole token.
+- Resolve ambiguous forms (US/us, May/may, Apple/apple) from meaning and authoritative terminology, not spelling alone. Keep the existing case when evidence is insufficient.
+- At a chunk edge, use read-only CONTEXT to establish whether the OWN text continues a sentence. Missing context is not evidence for a new sentence.
+- Final consistency pass: check sentence-initial case against the punctuation you actually returned, including intervening quotes and brackets. Do not independently invent a different sentence structure for casing.
+
+Examples (row breaks remain unchanged): `1|the talks are over` + `2|according to officials` → `1|The talks are over` + `2|according to officials.`; `1|we use OpenAI` + `2|to help us work` → `1|We use OpenAI` + `2|to help us work.`
+
+## Other checks
 
 - sentence-initial and ordinary casing;
 - people, places, organizations, brands, products, titles and acronyms;

@@ -7,7 +7,7 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260918-cue-scroll-2">
+  <link rel="stylesheet" href="/assets/editor.css?v=20260923-clear-player-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
@@ -19,6 +19,7 @@
       <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importExternalCalibration" type="button">外部校准结果</button><button id="importSrtTranslation" type="button">外部翻译结果</button><button id="importProjectPackage" type="button">字幕工程</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
       <input id="externalCalibrationInput" type="file" accept=".json,application/json" hidden>
       <input id="importSrtInput" type="file" accept=".srt,application/x-subrip" hidden>
+      <details id="versionMenu" class="editor-command-menu"><summary>版本</summary><div id="revisionMenu" class="editor-command-popover revision-popover"></div></details>
       <details id="taskInfoMenu" class="editor-command-menu task-info-menu disabled">
         <summary id="taskInfo" aria-disabled="true">任务信息</summary>
         <form id="taskInfoForm" class="editor-command-popover task-info-popover" aria-labelledby="taskInfoTitle">
@@ -163,6 +164,7 @@
         <button id="mergeTokens" type="button" disabled>合并</button>
         <button id="deleteTokens" type="button" disabled>删除</button>
         <button id="restoreTokens" type="button" disabled>恢复</button>
+        <button id="splitTokens" type="button" aria-pressed="false" title="右键切分词元，均分时间；点击其他位置退出">拆分</button>
       </div>
       <div id="referenceSelectionMenu" class="selection-float-menu reference-selection-menu hidden" role="dialog" aria-label="参考文稿差异">
         <div class="reference-selection-heading"><strong id="referenceSelectionType">参考文稿</strong><span id="referenceSelectionStatus"></span></div>
@@ -188,12 +190,41 @@
           </span>
           <button id="dismissOrdinaryError" class="task-dismiss" type="button" title="关闭提示" aria-label="关闭提示">×</button>
         </div>
-        <div class="cue-history-row"><span id="draftState">当前修改自动写入版本链</span><button id="undoDocument" type="button" disabled>撤销</button><button id="redoDocument" type="button" disabled>恢复</button><button id="saveCheckpoint" type="button" disabled>暂存</button><button id="resetDocument" type="button" disabled>重置</button><button id="refreshDocumentBottom" type="button">刷新</button></div>
+        <div class="cue-history-row"><span id="draftState">当前修改自动写入版本链</span><button id="undoDocument" type="button" disabled>撤销</button><button id="redoDocument" type="button" disabled>恢复</button><span id="checkpointControls"><span id="checkpointNaming" hidden><input id="checkpointName" maxlength="120" placeholder="版本名称" aria-label="暂存版本名称"></span><button id="saveCheckpoint" type="button" disabled aria-expanded="false" aria-controls="checkpointNaming">暂存</button><button id="confirmCheckpoint" type="button" hidden>确定</button></span><button id="resetDocument" type="button" disabled>重置</button><button id="refreshDocumentBottom" type="button">刷新</button></div>
       </div>
     </section>
 
     <aside class="editor-preview-pane">
-      <div class="preview-heading"><span id="mediaPreviewLabel">视频预览</span><span id="previewMode">A / B</span></div>
+      <div class="preview-heading"><span id="mediaPreviewLabel">视频预览</span><details id="assMenu" class="editor-command-menu">
+          <summary>字幕样式</summary>
+          <form id="assForm" class="editor-command-popover task-info-popover ass-popover" aria-labelledby="assPanelTitle">
+            <div id="assPanelHandle" class="ass-panel-heading"><strong id="assPanelTitle">字幕样式</strong><button id="assClose" type="button" aria-label="关闭字幕样式面板" title="关闭">×</button></div>
+            <div class="ass-profile-bar">
+                <label>方案<select id="assProfile"></select></label>
+                <button type="button" id="assProfileLoad">载入</button><button type="button" id="assProfileSave">另存方案</button><button type="button" id="assProfileDelete">删除方案</button>
+              </div>
+              <div class="ass-profile-bar">
+                <label>应用范围<select id="assScope"><option value="project">项目默认</option><option value="selection">选中的字幕</option></select></label>
+                <label>编辑层<select id="assLayer"></select></label><button type="button" id="assAddLayer">添加层</button><button type="button" id="assRemoveLayer">删除层</button>
+              </div>
+              <div class="task-info-grid">
+              <label class="task-info-model"><span>字体</span><input name="font" value="Microsoft YaHei" maxlength="100" required></label>
+              <label><span>字号</span><input name="size" type="number" value="54" min="8" max="300" required></label>
+              <label><span>内容</span><select name="content"><option value="source">原文</option><option value="target">译文</option></select></label>
+              <label><span>文字颜色</span><input name="color" type="color" value="#ffffff"></label>
+              <label><span>高亮颜色</span><input name="highlight" type="color" value="#ffff00"></label>
+              <label><span>描边</span><input name="outline" type="number" min="0" max="15" step="0.5" value="2" required></label>
+              <label><span>阴影</span><input name="shadow" type="number" min="0" max="15" step="0.5" value="1" required></label>
+              <label><span>垂直边距</span><input name="margin_y" type="number" min="0" max="2000" value="60" required></label>
+              <label><span>位置</span><select name="alignment"><option value="2">底部居中</option><option value="5">画面居中</option><option value="8">顶部居中</option></select></label>
+            </div>
+            <div class="ass-checks"><label class="ass-check"><input name="bold" type="checkbox"><span>加粗</span></label><label class="ass-check"><input name="background" type="checkbox"><span>半透明底色</span></label><label class="ass-check"><input name="enabled" type="checkbox"><span>显示此层</span></label></div>
+              <label class="ass-check"><input name="word_highlight" type="checkbox"><span>高亮正在播放的词元</span></label>
+            <p id="assStatus" role="status">修改后可直接播放预览；应用后写入版本。</p>
+            <div class="ass-output-actions"><button type="button" id="assPreview">预览当前帧</button><button type="button" id="assExport">导出 ASS</button><button type="button" id="assBurn">烧录视频</button></div>
+            <div class="task-info-actions"><button type="button" id="assReset">恢复项目默认</button><button type="button" id="assCancel">取消</button><button type="submit" class="primary">应用样式</button></div>
+          </form>
+        </details></div>
       <div class="media-frame">
         <div id="mediaStage" class="media-stage">
           <div id="mediaViewport" class="media-viewport">
@@ -201,7 +232,9 @@
             <audio id="projectAudio" preload="auto"></audio>
             <div id="audioPreview" class="audio-preview hidden" aria-hidden="true"><i></i><strong>音频预览</strong><span>字幕与波形使用同一媒体时钟</span></div>
             <div id="mediaMessage" class="media-message">等待项目媒体</div>
-            <div class="subtitle-overlay">
+            <div id="assFramePreview" hidden><img id="assFrameImage" alt="ASS 字幕效果预览"><button id="assFrameClose" type="button">返回播放</button></div>
+            <canvas id="assLiveCanvas" aria-label="ASS 实时字幕"></canvas>
+              <div class="subtitle-overlay">
               <div id="previewSource"></div>
               <div id="previewTarget"></div>
             </div>
@@ -211,8 +244,8 @@
           <button id="mediaPlayToggle" type="button" aria-label="播放">▶</button>
           <span id="mediaTime">0:00 / 0:00</span>
           <input id="mediaSeek" type="range" min="0" max="0" step="0.01" value="0" aria-label="播放进度">
-          <label class="media-speed-control" for="mediaSpeed">速度 <input id="mediaSpeed" type="range" min="0.25" max="3" step="0.05" value="1" aria-label="播放速度"><output id="mediaSpeedValue">1.00x</output></label>
-          <button id="mediaMute" type="button" aria-label="静音">🔊</button>
+          <label class="media-speed-control" for="mediaSpeed"><span class="media-control-label">倍速</span><input id="mediaSpeed" type="range" min="0.25" max="3" step="0.05" value="1" aria-label="播放速度"><output id="mediaSpeedValue">1.00x</output></label>
+          <div class="media-volume-control"><span class="media-control-label">音量</span><button id="mediaMute" type="button" aria-label="静音">🔊</button><input id="mediaVolume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" title="音量 100%"><output id="mediaVolumeValue">100%</output></div>
           <button id="mediaFullscreen" type="button" aria-label="全屏">⛶</button>
         </div>
       </div>
@@ -302,7 +335,7 @@
   <script src="/assets/editor_language.js?v=20260822-virtual-line-3"></script>
   <script src="/assets/editor_document.js?v=20260916-save-safety-1"></script>
   <script src="/assets/editor_document_store.js?v=20260916-save-safety-1"></script>
-  <script src="/assets/editor_operation_queue.js?v=20260809-refactor-final-1"></script>
+  <script src="/assets/editor_operation_queue.js?v=20260922-selection-sync-13"></script>
   <script src="/assets/editor_waveform_cache.js?v=20260809-refactor-final-1"></script>
   <script src="/assets/editor_timeline.js?v=20260911-translation-visibility-1"></script>
   <script src="/assets/editor_cue_time_controller.js?v=20260809-cue-order-1"></script>
@@ -312,6 +345,9 @@
   <script src="/assets/system_save_as.js?v=20260916-deferred-save-1"></script>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2"></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-  <script src="/assets/editor.js?v=20260918-cue-scroll-2"></script>
+  <script src="/assets/vendor/libass/subtitles-octopus.js"></script>
+  <script src="/assets/editor_cue_selection.js?v=20260922-selection-sync-13"></script>
+  <script src="/assets/editor_ass_panel.js?v=20260923-preview-selection-1"></script>
+  <script src="/assets/editor.js?v=20260923-clear-player-1"></script>
 </body>
 </html>

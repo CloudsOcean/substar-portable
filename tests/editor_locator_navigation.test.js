@@ -23,7 +23,7 @@ assert.match(
 );
 assert.match(
   source,
-  /const searchHasFocus = document\.activeElement === \$\("#toolSearch"\);[\s\S]*?\(!isEditingText \|\| searchHasFocus\)/,
+  /const searchHasFocus = document\.activeElement === \$\("#toolSearch"\);[\s\S]*?\(explicitNavigation \|\| !isEditingText \|\| searchHasFocus\)/,
   "Enter in the focused search field must not suppress explicit centering"
 );
 

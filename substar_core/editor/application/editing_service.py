@@ -160,6 +160,7 @@ class EditingService:
             actor="editor",
             metadata={
                 "batch_id": batch_id,
+                "user_action": str(operations[0].get("type", "edit")) if len(operations) == 1 else "batch_edit",
                 "operation_ids": [
                     str(operation.get("operation_id", "")) for operation in operations
                 ],

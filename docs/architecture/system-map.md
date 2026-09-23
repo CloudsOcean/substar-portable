@@ -239,21 +239,21 @@ flowchart LR
 | `translation_service` | `model_orchestration` | Translate original execution blocks using N|source input and N[-M]|target output (v16-numeric-pipe); both modes share the standard task container. Expand shared translations into original timed slots. Historical Cue syntax is read-compatible only; segmentation uses N|W####[-W####] and calibration uses N|corrected source; their binding and validation semantics remain unchanged. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request`<br>`model_text_exchange` | `task_record`<br>`translation_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `calibration_service` | `model_orchestration` | Ask for number|corrected-source rows (numeric-pipe v2), deterministically align request-local numbers to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections. Historical C aliases remain readable. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/calibration/service.py`<br>`substar_core/editor/calibration/exchange.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`prompts/production/calibration/ja.md`<br>`prompts/production/calibration/ko.md`<br>`prompts/production/calibration/mixed.md`<br>`scripts/run_calibration_worker.py`<br>`substar_core/editor/http_api.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`model_text_exchange` | `task_record`<br>`calibration_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
-| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
-| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
+| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_cue_selection.js`<br>`web/editor_ass_panel.js`<br>`web/vendor/libass/subtitles-octopus.js`<br>`web/vendor/libass/subtitles-octopus-worker.js`<br>`web/vendor/libass/subtitles-octopus-worker-legacy.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/editor_language.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
+| `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_ass_panel.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
 | `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
-| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`substar_core/editor/application/srt_import.py`<br>`scripts/run_reference_match.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
+| `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`substar_core/editor/application/srt_import.py`<br>`scripts/run_reference_match.py`<br>`substar_core/editor/application/selective_restore.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions. | `substar_core/manuscript_matching.py`<br>`substar_core/reference_phonetics.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
-| `export_service` | `domain_service` | Render verified source, target and bilingual SRT outputs from the current revision and presentation rules. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
+| `export_service` | `domain_service` | Render verified SRT and layered ASS outputs; persist named ASS profiles and revision-bound Cue layer assignments without restructuring subtitle entities. | `substar_core/export.py`<br>`substar_core/subtitle_exports.py`<br>`substar_core/ass_subtitles.py`<br>`substar_core/ass_api.py`<br>`substar_core/ass_profiles.py` | `editor_revision` | `subtitle_export` | `presentation_service` |
 | `project_exchange_service` | `application_service` | Export referenced original media into portable subtitle packages using package-relative paths; reject missing originals before streaming. Native local selection stores media_reference.json without copying the original; browser upload remains explicit copy-import compatibility. Imported packages must not install external media references. Historical external-AI exchange APIs remain backend-compatible. | `substar_core/editor/application/srt_import.py`<br>`substar_core/media_reference.py`<br>`substar_core/media_relink.py`<br>`substar_core/project_exchange.py` | `editor_revision`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `editor_operation`<br>`editor_revision`<br>`project_creation_projection`<br>`external_ai_exchange`<br>`subtitle_project_exchange`<br>`project_task_info` | `export_service`<br>`editor_domain`<br>`project_store`<br>`task_info_service`<br>`creation_projection`<br>`model_stage_scheduler` |
-| `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
+| `settings_ui` | `frontend_connector` | Edit non-secret configuration and registered production prompt components, manage cloud LLM provider drafts independently from ASR, submit purpose-specific keys, probe providers, show recognition configuration state, and expose advanced Worker/cloud/media/GPU/download resource limits. | `web/settings.js`<br>`web/settings_updates.js` | `settings_snapshot`<br>`runtime_identity`<br>`production_prompt_component` | `settings_snapshot`<br>`provider_test_request`<br>`credential_reference`<br>`model_stage_policy`<br>`production_prompt_component` | `settings_service`<br>`provider_test_service`<br>`local_environment_service`<br>`model_stage_scheduler` |
 | `settings_service` | `application` | Validate, persist and expose non-secret settings, edition capabilities, data roots and provider credential presence. | `substar_core/config.py`<br>`substar_core/model_providers.py`<br>`substar_core/edition.py`<br>`substar_core/relay_profile.py`<br>`substar_core/policy.py` | `settings_snapshot`<br>`credential_reference`<br>`release_manifest` | `settings_snapshot`<br>`model_stage_policy` | `credential_store`<br>`model_stage_scheduler` |
 | `provider_test_service` | `provider_connector` | Perform explicit connectivity probes, model discovery and reasoning-capability normalization for configured providers. | `substar_core/api_testing.py`<br>`substar_core/model_catalog.py`<br>`substar_core/model_providers.py`<br>`substar_core/openai_compat.py`<br>`substar_core/reasoning_capabilities.py`<br>`substar_core/http_client.py`<br>`substar_core/providers.py` | `provider_test_request`<br>`credential_reference` | `settings_snapshot`<br>`model_stage_policy` | `qwen_connector` |
 | `model_stage_scheduler` | `application` | Resolve versioned semantic prompts, append one authoritative compact Cue Script grammar, freeze primary/repair policy, archive exact provider-visible exchanges and route text-model requests through one provider-capability-aware gateway and deterministic finalizer. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py`<br>`substar_core/cue_script.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component`<br>`model_text_exchange` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js`<br>`web/glossary_transfer.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
-| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
+| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py`<br>`substar_core/updater.py`<br>`substar_core/update_helper.ps1` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
 | `local_environment_service` | `optional_capability` | Diagnose source-install local runtimes and manage optional local model paths/assets outside the cloud-only beta path. | `substar_core/environment_doctor.py`<br>`substar_core/model_assets.py`<br>`substar_core/model_paths.py`<br>`substar_core/asr_longform.py` | `settings_snapshot`<br>`release_manifest` | `settings_snapshot` | — |
 | `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js`<br>`web/theme/tokens.css`<br>`web/project_label.js`<br>`web/design-directions.html` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
 | `recognition_contracts` | `contract` | Register supported recognition profiles and validate provider-independent transcription artifacts. | `substar_core/recognition/registry.py`<br>`substar_core/recognition/contracts.py`<br>`substar_core/transcription/contracts.py`<br>`substar_core/transcription/artifacts.py`<br>`substar_core/artifacts.py` | `transcription_request`<br>`recognition_evidence` | `recognition_evidence`<br>`transcription_result` | — |
@@ -1656,6 +1656,11 @@ Render bounded Cue windows and the scrollable project picker, route audio/video 
 Code:
 
 - `web/editor.js`
+- `web/editor_cue_selection.js`
+- `web/editor_ass_panel.js`
+- `web/vendor/libass/subtitles-octopus.js`
+- `web/vendor/libass/subtitles-octopus-worker.js`
+- `web/vendor/libass/subtitles-octopus-worker-legacy.js`
 - `web/editor_document.js`
 - `web/editor_document_store.js`
 - `web/editor_operation_queue.js`
@@ -1677,6 +1682,8 @@ Must not:
 
 Invariants:
 
+- Cue multiselection is independent of token selection and playback-follow state
+- Live ASS uses bundled libass and the same generated track as frame preview and burn-in
 - Selected project_id never silently falls back to another project
 - The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner
 - Large Cue lists are windowed
@@ -1723,7 +1730,7 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_audit_regressions.test.js`
+Tests: `tests/editor_cue_selection.test.js`, `tests/test_ass_profiles.py`, `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_audit_regressions.test.js`
 
 Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1738,6 +1745,7 @@ Own editor HTTP request construction, error decoding, project identity and respo
 Code:
 
 - `web/editor.js`
+- `web/editor_ass_panel.js`
 - `web/editor_document_store.js`
 - `web/editor_operation_queue.js`
 
@@ -1835,6 +1843,7 @@ Code:
 - `substar_core/editor/application/reference.py`
 - `substar_core/editor/application/srt_import.py`
 - `scripts/run_reference_match.py`
+- `substar_core/editor/application/selective_restore.py`
 
 Must not:
 
@@ -1860,7 +1869,7 @@ Recovery: Reload the latest revision and let the caller rebase explicitly.
 
 Reuses: `operation_id`<br>`latest revision`; restarts: —; terminal behavior: Return conflict without partial commit.
 
-Tests: `tests/test_editor_ai_contracts.py`, `tests/test_editor_translation_binding.py`, `tests/test_architecture_audit.py`
+Tests: `tests/test_editor_ai_contracts.py`, `tests/test_editor_translation_binding.py`, `tests/test_architecture_audit.py`, `tests/test_editor_actions_ass_updates.py`
 
 Change impact modules: `editor_domain`<br>`project_store`<br>`editor_api`<br>`editor_api_client`
 
@@ -1959,21 +1968,26 @@ Change impact contracts: `editor_revision`<br>`editor_operation`<br>`editor_docu
 
 Layer: `domain_service`
 
-Render verified source, target and bilingual SRT outputs from the current revision and presentation rules.
+Render verified SRT and layered ASS outputs; persist named ASS profiles and revision-bound Cue layer assignments without restructuring subtitle entities.
 
 Code:
 
 - `substar_core/export.py` — `render_document_srt`
 - `substar_core/subtitle_exports.py` — `render_track`, `export_four_modes`
+- `substar_core/ass_subtitles.py`
+- `substar_core/ass_api.py`
+- `substar_core/ass_profiles.py` — `apply_profile`, `render_configuration`
 
 Must not:
 
-- Modify the project
+- Change subtitle text when applying an ASS style
 - Export stale uncommitted browser state
 - Invent missing translations
 
 Invariants:
 
+- ASS assignments carry one deduplicated configuration in existing revision metadata; each batch application is one revision
+- Per-layer Cue overrides inherit unassigned project layers; profile-library edits never mutate historical projects
 - Output is derived from one verified revision
 - Unavailable target tracks are reported rather than synthesized
 
@@ -1987,7 +2001,7 @@ Recovery: Reload and render the latest verified revision.
 
 Reuses: `editor revision`; restarts: `rendering`; terminal behavior: Return explicit export-unavailable reason.
 
-Tests: `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`
+Tests: `tests/test_ass_profiles.py`, `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`, `tests/test_editor_actions_ass_updates.py`
 
 Change impact modules: `composition_root`<br>`editor_api`<br>`presentation_service`<br>`editor_ui`
 
@@ -2061,6 +2075,7 @@ Edit non-secret configuration and registered production prompt components, manag
 Code:
 
 - `web/settings.js`
+- `web/settings_updates.js`
 
 Must not:
 
@@ -2096,7 +2111,7 @@ Recovery: Reload settings and runtime identity; never erase a saved key because 
 
 Reuses: `saved settings`<br>`credential presence`; restarts: `explicit probe`; terminal behavior: Display exact redacted API error.
 
-Tests: `tests/test_config_storage.py`, `tests/test_model_stage_scheduling.py`, `tests/test_runtime_resource_policy.py`, `tests/settings_prompts_ui_contract.test.js`, `tests/settings_general_hotfix_ui_contract.test.js`, `tests/test_prompt_catalog.py`
+Tests: `tests/test_config_storage.py`, `tests/test_model_stage_scheduling.py`, `tests/test_runtime_resource_policy.py`, `tests/settings_prompts_ui_contract.test.js`, `tests/settings_general_hotfix_ui_contract.test.js`, `tests/test_prompt_catalog.py`, `tests/test_editor_actions_ass_updates.py`
 
 Change impact modules: `settings_service`<br>`provider_test_service`<br>`credential_store`<br>`model_stage_scheduler`<br>`local_environment_service`
 
@@ -2344,6 +2359,8 @@ Code:
 - `substar_core/runtime/launch_surface.py` — `require_visible_backend`, `visible_backend_creation_flags`
 - `substar_core/runtime/windows_process.py`
 - `substar_core/process_command.py`
+- `substar_core/updater.py`
+- `substar_core/update_helper.ps1`
 
 Must not:
 
@@ -2376,7 +2393,7 @@ Recovery: Probe identity, wait for graceful shutdown, then use strictly verified
 
 Reuses: `runtime identity record`; restarts: `backend after confirmed exit`; terminal behavior: Refuse unsafe takeover or kill.
 
-Tests: `tests/test_visible_backend_policy.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`
+Tests: `tests/test_visible_backend_policy.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`, `tests/test_editor_actions_ass_updates.py`
 
 Change impact modules: `composition_root`<br>`scheduler`<br>`worker_supervisor`<br>`settings_service`<br>`packaging`
 
