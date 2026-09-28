@@ -1,9 +1,13 @@
 (function(root) {
-  function dragMode(target) {
+  function dragMode(target, activeCueId = null) {
     if (target.closest('input,textarea,select,a,[contenteditable="true"],.token-selection-menu')) return null;
     if (target.closest('.source-token-line')) return 'tokens';
     const button=target.closest('button');
     if (button && !button.matches('[data-cue-select]')) return null;
+    // The active cue's padding is part of the token marquee surface too.
+    // Keep the cue number as an explicit handle for selecting whole cues.
+    const row=target.closest('.cue-row');
+    if (!button && row?.dataset.cueId === activeCueId && row.querySelector('.display-token')) return 'tokens';
     return 'cues';
   }
   function intersectingTokens(boxes, rect) {

@@ -698,10 +698,19 @@ def _merge(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocu
     ids = tuple(str(value) for value in payload.get("token_ids", []))
     if len(ids) < 2:
         raise DocumentOperationError("merge needs at least two tokens")
-    positions = [cue.display_token_ids.index(value) for value in ids]
-    if positions != list(range(positions[0], positions[0] + len(ids))):
-        raise DocumentOperationError("merge tokens must be contiguous and ordered")
     tokens = _token_map(document)
+    if len(set(ids)) != len(ids) or any(value not in cue.display_token_ids for value in ids):
+        raise DocumentOperationError("merge tokens must be unique and belong to the cue")
+    positions = [cue.display_token_ids.index(value) for value in ids]
+    if positions != sorted(positions):
+        raise DocumentOperationError("merge tokens must be contiguous and ordered")
+    if positions != list(range(positions[0], positions[0] + len(ids))):
+        # Calibration sees active tokens only. Deleted tombstones may separate
+        # adjacent active words; retain those records and their source lineage.
+        skipped = set(cue.display_token_ids[positions[0]:positions[-1] + 1]) - set(ids)
+        if (any(tokens[value].state is not EntityState.ACTIVE for value in ids)
+                or any(tokens[value].state is not EntityState.DELETED for value in skipped)):
+            raise DocumentOperationError("merge tokens must be contiguous and ordered")
     selected = [tokens[value] for value in ids]
     provenance = _provenance(operation, "merge")
     merged = DisplayToken(
@@ -729,7 +738,8 @@ def _merge(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocu
     )
     display_tokens = (*remaining[:insert_at], merged, *remaining[insert_at:])
     cue_ids = list(cue.display_token_ids)
-    cue_ids[positions[0] : positions[0] + len(ids)] = [merged.token_id]
+    cue_ids = [merged.token_id if value == ids[0] else value
+               for value in cue_ids if value == ids[0] or value not in ids]
     updated_cue = replace(cue, display_token_ids=tuple(cue_ids))
     return replace(
         document,

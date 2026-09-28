@@ -80,6 +80,11 @@
 
     const reuseOrPatchRow = (existing, next) => {
       if (!existing || existing.dataset.cueId !== next.dataset.cueId) return next;
+      // Selection is applied after rendering, not by the cue renderer. Ignore
+      // that presentation-only difference or every save replaces every row.
+      next.classList.toggle("cue-selected", existing.classList.contains("cue-selected"));
+      const selected = existing.getAttribute("aria-selected");
+      if (selected !== null) next.setAttribute("aria-selected", selected);
       // A previous edit's asynchronous save can refresh the list while the user
       // is already typing in another row. Never replace that live textarea:
       // doing so loses focus, selection, composition and its unsaved draft.
@@ -250,6 +255,11 @@
     }, {passive:true});
 
     function render({cues, tokenById, activeCueId, pageStart = 0, preservePage = false}) {
+      const listTop = container.getBoundingClientRect().top;
+      const viewportRows = preservePage ? [...container.children]
+        .filter(node => node.dataset?.cueId)
+        .map(node => ({id:node.dataset.cueId, rect:node.getBoundingClientRect()}))
+        .filter(({rect}) => rect.bottom > listTop && rect.top < listTop + container.clientHeight) : [];
       context = {cues, tokenById};
       const activeIndex = Math.max(0, cues.findIndex(cue => cue.cue_id === activeCueId));
       const preserved = preservedWindow(cues.length, windowStart, windowEnd);
@@ -271,6 +281,17 @@
       // Preserve unchanged Cue DOM nodes. A split updates one row and inserts
       // one row instead of replacing the whole scrolling surface.
       reconcileRows(desiredRows);
+      if (keepWindow) {
+        // overflow-anchor is disabled for virtual paging. Preserve the first
+        // surviving visible row explicitly when edits change preceding heights.
+        for (const anchor of viewportRows) {
+          const row = [...container.children].find(node => node.dataset?.cueId === anchor.id);
+          if (!row) continue;
+          const delta = row.getBoundingClientRect().top - anchor.rect.top;
+          if (Math.abs(delta) > 0.5) container.scrollTop += delta;
+          break;
+        }
+      }
       notify();
       return page;
     }

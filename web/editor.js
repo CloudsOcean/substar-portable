@@ -2812,6 +2812,11 @@
     input.className = "inline-token-editor";
     input.value = token.text;
     input.size = Math.max(3, [...token.text].length + 1);
+    // Edit within the token's existing box. A wider input can wrap the last
+    // words onto another line and make the cue jump again when editing ends.
+    const labelRect = label.getBoundingClientRect();
+    Object.assign(input.style, {boxSizing:"border-box", minWidth:"0", maxWidth:"none",
+      width:`${labelRect.width}px`, height:`${labelRect.height}px`, padding:"2px 0"});
     label.replaceWith(input);
     let finished = false;
     const finish = async (commit = true) => {
@@ -2837,7 +2842,7 @@
     });
     input.addEventListener("blur", () => finish(true), {once:true});
     input.addEventListener("click", event => event.stopPropagation());
-    input.focus();
+    input.focus({preventScroll:true});
     input.select();
   }
 
@@ -5119,7 +5124,7 @@
   $("#cueList").addEventListener("pointerdown", event => {
     if (event.button!==0) return;
     cueCenterGeneration++;
-    const mode=window.EditorCueSelection.dragMode(event.target);
+    const mode=window.EditorCueSelection.dragMode(event.target, state.activeCueId);
     if (!mode || event.target.closest('.cue-row.deleted')) return;
     const row=event.target.closest('.cue-row:not(.deleted)') ||
       [...event.currentTarget.querySelectorAll('.cue-row:not(.deleted)')].find(node => node.getBoundingClientRect().bottom>=event.clientY);

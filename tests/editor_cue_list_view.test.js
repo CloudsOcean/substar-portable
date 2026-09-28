@@ -9,8 +9,13 @@ function cue(cueId, text) {
 
 function row(value, index = 0) {
   const number = {textContent:String(index + 1)};
+  const classes = new Set(), attributes = new Map();
   return {
     dataset:{cueId:value.cue_id},
+    classList:{contains:name=>classes.has(name),toggle(name,on){on?classes.add(name):classes.delete(name);}},
+    getAttribute:name=>attributes.get(name) ?? null,
+    setAttribute:(name,value)=>attributes.set(name,value),
+    getBoundingClientRect:()=>({top:0,bottom:80,height:80}),
     text:value.text,
     number,
     parent:null,
@@ -19,6 +24,8 @@ function row(value, index = 0) {
     },
     isEqualNode(other) {
       return this.dataset.cueId === other?.dataset?.cueId
+        && this.classList.contains('cue-selected') === other.classList.contains('cue-selected')
+        && this.getAttribute('aria-selected') === other.getAttribute('aria-selected')
         && this.text === other.text
         && this.number.textContent === other.number.textContent;
     },
@@ -40,6 +47,7 @@ function fixture({dynamic = false} = {}) {
   let scrollHandler = null;
   const container = {
     children:[],
+    getBoundingClientRect:()=>({top:0}),
     style:{},
     clientHeight:600,
     scrollHeight:2400,
@@ -310,4 +318,33 @@ console.log("editor_cue_list_view: ok");
   assert.notEqual(container.children[1],unlocked,"task locks still replace active edits");
   render([cue("a","A saved")]);
   assert.deepEqual(ids(container),["a"],"deleted cues are not retained");
+}
+
+
+{
+  const {container} = fixture();
+  container.scrollTop=100;
+  const renderCue=(value,index)=>{
+    const node=row(value,index);
+    node.height=value.text==='tall'?180:100;
+    node.getBoundingClientRect=()=>{
+      const top=container.children.slice(0,container.children.indexOf(node))
+        .reduce((sum,r)=>sum+r.height,0)-container.scrollTop;
+      return {top,bottom:top+node.height,height:node.height};
+    };
+    return node;
+  };
+  const view=createCueListView({container,renderCue});
+  const render=cues=>view.render({cues,tokenById:new Map(),activeCueId:'b',preservePage:true});
+  render([cue('a','short'),cue('b','short'),cue('c','short')]);
+  const anchor=container.children[1];
+  anchor.classList.toggle('cue-selected',true);
+  anchor.setAttribute('aria-selected','true');
+  const before=anchor.getBoundingClientRect().top;
+  render([cue('a','tall'),cue('b','short'),cue('c','short')]);
+  assert.equal(container.children[1],anchor,'selection presentation must not replace unchanged row');
+  assert.equal(anchor.getBoundingClientRect().top,before,'height change above viewport must preserve anchor');
+  const next=container.children[2],nextTop=next.getBoundingClientRect().top;
+  render([cue('a','tall'),cue('c','short')]);
+  assert.equal(next.getBoundingClientRect().top,nextTop,'removed anchor falls back to surviving visible row');
 }

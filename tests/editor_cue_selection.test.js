@@ -83,3 +83,17 @@ test('cue centering corrects delayed layout but yields to manual scrolling',()=>
   rowPosition=600;frames.shift()();assert.equal(list.scrollTop,450);
   list.scrollTop=250;frames.shift()();assert.equal(list.scrollTop,250);
 });
+
+
+test('active cue whitespace selects tokens, number and other cues select rows',()=>{
+  const target=(id,button=null,hasTokens=true)=>({closest(selector){
+    if(selector==='button') return button;
+    if(selector==='.cue-row') return {dataset:{cueId:id},querySelector:()=>hasTokens?{}:null};
+    return null;
+  }});
+  assert.equal(dragMode(target('a'),'a'),'tokens');
+  assert.equal(dragMode(target('b'),'a'),'cues');
+  assert.equal(dragMode(target('a',null,false),'a'),'cues');
+  assert.equal(dragMode(target('a',{matches:()=>true}),'a'),'cues');
+  assert.equal(dragMode(target('a',{matches:()=>false}),'a'),null);
+});

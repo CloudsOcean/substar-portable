@@ -702,7 +702,7 @@ html[data-theme] .media-controls,.media-controls{background:var(--theme-panel,#1
 @container (max-width:500px){#assMenu .task-info-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Keep native text dragging from stealing the token marquee gesture. */
-.source-token-line { user-select: none; -webkit-user-select: none; touch-action: none; }
+.source-token-line, .cue-row.current { user-select: none; -webkit-user-select: none; touch-action: none; }
 .subtitle-overlay > div { overflow-wrap: anywhere; box-sizing: border-box; }
 
 /* Give seeking its own full-width rail; label the two adjustment controls. */
