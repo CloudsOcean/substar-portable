@@ -135,11 +135,11 @@
         timer = null;
         await flush();
         while (inFlight || pending.length) {
-          if (failed.length) throw new Error("仍有编辑未保存，请先处理保存冲突或错误");
+          if (failed.length) throw new Error(failed[0].error?.message || "仍有编辑未保存，请先处理保存冲突或错误");
           if (destroyed) throw new Error("保存会话已结束");
           await new Promise(resolve => setTimeout(resolve, 20));
         }
-        if (failed.length) throw new Error("仍有编辑未保存，请先处理保存冲突或错误");
+        if (failed.length) throw new Error(failed[0].error?.message || "仍有编辑未保存，请先处理保存冲突或错误");
         if (destroyed) throw new Error("保存会话已结束");
         return options.base();
       },

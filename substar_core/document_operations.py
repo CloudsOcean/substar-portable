@@ -624,8 +624,9 @@ def _insert_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
         raise DocumentOperationError("new cue time must contain numeric start/end") from exc
     if start < 0 or end <= start:
         raise DocumentOperationError("new cue time must satisfy 0 <= start < end")
+    overlay = payload.get("overlay") is True
     for existing in document.cues:
-        if existing.state is EntityState.DELETED:
+        if overlay or existing.mapping.get("subtitle_track") == "overlay" or existing.state is EntityState.DELETED:
             continue
         if start < existing.end and existing.start < end:
             raise DocumentOperationError(
@@ -646,7 +647,7 @@ def _insert_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     if groups:
         previous = ordered[insert_at - 1] if insert_at > 0 else None
         following = ordered[insert_at] if insert_at < len(ordered) else None
-        if previous is not None and following is not None and previous.group_id == following.group_id:
+        if not overlay and previous is not None and following is not None and previous.group_id == following.group_id:
             group_id = previous.group_id
             groups = _mark_groups_dirty(groups, {group_id}, "structure")
         else:
@@ -675,7 +676,9 @@ def _insert_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     cue = DisplayCue(
         cue_id=stable_id("cue", {"operation_id": operation["operation_id"]}),
         index=insert_at,
-        display_token_ids=(token.token_id,),
+        source_text=text if overlay else None,
+        mapping={"subtitle_track": "overlay"} if overlay else {},
+        display_token_ids=() if overlay else (token.token_id,),
         start=start,
         end=end,
         target=None,
@@ -685,7 +688,7 @@ def _insert_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     cues = _reindex(tuple(ordered[:insert_at] + [cue] + ordered[insert_at:]))
     return replace(
         document,
-        display_tokens=(*document.display_tokens, token),
+        display_tokens=document.display_tokens if overlay else (*document.display_tokens, token),
         cues=cues,
         groups=groups,
         changes=(*document.changes, provenance),
@@ -1237,7 +1240,7 @@ def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
     operation_type = str(operation.get("type", ""))
-    if any(cue.source_text is not None for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times"}:
+    if any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times"}:
         raise DocumentOperationError("字幕导入项目仅支持文本和时间编辑，不支持词元操作")
     if operation_type not in _APPLIERS:
         raise DocumentOperationError(f"unsupported operation: {operation_type}")

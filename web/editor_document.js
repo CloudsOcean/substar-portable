@@ -348,6 +348,7 @@
       display_token_ids:[...cue.display_token_ids],
       active_display_token_ids:cue.display_token_ids.filter(id => displayById.get(id)?.state === ACTIVE),
       source_text:cue.source_text ?? null,
+      subtitle_track:cue.mapping?.subtitle_track || "main",
       start:cue.start,
       end:cue.end,
       target:cue.target === null ? null : clone(cue.target),
@@ -673,6 +674,7 @@
       end:nextEnd,
       text:String(text).trim(),
       speaker:options.speaker ?? null,
+      overlay:options.overlay === true,
       provenance:provenanceInput(provenance, "insert_cue")
     });
   }

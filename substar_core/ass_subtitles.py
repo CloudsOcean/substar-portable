@@ -138,11 +138,13 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
     from substar_core.presentation import project_cue_lines
     from substar_core.chinese_script import convert_chinese_script
 
-    def event(start, end, name, text, raw=False):
+    def event(start, end, name, text, raw=False, overlay=False):
         if round(end * 100) <= round(start * 100) or not text:
             return
         chosen = style if name == "Source" else target_style
         encoded = wrap_ass_text(text if raw else escape_text(text), chosen, options.width)
+        if overlay:
+            encoded = f"{{\\an8\\pos({options.width / 2:g},{chosen.margin_y})}}" + encoded
         fade = min(chosen.fade_ms, round((end-start)*500))
         effect = f"{{\\fad({fade},{fade})}}" if fade and not raw else ""
         if chosen.background:
@@ -192,10 +194,10 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
                         left,right = active[2:]
                         text = escape_text(source[:left])+f"{{\\c{ass_color(style.highlight)}&}}"+escape_text(source[left:right])+f"{{\\c{ass_color(style.color)}&}}"+escape_text(source[right:])
                     event(a,b,"Source",text,True)
-            elif options.word_highlight:
+            elif options.word_highlight and cue.mapping.get("subtitle_track") != "overlay":
                 raise ValueError("逐词高亮需要可映射的词级时间和显示文字")
             else:
-                event(cue.start,cue.end,"Source",source)
+                event(cue.start,cue.end,"Source",source,overlay=cue.mapping.get("subtitle_track") == "overlay")
         if options.mode in {"target", "ab-double"}:
             event(cue.start,cue.end,"Target",target)
     return "\n".join(output)+"\n"

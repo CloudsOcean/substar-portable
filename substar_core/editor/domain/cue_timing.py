@@ -122,7 +122,7 @@ def _validate_changed_ranges(
     cues: Iterable[DisplayCue], changed_ids: set[str]
 ) -> None:
     """Reject overlaps introduced by this mutation without invalidating old data."""
-    active = [cue for cue in cues if cue.state is not EntityState.DELETED]
+    active = [cue for cue in cues if cue.state is not EntityState.DELETED and cue.mapping.get("subtitle_track") != "overlay"]
     for cue in active:
         if cue.cue_id not in changed_ids:
             continue

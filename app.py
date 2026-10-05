@@ -917,6 +917,9 @@ def _register_completed_beginner_tutorial(job: Job) -> None:
 
     creation_path = job.job_dir / "project_creation.json"
     tutorial_path = job.job_dir / "tutorial_project.json"
+    # Older imported projects have no creation recipe and are not tutorials.
+    if not creation_path.is_file() and not tutorial_path.is_file():
+        return
     try:
         creation = json.loads(creation_path.read_text(encoding="utf-8"))
         if creation.get("tutorial_case_id") != "reference-script-v1":

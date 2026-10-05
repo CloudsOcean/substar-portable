@@ -229,16 +229,7 @@
                   <div><span class="detail-provider-icon"><svg class="ui-icon"><use href="/assets/ui-icons.svg#cloud"></use></svg></span><div><small>当前识别路线</small><h3 id="engineProviderTitle">Qwen 云端 · 文件听写</h3></div></div>
                 </header>
             <div class="card provider-card">
-              <div class="field wide">
-                <label>默认识别方案</label>
-                <select name="recognition_profile_id" id="recognitionProfile"></select>
-                <small id="recognitionProfileDescription">正在读取已注册方案…</small>
-              </div>
-              <div class="recognition-adapters wide" id="recognitionAdapters">
-                <div><span>主稿适配器</span><b id="transcriptAdapterLabel">—</b></div>
-                <div><span>时间适配器</span><b id="alignmentAdapterLabel">—</b></div>
-                <div><span>说话人适配器</span><b>未启用</b></div>
-              </div>
+              <select name="recognition_profile_id" id="recognitionProfile" hidden></select>
               <div class="field wide" data-recognition-profiles="qwen_cloud">
                 <label>阿里云百炼 API Key</label>
                 <div class="key-test-row"><input name="api_key" type="password" autocomplete="off" placeholder="留空则保留已保存的密钥" /><button class="secondary test-qwen-cloud icon-button key-test-button" type="button"><svg class="ui-icon"><use href="/assets/ui-icons.svg#test"></use></svg>测试连通性</button></div>
@@ -249,8 +240,11 @@
                 <select name="qwen_cloud_region"><option value="beijing">中国（北京）</option><option value="singapore">国际（新加坡）</option></select>
               </div>
               <div class="field" data-recognition-profiles="qwen_cloud">
-                <label>文件听写模型</label>
-                <input name="qwen_cloud_model" value="qwen-audio-3.0-asr-flash-filetrans" readonly />
+                <label for="qwenCloudModel">文件听写模型</label>
+                <select name="qwen_cloud_model" id="qwenCloudModel">
+                  <option value="qwen-audio-3.0-asr-flash-filetrans">Qwen ASR 3.0 · 文件听写</option>
+                  <option value="qwen-audio-3.1-asr-flash-filetrans">Qwen ASR 3.1 · 文件听写</option>
+                </select>
               </div>
               <div class="field wide" data-recognition-profiles="qwen_cloud">
                 <label>自定义 DashScope API Base URL（可选）</label>
@@ -274,25 +268,6 @@
                 <label>默认识别语言</label>
                 <input name="language" value="Auto" placeholder="Auto / zh / en / ja / ko" />
               </div>
-            <details class="advanced card">
-              <summary>
-                <span
-                  ><b>运行与输出</b><small>路径、识别上下文和兼容字段</small></span
-                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
-              </summary>
-              <div class="advanced-grid">
-                <div class="field wide">
-                </div>
-                <div class="field wide">
-                  <label>识别上下文</label
-                  ><textarea
-                    name="context"
-                    rows="3"
-                    placeholder="节目名、人名、地名、机构名"
-                  ></textarea>
-                </div>
-              </div>
-            </details>
               </div>
             </div>
           </section>
@@ -604,7 +579,7 @@
       </div>
       <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
     </dialog>
-  <script src="/assets/settings.js?v=20260922-general-updates-2"></script>
+  <script src="/assets/settings.js?v=20261004-asr-model-select-1"></script>
   <script src="/assets/settings_updates.js?v=20260922-general-updates-2"></script>
   </body>
 </html>

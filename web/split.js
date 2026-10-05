@@ -58,9 +58,33 @@
   async function api(url, options = {}) {
     const response = await fetch(url, options);
     let body = null;
-    try { body = await response.json(); } catch { body = null; }
-    if (!response.ok) throw new Error(errorMessage(body) || `HTTP ${response.status}`);
+    try { body = await response.json(); } catch (error) {
+      if (options.signal?.aborted) throw error;
+      body = null;
+    }
+    if (!response.ok) {
+      const error = new Error(body ? errorMessage(body) : `请求失败（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
+    }
     return body;
+  }
+
+  async function pollApi(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      return await api(url, {signal:controller.signal});
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const timeout = new Error("任务读取超时，将自动重试，也可点击刷新");
+        timeout.code = "POLL_TIMEOUT";
+        throw timeout;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function toast(message) {
@@ -1559,10 +1583,10 @@
     state.refreshing = true;
     try {
       const [jobs, editorTasks, projects] = await Promise.all([
-        api("/api/project-creations"),
-        api("/api/editor-tasks").catch(() => ({tasks:[]})),
+        pollApi("/api/project-creations"),
+        pollApi("/api/editor-tasks").catch(() => ({tasks:[]})),
         (refreshCatalog || Date.now() - projectCatalogUpdatedAt > 30000
-          ? api("/api/projects").then(value => {
+          ? pollApi("/api/projects").then(value => {
               projectCatalog = value;
               projectCatalogUpdatedAt = Date.now();
               return value;
@@ -1626,6 +1650,13 @@
       renderRecent([...tutorialProjectRows, ...state.jobs]
         .sort((left, right) => Number(right.created_at || 0) - Number(left.created_at || 0)));
     } catch (error) {
+      if (error.status || error.code === "POLL_TIMEOUT") {
+        // An HTTP error is a reachable server, not a lost backend connection.
+        const message = `最近任务加载失败：${errorMessage(error)}`;
+        if (!state.jobs.length) $("#recentJobs").textContent = message;
+        toast(message);
+        return;
+      }
       state.runtimeFailureCount += 1;
       state.runtimeConnected = false;
       const systemNode = $("#systemState");

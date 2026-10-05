@@ -39,6 +39,7 @@
         state:String(cue.state || "active"),
         speaker:cue.speaker ?? null,
         target_text:String(cue.target?.target_text || ""),
+        subtitle_track:cue.subtitle_track || "main",
         display_token_ids:[...(cue.display_token_ids || [])],
         text:cue.source_text ?? languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
           .map(id => tokens.get(String(id))?.text || "").filter(Boolean))

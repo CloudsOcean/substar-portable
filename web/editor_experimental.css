@@ -1,0 +1,434 @@
+/* Opt-in workspace: video / tools above waveform; cues span the right side. */
+html[data-editor-layout="experimental"] .editor-layout {
+  grid-template-columns: minmax(280px, 34fr) minmax(240px, 20fr) minmax(400px, 46fr);
+  grid-template-rows: minmax(240px, 1fr) minmax(200px, 42%);
+  gap: 8px;
+  padding: 8px;
+}
+html[data-editor-layout="experimental"] .editor-preview-pane {
+  grid-column: 1;
+  grid-row: 1;
+  grid-template-rows: 32px minmax(0, 1fr);
+  padding: 8px;
+  border: 1px solid var(--editor-line);
+  border-radius: 8px;
+}
+html[data-editor-layout="experimental"] .editor-tool-sidebar {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--editor-line);
+  border-radius: 8px;
+}
+html[data-editor-layout="experimental"] .editor-document-pane {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--editor-line);
+  border-radius: 8px;
+}
+html[data-editor-layout="experimental"] #editorTools {
+  background: #0b1015 !important;
+  border-color: #29323c;
+  padding: 0 12px 12px;
+}
+html[data-editor-layout="experimental"] .experimental-tool-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  border-bottom: 1px solid #29323c;
+}
+html[data-editor-layout="experimental"] .experimental-tool-tabs button {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  height: 54px;
+  padding: 8px 0;
+  flex-direction: column !important;
+  gap: 5px;
+  font-size: 11px;
+  background: transparent !important;
+  color: #929dab !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  position: relative;
+}
+html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button[aria-selected="true"] {
+  background: transparent !important;
+  color: #e3ebf4 !important;
+}
+html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button[aria-selected="true"]::after { content: ""; position: absolute; height: 2px; left: 12px; right: 12px; bottom: -1px; background: #94adc4; }
+html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+html[data-editor-layout="experimental"] #editorTools > .tool-accordion {
+  display: none;
+  border: 0;
+}
+html[data-editor-layout="experimental"] #editorTools > .experimental-tool-active { display: block; }
+html[data-editor-layout="experimental"] #editorTools > .tool-accordion > summary { display: none; }
+html[data-editor-layout="experimental"] #editorTools .tool-panel { padding: 14px 0 4px; gap: 10px; }
+html[data-editor-layout="experimental"] #editorTools .auto-snap-option,
+html[data-editor-layout="experimental"] #editorTools .sidebar-legend span {
+  background: #1d252e !important;
+  border-color: #35414e;
+}
+html[data-editor-layout="experimental"] #editorTools input,
+html[data-editor-layout="experimental"] #editorTools button:not([role="tab"]),
+html[data-editor-layout="experimental"] #editorTools select {
+  background: #1c242d !important;
+  border-color: #35414e;
+}
+html[data-editor-layout="experimental"] #editorTools input { color: #edf1f5; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 13px 0; background: transparent !important; border: 0; border-bottom: 1px solid #29323c; border-radius: 0; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row > div:first-child { display: flex; align-items: center; gap: 10px; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row strong { font-size: 12px; font-weight: 500; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row .tool-button-pair { display: flex; gap: 4px; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row button { width: 28px; height: 27px; min-height: 0; padding: 0; font-size: 21px; line-height: 1; border: 1px solid #424c59; background: transparent !important; border-radius: 4px; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row button:disabled { opacity: .3; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-row span { margin-left: auto; font-size: 11px; color: #8995a3; }
+html[data-editor-layout="experimental"] #editorTools .tool-locator-group { gap: 0; }
+html[data-editor-layout="experimental"] #editorTools .tool-button-pair { gap: 8px; }
+html[data-editor-layout="experimental"] #editorTools .tool-panel > strong { color: #cdd7e3; }
+html[data-editor-layout="experimental"] .multiline-waveform-module {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr) 17px;
+  gap: 6px;
+  background: #0b1015 !important;
+  border-color: #27313b;
+}
+html[data-editor-layout="experimental"] .multiline-waveform-module #timelineTrack[hidden] { display: none; }
+.multiline-waveform-toolbar { display: flex; align-items: center; gap: 12px; padding: 0 4px; color: #d5dde7; }
+.multiline-waveform-toolbar strong { font-size: 14px; margin-right: 0; }
+.multiline-waveform-toolbar label { display: flex; flex-direction: row; flex: 0 0 auto; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.multiline-waveform-toolbar select, .multiline-waveform-toolbar button { height: 29px; padding: 0 8px; font-size: 12px; }
+.multiline-waveform-toolbar select { width: auto; min-width: 72px; }
+.multiline-waveform-settings { position: relative; }
+.multiline-waveform-settings > summary { width: 28px; height: 28px; display: grid; place-items: center; list-style: none; cursor: pointer; border-radius: 4px; color: #a9b5c2; }
+.multiline-waveform-settings > summary::-webkit-details-marker { display: none; }
+.multiline-waveform-settings > summary:hover, .multiline-waveform-settings[open] > summary { background: #35404c; color: #eef3f8; }
+.multiline-waveform-settings svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.multiline-waveform-settings-panel { position: absolute; z-index: 20; top: 33px; right: 0; width: 220px; padding: 14px; border: 1px solid #47515d; border-radius: 7px; background: #2a313b; box-shadow: 0 10px 30px #0006; }
+.multiline-waveform-settings-panel > strong { display: block; margin: 0 0 14px; font-size: 12px; }
+.multiline-waveform-settings-panel > label { justify-content: space-between; color: #bac4d0; }
+.multiline-waveform-viewport { min-height: 0; overflow: auto; overflow-anchor: none; scrollbar-color: #67717d #242b32; }
+.multiline-waveform-row { display: block; width: 100%; height: 180px; margin-bottom: 8px; border: 1px solid #3b4650; border-radius: 6px; touch-action: none; cursor: crosshair; }
+.multiline-waveform-row:focus-visible { outline: 1px solid #9fd0f2; outline-offset: -1px; }
+html[data-editor-layout="experimental"] .multiline-waveform-module .timeline-scrollbar { padding: 0; }
+html[data-editor-layout="experimental"] .review-mode #editorTools > .experimental-tool-tabs { display: none; }
+html[data-editor-layout="experimental"] .pane-live-controls label:has(#timelineLayout) { display: none; }
+html[data-editor-layout="experimental"] .pane-heading {
+  min-height: 52px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+html[data-editor-layout="experimental"] .pane-live-controls { flex-wrap: wrap; }
+html[data-editor-layout="experimental"] .cue-timeline-panel {
+  grid-column: 1 / 3;
+  grid-row: 2;
+  padding: 8px;
+  border: 1px solid var(--editor-line);
+  border-radius: 8px;
+}
+@media (max-width: 1100px) {
+  html[data-editor-layout="experimental"] .editor-layout {
+    grid-template-columns: minmax(250px, 30fr) minmax(210px, 24fr) minmax(360px, 46fr);
+  }
+  html[data-editor-layout="experimental"] .pane-live-controls { margin-left: 0; }
+}
+
+html[data-editor-layout="experimental"] #editorTools { box-shadow: inset 0 1px 0 #ffffff03; }
+html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs { margin: 0 -4px; }
+html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button:hover { color: #dce5ef !important; background: #ffffff04 !important; }
+html[data-editor-layout="experimental"] #editorTools .experimental-help { gap: 20px; }
+.experimental-help section { padding-bottom: 16px; border-bottom: 1px solid #28313b; }
+.experimental-help h3 { font-size: 12px; color: #d9e4ef; margin: 0 0 10px; font-weight: 600; }
+.experimental-help p { font-size: 12px; line-height: 1.8; color: #97a5b5; margin: 8px 0 0; }
+.experimental-help dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 10px 12px; margin: 0; font-size: 11px; line-height: 1.6; }
+.experimental-help dt { color: #c3cfdd; } .experimental-help dd { color: #8e9eaf; margin: 0; }
+.experimental-help kbd { background: #222c36; border: 1px solid #374453; border-radius: 3px; padding: 1px 4px; font: inherit; }
+.waveform-overlay-toggle { color: #abb8c6; cursor: pointer; }
+.waveform-overlay-toggle input { width: 13px; height: 13px; margin: 0; accent-color: #a193c8; }
+.cue-row.overlay-cue { border-left: 3px solid #9481b8 !important; background: #171722 !important; }
+.cue-row.overlay-cue.current { background: #252236 !important; }
+.overlay-cue-label { display: block; width: fit-content; color: #b9aad4; font-size: 10px; letter-spacing: .05em; margin-bottom: 5px; }
+.cue-row.overlay-cue .source-text-track { background: transparent !important; border: 0; color: #e2dced; padding: 0; box-shadow: none; }
+
+.preview-overlay-subtitle { position: absolute; top: 16%; left: 6%; right: 6%; z-index: 4; pointer-events: none; text-align: center; white-space: pre-line; font-size: clamp(14px,1.4vw,26px); font-weight: 600; line-height: 1.4; color: #eee7ff; text-shadow: 0 2px 3px #000, 1px 0 2px #000; }
+#mediaViewport:has(#assLiveCanvas:not([hidden])) .preview-overlay-subtitle { display: none; }
+
+/* Retain the original vertical index and track-count arrangement. */
+html[data-editor-layout="experimental"] .cue-row,
+html[data-editor-layout="experimental"] .cue-row.source-only {
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+}
+html[data-editor-layout="experimental"] .cue-row .cue-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  align-self: center;
+  gap: 5px;
+  padding: 0;
+}
+html[data-editor-layout="experimental"] .cue-row .cue-meta strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+html[data-editor-layout="experimental"] .cue-row .cue-meta .cue-count {
+  gap: 3px;
+  font: 11px/1.45 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-editor-layout="experimental"] .cue-actions .hide-cue,
+html[data-editor-layout="experimental"] .cue-actions .danger {
+  --cue-action: #aab2be !important;
+  color: #aab2be !important;
+  border-color: #39414c !important;
+  background: #191e26 !important;
+}
+html[data-editor-layout="experimental"] .cue-actions .hide-cue:hover,
+html[data-editor-layout="experimental"] .cue-actions .danger:hover {
+  color: #e2e6ec !important;
+  border-color: #596371 !important;
+  background: #252c36 !important;
+}
+
+html[data-editor-layout="experimental"] .source-token-line[hidden] { display: none !important; }
+.whole-cue-editor { width: 100%; resize: vertical; min-height: 38px; line-height: 1.6; font-size: var(--editor-token-font-size,18px); }
+
+.inline-token-editor { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.multiline-waveform-toolbar .waveform-mode-switch { display: flex; gap: 0; margin-right: auto; border: 1px solid #2c3641; border-radius: 5px; overflow: hidden; }
+.waveform-mode-switch button { background: transparent; color: #8795a3; border: 0; border-radius: 0; min-width: 48px; }
+.waveform-mode-switch button[aria-pressed="true"] { background: #253342; color: #add1f4; }
+.multiline-waveform-viewport { scrollbar-color: #4b5968 #0b1015; }
+.multiline-waveform-row { border-color: #27313b; }
+.basic-waveform-viewport { display: flex; flex-direction: row; align-items: flex-start; overflow-y: hidden; }
+.basic-waveform-viewport .multiline-waveform-row { flex: 0 0 100%; min-width: 100%; margin: 0; border: 0; border-radius: 0; }
+
+html[data-editor-layout="experimental"] .basic-waveform-module { grid-template-rows: 30px minmax(0, 1fr); }
+.basic-waveform-module .timeline-scrollbar { display: none; }
+.basic-waveform-viewport .multiline-waveform-row { height: 100%; }
+
+/* Presets match the standard workspace, original editor, and large-preview reference. */
+html[data-editor-layout="experimental"] #editorWorkbench { position: relative; grid-template-columns: calc(var(--workspace-left, 54vw) * .63) calc(var(--workspace-left, 54vw) * .37) minmax(0, 1fr); grid-template-rows: minmax(0, var(--workspace-first, 58%)) minmax(0, 1fr); }
+html[data-editor-layout="experimental"] #editorWorkbench[data-workspace-layout="classic"] { grid-template-columns: var(--workspace-tools) minmax(0, calc(var(--workspace-left) - var(--workspace-tools))) minmax(0, 1fr); }
+html[data-editor-layout="experimental"] [data-workspace-layout="classic"] #editorTools { grid-column: 1; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="classic"] .editor-document-pane { grid-column: 2; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="classic"] .editor-preview-pane { grid-column: 3; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="classic"] .cue-timeline-panel { grid-column: 1 / 4; grid-row: 2; }
+html[data-editor-layout="experimental"] #editorWorkbench[data-workspace-layout="cinema"] { grid-template-columns: var(--workspace-left) minmax(0, 1fr); grid-template-rows: minmax(0, var(--workspace-first)) minmax(0, var(--workspace-second)) minmax(0, 1fr); }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .editor-preview-pane { grid-column: 1; grid-row: 1 / 3; }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] #editorTools { grid-column: 2; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .editor-document-pane { grid-column: 2; grid-row: 2; }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .cue-timeline-panel { grid-column: 1 / 3; grid-row: 3; }
+.workspace-layout-options { min-width: 250px; display: grid; gap: 5px; }
+.workspace-layout-options button { display: grid; gap: 5px; padding: 10px 12px; text-align: left; background: #10161d; border: 1px solid #29323c; }
+.workspace-layout-options button small { font-size: 11px; color: #8291a0; }
+.workspace-layout-options button[aria-pressed="true"] { border-color: #718da7; background: #1b2835; }
+.workspace-divider { position: absolute; z-index: 25; touch-action: none; outline: none; }
+.workspace-divider.vertical { cursor: col-resize; }
+.workspace-divider.horizontal { cursor: row-resize; }
+.workspace-divider:hover, .workspace-divider:focus-visible { background: #92b9dc40; border-radius: 3px; }
+.workspace-divider[hidden] { display: none; }
+.workspace-resizing { user-select: none; }
+
+.workspace-layout-options button { height: auto !important; min-height: 58px; white-space: normal; line-height: 1.4; }
+
+/* Keep the original task island structure and actions. */
+html[data-editor-layout="experimental"] #cueTaskIsland { border-radius: 10px; border-color: #303944; background: #10161ef5; transition: border-color .2s ease, box-shadow .2s ease; }
+html[data-editor-layout="experimental"] #cueTaskIsland .cue-history-row { padding: 8px 10px; gap: 6px; }
+html[data-editor-layout="experimental"] #cueTaskIsland #draftState { font-size: 11px; line-height: 1.5; color: #8b98a8; }
+html[data-editor-layout="experimental"] #cueTaskIsland .cue-history-row button { height: 30px; transition: background .15s ease, border-color .15s ease; }
+html[data-editor-layout="experimental"] #cueTaskIsland .translation-task-panel { padding: 11px 10px; background: #ffffff02; border-bottom: 1px solid #ffffff06; }
+html[data-editor-layout="experimental"] #cueTaskIsland .translation-task-panel > div:first-child strong { font-size: 12px; }
+html[data-editor-layout="experimental"] #cueTaskIsland .translation-task-summary { line-height: 1.5; }
+html[data-editor-layout="experimental"] #cueTaskIsland.task-active { border-color: #61537b; }
+.task-transition { animation: task-island-arrive .22s ease-out; }
+@keyframes task-island-arrive { from { opacity: .65; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { #cueTaskIsland.task-transition { animation: none; } }
+.speaker-popover { width: 320px; padding: 16px; display: grid; gap: 12px; }
+.speaker-popover > strong { font-size: 13px; color: #d3dce7; }
+.speaker-popover > p { margin: 0; font-size: 11px; line-height: 1.6; color: #8191a1; }
+.speaker-popover .speaker-name-grid { display: grid; gap: 8px; }
+.speaker-popover .speaker-name-grid label { display: flex; flex-direction: row; align-items: center; gap: 10px; }
+.speaker-popover .speaker-swatch { flex: 0 0 22px; width: 22px; height: 22px; border-radius: 6px; }
+.speaker-popover input { min-width: 0; width: 100%; height: 32px; }
+.speaker-popover > div:last-child { display: flex; justify-content: flex-end; gap: 8px; }
+
+html[data-editor-layout="experimental"] #cueTaskIsland.island-compact { width: max-content; max-width: calc(100% - 36px); }
+html[data-editor-layout="experimental"] #cueTaskIsland.island-compact #draftState { display: none; }
+html[data-editor-layout="experimental"] #cueTaskIsland.island-compact .cue-history-row { flex-wrap: nowrap; min-height: 0; border-top: 0; padding: 6px; }
+
+html[data-editor-layout="experimental"] #cueTaskIsland { box-sizing: border-box; }
+html[data-editor-layout="experimental"] #cueTaskIsland.task-active .translation-progress { position: relative; }
+html[data-editor-layout="experimental"] #cueTaskIsland.task-active .translation-progress::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 28%; background: linear-gradient(90deg, transparent, #bda6e666, transparent); animation: task-start-sweep 1.8s ease-in-out infinite; }
+@keyframes task-start-sweep { from { transform: translateX(-100%); } to { transform: translateX(460%); } }
+@media (prefers-reduced-motion: reduce) { #cueTaskIsland.task-active .translation-progress::after { animation: none; } }
+
+/* Expanded task details retain the original controls in a tighter card. */
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) { width: min(410px, calc(100% - 36px)); border-radius: 12px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel { grid-template-areas: "head close" "progress progress" "steps steps" "message message" "recovery recovery"; align-items: start; row-gap: 8px; column-gap: 10px; padding: 12px 12px 10px; background: transparent; border-bottom: 0; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel > div:first-child { align-items: center; min-height: 23px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #translationTaskTitle { font-size: 13px; font-weight: 600; color: #dde4ee; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #translationTaskPercent { font: 11px Consolas, monospace; color: #9facc0; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-progress { height: 3px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-summary,
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #translationTaskMessage { font-size: 11px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .cue-history-row { padding: 9px 12px 10px; gap: 6px; border-top-color: #ffffff09; justify-content: space-between; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #draftState { margin-bottom: 2px; font-size: 10px; color: #748496; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .cue-history-row > button,
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #checkpointControls { flex: 1 0 auto; text-align: center; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #checkpointControls > button { width: 100%; }
+
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel { min-height: 0; grid-template-areas: none; row-gap: 7px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel > * { grid-area: auto; grid-column: 1 / -1; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel > div:first-child { grid-column: 1; grid-row: 1; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel > .task-dismiss { grid-column: 2; grid-row: 1; }
+
+html[data-editor-layout="experimental"] #cueTaskIsland #draftState { display: none; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) { width: min(360px, calc(100% - 36px)); }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .translation-task-panel { padding: 9px 10px 8px; row-gap: 5px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .cue-history-row { padding: 6px 8px; gap: 5px; }
+
+/* Wide tool panes use compact horizontal tabs instead of stretched columns. */
+html[data-editor-layout="experimental"] #editorTools { container-type: inline-size; container-name: editor-tools; }
+@container editor-tools (min-width: 400px) {
+  html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs { display: flex; justify-content: flex-start; gap: 4px; padding: 5px 0; margin: 0; }
+  html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button { flex: 0 0 auto; width: auto; min-width: 68px; height: 34px; padding: 0 11px; flex-direction: row !important; gap: 7px; font-size: 12px; border-radius: 5px !important; white-space: nowrap; }
+  html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button[aria-selected="true"] { background: #ffffff08 !important; }
+  html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs button[aria-selected="true"]::after { left: 11px; right: 11px; bottom: -5px; height: 2px; }
+  html[data-editor-layout="experimental"] #editorTools .experimental-tool-tabs svg { width: 14px; height: 14px; flex-shrink: 0; }
+}
+
+.punctuation-rule-row { display: contents; }
+.wide-replace-label { display: none; }
+@container editor-tools (min-width: 520px) {
+  html[data-editor-layout="experimental"] #editorTools .tool-panel { padding-top: 12px; gap: 8px; }
+  html[data-editor-layout="experimental"] #editorTools .tool-panel input { height: 30px; font-size: 12px; }
+  html[data-editor-layout="experimental"] #editorTools .tool-panel button { height: 30px; padding-inline: 10px; font-size: 11px; white-space: nowrap; }
+  /* Navigation cards sit beside one another, each with its own count and arrows. */
+  html[data-editor-layout="experimental"] #editorTools .tool-locator-group { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+  html[data-editor-layout="experimental"] #editorTools .tool-locator-row { grid-template-columns: 1fr; gap: 10px; padding: 8px 12px; border-bottom: 0; border-right: 1px solid #29323c; }
+  html[data-editor-layout="experimental"] #editorTools .tool-locator-row:last-child { border-right: 0; }
+  html[data-editor-layout="experimental"] #editorTools .tool-locator-row .tool-button-pair { justify-content: flex-start; }
+  html[data-editor-layout="experimental"] #editorTools .tool-locator-row button { width: 28px; height: 26px; padding: 0; font-size: 20px; }
+  /* Search and replacement each get one horizontal working row. */
+  html[data-editor-layout="experimental"] #experimental-tool-panel-1 { grid-template-columns: 100px minmax(120px,1fr) 100px 88px; align-items: center; }
+  html[data-editor-layout="experimental"] #experimental-tool-panel-1 .tool-button-pair { display: contents; }
+  html[data-editor-layout="experimental"] #experimental-tool-panel-1 .search-scope-toggle { grid-column: 1; grid-row: 1; gap: 0; }
+  html[data-editor-layout="experimental"] #experimental-tool-panel-1 .search-scope-toggle button { padding: 0 8px; }
+  html[data-editor-layout="experimental"] #toolSearch { grid-column: 2; grid-row: 1; }
+  html[data-editor-layout="experimental"] #toolSearchNext { grid-column: 3; grid-row: 1; }
+  html[data-editor-layout="experimental"] #toolUndoReplace { grid-column: 4; grid-row: 1; }
+  html[data-editor-layout="experimental"] .wide-replace-label { display: block; grid-column: 1; grid-row: 2; font-size: 12px; color: #93a1b0; padding-left: 8px; }
+  html[data-editor-layout="experimental"] #toolReplace { grid-column: 2; grid-row: 2; }
+  html[data-editor-layout="experimental"] #toolReplaceCurrent { grid-column: 3; grid-row: 2; }
+  html[data-editor-layout="experimental"] #toolReplaceAll { grid-column: 4; grid-row: 2; }
+  html[data-editor-layout="experimental"] #toolSearchStatus { grid-column: 1 / -1; font-size: 10px; margin-top: 1px; }
+  /* Source and translation rules form two aligned rows. */
+  html[data-editor-layout="experimental"] #editorTools .punctuation-rule-row { display: grid; grid-template-columns: 74px minmax(0,1fr) minmax(0,1fr); gap: 10px; align-items: center; }
+  html[data-editor-layout="experimental"] .punctuation-rule-row > strong { font-size: 12px; font-weight: 500; color: #bac7d5; }
+  html[data-editor-layout="experimental"] #applyPunctuation { justify-self: end; width: auto; }
+  /* Timing settings use two groups with a compact action footer. */
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-popover { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-popover fieldset { padding: 7px 9px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-options { gap: 5px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-option { min-height: 28px; font-size: 11px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-smart-option { grid-template-columns: 1fr; gap: 6px 10px; padding: 6px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-mode-label { grid-column: 1 / -1; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-parameter { grid-template-columns: minmax(0,1fr) 44px 14px; gap: 4px; font-size: 10px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-popover input[type="number"] { height: 24px; font-size: 11px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-actions { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; gap: 6px; }
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-actions button { width: auto; min-width: 58px; height: 28px; }
+  html[data-editor-layout="experimental"] #autoSnapStatus { grid-column: 1; grid-row: 2; align-self: center; font-size: 10px; }
+  /* Help reads as side-by-side sections rather than a long sidebar. */
+  html[data-editor-layout="experimental"] #editorTools .experimental-help { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: start; }
+  html[data-editor-layout="experimental"] .experimental-help section { padding: 0 12px 0 0; border-bottom: 0; border-right: 1px solid #28313b; }
+  html[data-editor-layout="experimental"] .experimental-help section:last-child { border-right: 0; }
+  html[data-editor-layout="experimental"] .experimental-help p { font-size: 11px; line-height: 1.65; margin-top: 6px; }
+  html[data-editor-layout="experimental"] .experimental-help dl { gap: 6px 8px; font-size: 10px; }
+  html[data-editor-layout="experimental"] .experimental-help .tool-panel { padding-top: 0 !important; }
+  html[data-editor-layout="experimental"] .experimental-help .tool-panel span { font-size: 10px; min-height: 24px; }
+}
+@container editor-tools (min-width: 760px) {
+  html[data-editor-layout="experimental"] #editorTools .auto-snap-smart-option { grid-template-columns: 1fr 1fr; }
+  html[data-editor-layout="experimental"] #editorTools .experimental-help { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+
+@container editor-tools (min-width: 520px) { html[data-editor-layout="experimental"] #editorTools .auto-snap-popover input[type="radio"] { width: 14px; height: 14px; } }
+
+/* Subtitle view uses the same segmented control as the waveform mode. */
+html[data-editor-layout="experimental"] .pane-heading #cueSplitViewLabel {
+  display: flex; flex: 0 0 auto; min-width: 0; gap: 0;
+  border: 1px solid #2c3641; border-radius: 5px; overflow: hidden;
+}
+html[data-editor-layout="experimental"] .cue-view-switch select[hidden] { display: none; }
+html[data-editor-layout="experimental"] .cue-view-switch button {
+  height: 32px; padding: 0 10px; min-width: 48px; border: 0;
+  border-radius: 0 !important; border: 0 !important; background: transparent !important; color: #8795a3 !important;
+}
+html[data-editor-layout="experimental"] .cue-view-switch button[aria-pressed="true"] {
+  background: #253342 !important; color: #add1f4 !important;
+}
+html[data-editor-layout="experimental"] .cue-view-switch button:focus-visible {
+  outline: 2px solid #add1f4; outline-offset: -2px;
+}
+html[data-editor-layout="experimental"] .pane-live-controls .bilingual-toggle {
+  height: 34px; box-sizing: border-box; padding: 0 10px; gap: 7px;
+  border: 1px solid #343a43; border-radius: 5px; background: #272d36;
+  color: #d5dce6; font-size: 13px; cursor: pointer;
+}
+html[data-editor-layout="experimental"] .bilingual-toggle input {
+  width: 16px; height: 16px; margin: 0; accent-color: #9cc9ff;
+}
+
+/* Compact heading controls and checkpoint history. */
+html[data-editor-layout="experimental"] .pane-heading > div:first-child { align-items: center; gap: 12px; flex-shrink: 0; }
+html[data-editor-layout="experimental"] .pane-live-controls .bilingual-toggle { background: #11161c; border-color: #29313b; }
+html[data-editor-layout="experimental"] .cue-font-control { display: flex; align-items: center; gap: 0; height: 36px; border: 1px solid #293440; border-radius: 6px; overflow: hidden; background: #0e141b; }
+html[data-editor-layout="experimental"] .cue-font-control button { height: 34px; min-height: 0; min-width: 32px; padding: 0 8px; border: 0 !important; border-radius: 0 !important; background: transparent !important; color: #aebcca !important; }
+html[data-editor-layout="experimental"] .cue-font-control button:hover { background: #24303d !important; }
+html[data-editor-layout="experimental"] .cue-font-control output { display: flex; align-items: center; justify-content: center; height: 34px; min-width: 30px; text-align: center; font: 12px/1 Consolas, monospace; color: #d8e3ee; border-inline: 1px solid #25303b; }
+html[data-editor-layout="experimental"] .workspace-layout-menu { display: flex; align-items: center; gap: 8px; color: #788594; font-size: 12px; }
+html[data-editor-layout="experimental"] .workspace-layout-menu select { height: 36px; width: 116px; padding: 0 10px; border: 1px solid #333c48; border-radius: 5px; background: #191e26; color: #dce6f0; font-size: 13px; }
+html[data-editor-layout="experimental"] #cueTaskIsland #resetDocument[hidden] { display: none; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu { flex: 0 0 auto; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu > summary { height: 30px; box-sizing: border-box; padding: 0 8px; display: flex; align-items: center; border: 1px solid #353a45; border-radius: 6px; background: #171a20; color: #c9cdd5; font-size: 12px; cursor: pointer; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu > summary::marker { content: ""; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu .revision-popover { top: auto; bottom: calc(100% + 8px); right: 0; left: auto; width: min(400px, calc(100vw - 32px)); max-height: min(420px, 60vh); white-space: normal; }
+html[data-editor-layout="experimental"] #cueTaskIsland .revision-menu-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; }
+html[data-editor-layout="experimental"] #cueTaskIsland .revision-menu-row > span { flex: 1; min-width: 0; line-height: 1.5; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu.disabled > summary { opacity: .36; pointer-events: none; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .island-version-menu { flex: 1 1 0; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .island-version-menu > summary { justify-content: center; }
+
+html[data-editor-layout="experimental"] .command-project-zone .workspace-layout-menu { flex-direction: row !important; height: 36px; width: auto; white-space: nowrap; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu > summary { white-space: nowrap; min-width: 48px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .cue-history-row > button,
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) #checkpointControls,
+html[data-editor-layout="experimental"] #cueTaskIsland:not(.island-compact) .island-version-menu { flex: 1 1 0; min-width: 48px; }
+html[data-editor-layout="experimental"] #cueTaskIsland #revisionMenu { padding: 12px; background: #111820; color: #cbd5e1; z-index: 80; }
+html[data-editor-layout="experimental"] #cueTaskIsland #revisionMenu > .muted { display: block; color: #93a1b2; font-size: 12px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:has(.island-version-menu[open]) { overflow: visible; }
+
+
+/* The island expands horizontally; action buttons keep the same dimensions. */
+html[data-editor-layout="experimental"] .pane-live-controls .bilingual-toggle { height: 36px; }
+html[data-editor-layout="experimental"] #cueTaskIsland .cue-history-row { display: flex; flex-wrap: nowrap; justify-content: center; gap: 5px; }
+html[data-editor-layout="experimental"] #cueTaskIsland .cue-history-row > button,
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu,
+html[data-editor-layout="experimental"] #cueTaskIsland #checkpointControls > button { flex: 0 0 56px !important; width: 56px !important; min-width: 56px; height: 34px; box-sizing: border-box; }
+html[data-editor-layout="experimental"] #cueTaskIsland .island-version-menu > summary { width: 56px; height: 34px; min-width: 56px; justify-content: center; background: #171a20 !important; border-color: #353a45 !important; color: #c9cdd5 !important; }
+html[data-editor-layout="experimental"] #cueTaskIsland #checkpointControls { display: inline-flex; flex: 0 0 auto !important; width: auto; gap: 5px; min-width: 0; }
+html[data-editor-layout="experimental"] #cueTaskIsland:has(#checkpointNaming:not([hidden])) { width: min(560px, calc(100% - 36px)); }
+html[data-editor-layout="experimental"] #cueTaskIsland:has(#checkpointNaming:not([hidden])) #checkpointControls { flex: 1 1 auto !important; }
+html[data-editor-layout="experimental"] #cueTaskIsland #checkpointNaming { flex: 1 1 auto; min-width: 0; }
+html[data-editor-layout="experimental"] #cueTaskIsland #checkpointName { width: 100%; min-width: 0; height: 34px; padding: 0 10px; }
+html[data-editor-layout="experimental"] #cueTaskIsland:has(#checkpointNaming:not([hidden])) .translation-task-panel { width: 100%; }
+@media (max-width: 1100px) {
+  html[data-editor-layout="experimental"] #cueTaskIsland:has(#checkpointNaming:not([hidden])) .cue-history-row { flex-wrap: wrap; }
+  html[data-editor-layout="experimental"] #cueTaskIsland:has(#checkpointNaming:not([hidden])) #checkpointControls { flex: 1 0 100% !important; order: -1; }
+}

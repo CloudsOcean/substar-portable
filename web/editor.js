@@ -415,6 +415,8 @@
     try {
       await media.play();
     } catch (error) {
+      // Pausing or switching media cancels an outstanding play request normally.
+      if (error?.name === "AbortError") return;
       ordinaryError(`播放失败：${error?.message || "浏览器拒绝了播放请求"}`);
     }
   }
@@ -477,11 +479,13 @@
         || current.readyState >= HTMLMediaElement.HAVE_METADATA
         || Number.isFinite(current.duration)
       ) {
-        setMediaMessage();
+        setMediaMessage(`媒体播放中断：${current.error?.message || "媒体数据读取失败，请重新打开工程"}`);
         return;
       }
       scheduleMediaRetry();
     });
+    on("waiting", () => setMediaMessage("正在缓冲媒体…"));
+    on("playing", () => setMediaMessage());
     on("timeupdate", event => {
       updatePlaybackUi(event.currentTarget.currentTime, {
         playing:!event.currentTarget.paused,
@@ -868,8 +872,10 @@
   function renderRevisionMenu() {
     const menu = $("#revisionMenu");
     if (!menu) return;
-    const visible = state.revisions.filter((item, index) =>
-      index < 30 || item.is_latest || item.provenance?.operation === "checkpoint"
+    const checkpointsOnly = document.documentElement.dataset.editorLayout === "experimental";
+    const visible = state.revisions.filter((item, index) => checkpointsOnly
+      ? item.provenance?.operation === "checkpoint"
+      : index < 30 || item.is_latest || item.provenance?.operation === "checkpoint"
     );
     if (!visible.length) {
       menu.innerHTML = '<span class="muted">暂无人工暂存</span>';
@@ -887,7 +893,7 @@
       restore.disabled = item.is_latest;
       restore.textContent = item.is_latest ? "当前" : "恢复整版";
       row.append(label, restore);
-      if (!item.is_latest) {
+      if (!item.is_latest && !checkpointsOnly) {
         const scope = document.createElement("select");
         scope.setAttribute("aria-label", "选择性恢复范围");
         [["text", "仅文字"], ["timing", "仅时间"], ["translation", "仅译文"], ["style", "仅字幕样式"]].forEach(([value, text]) => {
@@ -919,6 +925,13 @@
   function syncRevisionControls() {
     $("#undoDocument").disabled = editorAiTaskLocksEditor() || state.historyNavigationPending || !state.undoRevisionIds.length;
     $("#redoDocument").disabled = editorAiTaskLocksEditor() || state.historyNavigationPending || !state.redoRevisionIds.length;
+    const versionsToggle = $("#checkpointVersionsToggle");
+    if (versionsToggle) {
+      const disabled = !state.projectId || editorAiTaskLocksEditor() || state.historyNavigationPending;
+      versionsToggle.setAttribute("aria-disabled", String(disabled));
+      $("#versionMenu").classList.toggle("disabled", disabled);
+      if (disabled) $("#versionMenu").open = false;
+    }
     $("#resetDocument").disabled = !state.revisions.some(item =>
       item.provenance?.operation === "checkpoint" && !item.is_latest
     );
@@ -1306,7 +1319,7 @@
     $("#toggleComplete").title = complete ? "完成只是属性；取消后仍是同一可编辑项目" : "标记后仍可继续编辑";
     $("#exportMenu").classList.toggle("disabled", !revision);
     $("#exportDocument").setAttribute("aria-disabled", String(!revision));
-    const textProject = state.view?.cue_views.some(cue => cue.source_text != null);
+    const textProject = state.view?.cue_views.some(cue => cue.source_text != null && cue.subtitle_track !== "overlay");
     $("#translateDocument").disabled = !revision || locked || textProject
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
     const editingCommandDisabled = !revision || locked || textProject;
@@ -1370,8 +1383,10 @@
     const referenceButton = $("#referenceManuscript");
     if (referenceButton) referenceButton.disabled = !revision || locked || textProject;
     const reviewMenu = $("#aiReviewMenu");
+    $("#detectSpeakers").setAttribute("aria-disabled", String($("#detectSpeakers").disabled));
     const reviewDisabled = !revision || locked || textProject;
     $("#cueSplitView").disabled = Boolean(textProject || locked);
+    syncCueViewSwitch();
     reviewMenu?.classList.toggle("disabled", reviewDisabled);
     if (reviewDisabled && reviewMenu?.open) reviewMenu.open = false;
     $("#aiReview")?.setAttribute("aria-disabled", String(reviewDisabled));
@@ -1781,6 +1796,7 @@
     $("#translationTargetLanguage").disabled = true;
     $("#translationMappingMode").disabled = true;
     $("#translationMenu").open = false;
+    renderTranslationTask({state:"queued", progress:0, message:"正在启动 AI 翻译…"});
     try {
       const task = await api(projectPath("/translation"), {
         method:"POST",
@@ -1932,13 +1948,16 @@
     // A target track is a real editable deliverable even when the model left
     // its text blank and marked it for manual completion.  Rendering based on
     // non-empty text hid exactly the recovery row the user needed to fill.
-    const hasTarget = Boolean(cue.target) && $("#showTranslations").checked;
+    const bilingualProject = state.view?.cue_views.some(item => item.subtitle_track !== "overlay" && item.target);
+    const hasTarget = (Boolean(cue.target) || (bilingualProject && cue.subtitle_track !== "overlay"))
+      && $("#showTranslations").checked;
     const sourceMetric = subtitleLengthMetric(projected.source, state.trackLanguages.source, "source");
     const targetMetric = subtitleLengthMetric(projected.target, state.trackLanguages.target, "target");
     const overLimit = sourceMetric.count > sourceMetric.limit
       || (Boolean(cue.target) && targetMetric.count > targetMetric.limit);
     row.className = `cue-row${hasTarget ? " has-target" : " source-only"}${cue.cue_id === state.activeCueId ? " current" : ""}${cue.state === "deleted" ? " deleted" : ""}${overLimit ? " over-limit" : ""}`;
     row.dataset.cueId = cue.cue_id;
+    row.classList.toggle("overlay-cue", cue.subtitle_track === "overlay");
     const noteCount = reviewEnabled ? reviewData.notes.filter(note => note.anchor.cue_id === cue.cue_id && note.status === "open").length : 0;
     if (noteCount) {row.dataset.reviewCount = String(noteCount); row.title = `${noteCount} 条未解决修订`;}
     if (cue.speaker) row.dataset.speaker = cue.speaker;
@@ -1946,15 +1965,15 @@
     meta.type = "button";
     meta.className = "cue-meta";
     meta.dataset.cueSelect = cue.cue_id;
-    meta.innerHTML = `<strong>${cue.index + 1}</strong><span class="cue-count"><span class="cue-count-line${metricClass(sourceMetric)}">原 ${sourceMetric.count}/${sourceMetric.limit}</span>${hasTarget ? `<span class="cue-count-line${metricClass(targetMetric)}">译 ${targetMetric.count}/${targetMetric.limit}</span>` : ""}</span>`;
+    meta.innerHTML = `<strong>${cue.index + 1}</strong><span class="cue-count"><span class="cue-count-line${metricClass(sourceMetric)}">${document.documentElement.dataset.editorLayout === "experimental" ? "原文" : "原"} ${sourceMetric.count}/${sourceMetric.limit}</span>${hasTarget ? `<span class="cue-count-line${metricClass(targetMetric)}">${document.documentElement.dataset.editorLayout === "experimental" ? "译文" : "译"} ${targetMetric.count}/${targetMetric.limit}</span>` : ""}</span>`;
     meta.title = `${timeLabel(cue.start)} → ${timeLabel(cue.end)}`;
     const content = document.createElement("div");
     content.className = "cue-content";
     const line = document.createElement("div");
     const virtual = state.cueSplitView === "virtual";
     line.className = `source-token-line${virtual ? " virtual-line" : ""}`;
-    const hasNext = index < state.view.cue_views.length - 1
-      && state.view.cue_views[index + 1].state === "active" && cue.state === "active";
+    const hasNext = cue.subtitle_track !== "overlay" && cue.state === "active"
+      && state.view.cue_views[index+1]?.state === "active" && state.view.cue_views[index+1]?.subtitle_track !== "overlay";
     const reviewGroupByToken = new Map();
     if (reviewEnabled) reviewData.notes.forEach(note => {
       if (note.status === "deleted" || note.anchor.track !== "source" || note.anchor.cue_id !== cue.cue_id || note.anchor_status === "needs_relocation") return;
@@ -2018,6 +2037,10 @@
         connector.title = "右键与下一 Cue 合并";
         connector.setAttribute("aria-label", "右键与下一 Cue 合并");
       }
+      if (atEnd && cue.state === "active" && document.documentElement.dataset.editorLayout === "experimental") {
+        connector.title = "双击编辑整行，点击外部保存；右键与下一 Cue 合并";
+        connector.setAttribute("aria-label", "双击编辑整行原文");
+      }
       line.append(connector);
     });
     content.append(line);
@@ -2029,7 +2052,10 @@
       source.value = cue.source_text;
       source.dataset.sourceEdit = cue.cue_id;
       source.dataset.originalSource = cue.source_text;
-      source.setAttribute("aria-label", "原文字幕");
+      source.setAttribute("aria-label", cue.subtitle_track === "overlay" ? "叠加字幕" : "原文字幕");
+      if (cue.subtitle_track === "overlay") {
+        const badge = document.createElement("span"); badge.className = "overlay-cue-label"; badge.textContent = "叠加字幕"; content.append(badge);
+      }
       source.disabled = cue.state !== "active" || editorAiTaskLocksEditor();
       content.append(source);
     }
@@ -2038,13 +2064,14 @@
       target.rows = 1;
       target.className = "translation-track";
       target.dataset.targetEdit = cue.cue_id;
-      target.dataset.originalTarget = cue.target.target_text;
+      target.dataset.originalTarget = cue.target?.target_text || "";
       target.dataset.projectedTarget = projected.target;
       target.dataset.rawEditing = "false";
-      target.title = cue.target.translation_status === "needs_review" ? (cue.target.issue_code === "source_changed" ? "原文已变更，请复核译文" : "译文质量或行长需要复核") : cue.target.translation_status === "manual_required" ? "译文需要人工处理" : "直接编辑译文";
-      target.dataset.translationStatus = cue.target.translation_status || "translated";
+      target.title = cue.target?.translation_status === "needs_review" ? (cue.target?.issue_code === "source_changed" ? "原文已变更，请复核译文" : "译文质量或行长需要复核") : cue.target?.translation_status === "manual_required" ? "译文需要人工处理" : "直接编辑译文";
+      target.dataset.translationStatus = cue.target?.translation_status || "manual_required";
       target.disabled = cue.state === "deleted" || editorAiTaskLocksEditor();
       target.value = projected.target;
+      if (!cue.target) target.placeholder = "\u8bd1\u6587";
       content.append(target);
     }
     const actions = document.createElement("div");
@@ -2055,7 +2082,7 @@
       <button type="button" class="danger" data-cue-action="purge" title="永久删除 Cue（可用全局撤销恢复）"><svg class="ui-icon"><use href="/assets/ui-icons.svg#trash"></use></svg></button>
       <button type="button" class="speaker${cue.speaker ? ` ${cue.speaker.replace("_", "-")}` : ""}" data-cue-action="speaker" title="${speakerLabel(cue.speaker)}；点击切换"><svg class="ui-icon"><use href="/assets/ui-icons.svg#user"></use></svg></button>`;
     row.append(meta, content, actions);
-    if (cue.source_text != null || editorAiTaskLocksEditor()) actions.querySelectorAll("button").forEach(node => {node.disabled = true;});
+    if ((cue.source_text != null && cue.subtitle_track !== "overlay") || editorAiTaskLocksEditor()) actions.querySelectorAll("button").forEach(node => {node.disabled = true;});
     return row;
   }
 
@@ -2080,11 +2107,13 @@
     document.querySelectorAll("[data-speaker-name]").forEach((input, index) => {
       input.value = names[input.dataset.speakerName] || `说话人 ${index + 1}`;
     });
-    $("#speakerDialog").classList.remove("hidden");
+    const menu = $("#speakerMenu");
+    if (menu) menu.open = true;
+    else $("#speakerDialog").classList.remove("hidden");
     requestAnimationFrame(() => $("[data-speaker-name]")?.focus());
   }
 
-  function closeSpeakerDialog() { $("#speakerDialog").classList.add("hidden"); }
+  function closeSpeakerDialog() { if ($("#speakerMenu")) $("#speakerMenu").open = false; $("#speakerDialog").classList.add("hidden"); }
 
   function renderCues({preservePage = false} = {}) {
     const list = $("#cueList");
@@ -2265,9 +2294,14 @@
 
   function renderPreview() {
     const cue = currentCue();
+    const overlayPreview=$("#previewOverlay");
+    const time=activeMedia()?.currentTime || 0;
+    if(overlayPreview) overlayPreview.textContent=(state.view?.cue_views || [])
+      .filter(item=>item.subtitle_track === "overlay" && item.state === "active" && item.start<=time && item.end>time)
+      .map(item=>item.source_text || "").join("\n");
     if (state.view?.cue_views.some(item => item.source_text != null)) {
       const time = activeMedia()?.currentTime || 0;
-      const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time);
+      const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time && (!overlayPreview || item.subtitle_track !== "overlay"));
       const lines = visible.map(projectedCueLines);
       const source = lines.map(line => line.source).filter(Boolean).join("\n");
       const target = lines.map(line => line.target).filter(Boolean).join("\n");
@@ -2802,27 +2836,91 @@
     }
   }
 
-  function beginInlineTokenEdit(button) {
+  function beginWholeCueEdit(connector, selectAll = false) {
     if (state.topologyOperationPending || editorAiTaskLocksEditor()) return;
-    const tokenId = button?.dataset.tokenId;
-    const token = state.view?.token_views.find(item => item.token_id === tokenId);
-    const label = button?.querySelector("b");
-    if (!token || !label || button.querySelector("input")) return;
-    const input = document.createElement("input");
-    input.className = "inline-token-editor";
-    input.value = token.text;
-    input.size = Math.max(3, [...token.text].length + 1);
-    // Edit within the token's existing box. A wider input can wrap the last
-    // words onto another line and make the cue jump again when editing ends.
-    const labelRect = label.getBoundingClientRect();
-    Object.assign(input.style, {boxSizing:"border-box", minWidth:"0", maxWidth:"none",
-      width:`${labelRect.width}px`, height:`${labelRect.height}px`, padding:"2px 0"});
-    label.replaceWith(input);
+    const cue = state.view?.cue_views.find(item => item.cue_id === connector.dataset.cueId);
+    const line = connector.closest(".source-token-line");
+    if (!cue || cue.state !== "active" || !line || line.querySelector("textarea")) return;
+    const original = cueSourceText(cue);
+    const input = document.createElement("textarea");
+    input.className = "translation-track whole-cue-editor";
+    input.setAttribute("aria-label", "整行编辑原文");
+    input.rows = 1;
+    input.value = original;
+    const resize = () => { input.style.height = "auto"; input.style.height = `${Math.max(38,input.scrollHeight)}px`; };
+    line.hidden = true;
+    line.after(input);
     let finished = false;
     const finish = async (commit = true) => {
       if (finished) return;
       finished = true;
       const text = input.value.trim();
+      if (!commit || !text || text === original) {
+        input.remove(); line.hidden = false; return;
+      }
+      input.disabled = true;
+      try {
+        const ids = cue.display_token_ids;
+        const provenance = manualProvenance("whole_cue_edit");
+        const operation = ids.length > 1
+          ? contract.mergeOperation(state.revision, ids, text, provenance)
+          : contract.replaceOperation(state.revision, ids[0], text, provenance);
+        const saved = await sendOperation(operation);
+        if (!saved && input.isConnected) {
+          finished = false; input.disabled = false; input.focus({preventScroll:true});
+        }
+      } catch (error) {
+        finished = false; input.disabled = false;
+        ordinaryError(`编辑尚未保存：${error.message}`);
+        input.focus({preventScroll:true});
+      }
+    };
+    input.addEventListener("input", resize);
+    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("keydown", event => {
+      event.stopPropagation();
+      if (event.key === "Escape") { event.preventDefault(); finish(false); }
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); input.blur(); }
+    });
+    input.addEventListener("click", event => event.stopPropagation());
+    resize(); input.focus({preventScroll:true});
+    input.setSelectionRange(selectAll ? 0 : input.value.length,input.value.length);
+  }
+
+  function beginInlineTokenEdit(button) {
+    if (state.topologyOperationPending || editorAiTaskLocksEditor()) return;
+    const tokenId = button?.dataset.tokenId;
+    const token = state.view?.token_views.find(item => item.token_id === tokenId);
+    const label = button?.querySelector("b");
+    if (!token || !label || button.querySelector("input,textarea")) return;
+    const input = document.createElement("textarea");
+    input.className = "inline-token-editor";
+    input.value = token.text;
+    input.rows = 1;
+    const content = button.closest(".cue-content");
+    const oldMaxWidth = button.style.maxWidth;
+    button.style.maxWidth = "100%";
+    const fontSize = parseFloat(getComputedStyle(label).fontSize) || state.fontSize || 18;
+    const resize = () => {
+      const available = Math.max(80, (content?.clientWidth || 400) - 16);
+      const desired = Math.max(64, [...input.value].reduce((n,char) => n + (char.charCodeAt(0)>255 ? 1 : .65),0)*fontSize + 28);
+      input.style.width = `${Math.min(available,desired)}px`;
+      input.style.height = "auto";
+      input.style.height = `${Math.max(36,input.scrollHeight)}px`;
+    };
+    Object.assign(input.style, {boxSizing:"border-box", minWidth:"0", maxWidth:"100%",
+      height:`${Math.max(36,fontSize*1.8)}px`, padding:"5px 12px 5px 8px"});
+    input.setAttribute("aria-label", "编辑词元文字");
+    input.addEventListener("input", resize);
+    resize();
+    label.replaceWith(input);
+    resize();
+    let finished = false;
+    const finish = async (commit = true) => {
+      if (finished) return;
+      finished = true;
+      const text = input.value.trim();
+      button.style.maxWidth = oldMaxWidth;
       if (!commit || !text || text === token.text) {
         // A cancelled/no-op edit does not change the document, so do not
         // rebuild the Cue list at all. Reusing the original label also avoids
@@ -3277,11 +3375,20 @@
   }
 
   async function insertTimelineCue(start, end) {
-    const text = await askText("新建人工 cue", "字幕文字（该 cue 没有词级时间）", "");
+    const experimental = document.documentElement.dataset.editorLayout === "experimental";
+    const text = experimental ? "新字幕" : await askText("新建人工 cue", "字幕文字（独立字幕，不含词级时间）", "");
     if (!text?.trim()) return;
-    await sendOperation(contract.insertCueOperation(
+    const beforeIds = new Set(state.view.cue_views.map(cue => cue.cue_id));
+    const saved = await sendOperation(contract.insertCueOperation(
       state.revision, start, end, text.trim(), manualProvenance("insert_cue")
     ));
+    if (!experimental || !saved) return;
+    const created = state.view.cue_views.find(cue => !beforeIds.has(cue.cue_id));
+    if (!created) return;
+    selectCue(created.cue_id);
+    const row = document.querySelector(`.cue-row[data-cue-id="${CSS.escape(created.cue_id)}"]`);
+    const connector = row?.querySelector(".token-connector.cue-end");
+    if (connector) beginWholeCueEdit(connector, true);
   }
 
   async function applyTimelineBoundary(intent) {
@@ -3333,7 +3440,8 @@
   }
 
   function initializeTimelineController() {
-    const factory = window.EditorTimeline;
+    const factory = document.documentElement.dataset.editorLayout === "experimental"
+      ? window.EditorMultilineTimeline : window.EditorTimeline;
     const canvas = $("#timelineCanvas");
     if (!factory?.createTimelineController || !canvas) return;
     state.timelineController?.destroy?.();
@@ -3363,7 +3471,8 @@
         if (!state.waveformCache) return api(projectPath(`/waveform?${query}`));
         return state.waveformCache.request({
           mediaId:state.projectId,
-          latestGroup:state.projectId,
+          latestGroup:document.documentElement.dataset.editorLayout === "experimental"
+            ? `${state.projectId}:row:${start}` : state.projectId,
           start, end, points,
           load:({signal}) => api(projectPath(`/waveform?${query}`), {signal})
         });
@@ -3639,7 +3748,6 @@
         return;
       }
       if (action === "purge") {
-        if (!window.confirm("永久删除这条 Cue？可通过顶部“撤销”恢复。")) return;
         await sendOperation(contract.purgeCueOperation(
           state.revision, [cueId], manualProvenance("purge_cue")
         ));
@@ -3665,7 +3773,7 @@
       if (action === "merge-next") {
         const index = state.view.cue_views.findIndex(item => item.cue_id === cueId);
         const next = state.view.cue_views[index + 1];
-        if (!next) return;
+        if (!next || cue.subtitle_track === "overlay" || next.subtitle_track === "overlay") return;
         if (cue.speaker && next.speaker && cue.speaker !== next.speaker
           && !window.confirm("两个 Cue 属于不同说话人。继续合并会清空合并后 Cue 的说话人标签，是否继续？")) return;
         state.activeCueId = cueId;
@@ -3724,7 +3832,7 @@
     state.timelineLayout = localStorage.getItem(`substar.editor.timeline-layout:${projectId}`) === "separated" ? "separated" : "composite";
     $("#timelineLayout").value = state.timelineLayout;
     state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
-    if ($("#cueSplitView")) $("#cueSplitView").value = state.cueSplitView;
+    if ($("#cueSplitView")) { $("#cueSplitView").value = state.cueSplitView; syncCueViewSwitch(); }
     renderProjectList();
     try {
       const project = state.projects.find(item => item.project_id === projectId);
@@ -3745,7 +3853,7 @@
       configureTranslationLanguageDefaults(taskInfo);
       state.mediaInfo = mediaInfo;
       configureMedia(mediaInfo?.kind);
-      const textProject = revision.document.cues.some(cue => cue.source_text != null);
+      const textProject = revision.document.cues.some(cue => cue.source_text != null && cue.mapping?.subtitle_track !== "overlay");
       if (textProject && !localStorage.getItem(`substar.editor.timeline-layout:${projectId}`)) {
         state.timelineLayout = "separated";
         $("#timelineLayout").value = "separated";
@@ -4269,7 +4377,7 @@
     if (isAdvancedTutorial()) {
       if (cues.length !== 34) return ordinaryError("进阶教程案例内容不完整，无法启动引导");
       state.cueSplitView = "virtual";
-      $("#cueSplitView").value = "virtual";
+      $("#cueSplitView").value = "virtual"; syncCueViewSwitch();
       state.tutorial = {active:true, step:0, focus:null, flags:{}, anchors:{}, positionTimer:0, centerCueId:null};
       $("#editorTutorialLayer").classList.remove("hidden");
       $("#editorTutorialLayer").setAttribute("aria-hidden", "false");
@@ -4285,7 +4393,7 @@
     );
     if (!resolved.ok) return ordinaryError(`教程案例缺少：${resolved.missing.join("、")}，无法启动引导`);
     state.cueSplitView = "virtual";
-    $("#cueSplitView").value = "virtual";
+    $("#cueSplitView").value = "virtual"; syncCueViewSwitch();
     const anchors = resolved.anchors;
     state.tutorial = {
       active:true, step:0, focus:null, flags:{}, anchors, positionTimer:0,
@@ -4425,7 +4533,9 @@
     const button = event.target.closest("[data-restore-revision]");
     if (!button || button.disabled || editorAiTaskLocksEditor()) return;
     $("#versionMenu").open = false;
-    restoreRevision(button.dataset.restoreRevision);
+    const checkpointNavigation = document.documentElement.dataset.editorLayout === "experimental";
+    restoreRevision(button.dataset.restoreRevision, checkpointNavigation
+      ? {navigation:"direct", undoRevisionIds:[], redoRevisionIds:[]} : {});
   });
   $("#confirmCheckpoint").onclick = createCheckpoint;
   $("#checkpointName").onkeydown = event => {
@@ -4475,7 +4585,17 @@
   $("#translateDocument").onclick = startTranslation;
   $("#dismissTaskPanel").onclick = cancelOrDismissTaskPanel;
   $("#dismissOrdinaryError").onclick = () => ordinaryError("");
-  $("#retryUnsaved").onclick = () => state.operationQueue?.retryFailed();
+  $("#retryUnsaved").onclick = async () => {
+    const queue = state.operationQueue;
+    if (!queue) return;
+    queue.retryFailed();
+    try {
+      await queue.flushAndWait();
+      ordinaryError("");
+    } catch (error) {
+      ordinaryError(`编辑尚未保存：${error.message}`);
+    }
+  };
   $("#downloadConflictCopy").onclick = async () => {
     try {
       const text = JSON.stringify({schema_version:"substar.editor-recovery.v1", project_id:state.projectId,
@@ -4744,8 +4864,16 @@
     updateTimelineHeight();
     state.timelineController?.redraw();
   };
+  function syncCueViewSwitch() {
+    const select = $("#cueSplitView");
+    document.querySelectorAll("[data-cue-view]").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.cueView === select.value));
+      button.disabled = select.disabled;
+    });
+  }
   $("#cueSplitView").onchange = event => {
     state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
+    syncCueViewSwitch();
     if (state.projectId) {
       localStorage.setItem(`substar.editor.cue-split-view:${state.projectId}`, state.cueSplitView);
     }
@@ -4978,7 +5106,11 @@
     if (connector && !connector.disabled) {
       event.preventDefault();
       event.stopPropagation();
-      insertTokenAfter(connector.dataset.cueId, connector.dataset.insertAfter);
+      if (document.documentElement.dataset.editorLayout === "experimental" && connector.classList.contains("cue-end")) {
+        beginWholeCueEdit(connector);
+      } else {
+        insertTokenAfter(connector.dataset.cueId, connector.dataset.insertAfter);
+      }
       return;
     }
     const cueMeta = event.target.closest("[data-cue-select]");
@@ -5219,7 +5351,15 @@
     closeInstructionDialog($("#instructionDialogValue").value);
   });
   $("#cancelInstruction").onclick = () => closeInstructionDialog(null);
-  $("#detectSpeakers").onclick = openSpeakerDialog;
+  $("#detectSpeakers").onclick = event => {
+    const menu = $("#speakerMenu");
+    if (menu) {
+      event.preventDefault();
+      if ($("#detectSpeakers").disabled) return;
+      if (menu.open) { closeSpeakerDialog(); return; }
+    }
+    openSpeakerDialog();
+  };
   $("#cancelSpeakerDialog").onclick = closeSpeakerDialog;
   $("#speakerDialogForm").addEventListener("submit", async event => {
     event.preventDefault();
@@ -5377,7 +5517,7 @@
 
   document.querySelectorAll("#editorTools > .tool-accordion").forEach(panel => {
     panel.addEventListener("toggle", () => {
-      if (!panel.open) return;
+      if (document.documentElement.dataset.editorLayout === "experimental" || !panel.open) return;
       document.querySelectorAll("#editorTools > .tool-accordion[open]").forEach(other => {
         if (other !== panel) other.open = false;
       });
@@ -5452,7 +5592,8 @@
     button.textContent = "启动修订";
     button.setAttribute("aria-pressed", "false");
     const selector = $("#timelineLayout").parentElement;
-    selector.before(button);
+    if (document.documentElement.dataset.editorLayout === "experimental") $(".pane-live-controls").prepend(button);
+    else selector.before(button);
     const panel = document.createElement("section");
     panel.className = "review-notes-panel hidden";
     panel.setAttribute("aria-label", "字幕修订");

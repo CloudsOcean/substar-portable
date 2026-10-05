@@ -251,7 +251,9 @@ def test_subtitle_project_round_trip_registers_one_new_project(tmp_path: Path) -
         # Previously imported packages did not carry a creation recipe.
         (imported / "project_creation.json").unlink()
         app.JOBS.clear()
-        app._restore_persisted_jobs(imported_id)
+        # Real packages with usable media enter tutorial registration here too.
+        with patch.object(app, "_editor_ready", return_value=True):
+            app._restore_persisted_jobs(imported_id)
         assert imported_id in app.JOBS
         result = app.delete_workbench_split_job(imported_id)
         assert result["deleted"] == imported_id

@@ -461,11 +461,6 @@ function syncRecognitionProfile() {
   );
   const recognitionBadge = $("#recognitionBadge");
   if (recognitionBadge) recognitionBadge.textContent = recognitionConfigured ? "已配置" : "未配置";
-  $("#recognitionProfileDescription").textContent = profile.available
-    ? profile.description
-    : `${profile.description} 缺少依赖：${(profile.missing_modules || []).join(", ")}`;
-  $("#transcriptAdapterLabel").textContent = profile.transcript_adapter;
-  $("#alignmentAdapterLabel").textContent = profile.alignment_adapter;
   $("#engineProviderTitle").textContent = engineProviderNames[profile.id] || profile.label;
   $$('[data-engine-profile]').forEach((button) => {
     button.classList.toggle("active", button.dataset.engineProfile === profile.id);
@@ -734,6 +729,13 @@ function populate(value) {
   for (const [name, current] of Object.entries(value)) {
     const input = form.elements[name];
     if (!input || name.endsWith("_key_set")) continue;
+    if (name === "qwen_cloud_model" && current
+      && ![...input.options].some((option) => option.value === current)) {
+      const option = document.createElement("option");
+      option.value = current;
+      option.textContent = `${current}（已保存）`;
+      input.append(option);
+    }
     if (input.type === "checkbox") input.checked = Boolean(current);
     else input.value = current ?? "";
   }
