@@ -11,6 +11,7 @@ from substar_core.contracts.editor_document import (
 from substar_core.domain import EditorDocument
 from substar_core.domain import ChangeKind, ChangeProvenance
 from substar_core.document_operations import apply_document_operation
+from substar_core.editor.application.reference_annotations import repair_deleted_reference_annotations
 from substar_core.segmentation.execution_planner import execution_block_plan
 from substar_core.language_layout import layout_tokens, editor_token_fragments
 from substar_core.segmentation.input_contract import _unpunctuated_word
@@ -701,5 +702,6 @@ def apply_reference_report(
             "retained_source_count": len(reference_report.get("retained_source", [])),
         },
     )
+    document = repair_deleted_reference_annotations(document)
     document = replace(document, changes=(*document.changes, audit))
     return validate_editor_document(document)

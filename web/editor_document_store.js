@@ -25,7 +25,10 @@
   function sourceBounds(document, displayIds) {
     const displayById = new Map(document.display_tokens.map(token => [token.token_id, token]));
     const sourceById = new Map(document.source_tokens.map(token => [token.token_id, token]));
-    const lineage = displayIds.flatMap(id => displayById.get(id)?.source_token_ids || [])
+    const lineage = displayIds.flatMap(id => {
+      const token = displayById.get(id);
+      return token?.state === "active" ? token.source_token_ids || [] : [];
+    })
       .map(id => sourceById.get(id)).filter(Boolean);
     if (!lineage.length) return null;
     return [
@@ -151,19 +154,24 @@
           ? (leftBounds[1] + rightBounds[0]) / 2
           : (Number(cue.start) + originalEnd) / 2;
         boundary = Math.min(Math.max(boundary, Number(cue.start) + 0.001), originalEnd - 0.001);
+        let leftEnd = boundary, rightStart = boundary;
+        if (leftBounds && rightBounds && leftBounds[1] <= rightBounds[0]) {
+          leftEnd = Math.min(Math.max(leftBounds[1], Number(cue.start) + 0.001), originalEnd - 0.001);
+          rightStart = Math.min(Math.max(rightBounds[0], leftEnd), originalEnd - 0.001);
+        }
         const copiedTarget = cue.target ? {
           ...clone(cue.target),
           provenance:{...provenance, operation:"split_cue_translation_copy"}
         } : null;
         cue.display_token_ids = leftIds;
-        cue.end = boundary;
+        cue.end = leftEnd;
         cue.target = copiedTarget;
         const right = {
           ...clone(cue),
           cue_id:String(payload.right_cue_id),
           index:Number(cue.index) + 1,
           display_token_ids:rightIds,
-          start:boundary,
+          start:rightStart,
           end:originalEnd,
           target:copiedTarget ? clone(copiedTarget) : null
         };

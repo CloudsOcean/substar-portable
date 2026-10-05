@@ -28,6 +28,7 @@ class DocumentOperationBatchRequest(BaseModel):
         "substar.editor-operation-batch.v1"
     )
     batch_id: str = Field(min_length=1)
+    preserve_user_actions: bool = False
     base: dict[str, Any]
     operations: list[DocumentOperationRequest] = Field(min_length=1, max_length=200)
 
@@ -101,6 +102,7 @@ def commit_operation_batch(
             base=payload.base,
             operations=[item.model_dump() for item in payload.operations],
             batch_id=payload.batch_id,
+            preserve_user_actions=payload.preserve_user_actions,
         )
     except (
         EmptyProjectError,
@@ -111,6 +113,13 @@ def commit_operation_batch(
         raise _translate_commit_error(exc, batch=True) from exc
     result = serialize_delta(commit.before, commit.after)
     result["batch_id"] = payload.batch_id
+    result["action_revisions"] = [
+        {"revision_id": r.revision_id, "revision_number": r.revision_number,
+         "parent_revision_id": r.parent_revision_id, "created_at": r.created_at,
+         "document_hash": r.document_hash, "complete": r.document.complete,
+         "provenance": r.provenance.to_dict()}
+        for r in commit.action_revisions
+    ]
     result["acknowledged_operation_ids"] = [
         item.operation_id for item in payload.operations
     ]

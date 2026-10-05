@@ -30,6 +30,19 @@ class SQLiteProjectRepository:
     def load_latest(self) -> DocumentRevision | None:
         return self.store.load_latest()
 
+    def operation_revisions(self, operations):
+        from substar_core.editor.application.editing_service import operation_hash
+        revisions = [self.store.find_receipt("operation:" + op["operation_id"], operation_hash(op)) for op in operations]
+        return sorted({r.revision_id: r for r in revisions if r}.values(), key=lambda r: r.revision_number)
+
+    def save_sequence(self, stages, *, expected_revision_id):
+        try:
+            return self.store.save_sequence(stages, expected_revision_id=expected_revision_id)
+        except ProjectConflictError as exc:
+            raise RepositoryConflictError(str(exc)) from exc
+        except ProjectStoreError as exc:
+            raise RepositoryError(str(exc)) from exc
+
     def save(
         self,
         document: EditorDocument,

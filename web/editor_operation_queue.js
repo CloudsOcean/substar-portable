@@ -7,9 +7,9 @@
 
   function createOperationQueue(options) {
     if (typeof options?.sendBatch !== "function") throw new Error("sendBatch is required");
-    const debounceMs = Math.max(0, Number(options.debounceMs ?? 60));
+    let debounceMs = Math.max(0, Number(options.debounceMs ?? 60));
     const maxBatchSize = Math.max(1, Number(options.maxBatchSize ?? 100));
-    const maxRetries = Math.max(0, Number(options.maxRetries ?? 3));
+    let maxRetries = Math.max(0, Number(options.maxRetries ?? 3));
     const pending = [];
     const failed = [];
     let inFlight = null;
@@ -61,7 +61,10 @@
     async function flush() {
       if (destroyed || inFlight || failed.length || !pending.length) return null;
       let count = maxBatchSize;
-      if (options.groupByUserAction && pending.length) {
+      if (pending[0]?.retryBatchId) {
+        count = 1;
+        while (count < pending.length && count < maxBatchSize && pending[count].retryBatchId === pending[0].retryBatchId) count++;
+      } else if (options.groupByUserAction && pending.length) {
         const action = entry => entry.operation.payload?.provenance?.metadata?.user_action_id || entry.operation.operation_id;
         const first = action(pending[0]);
         count = 1;
@@ -72,6 +75,7 @@
         schema_version:"substar.editor-operation-batch.v1",
         batch_id:`batch_${Date.now().toString(36)}_${(++sequence).toString(36)}`,
         base:options.base(),
+        preserve_user_actions:!!options.preserveUserActions,
         operations:entries.map(entry => entry.operation)
       };
       inFlight = {entries, batch};
@@ -84,12 +88,12 @@
       } catch (error) {
         const attempts = Math.max(...entries.map(entry => entry.attempts), 0);
         if (retryable(error) && attempts < maxRetries) {
-          entries.forEach(entry => { entry.attempts += 1; });
+          entries.forEach(entry => { entry.attempts += 1; entry.retryBatchId = batch.batch_id; });
           try { await options.onRetry?.(error, batch); } catch (_) { /* next send reports it */ }
           pending.unshift(...entries);
           retryDelay = Math.min(4000, 150 * (2 ** attempts));
         } else {
-          failed.push(...entries.map(entry => ({...entry, error})));
+          failed.push(...entries.map(entry => ({...entry, error, retryBatchId:batch.batch_id})));
           entries.forEach(entry => entry.reject(error));
           options.onFailed?.(error, entries.map(entry => entry.operation));
         }
@@ -125,6 +129,13 @@
 
     return Object.freeze({
       enqueue,
+      configure({debounceMs:delay, maxRetries:retries}) {
+        if (Number.isFinite(delay) && delay >= 0) debounceMs = delay;
+        if (Number.isInteger(retries) && retries >= 0) maxRetries = retries;
+        if (timer) clearTimeout(timer);
+        timer = null;
+        schedule();
+      },
       flushNow() {
         if (timer) clearTimeout(timer);
         timer = null;

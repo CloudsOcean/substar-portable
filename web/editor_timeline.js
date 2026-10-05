@@ -1146,6 +1146,7 @@
     separatedGeometry,
     rangesTouch,
     boundaryMode,
+    sharedBoundary,
     previewBoundaryChange,
     applyPreview,
     previewHasTimeChange,

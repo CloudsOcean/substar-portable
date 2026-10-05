@@ -68,6 +68,15 @@
                 ]
               }
             }
+          },
+          "sentence_id": {
+            "type": ["integer", "null"]
+          },
+          "sentence_start": {
+            "type": "boolean"
+          },
+          "sentence_end": {
+            "type": "boolean"
           }
         }
       }

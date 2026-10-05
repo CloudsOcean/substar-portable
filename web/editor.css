@@ -578,6 +578,8 @@ html[data-theme] #cueList .virtual-line .virtual-boundary.review-group-bridge { 
 .task-media-row input { flex:1; min-width:0; }
 .task-media-row button { flex:none; white-space:nowrap; }
 .task-info-popover { width: min(520px, calc(100vw - 28px)); display: grid; gap: 10px; padding: 14px; }
+.task-info-popover fieldset { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--border, #334155); border-radius: 8px; }
+.task-info-popover fieldset small { display: block; margin-top: 8px; line-height: 1.5; color: var(--muted, #94a3b8); }
 .task-info-popover > label, .task-info-grid label { display: grid; gap: 5px; }
 .task-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .task-info-grid .task-info-model { grid-column: 1 / -1; }

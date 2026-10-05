@@ -159,6 +159,8 @@ class ValidateDocumentRequest(BaseModel):
 
 
 class ProjectTaskInfoRequest(BaseModel):
+    autosave_delay_seconds: int = Field(default=1, ge=0, le=30, strict=True)
+    autosave_retry_count: int = Field(default=3, ge=0, le=5, strict=True)
     media_selection_token: str = Field(default="", max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
     language: Literal["Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"]
@@ -1178,7 +1180,10 @@ def set_project_task_info(
         if payload.media_selection_token:
             from substar_core.media_relink import resolve_selection
             selected = resolve_selection(project_id, payload.media_selection_token)
-        info = save_task_info(job_dir, project_id, payload.model_dump())
+        current_info = load_task_info(job_dir, project_id) if (job_dir / "task_info.json").exists() else {}
+        info = save_task_info(job_dir, project_id, {
+            **current_info, **payload.model_dump(exclude_unset=True)
+        })
         if selected:
             from substar_core.media_reference import write_reference
             write_reference(job_dir, selected)

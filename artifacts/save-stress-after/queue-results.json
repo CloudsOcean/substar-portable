@@ -1,0 +1,166 @@
+{
+  "project": "20261005_save_retest_1791175197",
+  "phases": [
+    {
+      "name": "burst_30_distinct_actions",
+      "count": 30,
+      "elapsed_ms": 10069.686,
+      "requests": 30,
+      "attempts": 30,
+      "peak_queue": 30,
+      "request_p50_ms": 327.5778999999998,
+      "request_p95_ms": 359.119,
+      "response_bytes": 40270,
+      "projection_delta_p95_ms": 7.1568999999999505,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    },
+    {
+      "name": "grouped_30_one_action",
+      "count": 30,
+      "elapsed_ms": 474.2991999999995,
+      "requests": 1,
+      "attempts": 1,
+      "peak_queue": 30,
+      "request_p50_ms": 318.27289999999994,
+      "request_p95_ms": 318.27289999999994,
+      "response_bytes": 18447,
+      "projection_delta_p95_ms": 6.159800000001269,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    },
+    {
+      "name": "slow_save_8",
+      "count": 8,
+      "elapsed_ms": 9648.5912,
+      "requests": 8,
+      "attempts": 8,
+      "peak_queue": 8,
+      "request_p50_ms": 344.9204000000027,
+      "request_p95_ms": 586.7972999999984,
+      "response_bytes": 10595,
+      "projection_delta_p95_ms": 113.46260000000075,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    },
+    {
+      "name": "lost_committed_response",
+      "count": 3,
+      "elapsed_ms": 1872.3989999999976,
+      "requests": 4,
+      "attempts": 4,
+      "peak_queue": 3,
+      "request_p50_ms": 372.8012999999992,
+      "request_p95_ms": 432.1899999999987,
+      "response_bytes": 4815,
+      "projection_delta_p95_ms": 393.47350000000006,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    },
+    {
+      "name": "offline_then_retry",
+      "count": 3,
+      "elapsed_ms": 2502.3719999999994,
+      "requests": 3,
+      "attempts": 7,
+      "peak_queue": 3,
+      "request_p50_ms": 347.90970000000016,
+      "request_p95_ms": 548.6754000000001,
+      "response_bytes": 4047,
+      "projection_delta_p95_ms": 111.09269999999742,
+      "mismatches": 0,
+      "first_failure": "injected offline",
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    }
+  ],
+  "errors": [],
+  "concurrent": {
+    "responses": [
+      {
+        "i": 0,
+        "status": 200,
+        "ms": 355.1847000000016,
+        "text": "发并发",
+        "id": "dsp_5118fb55266533dfb8ef4f75"
+      },
+      {
+        "i": 1,
+        "status": 409,
+        "id": "dsp_231f24338a0b6dbaea4c7a21",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      },
+      {
+        "i": 2,
+        "status": 409,
+        "id": "dsp_c08e106d5c648d7f2bd39154",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      },
+      {
+        "i": 3,
+        "status": 200,
+        "ms": 1153.274599999997,
+        "text": "的并发",
+        "id": "dsp_e180ad54cd08e485cf594cf6"
+      },
+      {
+        "i": 4,
+        "status": 409,
+        "id": "dsp_1caef9a260f2ab44d21adee1",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      },
+      {
+        "i": 5,
+        "status": 409,
+        "id": "dsp_838993396bec76c0e47692c3",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      },
+      {
+        "i": 6,
+        "status": 409,
+        "id": "dsp_2fec7c47ec5a80bb3b94fbb0",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      },
+      {
+        "i": 7,
+        "status": 409,
+        "id": "dsp_21f13ac21bb58e3c30b53667",
+        "error": "{\"detail\":{\"code\":\"stale_operation\",\"message\":\"编辑基于旧版本，请刷新后重试\",\"latest\":{\"document_id\":\"doc_d528b27a96fd8e8d871e17f3\",\"revision_id\":\"rev_07b07c574770fe69e8135532\",\"document_hash\":\"14f05b94af236013c35f357a547e6cb5ed1e04a9cf0eba2aa49b61728961a4ad\"}}}"
+      }
+    ],
+    "acknowledged_mismatches": 0
+  }
+}

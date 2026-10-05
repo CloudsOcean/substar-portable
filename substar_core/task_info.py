@@ -39,6 +39,12 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     if not 1 <= source_limit <= 500 or not 1 <= target_limit <= 500:
         raise ValueError("行长必须是 1–500 的整数")
     llm_provider_id = str(value.get("llm_provider_id") or "inherit").strip()
+    autosave_delay_seconds = value.get("autosave_delay_seconds", 1)
+    autosave_retry_count = value.get("autosave_retry_count", 3)
+    if type(autosave_delay_seconds) is not int or not 0 <= autosave_delay_seconds <= 30:
+        raise ValueError("自动保存等待时间必须是 0–30 的整数")
+    if type(autosave_retry_count) is not int or not 0 <= autosave_retry_count <= 5:
+        raise ValueError("保存失败重试次数必须是 0–5 的整数")
     if llm_provider_id != "inherit" and llm_provider_id not in MODEL_PROVIDER_IDS:
         raise ValueError("本任务使用的模型服务商无效")
     return {
@@ -49,6 +55,8 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
         "target_language_mode": target,
         "glossary_id": str(value.get("glossary_id") or "").strip()[:80],
         "llm_provider_id": llm_provider_id,
+        "autosave_delay_seconds": autosave_delay_seconds,
+        "autosave_retry_count": autosave_retry_count,
         "source_hard_limit": source_limit,
         "target_hard_limit": target_limit,
         "updated_at": str(value.get("updated_at") or datetime.now(timezone.utc).isoformat()),

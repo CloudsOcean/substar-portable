@@ -214,6 +214,11 @@ html[data-editor-layout="experimental"] .basic-waveform-module { grid-template-r
 
 /* Presets match the standard workspace, original editor, and large-preview reference. */
 html[data-editor-layout="experimental"] #editorWorkbench { position: relative; grid-template-columns: calc(var(--workspace-left, 54vw) * .63) calc(var(--workspace-left, 54vw) * .37) minmax(0, 1fr); grid-template-rows: minmax(0, var(--workspace-first, 58%)) minmax(0, 1fr); }
+html[data-editor-layout="experimental"] #editorWorkbench[data-workspace-layout="aligned-left"] { grid-template-columns: minmax(0, 1fr) calc(var(--workspace-left, 54vw) * .37) calc(var(--workspace-left, 54vw) * .63); }
+html[data-editor-layout="experimental"] [data-workspace-layout="aligned-left"] .editor-document-pane { grid-column: 1; grid-row: 1 / 3; }
+html[data-editor-layout="experimental"] [data-workspace-layout="aligned-left"] #editorTools { grid-column: 2; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="aligned-left"] .editor-preview-pane { grid-column: 3; grid-row: 1; }
+html[data-editor-layout="experimental"] [data-workspace-layout="aligned-left"] .cue-timeline-panel { grid-column: 2 / 4; grid-row: 2; }
 html[data-editor-layout="experimental"] #editorWorkbench[data-workspace-layout="classic"] { grid-template-columns: var(--workspace-tools) minmax(0, calc(var(--workspace-left) - var(--workspace-tools))) minmax(0, 1fr); }
 html[data-editor-layout="experimental"] [data-workspace-layout="classic"] #editorTools { grid-column: 1; grid-row: 1; }
 html[data-editor-layout="experimental"] [data-workspace-layout="classic"] .editor-document-pane { grid-column: 2; grid-row: 1; }

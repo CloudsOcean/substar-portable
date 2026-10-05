@@ -1,0 +1,27 @@
+{
+  "project": "20261005_save_stress_1791172788",
+  "phases": [
+    {
+      "name": "sustained_40_at_5_per_second",
+      "count": 40,
+      "elapsed_ms": 14947.0815,
+      "requests": 40,
+      "attempts": 40,
+      "peak_queue": 19,
+      "request_p50_ms": 357.4944999999989,
+      "request_p95_ms": 430.3028000000004,
+      "response_bytes": 53897,
+      "projection_delta_p95_ms": 7.91530000000057,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    }
+  ],
+  "errors": []
+}

@@ -348,3 +348,22 @@ console.log("editor_cue_list_view: ok");
   render([cue('a','tall'),cue('c','short')]);
   assert.equal(next.getBoundingClientRect().top,nextTop,'removed anchor falls back to surviving visible row');
 }
+
+{
+  const {container}=fixture();
+  const view=createCueListView({container,renderCue:row});
+  const render=cues=>view.render({cues,tokenById:new Map(),activeCueId:'a',preservePage:true});
+  render([cue('a','old'),cue('b','other')]);
+  const editing=container.children[0];
+  const input={value:'unconfirmed draft',selectionStart:2,selectionEnd:5,matches:s=>s==='.inline-token-editor'};
+  editing.contains=n=>n===input;document.activeElement=input;
+  render([cue('a','authoritative retokenized text'),cue('b','updated')]);
+  assert.equal(container.children[0],editing);
+  assert.equal(document.activeElement,input);
+  assert.equal(input.value,'unconfirmed draft');
+  assert.equal(input.selectionStart,2);
+  assert.equal(container.children[1].text,'updated');
+  document.activeElement=null;
+  render([cue('a','authoritative retokenized text'),cue('b','updated')]);
+  assert.equal(container.children[0].text,'authoritative retokenized text');
+}

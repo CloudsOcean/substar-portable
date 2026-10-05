@@ -80,7 +80,8 @@ test("dragging inside the end handle preserves the grab offset and moves a share
   canvas.closest=()=>panel;canvas.parentElement=track;
   let emitted;
   const media={duration:10,currentTime:0,paused:true,addEventListener() {},removeEventListener() {}};
-  const controller=createTimelineController({canvas,media,onOperation:(_name,intent)=>{emitted=intent;}});
+  const selection=require("../web/editor_cue_selection.js").createSelection();
+  const controller=createTimelineController({canvas,media,selection,onOperation:(_name,intent)=>{emitted=intent;}});
   controller.setView({cue_views:[
     {cue_id:"a",index:0,start:1,end:3,state:"active",source_text:"a"},
     {cue_id:"b",index:1,start:3,end:5,state:"active",source_text:"b"}
@@ -94,6 +95,31 @@ test("dragging inside the end handle preserves the grab offset and moves a share
   assert.deepEqual(emitted.changes,[
     {cue_id:"a",edge:"end",time:3.2},{cue_id:"b",edge:"start",time:3.2}
   ]);
+  // Clicking the shared boundary restores the persistent yellow single mode.
+  row.listeners.click(pointer(314));
+  row.listeners.pointermove(pointer(294));
+  row.listeners.pointermove({...pointer(302),clientY:80});
+  row.listeners.pointermove({...pointer(330),clientY:44});
+  row.listeners.click({...pointer(330),clientY:44});
+  row.listeners.pointerdown(pointer(294));
+  row.listeners.pointermove(pointer(274));
+  row.listeners.pointerup(pointer(274));
+  assert.equal(emitted.mode,"single");
+  assert.deepEqual(emitted.changes,[{cue_id:"a",edge:"end",time:2.8}]);
+  // Consume the browser click following a completed drag, then switch back.
+  row.listeners.click(pointer(274));
+  row.listeners.click(pointer(300));
+  row.listeners.pointerdown(pointer(294));
+  row.listeners.pointermove(pointer(314));
+  row.listeners.pointerup(pointer(314));
+  assert.equal(emitted.mode,"shared");
+  assert.equal(emitted.changes.length,2);
+  row.listeners.click(pointer(314));
+  row.listeners.pointerdown({...pointer(294),shiftKey:true});
+  row.listeners.pointermove({...pointer(274),shiftKey:true});
+  row.listeners.pointerup({...pointer(274),shiftKey:true});
+  assert.equal(emitted.mode,"single");
+  assert.equal(emitted.changes.length,1);
   row.listeners.contextmenu(pointer(50));
   assert.equal(emitted.type,"create_manual_cue");
   assert.equal(emitted.start,.5);
@@ -101,7 +127,48 @@ test("dragging inside the end handle preserves the grab offset and moves a share
   assert.equal(emitted.overlay,undefined);
   row.listeners.contextmenu(pointer(150));
   assert.equal(emitted.type,"manual_cue_occupied");
+  // Modifier clicks share the list selection without starting a move or seeking.
+  row.listeners.click(pointer(274)); // consume the last boundary drag click
+  const choose=(x,modifiers={})=>{
+    const event={...pointer(x),...modifiers};
+    row.listeners.pointerdown(event);row.listeners.pointerup(event);row.listeners.click(event);
+  };
+  choose(150);
+  assert.deepEqual([...selection.ids],["a"]);
+  const seekTime=media.currentTime;
+  choose(450,{ctrlKey:true});
+  assert.deepEqual(controller.getState().selected_cue_ids,["a","b"]);
+  assert.equal(media.currentTime,seekTime);
+  choose(150,{ctrlKey:true});
+  assert.deepEqual([...selection.ids],["b"]);
+  choose(450,{shiftKey:true});
+  assert.deepEqual([...selection.ids],["a","b"]);
+  // A list-side change uses the same selection, including its range anchor.
+  selection.select("b",["a","b"]);
+  controller.redraw();
+  assert.deepEqual(controller.getState().selected_cue_ids,["b"]);
+  choose(150,{shiftKey:true});
+  assert.deepEqual([...selection.ids],["a","b"]);
+  nodes.find(node=>node.textContent==="基础").onclick();
+  assert.deepEqual(controller.getState().selected_cue_ids,["a","b"]);
+  nodes.find(node=>node.textContent==="多行").onclick();
+  assert.deepEqual(controller.getState().selected_cue_ids,["a","b"]);
   media.duration=30;
+  controller.setView({cue_views:[
+    {cue_id:"a",start:1,end:3,state:"active"},
+    {cue_id:"b",start:3,end:5,state:"active"},
+    {cue_id:"c",start:11,end:14,state:"active"}
+  ]});
+  const secondRow=nodes.filter(node=>node.className==="multiline-waveform-row").at(-2);
+  const crossRow={...pointer(150),shiftKey:true};
+  secondRow.listeners.pointerdown(crossRow);secondRow.listeners.pointerup(crossRow);secondRow.listeners.click(crossRow);
+  assert.deepEqual(controller.getState().selected_cue_ids,["b","c"]);
+  nodes.find(node=>node.textContent==="基础").onclick();
+  const basicRow=nodes.filter(node=>node.className==="multiline-waveform-row").at(-2);
+  const toggle={...pointer(200),ctrlKey:true};
+  basicRow.listeners.pointerdown(toggle);basicRow.listeners.pointerup(toggle);basicRow.listeners.click(toggle);
+  assert.deepEqual(controller.getState().selected_cue_ids,["b"]);
+  nodes.find(node=>node.textContent==="多行").onclick();
   controller.setView({cue_views:[]});
   const viewport=nodes.find(node=>node.className==="multiline-waveform-viewport");
   nodes.find(node=>node.textContent==="基础").onclick();

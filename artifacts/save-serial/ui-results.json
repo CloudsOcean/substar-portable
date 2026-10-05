@@ -1,0 +1,17 @@
+{
+  "draftAfterDelayedAck": {
+    "preserved": true,
+    "focused": true,
+    "text": "年不应提前提交",
+    "selection": [
+      7,
+      7
+    ],
+    "requests": 1
+  },
+  "cancelDraftNotCommitted": true,
+  "twoEditsOneRequest": true,
+  "independentUndoRedo": true,
+  "offlineReloadRecovered": true,
+  "networkAndInstrumentationRestored": true
+}

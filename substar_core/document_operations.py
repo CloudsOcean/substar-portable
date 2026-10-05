@@ -115,6 +115,7 @@ def _source_bounds(
     lineage = [
         sources[source_id]
         for display_id in display_ids
+        if displays[display_id].state is EntityState.ACTIVE
         for source_id in displays[display_id].source_token_ids
     ]
     if not lineage:
@@ -225,6 +226,11 @@ def _replace(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
     if expected is not None and tokens[token_id].text != expected:
         raise DocumentOperationError("replacement precondition failed: source text changed")
     provenance = _provenance(operation, "replace")
+    if provenance.kind is ChangeKind.MANUAL and provenance.operation in {"inline_replace", "whole_cue_edit"}:
+        from substar_core.editor.application.text_retiming import edit_timed_text
+        cue = next(c for c in document.cues if token_id in c.display_token_ids)
+        if cue.mapping.get("subtitle_track") != "overlay":
+            return edit_timed_text(document, cue, (token_id,), text, provenance, operation["operation_id"])
     updated = replace(tokens[token_id], text=text, provenance=provenance)
     display_tokens = tuple(
         updated if token.token_id == token_id else token
@@ -716,6 +722,9 @@ def _merge(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocu
             raise DocumentOperationError("merge tokens must be contiguous and ordered")
     selected = [tokens[value] for value in ids]
     provenance = _provenance(operation, "merge")
+    if provenance.kind is ChangeKind.MANUAL and provenance.operation == "whole_cue_edit" and cue.mapping.get("subtitle_track") != "overlay":
+        from substar_core.editor.application.text_retiming import edit_timed_text
+        return edit_timed_text(document, cue, ids, str(payload.get("text", "")).strip(), provenance, operation["operation_id"])
     merged = DisplayToken(
         token_id=stable_id(
             "dsp",
@@ -968,6 +977,12 @@ def _split_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Editor
     else:
         boundary = (cue.start + cue.end) / 2
     boundary = min(max(boundary, cue.start + 0.001), cue.end - 0.001)
+    # A pause belongs to neither cue. Only overlapping/unknown envelopes need
+    # a shared fallback boundary; preserve independently timed speech edges.
+    left_end = right_start = boundary
+    if left_bounds and right_bounds and left_bounds[1] <= right_bounds[0]:
+        left_end = min(max(left_bounds[1], cue.start + 0.001), cue.end - 0.001)
+        right_start = min(max(right_bounds[0], left_end), cue.end - 0.001)
     provenance = _provenance(operation, "split_cue")
     copied_target = (
         _copy_translation_for_split(
@@ -982,7 +997,7 @@ def _split_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Editor
     left = replace(
         cue,
         display_token_ids=left_ids,
-        end=boundary,
+        end=left_end,
         target=copied_target,
     )
     requested_right_id = str(payload.get("right_cue_id", "")).strip()
@@ -999,7 +1014,7 @@ def _split_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Editor
         cue_id=requested_right_id,
         index=cue.index + 1,
         display_token_ids=right_ids,
-        start=boundary,
+        start=right_start,
         end=cue.end,
         target=copied_target,
         speaker=cue.speaker,
@@ -1181,7 +1196,10 @@ _APPLIERS = {
 
 
 def apply_document_batch(document: EditorDocument, operations: list[Mapping[str, Any]]) -> EditorDocument:
-    if not all(op.get("type") == "replace" for op in operations):
+    if not all(op.get("type") == "replace" for op in operations) or any(
+        op.get("payload", {}).get("provenance", {}).get("operation") in {"inline_replace", "whole_cue_edit"}
+        for op in operations
+    ):
         for operation in operations:
             document = apply_document_operation(document, operation)
         return document

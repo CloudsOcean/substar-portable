@@ -27,6 +27,63 @@ def _asr_units(*texts: str) -> list[dict[str, object]]:
     ]
 
 
+def test_unspoken_parenthetical_annotation_removes_both_brackets_and_keeps_stop():
+    script = "他就是德王奥托一世（Otto I）。公元962年2月。"
+    material, breaks, report = materialize_reference_script(
+        script, _asr_units("他就是德王奥托一世。", "公元962年2月。"), "，。", "zh")
+    document = build_reference_script_document(material, source_asset_id="annotation",
+        display_breaks=breaks, reference_report=report)
+    active = "".join(t.text for t in document.display_tokens if t.state.value == "active")
+    assert active == "他就是德王奥托一世。公元962年2月。"
+    hidden = "".join(t.text for t in document.display_tokens if t.state.value == "deleted")
+    assert hidden == "（OttoI）"
+    assert len(document.cues) == 2
+    assert any(item.get("reason") == "unspoken_annotation_punctuation"
+               for item in report["boundary_reconciliations"])
+    from substar_core.editor.application.reference_annotations import repair_deleted_reference_annotations
+    assert repair_deleted_reference_annotations(document) == document
+
+
+def test_deleted_annotation_boundary_preserves_pause_and_keeps_note_on_left():
+    material, breaks, report = materialize_reference_script(
+        "划分成行政区（wilaya）。分别是西部和东部。",
+        [{"index": 0, "text": "划分成行政区。", "start": 0, "end": 2},
+         {"index": 1, "text": "分别是西部和东部。", "start": 2.6, "end": 5}], "。", "zh")
+    document = build_reference_script_document(material, source_asset_id="annotation-gap",
+        display_breaks=breaks, reference_report=report)
+    assert len(document.cues) == 2
+    assert document.cues[0].end == 2
+    assert document.cues[1].start == 2.6
+    tokens = {t.token_id: t for t in document.display_tokens}
+    assert any(tokens[tid].state.value == "deleted" for tid in document.cues[0].display_token_ids)
+    assert "".join(tokens[tid].text for tid in document.cues[1].display_token_ids) == "分别是西部和东部。"
+
+
+def test_unmatched_non_annotation_text_does_not_gain_a_trusted_boundary():
+    material, breaks, report = materialize_reference_script(
+        "划分成行政区 unrelated。分别是西部和东部。",
+        _asr_units("划分成行政区", "分别是西部和东部"), "。", "zh")
+    assert not any(item.get("reason") == "unspoken_annotation_punctuation"
+                   for item in report["boundary_reconciliations"])
+
+
+def test_annotation_internal_period_does_not_split_spoken_sentence():
+    material, breaks, report = materialize_reference_script(
+        "这里是行政区（Mr. Unknown）分别是西部和东部。",
+        _asr_units("这里是行政区", "分别是西部和东部"), ".。", "zh")
+    assert breaks == []
+
+
+def test_spoken_parenthetical_content_keeps_brackets():
+    script = "他就是奥托（Otto）。"
+    material, breaks, report = materialize_reference_script(
+        script, _asr_units("他就是奥托", "Otto。"), "。", "zh")
+    document = build_reference_script_document(material, source_asset_id="spoken-annotation",
+        display_breaks=breaks, reference_report=report)
+    active = "".join(t.text for t in document.display_tokens if t.state.value == "active")
+    assert "（Otto）" in active
+
+
 def test_reference_tokenizer_covers_supported_unicode_languages() -> None:
     assert extract_reference_text("これはテストです。".encode(), "reference.txt")
     assert extract_reference_text("자막을 확인합니다.".encode(), "reference.txt")

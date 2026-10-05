@@ -1,0 +1,48 @@
+{
+  "project": "20261005_save_retest_1791175197",
+  "phases": [
+    {
+      "name": "sustained_40_at_5_per_second",
+      "count": 40,
+      "elapsed_ms": 8895.2866,
+      "requests": 14,
+      "attempts": 14,
+      "peak_queue": 9,
+      "request_p50_ms": 521.4081999999999,
+      "request_p95_ms": 741.9775,
+      "response_bytes": 61780,
+      "projection_delta_p95_ms": 7.279400000000351,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    },
+    {
+      "name": "human_12_at_600ms",
+      "count": 12,
+      "elapsed_ms": 7328.072499999998,
+      "requests": 8,
+      "attempts": 8,
+      "peak_queue": 4,
+      "request_p50_ms": 444.53349999999955,
+      "request_p95_ms": 910.0956999999999,
+      "response_bytes": 18729,
+      "projection_delta_p95_ms": 130.20820000000094,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    }
+  ],
+  "errors": []
+}

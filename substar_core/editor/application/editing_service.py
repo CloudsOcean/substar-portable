@@ -44,6 +44,7 @@ class StaleOperationError(RuntimeError):
 class OperationCommit:
     before: DocumentRevision
     after: DocumentRevision
+    action_revisions: tuple[DocumentRevision, ...] = ()
 
 
 class EditingService:
@@ -112,6 +113,7 @@ class EditingService:
         base: Mapping[str, Any],
         operations: list[Mapping[str, Any]],
         batch_id: str,
+        preserve_user_actions: bool = False,
     ) -> OperationCommit:
         if not operations:
             raise InvalidEditorOperationError("operation batch cannot be empty")
@@ -128,7 +130,7 @@ class EditingService:
             except RepositoryError as exc:
                 raise EditorPersistenceError(str(exc)) from exc
             if committed is not None:
-                return OperationCommit(before=committed, after=committed)
+                return OperationCommit(before=committed, after=committed, action_revisions=tuple(repository.operation_revisions(operations)) if preserve_user_actions else ())
         latest = repository.load_latest()
         if latest is None:
             raise EmptyProjectError("project has no document revision")
@@ -169,6 +171,28 @@ class EditingService:
             },
         )
         try:
+            if preserve_user_actions:
+                groups = []
+                for op in operations:
+                    action = op.get("payload", {}).get("provenance", {}).get("metadata", {}).get("user_action_id") or op["operation_id"]
+                    if groups and groups[-1][0] == action:
+                        groups[-1][1].append(op)
+                    else:
+                        groups.append((action, [op]))
+                if len(groups) > 1:
+                    stages = []
+                    current = latest.document
+                    for action, items in groups:
+                        current = apply_document_batch(current, items)
+                        stages.append((current, ChangeProvenance(
+                            kind=ChangeKind.MANUAL, operation="operation_batch", actor="editor",
+                            metadata={"batch_id": batch_id, "user_action_id": action,
+                                      "user_action": items[0]["type"] if len(items) == 1 else "batch_edit",
+                                      "operation_ids": [op["operation_id"] for op in items],
+                                      "operation_hashes": {op["operation_id"]: operation_hash(op) for op in items}}
+                        )))
+                    revisions = repository.save_sequence(stages, expected_revision_id=latest.revision_id)
+                    return OperationCommit(before=latest, after=revisions[-1], action_revisions=tuple(revisions))
             revision = repository.save(
                 document,
                 provenance=provenance,

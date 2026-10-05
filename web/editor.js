@@ -1034,6 +1034,34 @@
     await ensureOperationQueue().flushAndWait();
   }
 
+  let exitingEditor = false;
+  async function exitEditor(event) {
+    // Keep modified-link behavior (new tab/window) unchanged.
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0) return;
+    event.preventDefault();
+    if (exitingEditor) return;
+    exitingEditor = true;
+    const link = event.currentTarget;
+    let exitTimer;
+    link.textContent = "保存后退出…";
+    try {
+      if (state.revision) await Promise.race([
+        flushActiveEditorInput(),
+        new Promise((_, reject) => {
+          exitTimer = setTimeout(() => reject(new Error("保存响应较慢，当前页面仍可继续编辑")), 10000);
+        })
+      ]);
+      activeMedia()?.pause();
+      window.location.assign(link.href);
+    } catch (error) {
+      ordinaryError(`退出前保存未完成：${error.message}。编辑已保留，请重试保存。`);
+    } finally {
+      clearTimeout(exitTimer);
+      exitingEditor = false;
+      link.textContent = "退出";
+    }
+  }
+
   let idleRevisionCheck = false;
   async function syncIdleRevision() {
     if (idleRevisionCheck || !state.revision || state.operationPending || state.historyNavigationPending
@@ -1214,6 +1242,8 @@
     $("#taskInfoTargetLanguage").value = info.target_language_mode;
     $("#taskInfoSourceLimit").value = String(info.source_hard_limit);
     $("#taskInfoTargetLimit").value = String(info.target_hard_limit);
+    $("#taskInfoAutosaveDelay").value = String(info.autosave_delay_seconds ?? 1);
+    $("#taskInfoAutosaveRetries").value = String(info.autosave_retry_count ?? 3);
     renderProjectModelSelect();
     requestAnimationFrame(() => {
       $("#taskInfoName").focus();
@@ -1248,10 +1278,16 @@
           glossary_id:String(state.taskInfo?.glossary_id || ""),
           llm_provider_id:$("#taskInfoLlmProvider").value || "inherit",
           source_hard_limit:sourceLimit,
-          target_hard_limit:targetLimit
+          target_hard_limit:targetLimit,
+          autosave_delay_seconds:Number($("#taskInfoAutosaveDelay").value),
+          autosave_retry_count:Number($("#taskInfoAutosaveRetries").value)
         })
       });
       state.taskInfo = updated;
+      state.operationQueue?.configure({
+        debounceMs:(updated.autosave_delay_seconds ?? 1) * 1000,
+        maxRetries:updated.autosave_retry_count ?? 3
+      });
       if ($("#taskInfoMediaPath").dataset.selection) loadProjectMedia();
       applySubtitlePolicy(updated);
       configureTranslationLanguageDefaults(updated);
@@ -2626,10 +2662,11 @@
     let wasBusy = false;
     state.operationQueueProjectId = state.projectId;
     state.operationQueue = factory.createOperationQueue({
-      groupByUserAction:true,
-      debounceMs:60,
+      groupByUserAction:false,
+      preserveUserActions:true,
+      debounceMs:(state.taskInfo?.autosave_delay_seconds ?? 1) * 1000,
       maxBatchSize:100,
-      maxRetries:3,
+      maxRetries:state.taskInfo?.autosave_retry_count ?? 3,
       initialOperations,
       base() {
         const revision = state.documentStore?.acknowledged() || state.revision;
@@ -2640,7 +2677,6 @@
         };
       },
       async sendBatch(batch) {
-        const batchHasTopology = batch.operations.some(isTopologyOperation);
         try {
           const response = await api(queuePath("/operation-batches"), {
             method:"POST",
@@ -2658,9 +2694,8 @@
             const projection = state.documentStore?.acknowledge(
               revision, operationIds
             ) || revision;
-            if (batchHasTopology
-              && visibleRevisionSignature(optimisticProjection) === visibleRevisionSignature(projection)) {
-              // The optimistic topology projection already produced exactly
+            if (visibleRevisionSignature(optimisticProjection) === visibleRevisionSignature(projection)) {
+              // The optimistic projection already produced exactly
               // the server-visible result. Adopt authoritative metadata only:
               // touching the DOM here would create a second visual jump.
               adoptRevisionWithoutRender(projection);
@@ -2693,6 +2728,9 @@
               scheduleAuthoritativeResync("编辑已保存，界面状态正在自动恢复");
               console.error("Authoritative editor render failed", authoritativeRenderError);
             }
+          }
+          for (const boundary of response.action_revisions || []) {
+            if (boundary.revision_id !== revision.revision_id) recordCommittedRevision(boundary, boundary.provenance);
           }
           recordCommittedRevision(revision, {
             kind:"manual",
@@ -2792,6 +2830,7 @@
       }
       const projection = state.documentStore?.enqueue(operation);
       const saving = ensureOperationQueue().enqueue(operation);
+      if (topology) ensureOperationQueue().flushNow();
       saving.catch(() => {});
       if (projection) {
         setRevision(projection, {
@@ -2927,6 +2966,7 @@
         // the browser's focus-restoration scroll after the input disappears.
         label.textContent = token.text;
         input.replaceWith(label);
+        if (button.closest(".cue-row")?.dataset.deferredRefresh) renderCues({preservePage:true});
         return;
       }
       await sendOperation(contract.replaceOperation(
@@ -3481,7 +3521,12 @@
         if (error?.name === "AbortError") return;
         if (error?.status !== 404) ordinaryError(`波形读取失败：${error.message}`);
       },
-      onSelectCue(cueId) {
+      selection:state.cueSelection,
+      onSelectCue(cueId, _time, modifiers) {
+        if (modifiers) {
+          state.selectedTokenIds.clear(); state.selectionAnchorTokenId=null;
+          refreshTokenSelectionUi(); refreshCueSelection();
+        }
         syncPlaybackFollowAfterSeek();
         state.timelineSelectedCueId = cueId || null;
         if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false, explicitNavigation:true});
@@ -4521,6 +4566,7 @@
     $("#projectMenu").open = false;
     loadProject(button.dataset.projectId);
   });
+  $("#exitEditor").addEventListener("click", exitEditor);
   $("#saveCheckpoint").onclick = async () => {
     if (!$("#checkpointNaming").hidden) { setCheckpointNaming(false); return; }
     await flushActiveEditorInput();
@@ -4823,7 +4869,9 @@
       status.textContent = `已调整 ${intent.count} 条 Cue${forwardMode === "smart"
         ? `，智能起音 ${smartCount} 条` : ""}。`;
       observeEditorTutorialEvent("auto_snap", {smart:forwardMode === "smart", threshold:thresholdValue});
-      $("#autoSnapMenu").open = false;
+      if (document.documentElement.dataset.editorLayout !== "experimental") {
+        $("#autoSnapMenu").open = false;
+      }
     } catch (error) {
       status.textContent = `自动吸附失败：${error.message}`;
       ordinaryError(status.textContent);
@@ -5195,6 +5243,7 @@
   function cueOrder() { return (state.view?.cue_views || []).filter(c => c.state === "active").map(c => c.cue_id); }
   function refreshCueSelection() {
     const ids=state.cueSelection.ids;
+    state.timelineController?.redraw();
     $("#cueList").querySelectorAll(".cue-row[data-cue-id]").forEach(row => {
       row.classList.toggle("cue-selected", ids.has(row.dataset.cueId));
       row.setAttribute("aria-selected", String(ids.has(row.dataset.cueId)));

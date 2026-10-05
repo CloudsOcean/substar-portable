@@ -45,7 +45,7 @@ class _LexicalSpan:
 
 
 REFERENCE_TOKENIZER_VERSION = "unicode-script-v2"
-REFERENCE_MATCHER_VERSION = "local-reference-v5-phonetic"
+REFERENCE_MATCHER_VERSION = "local-reference-v6-annotation-boundaries"
 REFERENCE_BREAK_PRESETS = {
     "zh": "，。？！",
     "en": ".?!",
@@ -799,11 +799,37 @@ def materialize_reference_script(
         for index, token in enumerate(source[:-1])
         if _source_text_has_break(str(token["text"]), symbols, source_language)
     }
+    # A wholly unspoken parenthetical annotation still owns its external
+    # punctuation. Bind that boundary to the spoken token before the note,
+    # rather than dropping it because the annotation has no ASR counterpart.
+    annotation_anchors: dict[int, int] = {}
+    inserted_by_reference = {int(item["reference_index"]): item for item in insertions}
+    pairs = {"(": ")", "（": "）", "[": "]", "【": "】"}
+    chars = [(index, offset, char) for index, token in enumerate(reference)
+             for offset, char in enumerate(token.text)]
+    stack: list[int] = []
+    for position, (index, offset, char) in enumerate(chars):
+        if char in pairs:
+            stack.append(position)
+        elif stack and char == pairs[chars[stack[-1]][2]]:
+            opening = stack.pop()
+            lexical_indexes = {owner for owner, _, letter in chars[opening + 1:position]
+                               if letter.isalnum()}
+            if not lexical_indexes or not lexical_indexes.issubset(inserted_by_reference):
+                continue
+            tail = reference[index].text[offset + 1:]
+            if not any(symbol in tail for symbol in symbols):
+                continue
+            opening_index = chars[opening][0]
+            previous = next((owner for owner in range(opening_index, -1, -1)
+                             if owner in trusted_reference and owner in reference_to_source), None)
+            if previous is not None:
+                annotation_anchors[index] = reference_to_source[previous]
     resolved_reference_breaks: dict[int, int] = {}
-    boundary_reconciliations: list[dict[str, int]] = []
+    boundary_reconciliations: list[dict[str, Any]] = []
     for reference_index in reference_boundaries:
-        mapped = reference_to_source.get(reference_index)
-        if reference_index not in trusted_reference or mapped is None or mapped >= len(source) - 1:
+        mapped = annotation_anchors.get(reference_index, reference_to_source.get(reference_index))
+        if (reference_index not in trusted_reference and reference_index not in annotation_anchors) or mapped is None or mapped >= len(source) - 1:
             continue
         next_mapped = next(
             (
@@ -821,12 +847,14 @@ def materialize_reference_script(
         )
         resolved = nearby_asr[0] if nearby_asr else mapped
         resolved_reference_breaks[reference_index] = resolved
-        if resolved != mapped:
+        if resolved != mapped or reference_index in annotation_anchors:
             boundary_reconciliations.append(
                 {
                     "reference_index": reference_index,
                     "mapped_source_index": mapped,
                     "resolved_source_index": resolved,
+                    **({"reason": "unspoken_annotation_punctuation"}
+                       if reference_index in annotation_anchors else {}),
                 }
             )
 

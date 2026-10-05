@@ -1,0 +1,9 @@
+{
+  "pending_count": 30,
+  "enqueue_p95_ms": 7.8474999999998545,
+  "ack_replay_p95_ms": 38.2537999999995,
+  "ack_replay_max_ms": 42.75760000000082,
+  "ack_replay_total_ms": 601.3894000000009,
+  "build_view_ms": 133.6273000000001,
+  "final_pending": 0
+}

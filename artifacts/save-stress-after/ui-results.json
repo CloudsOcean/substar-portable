@@ -1,0 +1,10 @@
+{
+  "draft_preserved": false,
+  "draft_prematurely_committed": true,
+  "metrics": {
+    "result": {
+      "type": "string",
+      "value": "{\"requests\":[{\"ms\":5008.29999999702,\"status\":200},{\"ms\":5033.60000000149,\"status\":200}],\"longtasks\":[235,464,152,304],\"journal_count\":1}"
+    }
+  }
+}

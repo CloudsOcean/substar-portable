@@ -47,6 +47,26 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _batch_content_hash(document, cache):
+    """Reuse immutable entity encodings only within one atomic action batch."""
+    def entity(item):
+        key = id(item)
+        prior = cache.get(key)
+        if prior is None or prior[0] is not item:
+            prior = (item, _canonical_bytes(item.to_dict()))
+            cache[key] = prior
+        return prior[1]
+    parts = {
+        "schema_version": _canonical_bytes(document.schema_version),
+        "document_id": _canonical_bytes(document.document_id),
+        "presentation": entity(document.presentation),
+        "properties": entity(document.properties),
+    }
+    for key in ("source_tokens", "display_tokens", "cues", "groups", "changes"):
+        parts[key] = b"[" + b",".join(entity(item) for item in getattr(document, key)) + b"]"
+    return _sha256_bytes(b"{" + b",".join(_canonical_bytes(key) + b":" + parts[key] for key in sorted(parts)) + b"}")
+
+
 def _compress_json(value: Any) -> tuple[bytes, str]:
     encoded = _canonical_bytes(value)
     return zlib.compress(encoded, level=6), _sha256_bytes(encoded)
@@ -151,7 +171,7 @@ def _cue_patch(before: tuple[Any, ...], after: tuple[Any, ...]) -> dict[str, Any
             item.to_dict()
             for item in after
             if item.cue_id not in before_by_id
-            or without_index(before_by_id[item.cue_id]) != without_index(item)
+            or (before_by_id[item.cue_id] is not item and without_index(before_by_id[item.cue_id]) != without_index(item))
         ],
         "remove": [item_id for item_id in before_by_id if item_id not in after_by_id],
         "order_splice": order_splice,
@@ -590,11 +610,15 @@ class ProjectStore:
         provenance: ChangeProvenance,
         expected_revision_id: str | None = None,
         receipt: Mapping[str, Any] | None = None,
+        _connection=None,
+        _latest=None,
+        _hash_cache=None,
     ) -> DocumentRevision:
         self._marker()
         try:
-            connection = self._connect()
-            connection.execute("BEGIN IMMEDIATE")
+            connection = _connection or self._connect()
+            if _connection is None:
+                connection.execute("BEGIN IMMEDIATE")
             connection.execute("CREATE TABLE IF NOT EXISTS commit_receipts (receipt_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, revision_id TEXT NOT NULL, result_json TEXT NOT NULL)")
             if receipt is not None:
                 prior = connection.execute("SELECT * FROM commit_receipts WHERE receipt_id=?", (receipt["id"],)).fetchone()
@@ -618,7 +642,7 @@ class ProjectStore:
             current_document_id = document_id_row["value"] if document_id_row else ""
             if current_document_id not in ("", document.document_id):
                 raise ProjectStoreError("a project cannot change its document_id")
-            latest = (
+            latest = _latest or (
                 self._load_revision_with_connection(connection, latest_row)
                 if latest_row is not None
                 else None
@@ -636,6 +660,7 @@ class ProjectStore:
                 document=document,
                 parent_revision_id=latest_id,
                 provenance=provenance,
+                _content_hash=_batch_content_hash(document, _hash_cache) if _hash_cache is not None else None,
             )
             checkpoint = (
                 latest is None
@@ -686,27 +711,52 @@ class ProjectStore:
                     receipt["id"], receipt["hash"], revision.revision_id,
                     json.dumps(receipt.get("result", {}), ensure_ascii=False),
                 ))
-            connection.execute("COMMIT")
+            if _connection is None:
+                connection.execute("COMMIT")
         except ProjectConflictError:
-            if "connection" in locals():
+            if "connection" in locals() and _connection is None:
                 connection.execute("ROLLBACK")
             raise
         except ProjectStoreError:
-            if "connection" in locals():
+            if "connection" in locals() and _connection is None:
                 connection.execute("ROLLBACK")
             raise
         except sqlite3.Error as exc:
-            if "connection" in locals():
+            if "connection" in locals() and _connection is None:
                 try:
                     connection.execute("ROLLBACK")
                 except sqlite3.Error:
                     pass
             raise ProjectStoreError("project transaction failed") from exc
         finally:
-            if "connection" in locals():
+            if "connection" in locals() and _connection is None:
                 connection.close()
-        _cache_put(self.root, revision)
+        if _connection is None:
+            _cache_put(self.root, revision)
         return revision
+
+    def save_sequence(self, stages, *, expected_revision_id):
+        """Commit user-action revisions atomically within one network batch."""
+        revisions = []
+        hash_cache = {}
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                latest = None
+                for document, provenance in stages:
+                    latest = self.save(document, provenance=provenance,
+                        expected_revision_id=expected_revision_id,
+                        _connection=connection, _latest=latest, _hash_cache=hash_cache)
+                    revisions.append(latest)
+                    expected_revision_id = latest.revision_id
+                connection.execute("COMMIT")
+            except Exception:
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                raise
+        for revision in revisions:
+            _cache_put(self.root, revision)
+        return revisions
 
     def load_latest(self) -> DocumentRevision | None:
         self._marker()

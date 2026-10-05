@@ -1,0 +1,27 @@
+{
+  "project": "20261005_save_retest_1791175197",
+  "phases": [
+    {
+      "name": "sustained_40_at_5_per_second",
+      "count": 40,
+      "elapsed_ms": 17357.8121,
+      "requests": 40,
+      "attempts": 40,
+      "peak_queue": 22,
+      "request_p50_ms": 384.77919999999995,
+      "request_p95_ms": 480.90409999999974,
+      "response_bytes": 54143,
+      "projection_delta_p95_ms": 7.575199999999313,
+      "mismatches": 0,
+      "first_failure": null,
+      "final_state": {
+        "pending": 0,
+        "in_flight": 0,
+        "failed": 0,
+        "busy": false,
+        "hasUnsavedChanges": false
+      }
+    }
+  ],
+  "errors": []
+}

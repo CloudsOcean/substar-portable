@@ -257,7 +257,7 @@ def test_isolated_matching_subprocess_returns_shared_report():
                                          units('甲乙丙丁'), 'zh', Request()))
     assert result['edits'] == []
     assert result['insertions'][0]['text'] == '新'
-    assert result['report']['matcher_version'] == 'local-reference-v5-phonetic'
+    assert result['report']['matcher_version'] == 'local-reference-v6-annotation-boundaries'
 
 
 def test_editor_endpoint_commits_hidden_insertions_atomically():

@@ -761,8 +761,9 @@ class DocumentRevision:
         parent_revision_id: str | None,
         provenance: ChangeProvenance,
         created_at: str | None = None,
+        _content_hash: str | None = None,
     ) -> "DocumentRevision":
-        document_hash = document.content_hash()
+        document_hash = _content_hash or document.content_hash()
         revision_id = stable_id(
             "rev",
             {

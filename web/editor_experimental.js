@@ -1,9 +1,16 @@
 (() => {
   "use strict";
-  const experimental = new URLSearchParams(location.search).get("layout") === "experimental";
+  // This workspace is the production editor. Retain the internal CSS marker
+  // for compatibility with existing modules and saved workspace preferences.
+  const experimental = true;
   if (experimental) {
     document.documentElement.dataset.editorLayout = "experimental";
-    document.title = "Substar · 实验性字幕编辑器";
+    document.title = "Substar · 字幕编辑器";
+    const url = new URL(location.href);
+    if (url.searchParams.get("layout") === "experimental") {
+      url.searchParams.delete("layout");
+      history.replaceState(null, "", url);
+    }
   }
   function installWorkspaceLayouts() {
     const workbench = document.querySelector("#editorWorkbench");
@@ -11,25 +18,43 @@
     const tools = workbench.querySelector("#editorTools");
     const wave = workbench.querySelector(".cue-timeline-panel");
     const cue = workbench.querySelector(".editor-document-pane");
-    const presets = [["standard", "标准", "视频与工具并排，波形在下方"],
-      ["classic", "经典", "工具在左、字幕居中、预览在右，波形横贯底部"],
-      ["cinema", "大屏", "预览在左，工具与字幕在右，波形横贯底部"]];
+    const presets = [["standard", "对齐布局右", "字幕在右，左上视频与工具并排，左下波形"],
+      ["aligned-left", "对齐布局左", "字幕在左，右上工具与视频并排，右下波形"],
+      ["classic", "经典布局", "工具在左、字幕居中、预览在右，波形横贯底部"],
+      ["cinema", "大屏布局", "预览在左，工具与字幕在右，波形横贯底部"]];
     const key = "substar.editor.workspace-layouts-v3";
+    const initialSizes = {
+      standard: {left:54, first:39.42450055505476, second:56},
+      "aligned-left": {left:54, first:39.42450055505476, second:56},
+      classic: {left:62, first:78.2905982905983, second:56},
+      cinema: {left:54, first:12, second:66}
+    };
     let saved = {}; try { saved = JSON.parse(localStorage.getItem(key) || "{}"); } catch {}
     let preset = presets.some(([id]) => id === saved.preset) ? saved.preset : "standard";
     let sizes = saved.sizes || {};
+    const waveformModes = saved.waveformModes || {};
     const menu = document.createElement("label"); menu.className = "workspace-layout-menu";
     const caption = document.createElement("span"); caption.textContent = "工作区";
     const layoutSelect = document.createElement("select"); layoutSelect.id = "workspaceLayoutSelect";
     layoutSelect.setAttribute("aria-label", "工作区布局");
-    presets.forEach(([id, name]) => layoutSelect.add(new Option(`${name}布局`, id)));
+    presets.forEach(([id, name]) => layoutSelect.add(new Option(name, id)));
     layoutSelect.onchange = () => { preset = layoutSelect.value; apply(); persist(); };
     menu.append(caption, layoutSelect); document.querySelector("#taskInfoMenu").after(menu);
     document.querySelector("#revisionLabel").hidden = true;
-    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes})); } catch {} }
-    function config() { return sizes[preset] ||= {left:preset === "classic" ? 62 : 54, first:preset === "classic" ? 78 : preset === "cinema" ? 22 : 58, second:56}; }
+    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes, waveformModes})); } catch {} }
+    function config() { return sizes[preset] ||= {...initialSizes[preset]}; }
+    wave.addEventListener("workspace-waveform-mode-change", event => {
+      waveformModes[preset] = event.detail.mode;
+      wave.dataset.workspaceWaveformMode = event.detail.mode;
+      persist();
+    });
     function apply() {
       workbench.dataset.workspaceLayout = preset;
+      const waveformMode = waveformModes[preset] || (preset === "classic" || preset === "cinema" ? "basic" : "multiline");
+      if (wave.dataset.workspaceWaveformMode !== waveformMode) {
+        wave.dataset.workspaceWaveformMode = waveformMode;
+        wave.dispatchEvent(new CustomEvent("workspace-waveform-mode", {detail:{mode:waveformMode}}));
+      }
       const size = config(), width = workbench.clientWidth - 24;
       const maxUpper = 100 - 254 / Math.max(1, workbench.clientHeight - 24) * 100;
       if (preset === "cinema") size.second = Math.min(size.second, Math.max(28, maxUpper - size.first));
@@ -80,8 +105,8 @@
       if (kind === "width") {
         const minimum = preset === "classic" ? Math.max(180, Math.min(240, width*.125))+360 : 460;
         const rightMinimum = preset === "classic" ? 300 : 380;
-        size.left = clamp(origin.left+dx/width*100, Math.min(minimum/width*100,58), Math.min(72, (width-rightMinimum)/width*100));
-      } else if (preset === "standard") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-254/height*100));
+        size.left = clamp(origin.left+(preset === "aligned-left" ? -dx : dx)/width*100, Math.min(minimum/width*100,58), Math.min(72, (width-rightMinimum)/width*100));
+      } else if (preset === "standard" || preset === "aligned-left") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-254/height*100));
       else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-254/height*100));
       else {
         const delta = dy/height*100;
@@ -98,6 +123,9 @@
       if (preset === "standard") {
         place(handles[0], cueBox.left-8, box.top+8, 8, box.height-16);
         place(handles[1], box.left+8, waveBox.top-8, cueBox.left-box.left-16, 8);
+      } else if (preset === "aligned-left") {
+        place(handles[0], toolsBox.left-8, box.top+8, 8, box.height-16);
+        place(handles[1], waveBox.left, waveBox.top-8, waveBox.width, 8);
       } else if (preset === "classic") {
         place(handles[0], previewBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
         place(handles[1], box.left+8, waveBox.top-8, box.width-16, 8);
@@ -183,21 +211,6 @@
     menu.append(summary, form); button.replaceWith(menu);
   }
   document.addEventListener("DOMContentLoaded", () => {
-    const menu = document.querySelector("#projectMenu .project-popover");
-    const link = document.createElement("a");
-    link.className = "editor-command-link";
-    link.textContent = experimental ? "打开原布局" : "打开实验性布局";
-    link.target = "_blank";
-    link.rel = "noopener";
-    // Read the URL at click time so switching projects retains the current project.
-    link.addEventListener("click", () => {
-      const url = new URL(location.href);
-      if (experimental) url.searchParams.delete("layout");
-      else url.searchParams.set("layout", "experimental");
-      link.href = url.href;
-    });
-    link.href = location.href;
-    if (!experimental) menu.append(link);
     if (experimental) {
       document.querySelector("#taskInfo").textContent = "项目配置";
       document.querySelector("#taskInfoTitle").textContent = "项目配置";
@@ -258,6 +271,7 @@
       });
       function activate(index) {
         panels.forEach((panel, i) => {
+          if (i === index) panel.open = true;
           panel.classList.toggle("experimental-tool-active", i === index);
           buttons[i].setAttribute("aria-selected", String(i === index));
           buttons[i].tabIndex = i === index ? 0 : -1;

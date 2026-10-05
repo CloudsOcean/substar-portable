@@ -18,6 +18,10 @@ class ProjectRepository(Protocol):
 
     def load_latest(self) -> DocumentRevision | None: ...
 
+    def operation_revisions(self, operations: list[Mapping[str, Any]]) -> list[DocumentRevision]: ...
+
+    def save_sequence(self, stages: list[tuple[EditorDocument, ChangeProvenance]], *, expected_revision_id: str) -> list[DocumentRevision]: ...
+
     def save(
         self,
         document: EditorDocument,

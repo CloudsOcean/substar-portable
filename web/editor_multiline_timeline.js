@@ -1,9 +1,10 @@
 (function (root, factory) {
   const timeline = root.EditorTimeline || (typeof module === "object" ? require("./editor_timeline.js") : null);
-  const api = factory(timeline);
+  const selectionApi = root.EditorCueSelection || (typeof module === "object" ? require("./editor_cue_selection.js") : null);
+  const api = factory(timeline, selectionApi);
   if (typeof module === "object" && module.exports) module.exports = api;
   root.EditorMultilineTimeline = api;
-})(typeof globalThis === "object" ? globalThis : this, function (timeline) {
+})(typeof globalThis === "object" ? globalThis : this, function (timeline, selectionApi) {
   "use strict";
   const ROW_HEIGHT = 180;
   const ROW_GAP = 8;
@@ -100,6 +101,9 @@
     panel.prepend(toolbar, viewport);
     let view = null, cues = [], duration = 0, seconds = 10, rows = [];
     let active = null, selected = null, preview = null, drag = null;
+    const selection = options.selection || selectionApi.createSelection();
+    let selectionHandled = false;
+    let hover = null, boundaryOverride = null;
     let destroyed = false, following = true, frame = 0, playback = 0, generation = 0;
     let firstActive = true, suppressClick = false, mode = "multiline";
     function visibleStart() { return mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) * seconds : viewport.scrollTop / (ROW_HEIGHT + ROW_GAP) * seconds; }
@@ -113,7 +117,15 @@
       label.firstChild && (label.firstChild.textContent = mode === "basic" ? "可视时长 " : "每行 ");
       rebuild(); viewport.scrollLeft = viewport.scrollTop = 0; revealTime(time, true);
     }
-    basicButton.onclick = () => setMode("basic"); multiButton.onclick = () => setMode("multiline");
+    function chooseMode(next) {
+      setMode(next);
+      if (panel.dispatchEvent) panel.dispatchEvent(new CustomEvent("workspace-waveform-mode-change", {detail:{mode:next}}));
+    }
+    function workspaceMode(event) {
+      if (event.detail.mode !== mode) setMode(event.detail.mode);
+    }
+    panel.addEventListener("workspace-waveform-mode", workspaceMode);
+    basicButton.onclick = () => chooseMode("basic"); multiButton.onclick = () => chooseMode("multiline");
     basicButton.setAttribute("aria-pressed", "false"); multiButton.setAttribute("aria-pressed", "true");
     function setFollow(enabled) {
       following = !!enabled;
@@ -150,6 +162,7 @@
         const row = {...range, canvas, peaks:null, loading:false};
         canvas.addEventListener("pointerdown", event => pointerDown(event, row));
         canvas.addEventListener("pointermove", event => pointerMove(event, row));
+        canvas.addEventListener("pointerleave", () => { if (!drag) { hover = null; redraw(); } });
         canvas.addEventListener("pointerup", event => pointerUp(event, row));
         canvas.addEventListener("pointercancel", () => { drag = null; preview = null; redraw(); });
         canvas.addEventListener("click", event => click(event, row));
@@ -250,7 +263,7 @@
           ? {left:xAt(cue.start), right:xAt(cue.end), cap:Math.min(10, (cue.end-cue.start)/seconds*width/4), start:true, end:true}
           : cueHandles(cue,row,seconds,width);
         const {left,right,cap} = handles;
-        const isSelected = cue.cue_id === active || cue.cue_id === selected;
+        const isSelected = selection.ids.has(cue.cue_id);
         const overlay=cue.subtitle_track === "overlay";
         const firstLane=overlay?mainLanes+overlayLanes.get(cue.cue_id):0;
         const count=overlay?1:mainLanes;
@@ -278,6 +291,7 @@
           ctx.fillText(text, textLeft, y + laneHeight / 2); ctx.restore();
         }
       }
+      drawBoundaryMode(ctx, row, width, height, xAt);
       if(drag?.kind==="create") {
         const end=row.pointerTime ?? drag.time, left=xAt(Math.min(drag.time,end)),right=xAt(Math.max(drag.time,end));
         ctx.fillStyle="rgba(174,153,215,.18)"; ctx.fillRect(left,0,right-left,height);
@@ -329,8 +343,49 @@
       return {x:event.clientX - rect.left, y:event.clientY - rect.top,
         time:clamp(row.start + (event.clientX - rect.left) / rect.width * seconds, 0, duration), width:rect.width};
     }
+    function boundaryTrack(target) {
+      const track = target.cue.subtitle_track === "overlay" ? [target.cue] : cues.filter(c => c.subtitle_track !== "overlay");
+      return {track, index:track.findIndex(c => c.cue_id === target.cue.cue_id)};
+    }
+    function boundaryModeFor(target) {
+      const {track,index} = boundaryTrack(target);
+      const override = boundaryOverride?.cueId === target.cue.cue_id && boundaryOverride.edge === target.edge
+        ? boundaryOverride.mode : null;
+      return timeline.boundaryMode(track,index,target.edge,selected,override);
+    }
+    function boundaryBadge(target, row, width) {
+      if (!target || !["boundary", "mode-toggle"].includes(target.kind)) return null;
+      const cue = timeline.applyPreview(cues,preview).find(c => c.cue_id === target.cue.cue_id);
+      if (!cue || cue[target.edge] < row.start || cue[target.edge] > row.end) return null;
+      const x = (cue[target.edge]-row.start)/seconds*width;
+      return {x,left:clamp(x+8,4,Math.max(4,width-54)),top:32,width:50,height:24};
+    }
+    function drawBoundaryMode(ctx,row,width,height,xAt) {
+      const target = drag?.kind === "boundary" ? drag : hover?.row === row ? hover : null;
+      const badge = boundaryBadge(target,row,width);
+      if (!badge) return;
+      const adjustment = drag?.kind === "boundary" ? drag.mode : boundaryModeFor(target);
+      const color = adjustment === "shared" ? "#70bfff" : "#ffe16b";
+      ctx.save(); ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=drag?4:3;
+      ctx.beginPath(); ctx.moveTo(badge.x,28); ctx.lineTo(badge.x,height); ctx.stroke();
+      ctx.fillRect(badge.x-4,height-6,8,5);
+      ctx.fillStyle="#111c26"; ctx.fillRect(badge.left,badge.top,badge.width,badge.height);
+      ctx.lineWidth=1; ctx.strokeRect(badge.left+.5,badge.top+.5,badge.width-1,badge.height-1);
+      ctx.fillStyle=color; ctx.font="bold 12px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.textBaseline="middle";
+      ctx.fillText(adjustment === "shared" ? "联动" : "单条",badge.left+12,badge.top+12);
+      ctx.restore();
+    }
+    function toggleBoundaryMode(target) {
+      const {track,index}=boundaryTrack(target);
+      if (!timeline.sharedBoundary(track,index,target.edge)) return false;
+      boundaryOverride={cueId:target.cue.cue_id,edge:target.edge,mode:boundaryModeFor(target)==="shared"?"single":"shared"};
+      hover=target; redraw(); return true;
+    }
     function hit(event, row) {
       const p = position(event, row);
+      const badge = hover?.row === row ? boundaryBadge(hover,row,p.width) : null;
+      if (badge && p.x >= badge.left && p.x <= badge.left+badge.width && p.y >= badge.top && p.y <= badge.top+badge.height)
+        return {...hover,kind:"mode-toggle",...p};
       const laneCues=timeline.applyPreview(cues,preview).filter(cue=>{
         const lane=row.lanes?.get(cue.cue_id);
         return lane ? p.y>=lane.top && p.y<=lane.bottom : p.y>=99;
@@ -346,37 +401,57 @@
             const boundaryX=(time-row.start)/seconds*p.width;
             const insideHandle=edge==="start" ? p.x>=boundaryX&&p.x<=boundaryX+10 : p.x>=boundaryX-10&&p.x<=boundaryX;
             if (insideHandle || Math.abs(boundaryX-p.x)<4)
-              return {kind:"boundary", cueIndex:index, edge, cue:cues[index], ...p};
+              return {kind:"boundary", cueIndex:index, edge, cue:cues[index], row, ...p};
           }
         }
       }
       return {kind:cue ? "cue" : "blank", cue, ...p};
     }
+    function selectTarget(target,event) {
+      if (selected !== (target.cue?.cue_id || null)) boundaryOverride=null;
+      selected=target.cue?.cue_id || null;
+      if (selected) selection.select(selected,cues.map(c=>c.cue_id),{range:event.shiftKey,toggle:event.ctrlKey || event.metaKey});
+      else selection.clear();
+      options.onSelectCue?.(selected,target.time,{range:!!event.shiftKey,toggle:!!(event.ctrlKey || event.metaKey)});
+      redraw();
+    }
     function pointerDown(event, row) {
       if (event.button !== 0) return;
+      selectionHandled=false;
       row.canvas.focus({preventScroll:true});
       const target = hit(event, row);
       row.pointerTime=target.time;
-      if(event.ctrlKey || event.metaKey) {
-        if (target.kind !== "blank") return;
+      if (target.kind === "mode-toggle") { event.preventDefault(); return; }
+      if((event.ctrlKey || event.metaKey) && target.kind === "blank") {
         event.preventDefault(); drag={kind:"create",time:target.time,startX:event.clientX,moved:false};
         row.canvas.setPointerCapture(event.pointerId); setFollow(false); return;
       }
       if(target.kind==="cue") {
         event.preventDefault(); setFollow(false);
-        selected=target.cue.cue_id; options.onSelectCue?.(selected,target.time);
+        selectTarget(target,event); selectionHandled=true;
+        if (event.shiftKey || event.ctrlKey || event.metaKey) return;
         drag={...target,kind:"move",startX:event.clientX,moved:false};
         row.canvas.setPointerCapture(event.pointerId); return;
       }
       if (target.kind !== "boundary") return;
       event.preventDefault();
       setFollow(false);
-      drag = {...target, startX:event.clientX, moved:false, offset:target.time-target.cue[target.edge]};
+      drag = {...target, mode:event.shiftKey?"single":boundaryModeFor(target), startX:event.clientX, moved:false, offset:target.time-target.cue[target.edge]};
       row.canvas.setPointerCapture(event.pointerId);
+      redraw();
     }
     function pointerMove(event, row) {
       row.pointerTime=position(event,row).time;
-      if (!drag) { row.canvas.style.cursor = hit(event,row).kind === "boundary" ? "ew-resize" : "crosshair"; return; }
+      if (!drag) {
+        const target=hit(event,row);
+        const badge=hover?.row===row?boundaryBadge(hover,row,target.width):null;
+        const inBadgePath=badge && target.x>=Math.min(badge.x-12,badge.left-8)
+          && target.x<=Math.max(badge.x+12,badge.left+badge.width+8)
+          && target.y>=badge.top-8 && target.y<=row.canvas.getBoundingClientRect().height;
+        hover=["boundary","mode-toggle"].includes(target.kind)?target:inBadgePath?hover:null;
+        row.canvas.style.cursor=target.kind==="mode-toggle"?"pointer":target.kind==="boundary"?(boundaryModeFor(target)==="shared"?"col-resize":"ew-resize"):"crosshair";
+        redraw(); return;
+      }
       if (Math.abs(event.clientX - drag.startX) > 2) drag.moved = true;
       if(drag.kind==="create") { row.canvas.style.cursor="crosshair"; redraw(); return; }
       if(drag.kind==="move") {
@@ -384,8 +459,9 @@
       }
       const track=drag.cue.subtitle_track === "overlay" ? [drag.cue] : cues.filter(c=>c.subtitle_track!=="overlay");
       const index=track.findIndex(c=>c.cue_id===drag.cue.cue_id);
-      const mode = event.shiftKey ? "single" : timeline.boundaryMode(track,index,drag.edge,selected);
-      preview = timeline.previewBoundaryChange(track,index,drag.edge,position(event,row).time-drag.offset,selected,mode);
+      const adjustment = event.shiftKey ? "single" : boundaryModeFor(drag);
+      drag.mode=adjustment;
+      preview = timeline.previewBoundaryChange(track,index,drag.edge,position(event,row).time-drag.offset,selected,adjustment);
       redraw();
     }
     function pointerUp(event, row) {
@@ -403,8 +479,12 @@
     function click(event, row) {
       if (suppressClick) { suppressClick = false; return; }
       const target = hit(event,row);
-      selected = target.cue?.cue_id || null;
-      seek(target.time); options.onSelectCue?.(selected, target.time); redraw();
+      if (["boundary","mode-toggle"].includes(target.kind) && toggleBoundaryMode(target)) return;
+      hover=null;
+      if (!selectionHandled) selectTarget(target,event);
+      selectionHandled=false;
+      if (!event.shiftKey && !event.ctrlKey && !event.metaKey) seek(target.time);
+      redraw();
     }
     function tick() {
       playback = 0;
@@ -441,22 +521,24 @@
     options.media?.addEventListener("timeupdate", mediaUpdate);
     options.media?.addEventListener("seeked", mediaUpdate);
     options.media?.addEventListener("play", mediaPlay);
+    if (panel.dataset.workspaceWaveformMode === "basic") setMode("basic");
     return Object.freeze({
       setView(next) {
         view = next; cues = timeline.activeCues(view);
+        selection.reconcile(cues.map(c=>c.cue_id));
         const nextDuration = Math.max(Number(options.media?.duration) || 0, ...cues.map(cue=>cue.end), .001);
         if (nextDuration !== duration || !rows.length) { duration = nextDuration; rebuild(); }
         else redraw();
       },
       setActiveCue(id) { active = id; if (firstActive && id) { firstActive=false; const cue=cues.find(c=>c.cue_id===id); if(cue) revealTime(cue.start); } redraw(); },
-      setSelectedCue(id) { selected = id; redraw(); },
+      setSelectedCue(id) { if (selected !== id) boundaryOverride=null; selected = id; redraw(); },
       setFollowPlayback:setFollow,
       setWaveform(samples, total, start=0, end=total) {
         for (const row of rows) { row.peaks=samples; row.peakScale=1; row.waveStart=start; row.waveEnd=end; row.envelopeKey=null; } redraw();
       },
       revealTime, revealRange:(start,end)=>revealTime((start+end)/2,true), seek, redraw,
       autoSnapOnce(config) { const intent=timeline.autoSnapPlan({...view,cue_views:view.cue_views.filter(c=>c.subtitle_track!=="overlay")},config); if(intent.count) options.onOperation?.("autoSnap",intent); return intent; },
-      getState() { const start=visibleStart(); return {mode,active_cue_id:active,selected_cue_id:selected,view_start:start,view_end:Math.min(duration,start+visibleSpan()),duration,playhead_time:options.media?.currentTime||0,preview}; },
+      getState() { const start=visibleStart(); return {mode,active_cue_id:active,selected_cue_id:selected,selected_cue_ids:[...selection.ids],view_start:start,view_end:Math.min(duration,start+visibleSpan()),duration,playhead_time:options.media?.currentTime||0,preview}; },
       getTimeRect(start,end=start) {
         const row=rows[clamp(Math.floor(start/seconds),0,rows.length-1)]; if(!row) return null;
         const rect=row.canvas.getBoundingClientRect(); const left=rect.left+clamp((start-row.start)/seconds,0,1)*rect.width;
@@ -465,6 +547,7 @@
       },
       destroy() {
         destroyed=true; generation++; cancelAnimationFrame(frame); cancelAnimationFrame(playback); observer.disconnect();
+        panel.removeEventListener?.("workspace-waveform-mode", workspaceMode);
         doc.removeEventListener("pointerdown",dismissSettings);
         options.media?.removeEventListener("timeupdate",mediaUpdate); options.media?.removeEventListener("seeked",mediaUpdate); options.media?.removeEventListener("play",mediaPlay);
         toolbar.remove(); viewport.remove(); originalTrack.hidden=false; panel.classList.remove("multiline-waveform-module");

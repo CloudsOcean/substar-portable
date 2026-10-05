@@ -92,6 +92,9 @@ def build_segmentation_material_with_reference_projection(
                     "end": end if offset + 1 == len(fragments) else start + (offset + 1) * width,
                     "text": fragment,
                     "speaker_id": item.get("speaker_id"),
+                    **({"sentence_id": item["sentence_id"]} if "sentence_id" in item else {}),
+                    **({"sentence_start": bool(item["sentence_start"]) and offset == 0} if "sentence_start" in item else {}),
+                    **({"sentence_end": bool(item["sentence_end"]) and offset == len(fragments) - 1} if "sentence_end" in item else {}),
                     "timing": {
                         **dict(item.get("timing") or {}),
                         "kind": "subdivided" if len(fragments) > 1 or (item.get("timing") or {}).get("kind") == "subdivided" else (
@@ -165,7 +168,7 @@ def validate_segmentation_material(value: object) -> dict[str, Any]:
         "speaker_id",
     }
     for position, raw in enumerate(raw_units):
-        if not isinstance(raw, dict) or not required.issubset(raw) or set(raw) - required - {"timing"}:
+        if not isinstance(raw, dict) or not required.issubset(raw) or set(raw) - required - {"timing", "sentence_id", "sentence_start", "sentence_end"}:
             raise ValueError(f"segmentation material unit {position} has invalid fields")
         index = raw["index"]
         if isinstance(index, bool) or not isinstance(index, int):
@@ -183,6 +186,12 @@ def validate_segmentation_material(value: object) -> dict[str, Any]:
         speaker_id = raw["speaker_id"]
         if speaker_id is not None and not isinstance(speaker_id, str):
             raise ValueError(f"segmentation material unit {position} speaker_id is invalid")
+        sentence_id = raw.get("sentence_id")
+        if sentence_id is not None and (isinstance(sentence_id, bool) or not isinstance(sentence_id, int)):
+            raise ValueError(f"segmentation material unit {position} sentence_id is invalid")
+        for flag in ("sentence_start", "sentence_end"):
+            if flag in raw and not isinstance(raw[flag], bool):
+                raise ValueError(f"segmentation material unit {position} {flag} is invalid")
         normalized_units.append(
             {
                 "index": index,
@@ -190,6 +199,7 @@ def validate_segmentation_material(value: object) -> dict[str, Any]:
                 "end": end,
                 "text": text,
                 "speaker_id": speaker_id,
+                **{key: raw[key] for key in ("sentence_id", "sentence_start", "sentence_end") if key in raw},
                 **({"timing": dict(raw["timing"])} if raw.get("timing") is not None else {}),
             }
         )
@@ -213,6 +223,9 @@ def load_segmentation_material(path: Path) -> tuple[str, list[AlignmentUnit]]:
             end=item["end"],
             text=item["text"],
             speaker_id=item["speaker_id"],
+            sentence_id=item.get("sentence_id"),
+            sentence_start=item.get("sentence_start", False),
+            sentence_end=item.get("sentence_end", False),
             speaker_confidence=1.0 if item["speaker_id"] else 0.0,
             timing=item.get("timing"),
         )
