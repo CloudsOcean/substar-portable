@@ -88,7 +88,7 @@ body.editor-shell {
 .editor-tool-sidebar button:disabled { opacity: .36; cursor: not-allowed; }
 .translation-command { border-color: #8b4be1 !important; background: #752dde !important; color: #fff !important; font-weight: 700; }
 .editor-command-menu.disabled { opacity: .36; pointer-events: none; }
-.translation-popover { min-width: 176px !important; }
+.translation-popover { min-width: 280px !important; max-width: min(340px, calc(100vw - 24px)); }
 .translation-popover label { color: #aeb4c1; font-size: 13px; }
 .translation-popover select { height: 32px; padding: 0 8px; font-size: 14px; }
 .translation-popover #translateDocument { width: 100%; justify-content: center; }
@@ -725,3 +725,10 @@ html[data-theme] .media-controls, .media-controls {
 .media-controls #mediaPlayToggle, .media-controls #mediaFullscreen { flex:0 0 28px; width:28px; height:28px; }
 .media-controls #mediaSeek::-webkit-slider-runnable-track { height:4px; }
 .media-controls #mediaSeek::-webkit-slider-thumb { width:12px; height:12px; margin-top:-4px; }
+
+.translation-glossary { min-width: 0; margin: 8px 0; padding: 8px; max-width: 280px; border: 1px solid #354252; border-radius: 6px; }
+#translationGlossaryChoices { max-height: 180px; overflow-y: auto; overflow-x: hidden; }
+#translationGlossaryChoices label { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 5px 0; }
+.translation-glossary small, .translation-glossary a { display: block; margin-top: 6px; font-size: 12px; }
+
+#translationGlossaryChoices input[type="checkbox"] { width: 14px; height: 14px; min-width: 14px; flex: 0 0 14px; padding: 0; margin: 0; }

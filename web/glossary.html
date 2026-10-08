@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>词库 · Substar</title>
-    <link rel="stylesheet" href="/assets/glossary.css?v=20260911-transfer-1" />
+    <link rel="stylesheet" href="/assets/glossary.css?v=20261008-spacing-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260909-unsaved-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1" />
@@ -31,8 +31,8 @@
 
         </div>
         <label class="search"
-          ><span>⌕</span
-          ><input id="searchInput" placeholder="搜索原词、译文或别名"
+          ><span aria-hidden="true"><svg class="ui-icon"><use href="/assets/ui-icons.svg#search"></use></svg></span
+          ><input id="searchInput" aria-label="搜索词条" placeholder="搜索原词或译词"
         /></label>
         <div class="filter-tabs asset-sidebar-list">
           <button class="active asset-sidebar-item" data-glossary="all" type="button">
@@ -135,7 +135,7 @@
         <fieldset class="collection-permissions" id="collectionPermissions">
           <legend>注入权限</legend>
           <label><input type="checkbox" value="asr"> Qwen 听写</label>
-          <label><input type="checkbox" value="calibration"> AI 校准</label>
+
           <label><input type="checkbox" value="translation"> 翻译</label>
         </fieldset>
         <div class="dialog-actions"><button value="cancel" class="secondary">取消</button><button id="confirmCollection" value="default" class="primary">创建词库</button></div>
@@ -181,6 +181,6 @@
     </dialog>
     <script src="/assets/glossary_transfer.js?v=20260911-transfer-1"></script>
     <script src="/assets/system_save_as.js?v=20260826-system-save-as-1"></script>
-    <script src="/assets/glossary.js?v=20260911-transfer-1"></script>
+    <script src="/assets/glossary.js?v=20261008-injection-1"></script>
   </body>
 </html>

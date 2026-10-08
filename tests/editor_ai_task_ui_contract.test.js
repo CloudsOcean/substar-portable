@@ -51,7 +51,7 @@ test("an active calibration or translation task dims every editor-writing comman
 });
 
 test("blank manual translation tracks still render editable rows", () => {
-  assert.match(editorJs, /const hasTarget = Boolean\(cue\.target\) && \$\("#showTranslations"\)\.checked;/);
+  assert.match(editorJs, /const hasTarget = \(Boolean\(cue\.target\) \|\| \(bilingualProject && cue\.subtitle_track !== "overlay"\)\)\s*&& \$\("#showTranslations"\)\.checked;/);
   assert.doesNotMatch(
     editorJs,
     /const hasTarget = Boolean\(String\(cue\.target\?\.target_text \|\| ""\)\.trim\(\)\);/,

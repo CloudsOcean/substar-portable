@@ -756,3 +756,17 @@ body dialog.transfer-dialog { width:min(760px,calc(100vw - 40px)); max-height:ca
 #importConflicts label { display:flex; align-items:start; gap:10px; padding:10px 0; border-bottom:1px solid var(--theme-line); overflow-wrap:anywhere; }
 #importConflicts input { flex:none; }
 @media(max-width:680px) { body .glossary-layout .content-heading { display:block; } }
+
+/* Small spacing adjustments scoped to the glossary page. */
+html[data-theme] .library-sidebar .search { display:block; width:100%; }
+html[data-theme] .library-sidebar .search > span { top:50%; left:12px; transform:translateY(-50%); width:16px; height:16px; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+html[data-theme] .library-sidebar .search .ui-icon { width:16px; height:16px; }
+html[data-theme] .library-sidebar #searchInput { height:40px; min-width:0; padding:0 12px 0 38px; line-height:normal; }
+body .glossary-layout .content-heading { padding:4px 0 12px; margin-bottom:12px; gap:12px; }
+.glossary-content .entry-card { padding:8px; }
+.glossary-content .entry-main-row { gap:10px; }
+.glossary-content .candidate-actions { gap:10px; margin:12px 0; }
+.glossary-content .candidate-actions input[type="checkbox"] { width:16px; height:16px; margin:0; flex:none; }
+.glossary-content #candidateMessage { margin:10px 0 0; color:var(--theme-muted); font-size:13px; }
+.glossary-content .permission-row { grid-template-columns:minmax(100px,1fr) repeat(2,auto); }
+@media(max-width:620px) { .glossary-content .permission-row { grid-template-columns:1fr; } }

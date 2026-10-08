@@ -347,7 +347,7 @@ function renderPermissions() {
   for (const collection of collections.filter(c => c.kind === "project")) {
     const row = document.createElement("div"); row.className = "permission-row";
     const title = document.createElement("strong"); title.textContent = collection.name; row.append(title);
-    for (const [stage, label] of [["asr","Qwen 听写"],["calibration","AI 校准"],["translation","翻译"]]) {
+    for (const [stage, label] of [["asr","Qwen 听写"],["translation","翻译"]]) {
       const field = document.createElement("label"), check = document.createElement("input"); check.type = "checkbox";
       check.setAttribute("aria-label", `${collection.name} · ${label}`);
       check.checked = (collection.injection_permissions || []).includes(stage);

@@ -1816,6 +1816,40 @@
     );
   }
 
+  let translationGlossaryLoaded = false;
+  let translationGlossaryLoading = null;
+  async function loadTranslationGlossaries() {
+    if (translationGlossaryLoading) return translationGlossaryLoading;
+    translationGlossaryLoading = (async () => {
+      const container = $("#translationGlossaryChoices");
+      const selected = new Set(Array.from(container.querySelectorAll("input:checked"), input => input.value));
+      try {
+        const library = await api("/api/glossary");
+        const collections = (library.collections || []).filter(c => c.injection_permissions?.includes("translation"));
+        container.replaceChildren();
+        for (const collection of collections) {
+          const label = document.createElement("label");
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.value = collection.id;
+          input.checked = translationGlossaryLoaded ? selected.has(collection.id) : true;
+          const count = (library.entries || []).filter(e => e.enabled && e.glossary_id === collection.id).length;
+          label.append(input, document.createTextNode(`${collection.name}（${count} 条）`));
+          container.append(label);
+        }
+        if (!collections.length) container.textContent = "暂无可用词库";
+        translationGlossaryLoaded = true;
+      } catch (error) {
+        throw new Error(`词库读取失败：${error.message}`);
+      }
+    })();
+    try { await translationGlossaryLoading; }
+    finally { translationGlossaryLoading = null; }
+  }
+  $("#translationMenu").addEventListener("toggle", () => {
+    if ($("#translationMenu").open) loadTranslationGlossaries().catch(error => ordinaryError(error.message));
+  });
+
   async function startTranslation() {
     if (!state.projectId || !state.revision) return;
     if (isAdvancedTutorial()) {
@@ -1834,6 +1868,8 @@
     $("#translationMenu").open = false;
     renderTranslationTask({state:"queued", progress:0, message:"正在启动 AI 翻译…"});
     try {
+      await loadTranslationGlossaries();
+      const glossaryIds = Array.from($("#translationGlossaryChoices").querySelectorAll("input:checked"), input => input.value);
       const task = await api(projectPath("/translation"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1841,7 +1877,8 @@
           expected_revision_id:state.revision.revision_id,
           source_language:sourceLanguage,
           target_language:targetLanguage,
-          mapping_mode:mappingMode
+          mapping_mode:mappingMode,
+          glossary_ids:glossaryIds
         })
       });
       followTranslationTask(task);

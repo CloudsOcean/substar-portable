@@ -20,8 +20,7 @@ def material(revision):
 
 def export_calibration(project_id, revision, settings, glossary, instruction=""):
     _, cues, request, _ = material(revision)
-    source_glossary = [{"source": r.get("source"), "standard_source": r.get("standard_source"),
-                       "aliases": r.get("aliases", [])} for r in glossary]
+    source_glossary = []
     prompt, _ = calibration_prompts(settings, cues, source_glossary, instruction)
     envelope = {"schema_version": SCHEMA, "project_id": project_id,
                 "revision_id": revision.revision_id, "output": "1|完整校准后原文\n2|完整校准后原文"}

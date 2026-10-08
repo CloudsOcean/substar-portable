@@ -780,10 +780,6 @@ def calibration_prompts(settings, cues, calibration_glossary, instruction=""):
     calibration_repair_prompt = frozen_prompt(settings,
         "calibration_repair", variant=calibration_prompt_variant
     ).text
-    if calibration_glossary:
-        glossary_section = glossary_prompt(calibration_glossary, include_target=False)
-        calibration_prompt += "\n\n" + glossary_section
-        calibration_repair_prompt += "\n\n" + glossary_section
     if instruction.strip():
         instruction_section = (
             "\n\n用户本次补充校准要求：\n"
@@ -819,14 +815,7 @@ def compute_calibration(
     blocks = _editor_ai_blocks(cues)
     request_blocks = _calibration_model_blocks(blocks)
     settings = dict(settings_snapshot) if settings_snapshot is not None else load_settings(include_secret=True)
-    calibration_glossary = [
-        {
-            "source": row.get("source"),
-            "standard_source": row.get("standard_source"),
-            "aliases": row.get("aliases", []),
-        }
-        for row in (settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(load_task_info(project_root, project_id).get("glossary_id") or ""), stage="calibration"))
-    ]
+    calibration_glossary = []
     calibration_prompt, calibration_repair_prompt = calibration_prompts(settings, cues, calibration_glossary, payload.instruction)
     tracker = {
         "planned": len(blocks), "completed": 0,

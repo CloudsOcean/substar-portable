@@ -36,7 +36,7 @@ def normalize_collection(value: dict[str, Any]) -> dict[str, Any]:
     raw_permissions = value.get("injection_permissions", [])
     if not isinstance(raw_permissions, list) or any(stage not in INJECTION_STAGES for stage in raw_permissions if isinstance(stage, str)) or any(not isinstance(stage, str) for stage in raw_permissions):
         raise ValueError("词库注入权限无效")
-    permissions = [stage for stage in ("asr", "calibration", "translation") if stage in raw_permissions]
+    permissions = [stage for stage in ("asr", "translation") if stage in raw_permissions]
     kind = "global" if value.get("kind") == "global" else "project"
     if kind == "global":
         return {"id": GLOBAL_GLOSSARY_ID, "name": "未分配", "kind": "global", "injection_permissions": []}
@@ -153,15 +153,27 @@ def save_glossary_library(collections: list[dict[str, Any]], entries: list[dict[
         collection_names.add(item["name"].casefold())
         normalized_collections.append(item)
 
-    normalized_entries = [normalize_entry(item) for item in entries]
-    seen: set[tuple[str, str]] = set()
-    for item in normalized_entries:
+    normalized_entries = []
+    seen = {}
+    targets = {}
+    for raw in entries:
+        item = normalize_entry(raw)
         if item["glossary_id"] not in collection_ids:
             raise ValueError(f"术语所属词库不存在：{item['source']}")
-        key = (item["glossary_id"], item["source"] if item["case_sensitive"] else item["source"].casefold())
+        word = item["source"].casefold()
+        target = item["target"]
+        if target and word in targets and targets[word] != target:
+            raise ValueError(f"术语译词冲突：{item['source']}（{targets[word]} / {target}）")
+        if target:
+            targets[word] = target
+        key = (item["glossary_id"], word)
         if key in seen:
-            raise ValueError(f"术语重复：{item['source']}")
-        seen.add(key)
+            seen[key]["enabled"] = seen[key]["enabled"] or item["enabled"]
+            if target:
+                seen[key]["target"] = target
+            continue
+        seen[key] = item
+        normalized_entries.append(item)
     library = {"schema_version": GLOSSARY_SCHEMA_VERSION, "collections": normalized_collections, "entries": normalized_entries, "candidates": load_glossary_library().get("candidates", []) if candidates is None else candidates}
     # Merge imports while holding the library lock; background ASR additions and
     # terminal review states must survive a browser's older draft.
@@ -201,6 +213,8 @@ def glossary_collection_exists(glossary_id: str) -> bool:
 def active_glossary(glossary_id: str = "", *, stage: str = "translation", collection_ids: list[str] | None = None) -> list[dict[str, Any]]:
     if stage not in INJECTION_STAGES:
         raise ValueError("未知词库注入环节")
+    if stage == "calibration":
+        return []
     library = load_glossary_library()
     permitted = {c["id"] for c in library["collections"] if stage in c.get("injection_permissions", [])}
     if collection_ids is not None:
@@ -210,7 +224,17 @@ def active_glossary(glossary_id: str = "", *, stage: str = "translation", collec
         if denied:
             raise ValueError("所选词库不存在或没有该环节的注入权限，请刷新选择")
         permitted &= set(collection_ids)
-    return [e for e in library["entries"] if e["enabled"] and e["glossary_id"] in permitted]
+    unique = {}
+    for entry in library["entries"]:
+        if not entry["enabled"] or entry["glossary_id"] not in permitted:
+            continue
+        key = entry["source"].casefold()
+        prior = unique.get(key)
+        if stage == "translation" and prior and prior["target"] and entry["target"] and prior["target"] != entry["target"]:
+            raise ValueError(f"术语译词冲突：{entry['source']}（{prior['target']} / {entry['target']}）")
+        if prior is None or (not prior["target"] and entry["target"]):
+            unique[key] = entry
+    return list(unique.values())
 
 
 def injection_preview(collection_ids: list[str] | None, temporary: list[dict[str, Any]]) -> dict[str, Any]:
@@ -266,7 +290,7 @@ def review_candidates(ids: list[str], action: str, glossary_id: str) -> dict[str
     for c in candidates:
         if c["id"] not in ids or c["status"] != "pending":
             continue
-        if action == "approve" and (glossary_id, c["source"].casefold()) not in known:
+        if action == "approve":
             entries.append(normalize_entry({"source":c["source"], "target":c.get("target", ""), "glossary_id":glossary_id}))
             known.add((glossary_id, c["source"].casefold()))
         c["status"] = "approved" if action == "approve" else "ignored"
@@ -274,17 +298,12 @@ def review_candidates(ids: list[str], action: str, glossary_id: str) -> dict[str
 
 
 def glossary_prompt(entries: list[dict[str, Any]], *, include_target: bool = True) -> str:
+    if not include_target:
+        return "# ACTIVE_GLOSSARY\n单语处理不注入词库。"
     if not entries:
         return "# ACTIVE_GLOSSARY\n本次没有锁定术语。"
-    rows = [{"source": item["source"], "standard_source": item["standard_source"], "aliases": item["aliases"]} for item in entries]
-    if include_target:
-        for row, item in zip(rows, entries):
-            row.update({"target": item["target"], "do_not_translate": item["do_not_translate"]})
-    rule = (
-        "命中热词时采用指定译文；do_not_translate=true 时保留原词。"
-        if include_target
-        else "这是单语处理，词库仅作为专名写法参考；结合上下文确认后才校正，不因近似拼写强行替换，不读取译文、不改变语言。"
-    )
+    rows = [{"source": item["source"], "target": item.get("target", "")} for item in entries]
+    rule = "原文命中原词时采用对应译词；译词为空时正常翻译。按完整词语或术语匹配，不将其他词中的相同片段当作命中。"
     return f"# ACTIVE_GLOSSARY\n以下是人工锁定的术语。{rule}\n" + json.dumps(rows, ensure_ascii=False)
 
 

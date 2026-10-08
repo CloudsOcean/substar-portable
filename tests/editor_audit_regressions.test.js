@@ -29,7 +29,7 @@ test("a conflict is retained, blocks dependent saves and prevents export", async
   }});
   const first=queue.enqueue({operation_id:"one"}).catch(()=>{});
   const second=queue.enqueue({operation_id:"two"}).catch(()=>{});
-  await assert.rejects(queue.flushAndWait(),/未保存/);
+  await assert.rejects(queue.flushAndWait(),/conflict/);
   await first;
   assert.equal(sends,1);
   assert.equal(queue.getState().failed,1);
@@ -83,7 +83,7 @@ test("late project A load cannot overwrite project B session",async()=>{
     refreshTranslationTask:async()=>null,
     loadRevisionHistory:async()=>{},
   };
-  for(const name of ['renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
+  for(const name of ['syncCueViewSwitch','renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
   vm.createContext(context);vm.runInContext(code,context);
   const a=context.loadProject('A');
   const b=context.loadProject('B');

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import struct
+import json
+from substar_core import __version__
 import unittest
 from pathlib import Path
 
@@ -37,7 +39,7 @@ class PackagingContractTests(unittest.TestCase):
 
     def test_release_manifest_contains_no_projects_or_retired_capability(self) -> None:
         manifest = read_text("portable_manifest.json")
-        self.assertIn('"version": "2.2.5"', manifest)
+        self.assertEqual(json.loads(manifest)["version"], __version__)
         self.assertIn('"package_layout": "transparent-source-runtime"', manifest)
         self.assertIn('"reference-script-v1"', manifest)
         self.assertIn('"advanced-ai-v1"', manifest)

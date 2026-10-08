@@ -34,7 +34,7 @@ class GlossaryInjectionTests(unittest.TestCase):
 
     def test_permissions_survive_save_and_separate_stages(self):
         self.assertEqual([e["source"] for e in g.active_glossary(stage="asr")],["Nova"])
-        self.assertEqual([e["source"] for e in g.active_glossary(stage="calibration")],["Nova"])
+        self.assertEqual([e["source"] for e in g.active_glossary(stage="calibration")],[])
         self.assertEqual([e["source"] for e in g.active_glossary(stage="translation")],[])
         self.assertEqual(g.active_glossary(stage="asr",collection_ids=[]),[])
         with self.assertRaises(ValueError):g.active_glossary(stage="asr",collection_ids=["global"])
@@ -44,7 +44,7 @@ class GlossaryInjectionTests(unittest.TestCase):
         unassigned = next(c for c in library["collections"] if c["id"] == "global")
         self.assertEqual(unassigned["injection_permissions"], [])
         self.assertTrue(any(e["source"] == "Global" for e in library["entries"]))
-        for stage in ("asr", "calibration", "translation"):
+        for stage in ("asr", "translation"):
             with self.assertRaises(ValueError):
                 g.active_glossary(stage=stage, collection_ids=["global"])
 
@@ -121,3 +121,43 @@ class GlossaryInjectionTests(unittest.TestCase):
         with patch.object(app,"build_transcription_request",side_effect=lambda **kwargs:kwargs):
             request=app._workbench_transcription_request(SimpleNamespace(input_path=Path("media.wav"),job_dir=Path("project")),settings)
         self.assertEqual(request["hotwords"],{"Manual":5,"Nova":5})
+
+    def test_duplicate_merge_and_conflict_does_not_write(self):
+        entries = [{"source":"Nova", "target":"", "glossary_id":"show"},
+                   {"source":"nova", "target":"新星", "glossary_id":"show", "case_sensitive":True}]
+        saved = g.save_glossary_library(self.collections, entries)
+        self.assertEqual(len(saved["entries"]), 1)
+        self.assertEqual(saved["entries"][0]["target"], "新星")
+        with self.assertRaisesRegex(ValueError, "冲突"):
+            g.save_glossary_library(self.collections, entries + [{"source":"NOVA", "target":"不同", "glossary_id":"global"}])
+        self.assertEqual(g.load_glossary_library(), saved)
+
+    def test_translation_selection_and_legacy_conflicts(self):
+        collections = [{"id":id, "name":id, "kind":"project", "injection_permissions":["translation"]} for id in ("a", "b")]
+        entries = [g.normalize_entry({"source":"Nova", "target":target, "glossary_id":id}) for id,target in (("a","新星"),("b","新星"))]
+        library = {"collections":collections, "entries":entries}
+        with patch.object(g, "load_glossary_library", return_value=library):
+            self.assertEqual(len(g.active_glossary(collection_ids=["a","b"])), 1)
+            self.assertEqual(g.active_glossary(collection_ids=[]), [])
+            entries[1]["target"] = "不同"
+            self.assertEqual(len(g.active_glossary(collection_ids=["a"])), 1)
+            with self.assertRaisesRegex(ValueError, "冲突"):
+                g.active_glossary(collection_ids=["a","b"])
+            with self.assertRaises(ValueError):
+                g.active_glossary(collection_ids=["missing"])
+
+    def test_translation_prompt_uses_only_source_target(self):
+        entry = g.normalize_entry({"source":"Nova", "target":"新星", "aliases":["other"], "do_not_translate":True})
+        prompt = g.glossary_prompt([entry])
+        self.assertIn('"target": "新星"', prompt)
+        self.assertNotIn('aliases', prompt)
+        self.assertNotIn('do_not_translate', prompt)
+        self.assertNotIn('Nova', g.glossary_prompt([entry], include_target=False))
+
+    def test_candidate_approval_rejects_conflicting_target(self):
+        library = g.load_glossary_library()
+        library["candidates"] = [{"id":"conflict", "source":"Nova", "target":"不同", "status":"pending"}]
+        g.save_glossary_library(library["collections"], library["entries"], candidates=library["candidates"])
+        with self.assertRaisesRegex(ValueError, "冲突"):
+            g.review_candidates(["conflict"], "approve", "show")
+        self.assertEqual(g.load_glossary_library()["candidates"][0]["status"], "pending")

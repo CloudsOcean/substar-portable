@@ -176,6 +176,7 @@ class ProjectTaskInfoRequest(BaseModel):
 
 class TranslationStartRequest(BaseModel):
     expected_revision_id: str = Field(min_length=1)
+    glossary_ids: list[str] | None = Field(default=None, max_length=200)
     workers: int = Field(default=3, ge=1, le=256)
     source_language: Literal["Auto", "mixed", "zh-CN", "en", "ja", "ko"]
     target_language: Literal["zh-CN", "en", "ja", "ko"]
@@ -2821,7 +2822,10 @@ def start_project_translation(
         key: asdict(render_prompt(key, variant=variant, mode=payload.mapping_mode))
         for key in ("contextual_translation", "contextual_translation_repair")
     }
-    frozen_settings["glossary_snapshot"] = active_glossary(_project_glossary_id(project_id))
+    try:
+        frozen_settings["glossary_snapshot"] = active_glossary(collection_ids=payload.glossary_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
     task_input = {
         "schema_version": TRANSLATION_INPUT_SCHEMA,
         "expected_revision_id": latest.revision_id,
