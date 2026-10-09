@@ -90,8 +90,12 @@ try {
     foreach ($worker in @(
         'run_transcription_worker.py', 'run_segmentation_worker.py',
         'run_semantic_segmentation.py',
-        'run_translation_worker.py', 'run_calibration_worker.py'
+        'run_translation_worker.py', 'run_calibration_worker.py', 'run_reference_match.py'
     )) { Copy-RequiredFile "scripts\$worker" }
+
+    Copy-RequiredFile 'scripts\verify_runtime_entries.py'
+    & $BundlePython (Join-Path $BundleRoot 'scripts\verify_runtime_entries.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Packaged runtime entry smoke test failed.' }
 
     foreach ($cache in Get-ChildItem -LiteralPath $BundleRoot -Directory -Recurse -Force | Where-Object { $_.Name -eq '__pycache__' }) {
         Remove-Item -LiteralPath $cache.FullName -Recurse -Force

@@ -30,6 +30,7 @@ class TargetSaveSafetyTests(unittest.TestCase):
     def test_old_revision_rebases_only_when_target_unchanged(self):
         latest = SimpleNamespace(document=self.doc, revision_id="new", document_hash="hash")
         repository = Mock()
+        repository.uncommitted_operations.side_effect = lambda operations: operations
         repository.find_operation_commit.return_value = None
         repository.load_latest.return_value = latest
         repository.save.return_value = latest
@@ -45,6 +46,7 @@ class TargetSaveSafetyTests(unittest.TestCase):
     def test_lost_response_retry_does_not_write_twice(self):
         committed = SimpleNamespace(document=self.doc, revision_id="committed")
         repository = Mock()
+        repository.uncommitted_operations.side_effect = lambda operations: operations
         repository.find_operation_commit.return_value = committed
         result = EditingService(lambda _: repository).commit_batch(
             "project", base={}, operations=[self.operation("", "原文译文")], batch_id="retry")

@@ -20,9 +20,9 @@ def document(gap=0):
 
 def edit(doc, text, token=None, number=1):
     ids = doc.cues[0].display_token_ids
-    operation = {"operation_id":f"edit-{number}", "type":"replace" if token or len(ids)==1 else "merge",
+    operation = {"operation_id":f"edit-{number}", "type":"retime_text",
                  "payload":{"text":text, "cue_id":doc.cues[0].cue_id,
-                            "token_id":token or ids[0], "token_ids":list(ids),
+                            "token_id":token or ids[0], "token_ids":[token] if token else list(ids),
                             "provenance":{"kind":"manual", "operation":"inline_replace" if token else "whole_cue_edit"}}}
     return apply_document_operation(doc, operation)
 
@@ -133,10 +133,12 @@ def test_history_preserves_original_timing_and_unrelated_cue(tmp_path):
     assert new.source_tokens[-1].start == source.start
 
 
-def test_inline_edit_batch_uses_same_timing_logic():
+def test_inline_edit_batch_preserves_identity_and_timing():
     old = document()
     operation = {"operation_id":"batch-inline", "type":"replace", "payload":{
         "token_id":old.display_tokens[1].token_id, "text":"good morning",
         "expected_text":"world", "provenance":{"kind":"manual", "operation":"inline_replace"}}}
-    assert active(apply_document_batch(old,[operation])) == [
-        ("hello",0,1),("good",1,1.5),("morning",1.5,2),("again",2,3)]
+    result = apply_document_batch(old,[operation])
+    assert result.source_tokens == old.source_tokens
+    assert result.cues == old.cues
+    assert active(result) == [("hello",0,1),("good morning",1,2),("again",2,3)]

@@ -72,6 +72,10 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
             for token in selected:
                 deleted[token.token_id] = replace(token, state=EntityState.DELETED, provenance=provenance)
             continue
+        if len(selected) == 1 and last - j == 1 and interval(i, end)[1] > interval(i, end)[0]:
+            token = selected[0]
+            deleted[token.token_id] = replace(token, text=words[j], provenance=provenance)
+            continue
         start, finish = interval(i, end)
         if finish <= start:
             raise ValueError("该时间范围无法分配有效词元时间")
@@ -83,7 +87,8 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
             right = start + (finish-start)*(offset+1)/(last-j)
             source_id = stable_id("src", {"operation":operation_id, "word":j+offset})
             source = SourceToken(source_id, 0, word, left, right, cue.speaker,
-                                 {"kind":"subdivided", "method":"equal_split", "parent_source_ids":parent_ids})
+                                 {"kind":"subdivided", "method":"equal_split", "parent_source_ids":parent_ids,
+                                  "parent_sources":[sources[sid].to_dict() for sid in dict.fromkeys(parent_ids)]})
             token = DisplayToken(stable_id("dsp", {"operation":operation_id, "word":j+offset}),
                                  word, word, (source_id,), provenance)
             new_sources.append(source); new_displays.append(token); parts.append(token.token_id)
@@ -94,21 +99,22 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
         else:
             insertions[i] = parts
 
-    ids = []
-    old_positions = {t.token_id:i for i, t in enumerate(old)}
-    for tid in cue.display_token_ids:
-        position = old_positions.get(tid)
-        if position is not None:
-            ids.extend(insertions.get(position, []))
-        ids.extend(replacements.get(tid, [tid]))
-        if position == len(old)-1:
-            ids.extend(insertions.get(len(old), []))
+    def updated_cue(owner):
+        ids = []
+        old_positions = {t.token_id:i for i,t in enumerate(old)}
+        for tid in owner.display_token_ids:
+            position = old_positions.get(tid)
+            if position is not None:
+                ids.extend(insertions.get(position, []))
+            ids.extend(replacements.get(tid, [tid]))
+            if position == len(old)-1:
+                ids.extend(insertions.get(len(old), []))
+        return replace(owner, display_token_ids=tuple(dict.fromkeys(ids)))
     remaining_sources = [s for s in document.source_tokens if s.token_id not in removed_sources]
     ordered_sources = sorted([*remaining_sources, *new_sources], key=lambda s:s.start)
     remaining_displays = [deleted.get(t.token_id, t) for t in document.display_tokens if t.token_id not in replacements]
-    updated = replace(cue, display_token_ids=tuple(ids))
     return replace(document,
                    source_tokens=tuple(replace(s, index=i) for i,s in enumerate(ordered_sources)),
                    display_tokens=tuple([*remaining_displays, *new_displays]),
-                   cues=tuple(updated if c.cue_id == cue.cue_id else c for c in document.cues),
+                   cues=tuple(updated_cue(c) if set(c.display_token_ids).intersection(token_ids) else c for c in document.cues),
                    changes=(*document.changes, provenance))

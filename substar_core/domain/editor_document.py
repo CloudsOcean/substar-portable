@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import InitVar, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -50,7 +51,7 @@ def utc_now() -> str:
 
 def _canonical_bytes(value: Any) -> bytes:
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
 
 
@@ -74,13 +75,13 @@ def _require_text(value: str, field_name: str) -> None:
 
 
 def _require_time_range(start: float, end: float, field_name: str) -> None:
-    if start < 0 or end <= start:
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
         raise DocumentValidationError(f"{field_name} must satisfy 0 <= start < end")
 
 
 def _require_source_time_range(start: float, end: float) -> None:
     """Preserve provider timing evidence, including zero-width ASR tokens."""
-    if start < 0 or end < start:
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end < start:
         raise DocumentValidationError(
             "source token time range must satisfy 0 <= start <= end"
         )

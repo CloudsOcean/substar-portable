@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import re
 from typing import Any, Mapping
 
 from substar_core.domain import (
@@ -213,6 +214,20 @@ def _translations_are_unedited_copies(
     )
 
 
+def _retime_text(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
+    from substar_core.editor.application.text_retiming import edit_timed_text
+    payload = operation["payload"]
+    cue = _find_cue(document, str(payload["cue_id"]))
+    ids = tuple(str(t) for t in payload["token_ids"])
+    if not ids or len(set(ids)) != len(ids) or any(t not in cue.display_token_ids for t in ids):
+        raise DocumentOperationError("retime tokens must belong to the cue")
+    positions = [cue.display_token_ids.index(t) for t in ids]
+    if positions != list(range(positions[0], positions[-1] + 1)):
+        raise DocumentOperationError("retime tokens must be contiguous and ordered")
+    return edit_timed_text(document, cue, ids, str(payload["text"]),
+                           _provenance(operation, "retime_text"), operation["operation_id"])
+
+
 def _replace(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
     payload = operation["payload"]
     token_id = str(payload["token_id"])
@@ -226,11 +241,6 @@ def _replace(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
     if expected is not None and tokens[token_id].text != expected:
         raise DocumentOperationError("replacement precondition failed: source text changed")
     provenance = _provenance(operation, "replace")
-    if provenance.kind is ChangeKind.MANUAL and provenance.operation in {"inline_replace", "whole_cue_edit"}:
-        from substar_core.editor.application.text_retiming import edit_timed_text
-        cue = next(c for c in document.cues if token_id in c.display_token_ids)
-        if cue.mapping.get("subtitle_track") != "overlay":
-            return edit_timed_text(document, cue, (token_id,), text, provenance, operation["operation_id"])
     updated = replace(tokens[token_id], text=text, provenance=provenance)
     display_tokens = tuple(
         updated if token.token_id == token_id else token
@@ -722,9 +732,6 @@ def _merge(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocu
             raise DocumentOperationError("merge tokens must be contiguous and ordered")
     selected = [tokens[value] for value in ids]
     provenance = _provenance(operation, "merge")
-    if provenance.kind is ChangeKind.MANUAL and provenance.operation == "whole_cue_edit" and cue.mapping.get("subtitle_track") != "overlay":
-        from substar_core.editor.application.text_retiming import edit_timed_text
-        return edit_timed_text(document, cue, ids, str(payload.get("text", "")).strip(), provenance, operation["operation_id"])
     merged = DisplayToken(
         token_id=stable_id(
             "dsp",
@@ -752,11 +759,18 @@ def _merge(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocu
     cue_ids = list(cue.display_token_ids)
     cue_ids = [merged.token_id if value == ids[0] else value
                for value in cue_ids if value == ids[0] or value not in ids]
-    updated_cue = replace(cue, display_token_ids=tuple(cue_ids))
+    def update_owner(owner):
+        if not set(ids).intersection(owner.display_token_ids):
+            return owner
+        if not set(ids).issubset(owner.display_token_ids):
+            raise DocumentOperationError("shared merge requires all selected tokens in every owner")
+        return replace(owner, display_token_ids=tuple(
+            merged.token_id if tid == ids[0] else tid for tid in owner.display_token_ids
+            if tid == ids[0] or tid not in ids))
     return replace(
         document,
         display_tokens=display_tokens,
-        cues=_replace_cue(document.cues, cue.cue_id, updated_cue),
+        cues=tuple(update_owner(owner) for owner in document.cues),
         changes=(*document.changes, provenance),
     )
 
@@ -1126,7 +1140,7 @@ def _merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
         groups = _mark_groups_dirty(groups, {merged_group_id}, "structure")
     merged = replace(
         left,
-        display_token_ids=(*left.display_token_ids, *right.display_token_ids),
+        display_token_ids=tuple(dict.fromkeys((*left.display_token_ids, *right.display_token_ids))),
         end=right.end,
         target=target,
         group_id=merged_group_id,
@@ -1141,6 +1155,77 @@ def _merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
         groups=groups,
         changes=(*document.changes, provenance),
     )
+
+
+def _auto_merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
+    """Snap small gaps and absorb short cues as one reversible document operation."""
+    payload = operation["payload"]
+    gap_ms = payload.get("gap_ms", 200)
+    short_count = payload.get("short_count", 3)
+    absorb = payload.get("absorb", True)
+    snap_direction = payload.get("snap_direction", "previous")
+    absorb_direction = payload.get("absorb_direction", "previous")
+    if (type(gap_ms) is not int or not 0 <= gap_ms <= 10000
+            or type(short_count) is not int or not 1 <= short_count <= 100
+            or type(absorb) is not bool
+            or snap_direction not in {"previous", "next"}
+            or absorb_direction not in {"previous", "next"}):
+        raise DocumentOperationError("invalid subtitle merge settings")
+    provenance = _provenance(operation, "auto_merge_cues")
+    original_changes = document.changes
+    tokens = {token.token_id: token for token in document.display_tokens}
+
+    def eligible(left, right):
+        return (left.state is EntityState.ACTIVE and right.state is EntityState.ACTIVE
+                and left.mapping.get("subtitle_track") != "overlay"
+                and right.mapping.get("subtitle_track") != "overlay"
+                and left.speaker == right.speaker
+                and -1e-9 <= right.start - left.end <= gap_ms / 1000 + 1e-9)
+
+    def count(cue):
+        text = cue.source_text if cue.source_text is not None else " ".join(
+            tokens[token_id].text for token_id in cue.display_token_ids
+            if tokens[token_id].state is EntityState.ACTIVE)
+        cjk = r"[\u3400-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]"
+        return len(re.findall(cjk, text)) + len(re.findall(r"[^\W_]+(?:['’][^\W_]+)*", re.sub(cjk, " ", text)))
+
+    # Process in the chosen direction, so a run of short cues is absorbed naturally.
+    if absorb:
+        index = 1 if absorb_direction == "previous" else len(document.cues) - 2
+        while 0 <= index < len(document.cues):
+            neighbor = index - 1 if absorb_direction == "previous" else index + 1
+            if not 0 <= neighbor < len(document.cues):
+                break
+            left, right = (document.cues[min(index, neighbor)], document.cues[max(index, neighbor)])
+            if eligible(left, right) and count(document.cues[index]) < short_count:
+                merged = _merge_cues(document, {
+                    **operation, "operation_id": f"{operation['operation_id']}:{left.cue_id}:{right.cue_id}",
+                    "payload": {"cue_ids": [left.cue_id, right.cue_id], "provenance": payload.get("provenance", {})},
+                })
+                if left.source_text is not None or right.source_text is not None:
+                    text = _join_translation_text(left.source_text or "", right.source_text or "")
+                    merged = replace(merged, cues=tuple(replace(cue, source_text=text) if cue.cue_id == left.cue_id else cue for cue in merged.cues))
+                document = merged
+                if absorb_direction == "next":
+                    index -= 1
+            else:
+                index += 1 if absorb_direction == "previous" else -1
+    if gap_ms:
+        changes = {}
+        for left, right in zip(document.cues, document.cues[1:]):
+            if eligible(left, right) and right.start > left.end:
+                cue = right if snap_direction == "previous" else left
+                changes[cue.cue_id] = CueTimeChange(
+                    cue_id=cue.cue_id,
+                    start=left.end if snap_direction == "previous" else cue.start,
+                    end=right.start if snap_direction == "next" else cue.end,
+                )
+        if changes:
+            try:
+                document = apply_cue_times(document, list(changes.values()), provenance)
+            except CueTimingError as exc:
+                raise DocumentOperationError(str(exc)) from exc
+    return replace(document, changes=(*original_changes, provenance))
 
 
 def _set_cue_speaker(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
@@ -1175,6 +1260,7 @@ def _set_speaker_names(document: EditorDocument, operation: Mapping[str, Any]) -
 
 _APPLIERS = {
     "replace": _replace,
+    "retime_text": _retime_text,
     "batch_replace": _batch_replace,
     "set_ai_calibration": _set_ai_calibration,
     "set_presentation": _set_presentation,
@@ -1190,16 +1276,14 @@ _APPLIERS = {
     "insert": _insert,
     "split_cue": _split_cue,
     "merge_cues": _merge_cues,
+    "auto_merge_cues": _auto_merge_cues,
     "set_cue_speaker": _set_cue_speaker,
     "set_speaker_names": _set_speaker_names,
 }
 
 
 def apply_document_batch(document: EditorDocument, operations: list[Mapping[str, Any]]) -> EditorDocument:
-    if not all(op.get("type") == "replace" for op in operations) or any(
-        op.get("payload", {}).get("provenance", {}).get("operation") in {"inline_replace", "whole_cue_edit"}
-        for op in operations
-    ):
+    if not all(op.get("type") == "replace" for op in operations):
         for operation in operations:
             document = apply_document_operation(document, operation)
         return document
@@ -1231,7 +1315,7 @@ def apply_document_batch(document: EditorDocument, operations: list[Mapping[str,
     return synchronize_translation_status(replace(document, display_tokens=tuple(tokens[t.token_id] for t in document.display_tokens), changes=tuple(changes)), changed_ids)
 
 
-def synchronize_translation_status(document: EditorDocument, changed_ids: set[str]) -> EditorDocument:
+def synchronize_translation_status(document: EditorDocument, changed_ids: set[str], changed_cues: set[str] | None = None) -> EditorDocument:
     """Keep current tracks authoritative and preserve immutable deleted cues."""
     cues = []
     for cue in document.cues:
@@ -1239,7 +1323,7 @@ def synchronize_translation_status(document: EditorDocument, changed_ids: set[st
             cues.append(cue)
             continue
         target = cue.target
-        if target is not None and changed_ids.intersection(cue.display_token_ids) and target.translation_status == "translated":
+        if target is not None and (changed_ids.intersection(cue.display_token_ids) or cue.cue_id in (changed_cues or set())) and target.translation_status == "translated":
             target = replace(target, translation_status="needs_review", issue_code="source_changed")
         mapping = dict(cue.mapping or {})
         if target is not None:
@@ -1258,7 +1342,7 @@ def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
     operation_type = str(operation.get("type", ""))
-    if any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times"}:
+    if any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times", "auto_merge_cues"}:
         raise DocumentOperationError("字幕导入项目仅支持文本和时间编辑，不支持词元操作")
     if operation_type not in _APPLIERS:
         raise DocumentOperationError(f"unsupported operation: {operation_type}")
@@ -1270,7 +1354,9 @@ def apply_document_operation(
     )
     result = _APPLIERS[operation_type](ordered_document, operation)
     changed_ids = set()
-    if operation_type in {"replace", "batch_replace", "set_ai_calibration", "delete", "restore", "insert", "merge"}:
+    if operation_type in {"retime_text", "replace", "batch_replace", "set_ai_calibration", "delete", "restore", "insert", "merge"}:
         before = {token.token_id: (token.text, token.state) for token in document.display_tokens}
         changed_ids = {token.token_id for token in result.display_tokens if before.get(token.token_id) != (token.text, token.state)}
-    return synchronize_translation_status(canonicalize_document_cues(result), changed_ids)
+    before_cues = {cue.cue_id: cue.source_text for cue in document.cues}
+    changed_cues = {cue.cue_id for cue in result.cues if cue.source_text != before_cues.get(cue.cue_id)}
+    return synchronize_translation_status(canonicalize_document_cues(result), changed_ids, changed_cues)

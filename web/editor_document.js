@@ -14,8 +14,8 @@
   const DELETED = "deleted";
   const CHANGE_KINDS = new Set(["source", "import", "manual", "ai", "normalization"]);
   const OPERATION_TYPES = new Set([
-    "replace", "set_target", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
-    "merge", "delete", "purge_cue", "restore", "insert", "split_cue", "merge_cues",
+    "replace", "retime_text", "set_target", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
+    "merge", "delete", "purge_cue", "restore", "insert", "split_cue", "merge_cues", "auto_merge_cues",
     "set_cue_speaker", "set_speaker_names", "batch_replace", "set_ai_calibration"
   ]);
   const consumedRevisions = new WeakSet();
@@ -333,9 +333,12 @@
       };
     }
     const displayById = new Map(revision.document.display_tokens.map(token => [token.token_id, token]));
+    const sourceTimes = new Map(revision.document.source_tokens.map(token => [token.token_id, token]));
     const tokenViews = revision.document.display_tokens.map(token => ({
       token_id:token.token_id,
       text:token.text,
+      start:token.source_token_ids.length ? Math.min(...token.source_token_ids.map(id => sourceTimes.get(id)?.start ?? Infinity)) : null,
+      end:token.source_token_ids.length ? Math.max(...token.source_token_ids.map(id => sourceTimes.get(id)?.end ?? -Infinity)) : null,
       original_text:token.original_text,
       source_token_ids:[...token.source_token_ids],
       provenance:clone(token.provenance),
@@ -679,6 +682,13 @@
     });
   }
 
+  function retimeTextOperation(revisionPayload, cueId, tokenIds, text, provenance = null) {
+    return createOperation(revisionPayload, "retime_text", {
+      cue_id:String(cueId), token_ids:tokenIds.map(String), text:String(text),
+      provenance:provenanceInput(provenance, "retime_text")
+    });
+  }
+
   function mergeOperation(revisionPayload, tokenIds, text, provenance = null) {
     const indexes = revisionIndexes(revisionPayload);
     const ids = tokenIds.map(String);
@@ -830,6 +840,12 @@
     }, [left, right]);
   }
 
+  function autoMergeCuesOperation(revisionPayload, settings, provenance = null) {
+    return createOperation(revisionPayload, "auto_merge_cues", {
+      ...settings, provenance:provenanceInput(provenance, "auto_merge_cues")
+    });
+  }
+
   function findContiguousTokenMatches(tokensInput, queryInput) {
     const tokens = (Array.isArray(tokensInput) ? tokensInput : [])
       .filter(token => token && typeof token.token_id === "string")
@@ -887,12 +903,14 @@
     setCueTimesOperation,
     insertCueOperation,
     mergeOperation,
+    retimeTextOperation,
     deleteOperation,
     purgeCueOperation,
     restoreOperation,
     insertOperation,
     splitCueOperation,
     mergeCuesOperation,
+    autoMergeCuesOperation,
     findContiguousTokenMatches
   });
 });

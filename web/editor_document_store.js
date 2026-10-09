@@ -245,7 +245,9 @@
     document.cues = document.cues.map(cue => {
       if (cue.state === "deleted" || !cue.target) return cue;
       let target = cue.target;
-      if (target.translation_status === "translated" && cue.display_token_ids.some(id => sourceChanges.has(id)))
+      if (target.translation_status === "translated" && (cue.display_token_ids.some(id => sourceChanges.has(id)) ||
+          (operation.type === "set_source_text" && cue.cue_id === payload.cue_id &&
+           before.cues.find(c => c.cue_id === cue.cue_id)?.source_text !== cue.source_text)))
         target = {...target, translation_status:"needs_review", issue_code:"source_changed"};
       if (target === cue.target && !cueIds.has(cue.cue_id)) return cue;
       return {...cue, target, mapping:{...cue.mapping,

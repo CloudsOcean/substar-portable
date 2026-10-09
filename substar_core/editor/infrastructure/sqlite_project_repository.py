@@ -30,6 +30,17 @@ class SQLiteProjectRepository:
     def load_latest(self) -> DocumentRevision | None:
         return self.store.load_latest()
 
+    def uncommitted_operations(self, operations):
+        from substar_core.editor.application.editing_service import operation_hash
+        try:
+            return [op for op in operations if self.store.find_receipt(
+                "operation:" + str(op["operation_id"]), operation_hash(op)
+            ) is None]
+        except ProjectConflictError as exc:
+            raise RepositoryConflictError(str(exc)) from exc
+        except ProjectStoreError as exc:
+            raise RepositoryError(str(exc)) from exc
+
     def operation_revisions(self, operations):
         from substar_core.editor.application.editing_service import operation_hash
         revisions = [self.store.find_receipt("operation:" + op["operation_id"], operation_hash(op)) for op in operations]

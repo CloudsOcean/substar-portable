@@ -36,14 +36,14 @@ def _write_onset_fixture(
 
 
 class SmartForwardSnapTests(unittest.TestCase):
-    def test_touching_cues_allow_shared_boundary_search(self) -> None:
+    def test_touching_cues_are_hard_barriers(self) -> None:
         self.assertEqual(
             smart_snap_search_minimum(
                 previous_start=1.0,
                 previous_end=2.0,
                 current_start=2.0,
             ),
-            1.04,
+            2.0,
         )
 
     def test_real_gap_and_manual_cue_remain_hard_barriers(self) -> None:

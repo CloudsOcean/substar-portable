@@ -40,6 +40,8 @@
         speaker:cue.speaker ?? null,
         target_text:String(cue.target?.target_text || ""),
         subtitle_track:cue.subtitle_track || "main",
+        timed_tokens:(cue.source_text == null ? (cue.active_display_token_ids || cue.display_token_ids || []) : [])
+          .map(id => tokens.get(String(id))).filter(Boolean),
         display_token_ids:[...(cue.display_token_ids || [])],
         text:cue.source_text ?? languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
           .map(id => tokens.get(String(id))?.text || "").filter(Boolean))
@@ -181,14 +183,8 @@
       const cue = cues[index];
       if (!Object.prototype.hasOwnProperty.call(forwardStarts, cue.cue_id)) continue;
       const requested = number(forwardStarts[cue.cue_id], cue.start);
-      const minimum = index ? starts[index - 1] + MIN_CUE_SECONDS : 0;
-      const snapped = clamp(requested, minimum, cue.start);
-      starts[index] = snapped;
-      if (index && snapped < ends[index - 1] - 0.0005) {
-        // A touching pair owns one boundary.  Move both sides together instead
-        // of rejecting a valid onset merely because the old ranges touched.
-        ends[index - 1] = snapped;
-      }
+      const minimum = index ? Math.min(cue.start, ends[index - 1]) : 0;
+      starts[index] = clamp(requested, minimum, cue.start);
     }
     if (threshold !== null) {
       for (let index = 0; index < cues.length - 1; index += 1) {

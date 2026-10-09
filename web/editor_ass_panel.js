@@ -105,7 +105,7 @@
         renderer?.freeTrack();
         ready=false; $("#assLiveCanvas").hidden=true; $(".subtitle-overlay").hidden=false;
         revision="";
-        if (menu.open) message(error.message);
+        if (menu.open) message('字幕实时预览加载失败，当前使用基础预览。' + (error.status ? `（${error.status}）` : error.message));
       }
     }
     function schedule() { clearTimeout(timer); timer=setTimeout(live,180); }
@@ -242,7 +242,6 @@
         await flush();if(origin!==state.projectId)throw new Error('项目已切换');return (await exportResponse(renderPayload())).blob();
       });message(result.cancelled ? '已取消导出' : '字幕已导出');
     });
-    $('#assBurn').onclick=()=>action(async()=>{const result=await systemSaveAs.saveUrl({suggestedName:systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)+'_字幕.mp4',description:'字幕视频',mimeType:'video/mp4',extension:'.mp4',url:()=>render(null)});message(result.cancelled ? '已取消烧录' : '视频已保存');});
     [$('#projectVideo'),$('#projectAudio')].forEach(media=>{
       ['play','seeking','emptied'].forEach(event=>media.addEventListener(event,closeFrame));
       media.addEventListener('loadedmetadata',schedule);

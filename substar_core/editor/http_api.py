@@ -1399,6 +1399,20 @@ def _aggregate_peaks(values: list[float], points: int) -> list[float]:
     return [max(values[start : start + bucket]) for start in range(0, len(values), bucket)]
 
 
+@router.get("/projects/{project_id}/spectrogram")
+def get_project_spectrogram(project_id: str, start: float = Query(ge=0), end: float = Query(gt=0)) -> Response:
+    from substar_core.media.spectrogram import spectrogram_png
+    job_dir = project_job_path(project_id)
+    audio = (job_dir / "audio_16k_mono.wav").resolve()
+    if not audio.is_file() or job_dir.resolve() not in audio.parents:
+        raise HTTPException(404, "项目没有可用的音频")
+    try:
+        data = spectrogram_png(audio, start, end)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return Response(data, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+
 @router.get("/projects/{project_id}/waveform")
 def get_project_waveform(
     project_id: str,

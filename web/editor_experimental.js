@@ -24,15 +24,23 @@
       ["cinema", "大屏布局", "预览在左，工具与字幕在右，波形横贯底部"]];
     const key = "substar.editor.workspace-layouts-v3";
     const initialSizes = {
-      standard: {left:54, first:39.42450055505476, second:56},
-      "aligned-left": {left:54, first:39.42450055505476, second:56},
-      classic: {left:62, first:78.2905982905983, second:56},
-      cinema: {left:54, first:12, second:66}
+      standard: {left:60, cue:710, tools:365, first:48.6, second:56},
+      "aligned-left": {left:60, cue:710, tools:365, first:48.6, second:56},
+      classic: {left:62, cue:830, tools:250, first:80, second:56},
+      cinema: {left:57.5, first:12, second:47}
     };
     let saved = {}; try { saved = JSON.parse(localStorage.getItem(key) || "{}"); } catch {}
     let preset = presets.some(([id]) => id === saved.preset) ? saved.preset : "standard";
     let sizes = saved.sizes || {};
     const waveformModes = saved.waveformModes || {};
+    // Apply the requested defaults once; subsequent resizing remains personal.
+    const defaultsVersion = 6;
+    if (saved.defaultsVersion !== defaultsVersion) {
+      for (const id of ["standard", "aligned-left", "classic"]) {
+        sizes[id] = {...initialSizes[id]};
+        waveformModes[id] = id === "classic" ? "basic" : "multiline";
+      }
+    }
     const menu = document.createElement("label"); menu.className = "workspace-layout-menu";
     const caption = document.createElement("span"); caption.textContent = "工作区";
     const layoutSelect = document.createElement("select"); layoutSelect.id = "workspaceLayoutSelect";
@@ -41,7 +49,7 @@
     layoutSelect.onchange = () => { preset = layoutSelect.value; apply(); persist(); };
     menu.append(caption, layoutSelect); document.querySelector("#taskInfoMenu").after(menu);
     document.querySelector("#revisionLabel").hidden = true;
-    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes, waveformModes})); } catch {} }
+    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes, waveformModes, defaultsVersion})); } catch {} }
     function config() { return sizes[preset] ||= {...initialSizes[preset]}; }
     wave.addEventListener("workspace-waveform-mode-change", event => {
       waveformModes[preset] = event.detail.mode;
@@ -56,14 +64,16 @@
         wave.dispatchEvent(new CustomEvent("workspace-waveform-mode", {detail:{mode:waveformMode}}));
       }
       const size = config(), width = workbench.clientWidth - 24;
-      const maxUpper = 100 - 254 / Math.max(1, workbench.clientHeight - 24) * 100;
+      const maxUpper = 100 - 240 / Math.max(1, workbench.clientHeight - 24) * 100;
       if (preset === "cinema") size.second = Math.min(size.second, Math.max(28, maxUpper - size.first));
       else size.first = Math.min(size.first, Math.max(preset === "classic" ? 50 : 30, maxUpper));
-      const toolsWidth = Math.max(180, Math.min(240, width*.125));
-      const minimum = preset === "classic" ? toolsWidth+360 : 460;
-      const rightMinimum = preset === "classic" ? 300 : 380;
-      const left = Math.max(Math.min(minimum, width*.58), Math.min(width-rightMinimum, width*size.left/100));
+      const toolsWidth = Math.max(180, Math.min(size.tools || 250, Math.max(180, width-660)));
+      const cueWidth = Math.max(320, Math.min(size.cue || 710, width-toolsWidth-300));
+      const left = preset === "cinema"
+        ? Math.max(380, Math.min(width-540, width*size.left/100))
+        : preset === "classic" ? toolsWidth+cueWidth : width-cueWidth;
       workbench.style.setProperty("--workspace-tools", `${toolsWidth}px`);
+      workbench.style.setProperty("--workspace-cue", `${cueWidth}px`);
       workbench.style.setProperty("--workspace-left", `${left}px`);
       workbench.style.setProperty("--workspace-first", `${size.first}%`);
       workbench.style.setProperty("--workspace-second", `${size.second}%`);
@@ -71,7 +81,8 @@
       requestAnimationFrame(positionHandles);
     }
     const handles = [makeHandle("左右调整工作区宽度", "vertical", "width"),
-      makeHandle("上下调整模块高度", "horizontal", "first"), makeHandle("上下调整第二处分界", "horizontal", "second")];
+      makeHandle("上下调整模块高度", "horizontal", "first"), makeHandle("上下调整第二处分界", "horizontal", "second"),
+      makeHandle("调整工具栏宽度", "vertical", "tools")];
     let dragging = null;
     function makeHandle(name, orientation, kind) {
       const handle = document.createElement("div"); handle.className = `workspace-divider ${orientation}`;
@@ -93,25 +104,29 @@
       handle.addEventListener("keydown", event => {
         const directions = {ArrowLeft:-12, ArrowRight:12, ArrowUp:-12, ArrowDown:12};
         if (!(event.key in directions)) return;
-        if (kind === "width" && !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-        if (kind !== "width" && !["ArrowUp", "ArrowDown"].includes(event.key)) return;
-        event.preventDefault(); resize(kind, kind === "width" ? directions[event.key] : 0, kind === "width" ? 0 : directions[event.key], {...config()}); persist();
+        const horizontal = kind === "width" || kind === "tools";
+        if (horizontal && !["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        if (!horizontal && !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault(); resize(kind, horizontal ? directions[event.key] : 0, horizontal ? 0 : directions[event.key], {...config()}); persist();
       });
       workbench.append(handle); return handle;
     }
     function resize(kind, dx, dy, origin) {
       const size = config(), width = workbench.clientWidth-24, height = workbench.clientHeight-24;
       const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-      if (kind === "width") {
-        const minimum = preset === "classic" ? Math.max(180, Math.min(240, width*.125))+360 : 460;
-        const rightMinimum = preset === "classic" ? 300 : 380;
-        size.left = clamp(origin.left+(preset === "aligned-left" ? -dx : dx)/width*100, Math.min(minimum/width*100,58), Math.min(72, (width-rightMinimum)/width*100));
-      } else if (preset === "standard" || preset === "aligned-left") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-254/height*100));
-      else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-254/height*100));
+      if (kind === "tools") {
+        const total = tools.getBoundingClientRect().width + cue.getBoundingClientRect().width;
+        size.tools = clamp((origin.tools || 250) + dx, 180, total-320);
+        size.cue = total-size.tools;
+      } else if (kind === "width") {
+        if (preset === "cinema") size.left = clamp(origin.left+dx/width*100, 380/width*100, (width-540)/width*100);
+        else size.cue = clamp(origin.cue+(preset === "standard" ? -dx : dx), 320, width-(size.tools || 250)-300);
+      } else if (preset === "standard" || preset === "aligned-left") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-240/height*100));
+      else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-240/height*100));
       else {
         const delta = dy/height*100;
         if (kind === "first") { size.first = clamp(origin.first+delta, 12, origin.first+origin.second-28); size.second = origin.second+origin.first-size.first; }
-        else size.second = clamp(origin.first+origin.second+delta, Math.max(50,origin.first+28),Math.max(50,100-254/height*100))-origin.first;
+        else size.second = clamp(origin.first+origin.second+delta, Math.max(50,origin.first+28),Math.max(50,100-240/height*100))-origin.first;
       }
       apply();
     }
@@ -120,6 +135,8 @@
       const previewBox = preview.getBoundingClientRect(), toolsBox = tools.getBoundingClientRect(), waveBox = wave.getBoundingClientRect();
       function place(handle, left, top, width, height) { Object.assign(handle.style, {left:`${left-box.left}px`, top:`${top-box.top}px`, width:`${width}px`, height:`${height}px`}); }
       handles[2].hidden = preset !== "cinema";
+      handles[1].hidden = preset === "cinema";
+      handles[3].hidden = preset !== "classic";
       if (preset === "standard") {
         place(handles[0], cueBox.left-8, box.top+8, 8, box.height-16);
         place(handles[1], box.left+8, waveBox.top-8, cueBox.left-box.left-16, 8);
@@ -127,16 +144,18 @@
         place(handles[0], toolsBox.left-8, box.top+8, 8, box.height-16);
         place(handles[1], waveBox.left, waveBox.top-8, waveBox.width, 8);
       } else if (preset === "classic") {
+        place(handles[3], cueBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
         place(handles[0], previewBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
         place(handles[1], box.left+8, waveBox.top-8, box.width-16, 8);
       } else {
-        place(handles[0], toolsBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
+        place(handles[0], cueBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
         place(handles[1], toolsBox.left, cueBox.top-8, toolsBox.width, 8);
         place(handles[2], box.left+8, waveBox.top-8, box.width-16, 8);
       }
     }
     new ResizeObserver(apply).observe(workbench);
     apply();
+    persist();
   }
   function installTaskIsland() {
     const island = document.querySelector("#cueTaskIsland");
@@ -189,6 +208,7 @@
     }
     label.replaceWith(group);
     document.querySelector(".editor-document-pane .pane-heading > div:first-child").append(group);
+    group.before(document.querySelector("#reviewModeToggle"));
     const fontGroup = document.createElement("div"); fontGroup.className = "cue-font-control";
     fontGroup.setAttribute("role", "group"); fontGroup.setAttribute("aria-label", "字幕字号");
     const decrease = document.querySelector("#fontDecrease"), value = document.querySelector("#fontValue"), increase = document.querySelector("#fontIncrease");
@@ -199,6 +219,28 @@
     bilingual.classList.add("bilingual-toggle");
     [...bilingual.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
       .forEach(node => { node.textContent = "双语字幕"; });
+    const displayMenu = document.createElement("details"); displayMenu.className = "cue-display-settings multiline-waveform-settings";
+    const displayToggle = document.createElement("summary"); displayToggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.2-2 .9-2-.9-2.5 4.3 1.8 1.5v2l-1.8 1.5 2.5 4.3 2-.9 2 .9.6 2.2h5l.6-2.2 2-.9 2 .9 2.5-4.3-1.8-1.5v-2l1.8-1.5-2.5-4.3-2 .9-2-.9L14.5 3Z"/><circle cx="12" cy="12" r="3"/></svg>';
+    displayToggle.setAttribute("aria-label", "字幕显示设置"); displayToggle.title = "字幕显示设置";
+    const displayContent = document.createElement("div"); displayContent.className = "cue-display-settings-content multiline-waveform-settings-panel";
+    const fontLabel = document.createElement("span"); fontLabel.textContent = "字号";
+    const fontRow = document.createElement("div"); fontRow.className = "cue-settings-font-row";
+    const fontSlider = document.createElement("input"); fontSlider.type = "range"; fontSlider.min = "11"; fontSlider.max = "22"; fontSlider.step = "1"; fontSlider.value = value.textContent || "18";
+    fontSlider.setAttribute("aria-label", "字幕字号");
+    const fontOutput = document.createElement("output"); fontOutput.textContent = fontSlider.value;
+    const syncFont = () => { fontSlider.value = value.textContent; fontOutput.textContent = value.textContent; };
+    new MutationObserver(syncFont).observe(value, {childList:true, characterData:true, subtree:true});
+    fontSlider.oninput = () => {
+      const target = Number(fontSlider.value), current = Number(value.textContent);
+      for (let i = 0; i < Math.abs(target-current); i++) (target > current ? increase : decrease).click();
+      syncFont();
+    };
+    fontGroup.hidden = true;
+    const sliderControls = document.createElement("span"); sliderControls.className = "waveform-gain-controls"; sliderControls.append(fontSlider, fontOutput);
+    const settingsTitle = document.createElement("strong"); settingsTitle.textContent = "字幕显示设置";
+    fontRow.append(fontLabel, sliderControls); displayContent.append(settingsTitle, fontRow, bilingual, fontGroup);
+    displayMenu.append(displayToggle, displayContent);
+    document.querySelector(".pane-live-controls").append(displayMenu);
   }
   function installSpeakerMenu() {
     const button = document.querySelector("#detectSpeakers");
@@ -233,13 +275,82 @@
       tabs.className = "experimental-tool-tabs";
       tabs.setAttribute("role", "tablist");
       tabs.setAttribute("aria-label", "编辑工具");
+      const locator = tools.querySelector('[data-tool-panel="locator"]');
+      const search = tools.querySelector('[data-tool-panel="search"]');
+      const searchContent = search.querySelector('.tool-panel');
+      searchContent.id = 'experimental-search-panel';
+      search.open = true;
+      search.classList.add('combined-search');
+      const locatorGroup = locator.querySelector('.tool-panel');
+      const combined = document.createElement('div');
+      combined.className = 'tool-panel combined-find-panel';
+      combined.append(search, locatorGroup);
+      locator.append(combined);
+      locator.querySelector('summary').textContent = '查找与定位';
       const panels = Array.from(tools.querySelectorAll(":scope > .tool-accordion"));
-      const tabLabels = ["定位", "查找", "标点", "吸附", "帮助"];
+      const toolsScroll = document.createElement("input");
+      toolsScroll.type = "range";
+      toolsScroll.className = "tools-scroll-slider";
+      toolsScroll.setAttribute("aria-label", "编辑工具内容位置");
+      toolsScroll.min = "0";
+      toolsScroll.step = "1";
+      toolsScroll.value = "0";
+      toolsScroll.hidden = true;
+      let activePanel = panels[0];
+      const workbench = document.querySelector("#editorWorkbench");
+      const isCinema = () => workbench.dataset.workspaceLayout === "cinema";
+      let scrollFrame = 0;
+      const floatingHeading = document.createElement("div"); floatingHeading.className = "cinema-tool-heading";
+      const floatingTitle = document.createElement("strong");
+      const floatingClose = document.createElement("button"); floatingClose.type = "button"; floatingClose.textContent = "×";
+      floatingClose.setAttribute("aria-label", "关闭工具窗口"); floatingClose.onclick = closeTools;
+      floatingHeading.append(floatingTitle, floatingClose); tools.append(floatingHeading);
+      function syncToolsScroll() {
+        scrollFrame = 0;
+        if (isCinema()) {
+          const preview = document.querySelector(".editor-preview-pane").getBoundingClientRect();
+          const anchor = document.querySelector("#assMenu > summary").getBoundingClientRect();
+          const width = Math.min(340, preview.width - 24);
+          tools.style.left = `${preview.right - width - 12}px`;
+          tools.style.top = `${anchor.bottom + 8}px`;
+          tools.style.width = `${width}px`;
+          tools.style.setProperty("--cinema-window-height", `${Math.max(120, Math.min(560, preview.bottom - anchor.bottom - 60))}px`);
+          activePanel.style.left = "0px";
+          toolsScroll.style.left = `${width - 16}px`;
+        } else {
+          ["left", "top", "width"].forEach(key => tools.style.removeProperty(key));
+          panels.forEach(panel => panel.style.removeProperty("left"));
+          toolsScroll.style.removeProperty("left");
+        }
+        const maximum = Math.max(0, activePanel.scrollHeight - activePanel.clientHeight);
+        toolsScroll.hidden = maximum <= 1 || (isCinema() && !tools.classList.contains("cinema-tools-open"));
+        toolsScroll.disabled = maximum <= 1;
+        toolsScroll.max = String(maximum);
+        toolsScroll.value = String(activePanel.scrollTop);
+        toolsScroll.style.top = isCinema() ? "36px" : `${tabs.offsetTop + tabs.offsetHeight}px`;
+        toolsScroll.style.height = `${activePanel.clientHeight}px`;
+        toolsScroll.setAttribute("aria-controls", activePanel.querySelector(".tool-panel").id);
+      }
+      function scheduleToolsScroll() {
+        if (!scrollFrame) scrollFrame = requestAnimationFrame(syncToolsScroll);
+      }
+      toolsScroll.addEventListener("input", () => {
+        activePanel.scrollTop = Number(toolsScroll.value);
+      });
+      const toolsResize = new ResizeObserver(scheduleToolsScroll);
+      toolsResize.observe(tools);
+      panels.forEach(panel => {
+        panel.addEventListener("scroll", scheduleToolsScroll, {passive:true});
+        toolsResize.observe(panel);
+        toolsResize.observe(panel.querySelector(".tool-panel"));
+      });
+      new MutationObserver(scheduleToolsScroll).observe(tools, {subtree:true, childList:true, characterData:true});
+      const tabLabels = ["查找", "标点", "吸附", "合并", "帮助"];
       const tabIcons = [
-        '<circle cx="8" cy="8" r="4"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/>',
         '<circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/>',
         '<path d="M4 4h3v4H4zm6 0h3v4h-3zM7 8l-2 4m8-4-2 4"/>',
         '<path d="M3 3v6a5 5 0 0 0 10 0V3M3 6h3m4 0h3M6 3v6m4-6v6"/>',
+        '<path d="M2 3h3l3 5m6-5h-3L8 8v6m-3-3 3 3 3-3"/>',
         '<circle cx="8" cy="8" r="6"/><path d="M6.3 6a1.8 1.8 0 0 1 3.4.8C9.7 8 8 8.2 8 9.5M8 12v.1"/>'
       ];
       const buttons = panels.map((panel, index) => {
@@ -257,7 +368,10 @@
         content.setAttribute("aria-labelledby", button.id);
         button.setAttribute("role", "tab");
         button.setAttribute("aria-controls", content.id);
-        button.onclick = () => activate(index);
+        button.onclick = () => {
+          if (isCinema() && activePanel === panel && tools.classList.contains("cinema-tools-open")) closeTools();
+          else activate(index);
+        };
         button.onkeydown = event => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
           event.preventDefault();
@@ -270,13 +384,50 @@
         return button;
       });
       function activate(index) {
+        activePanel = panels[index];
+        floatingTitle.textContent = tabLabels[index];
+        if (isCinema()) {
+          document.querySelector("#assMenu").open = false;
+          tools.classList.add("cinema-tools-open");
+        }
         panels.forEach((panel, i) => {
           if (i === index) panel.open = true;
           panel.classList.toggle("experimental-tool-active", i === index);
-          buttons[i].setAttribute("aria-selected", String(i === index));
+          if (!isCinema()) buttons[i].setAttribute("aria-selected", String(i === index));
           buttons[i].tabIndex = i === index ? 0 : -1;
+          if (isCinema()) { buttons[i].setAttribute("aria-expanded", String(i === index)); buttons[i].tabIndex = 0; }
+        });
+        scheduleToolsScroll();
+      }
+      function closeTools() {
+        tools.classList.remove("cinema-tools-open");
+        buttons.forEach(button => { if (isCinema()) button.setAttribute("aria-expanded", "false"); });
+        scheduleToolsScroll();
+      }
+      function syncToolMode() {
+        closeTools();
+        if (isCinema()) {
+          document.querySelector(".cue-view-switch").after(tabs);
+          if (document.body.classList.contains("review-mode")) document.querySelector("#reviewModeToggle")?.click();
+        } else tools.prepend(tabs);
+        tabs.setAttribute("role", isCinema() ? "toolbar" : "tablist");
+        buttons.forEach((button, index) => {
+          button.setAttribute("role", isCinema() ? "button" : "tab");
+          button.tabIndex = isCinema() || activePanel === panels[index] ? 0 : -1;
+          if (isCinema()) { button.setAttribute("aria-haspopup", "dialog"); button.setAttribute("aria-expanded", "false"); button.removeAttribute("aria-selected"); }
+          else { button.removeAttribute("aria-haspopup"); button.removeAttribute("aria-expanded"); button.setAttribute("aria-selected", String(activePanel === panels[index])); }
+          panels[index].querySelector(".tool-panel").setAttribute("role", isCinema() ? "dialog" : "tabpanel");
         });
       }
+      new MutationObserver(syncToolMode).observe(workbench, {attributes:true, attributeFilter:["data-workspace-layout"]});
+      document.querySelector("#assMenu").addEventListener("toggle", event => {
+        if (isCinema() && event.currentTarget.open) closeTools();
+      });
+      document.addEventListener("keydown", event => {
+        if (isCinema() && event.key === "Escape") { closeTools(); buttons[panels.indexOf(activePanel)].focus(); event.stopPropagation(); }
+      });
+      window.addEventListener("resize", scheduleToolsScroll);
+      toolsResize.observe(document.querySelector(".editor-preview-pane"));
       const help = panels[4].querySelector(".tool-panel");
       const legend = help.cloneNode(true);
       legend.removeAttribute("id"); legend.removeAttribute("role"); legend.removeAttribute("aria-labelledby");
@@ -301,17 +452,41 @@
         section.append(heading, legend); help.append(section);
       }
       // Group punctuation rules by language without replacing the existing inputs.
-      const punctuation = panels[2].querySelector(".tool-panel");
+      const punctuation = tools.querySelector('[data-tool-panel="punctuation"] .tool-panel');
       const rules = Array.from(punctuation.children);
       for (const offset of [0, 3]) {
-        const row = document.createElement("div"); row.className = "punctuation-rule-row";
+        const row = document.createElement("fieldset"); row.className = "punctuation-rule-row";
         rules[offset].before(row);
-        row.append(rules[offset], rules[offset+1], rules[offset+2]);
+        const heading = document.createElement("legend"); heading.textContent = rules[offset].textContent;
+        row.append(heading);
+        rules[offset].remove();
+        ["移除符号", "替换为空格"].forEach((name, index) => {
+          const label = document.createElement("label");
+          const text = document.createElement("span"); text.textContent = name;
+          const input = rules[offset + index + 1];
+          input.placeholder = index ? "例如：，、" : "例如：。！？";
+          label.append(text, input); row.append(label);
+        });
       }
-      const replaceLabel = document.createElement("label");
-      replaceLabel.htmlFor = "toolReplace"; replaceLabel.className = "wide-replace-label"; replaceLabel.textContent = "替换为";
-      panels[1].querySelector("#toolReplace").before(replaceLabel);
+      const punctuationActions = document.createElement("div"); punctuationActions.className = "panel-actions";
+      punctuationActions.append(punctuation.querySelector("#applyPunctuation"));
+      punctuation.append(punctuationActions);
+      function searchGroup(name, nodes) {
+        const group = document.createElement("fieldset");
+        const legend = document.createElement("legend"); legend.textContent = name;
+        group.append(legend, ...nodes); return group;
+      }
+      const findActions = document.createElement("div"); findActions.className = "panel-actions";
+      findActions.append(searchContent.querySelector("#toolSearchNext"));
+      const replaceActions = document.createElement("div"); replaceActions.className = "panel-actions replace-actions";
+      replaceActions.append(findActions.querySelector("#toolSearchNext"), ...["#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace"].map(id => searchContent.querySelector(id)));
+      const queryRow = document.createElement("div"); queryRow.className = "search-query-row";
+      queryRow.append(searchContent.querySelector("#toolSearch"), findActions);
+      const findGroup = searchGroup("查找与替换", [searchContent.querySelector(".search-scope-toggle"), queryRow, searchContent.querySelector("#toolReplace"), replaceActions]);
+      const searchStatus = searchContent.querySelector("#toolSearchStatus");
+      searchContent.replaceChildren(findGroup, searchStatus);
       tools.prepend(tabs);
+      tools.append(toolsScroll);
       tools.querySelectorAll(".tool-locator-row").forEach(row => {
         row.querySelectorAll(".tool-button-pair button").forEach((button, index) => {
           const name = `${button.textContent} · ${row.querySelector("strong").textContent}`;
@@ -321,6 +496,7 @@
         });
       });
       activate(0);
+      syncToolMode();
       // Review mode uses the locator panel for its review controls.
       new MutationObserver(() => {
         if (document.body.classList.contains("review-mode")) activate(0);

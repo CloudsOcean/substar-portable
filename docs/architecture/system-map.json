@@ -725,7 +725,7 @@
       "layer": "domain_service",
       "role": "Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations.",
       "must_not": ["Own Cue topology", "Load whole media into API memory", "Return media from another project"],
-      "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["get_project_media_info", "get_project_media", "get_project_waveform"]}, {"path": "substar_core/media/playback_proxy.py", "symbols": []}, {"path": "substar_core/media/waveform_cache.py", "symbols": []}],
+      "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["get_project_media_info", "get_project_media", "get_project_waveform"]}, {"path": "substar_core/media/playback_proxy.py", "symbols": []}, {"path": "substar_core/media/waveform_cache.py", "symbols": []}, {"path": "substar_core/media/spectrogram.py", "symbols": []}],
       "inputs": ["editor_revision"],
       "outputs": ["media_info", "media_stream"],
       "calls": [],

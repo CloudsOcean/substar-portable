@@ -191,3 +191,12 @@ test("waveform resampling preserves sharp transients without smoothing adjacent 
   assert.deepEqual(waveformEnvelope([0,1,0,.2,0,0],3,0,6,0,6), [1,.2,0]);
   assert.deepEqual(waveformEnvelope([0,1,0],6,0,3,0,3), [0,0,1,1,0,0]);
 });
+
+ test("row labels follow token times and preserve untimed text", () => {
+   const {rowCueText} = require("../web/editor_multiline_timeline.js");
+   const cue = {start:0,end:6,text:"one two",timed_tokens:[{text:"one",start:0,end:1},{text:"two",start:4,end:5}]};
+   assert.equal(rowCueText(cue,{start:0,end:2}),"one …");
+   assert.equal(rowCueText(cue,{start:2,end:4}),"（间歇）");
+   assert.equal(rowCueText(cue,{start:4,end:6}),"… two");
+   assert.equal(rowCueText({...cue,timed_tokens:[]},{start:4,end:6}),"续 · one two");
+ });

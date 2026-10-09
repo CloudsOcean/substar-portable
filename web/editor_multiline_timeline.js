@@ -52,6 +52,19 @@
       {cue_id:cue.cue_id,edge:"end",time:Number((cue.end+shift).toFixed(3))}
     ]};
   }
+  function rowCueText(cue, row, target = false) {
+    const full = String(target ? cue.target_text || "" : cue.text || "");
+    if (cue.start >= row.start && cue.end <= row.end) return full;
+    const tokens = cue.timed_tokens || [];
+    if (!target && tokens.length && tokens.every(t => Number.isFinite(t.start) && Number.isFinite(t.end))) {
+      const included = tokens.filter(t => t.end > row.start && t.start < row.end);
+      if (!included.length) return "（间歇）";
+      const layout = globalThis.SubstarLanguageLayout?.layoutTokens || (values => values.join(" "));
+      return (tokens.indexOf(included[0]) > 0 ? "… " : "") + layout(included.map(t => t.text))
+        + (tokens.indexOf(included[included.length-1]) < tokens.length-1 ? " …" : "");
+    }
+    return cue.start < row.start ? "续 · " + full : full;
+  }
   function createTimelineController(options) {
     const doc = options.canvas.ownerDocument;
     const panel = options.canvas.closest(".cue-timeline-panel");
@@ -85,7 +98,17 @@
     const gainLabel=doc.createElement("label"); gainLabel.textContent="振幅";
     const gainInput=doc.createElement("input"); gainInput.type="range"; gainInput.min="0.5"; gainInput.max="4"; gainInput.step="0.1"; gainInput.value="1.3";
     gainInput.setAttribute("aria-label","波形振幅"); gainLabel.append(gainInput);
-    settingsPanel.append(settingsTitle, label, gainLabel);
+    const displayLabel = doc.createElement("label"); displayLabel.textContent = "显示";
+    const displaySelect = doc.createElement("select"); displaySelect.setAttribute("aria-label", "音频显示");
+    for (const [value, text] of [["waveform", "波形"], ["spectrogram", "声谱图"]]) {
+      const item = doc.createElement("option"); item.value = value; item.textContent = text; displaySelect.append(item);
+    }
+    displaySelect.value = "waveform";
+    displayLabel.append(displaySelect);
+    const gainValue = doc.createElement("output"); gainValue.textContent = "1.3×";
+    const gainControls = doc.createElement("span"); gainControls.className = "waveform-gain-controls";
+    gainControls.append(gainInput, gainValue); gainLabel.append(gainControls);
+    settingsPanel.append(settingsTitle, displayLabel, label, gainLabel);
     settings.append(gear, settingsPanel);
     const modes = doc.createElement("div");
     modes.className = "waveform-mode-switch";
@@ -98,7 +121,17 @@
     const viewport = doc.createElement("div");
     viewport.className = "multiline-waveform-viewport";
     viewport.setAttribute("aria-label", "多行波形与字幕时间轴");
-    panel.prepend(toolbar, viewport);
+    const body = doc.createElement("div");
+    body.className = "multiline-waveform-body";
+    const positionSlider = doc.createElement("input");
+    positionSlider.type = "range";
+    positionSlider.className = "waveform-position-slider";
+    positionSlider.min = positionSlider.max = positionSlider.value = "0";
+    positionSlider.step = "0.001";
+    positionSlider.disabled = true;
+    positionSlider.setAttribute("aria-label", "波形时间位置");
+    body.append(viewport, positionSlider);
+    panel.prepend(toolbar, body);
     let view = null, cues = [], duration = 0, seconds = 10, rows = [];
     let active = null, selected = null, preview = null, drag = null;
     const selection = options.selection || selectionApi.createSelection();
@@ -106,6 +139,26 @@
     let hover = null, boundaryOverride = null;
     let destroyed = false, following = true, frame = 0, playback = 0, generation = 0;
     let firstActive = true, suppressClick = false, mode = "multiline";
+    displaySelect.onchange = () => {
+      title.textContent = displaySelect.value === "spectrogram" ? "声谱图" : "波形";
+      gainLabel.style.display = displaySelect.value === "spectrogram" ? "none" : "";
+      clearSpectra(); redraw();
+    };
+    const spectra = new Map();
+    function clearSpectra(keep = []) {
+      for (const [row, image] of spectra) {
+        if (keep.includes(row)) continue;
+        image.onload = image.onerror = null; image.removeAttribute("src"); spectra.delete(row);
+      }
+    }
+    function requestSpectrum(row) {
+      if (spectra.has(row) || !options.spectrogramUrl) return;
+      const image = doc.createElement("img"), token = generation;
+      spectra.set(row, image);
+      image.onload = () => { if (!destroyed && generation === token && spectra.get(row) === image) redraw(); };
+      image.onerror = () => { image.failed = true; if (!destroyed && generation === token) redraw(); };
+      image.src = options.spectrogramUrl({start:row.start, end:row.end});
+    }
     function visibleStart() { return mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) * seconds : viewport.scrollTop / (ROW_HEIGHT + ROW_GAP) * seconds; }
     function visibleSpan() { return mode === "basic" ? seconds : viewport.clientHeight / (ROW_HEIGHT + ROW_GAP) * seconds; }
     function setMode(next) {
@@ -144,13 +197,20 @@
     function notifyViewport() {
       const start = visibleStart();
       const count = Math.max(1, visibleSpan() / seconds);
-      options.onViewportChange?.({start, end:Math.min(duration, start + count * seconds), duration});
+      const span = Math.min(duration, count * seconds);
+      positionSlider.min = String(span / 2);
+      positionSlider.max = String(Math.max(span / 2, duration - span / 2));
+      positionSlider.value = String(start + span / 2);
+      positionSlider.disabled = duration <= span;
+      positionSlider.setAttribute("aria-valuetext", `${timeLabel(start)} 起`);
+      options.onViewportChange?.({start, end:Math.min(duration, start + span), duration});
     }
     function creationIntent(start, end = Math.min(duration, start + 1.5)) {
       return timeline.manualCueIntent(view, start, end-start, duration);
     }
     function rebuild() {
       generation++;
+      clearSpectra();
       viewport.replaceChildren();
       rows = rowRanges(duration, seconds).map(range => {
         const canvas = doc.createElement("canvas");
@@ -220,9 +280,9 @@
       const amplitude = mode === "basic" ? Math.max(8, center - 6) : hasOverlay ? 52 : 77;
       ctx.strokeStyle = "#334149"; ctx.lineWidth = .7;
       ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(width, center); ctx.stroke();
-      requestPeaks(row, width);
+      if (displaySelect.value !== "spectrogram") requestPeaks(row, width);
       const peaks = row.peaks || [];
-      if (peaks.length) {
+      if (displaySelect.value !== "spectrogram" && peaks.length) {
         const columns = canvas.width;
         const envelopeKey = `${columns}:${row.waveStart}:${row.waveEnd}`;
         if (row.envelopeKey !== envelopeKey) {
@@ -254,6 +314,22 @@
       const mainLanes=translations?2:1;
       const laneHeight=hasOverlay?Math.min(36,106/(mainLanes+overlayEnds.length)-3):(translations?40:48);
       const top=height-6-(mainLanes+overlayEnds.length)*(laneHeight+3);
+      if (displaySelect.value === "spectrogram") {
+        requestSpectrum(row);
+        const image = spectra.get(row), plotTop = 30, plotHeight = Math.max(16, top - plotTop - 4);
+        if (image?.complete && image.naturalWidth) {
+          ctx.drawImage(image, 0, plotTop, width * (row.end-row.start)/seconds, plotHeight);
+          ctx.font = "10px sans-serif";
+          for (const [fraction, text] of [[0,"8 kHz"],[.5,"4 kHz"],[1,"0 Hz"]]) {
+            const y = plotTop + fraction * (plotHeight - 10);
+            ctx.fillStyle = "rgba(6,12,17,.8)"; ctx.fillRect(2, y, 39, 12);
+            ctx.fillStyle = "#e6eaf0"; ctx.fillText(text, 4, y+10);
+          }
+        } else {
+          ctx.fillStyle = "#9ba9b8"; ctx.font = "12px sans-serif";
+          ctx.fillText(image?.failed ? "声谱图加载失败，切换显示可重试" : "声谱图加载中…", 12, 48);
+        }
+      }
       row.lanes=new Map();
       for (const cue of ranges) {
         if (cue.end <= row.start || cue.start >= row.end) continue;
@@ -283,7 +359,7 @@
           const available = Math.max(0,right-(handles.end?cap:0)-textLeft-5);
           ctx.save(); ctx.beginPath(); ctx.rect(textLeft, y, available, laneHeight); ctx.clip();
           ctx.font = "14px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.fillStyle = "#edf1f4"; ctx.textBaseline = "middle";
-          let text = lane ? cue.target_text : cue.text;
+          let text = mode === "multiline" ? rowCueText(cue, row, !!lane) : (lane ? cue.target_text : cue.text);
           if (ctx.measureText(text).width > available) {
             while (text.length && ctx.measureText(text + "…").width > available) text = text.slice(0,-1);
             text += "…";
@@ -318,7 +394,7 @@
     }
     function redraw() {
       if (destroyed || frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; visibleRows().forEach(drawRow); notifyViewport(); });
+      frame = requestAnimationFrame(() => { frame = 0; const visible = visibleRows(); clearSpectra(visible); visible.forEach(drawRow); notifyViewport(); });
     }
     function revealTime(time, center = false) {
       if (mode === "basic") {
@@ -333,6 +409,15 @@
         viewport.scrollTop = Math.max(0, top - (center ? (viewport.clientHeight - ROW_HEIGHT) / 2 : 0));
       redraw();
     }
+    function scrollToTime(time) {
+      setFollow(false);
+      const span = Math.min(duration, visibleSpan());
+      const start = clamp(Number(time) - span / 2, 0, Math.max(0, duration - span));
+      if (mode === "basic") viewport.scrollLeft = start / seconds * viewport.clientWidth;
+      else viewport.scrollTop = start / seconds * (ROW_HEIGHT + ROW_GAP);
+      redraw();
+    }
+    positionSlider.oninput = () => scrollToTime(positionSlider.value);
     function seek(time) {
       const value = clamp(time, 0, duration);
       if (options.media) options.media.currentTime = value;
@@ -444,6 +529,7 @@
       row.pointerTime=position(event,row).time;
       if (!drag) {
         const target=hit(event,row);
+        row.canvas.title = target.cue ? [target.cue.text, target.cue.target_text].filter(Boolean).join("\n") : "";
         const badge=hover?.row===row?boundaryBadge(hover,row,target.width):null;
         const inBadgePath=badge && target.x>=Math.min(badge.x-12,badge.left-8)
           && target.x<=Math.max(badge.x+12,badge.left+badge.width+8)
@@ -513,7 +599,7 @@
       rowSelect.value = String(seconds);
       options.onZoom?.({old_span:old,new_span:seconds,direction:seconds<old?"in":"out",anchor_time:time});
     }
-    gainInput.oninput=redraw;
+    gainInput.oninput=() => { gainValue.textContent = `${Number(gainInput.value).toFixed(1)}×`; redraw(); };
     rowSelect.onchange = () => { const time = visibleStart(); seconds = Number(rowSelect.value); rebuild(); revealTime(time); };
     viewport.addEventListener("scroll", onScroll);
     viewport.addEventListener("wheel", onWheel, {passive:false});
@@ -523,6 +609,7 @@
     options.media?.addEventListener("play", mediaPlay);
     if (panel.dataset.workspaceWaveformMode === "basic") setMode("basic");
     return Object.freeze({
+      scrollToTime,
       setView(next) {
         view = next; cues = timeline.activeCues(view);
         selection.reconcile(cues.map(c=>c.cue_id));
@@ -546,13 +633,13 @@
         return {left,right,top:rect.top,bottom:rect.bottom,width:Math.max(0,right-left),height:rect.height};
       },
       destroy() {
-        destroyed=true; generation++; cancelAnimationFrame(frame); cancelAnimationFrame(playback); observer.disconnect();
+        destroyed=true; generation++; clearSpectra(); cancelAnimationFrame(frame); cancelAnimationFrame(playback); observer.disconnect();
         panel.removeEventListener?.("workspace-waveform-mode", workspaceMode);
         doc.removeEventListener("pointerdown",dismissSettings);
         options.media?.removeEventListener("timeupdate",mediaUpdate); options.media?.removeEventListener("seeked",mediaUpdate); options.media?.removeEventListener("play",mediaPlay);
-        toolbar.remove(); viewport.remove(); originalTrack.hidden=false; panel.classList.remove("multiline-waveform-module");
+        toolbar.remove(); body.remove(); originalTrack.hidden=false; panel.classList.remove("multiline-waveform-module");
       }
     });
   }
-  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,createTimelineController});
+  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,rowCueText,createTimelineController});
 });

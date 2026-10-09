@@ -12,7 +12,7 @@ const documentContract = fs.readFileSync(path.join(root, "web", "editor_document
 
 test("release keeps the non-dubbing editor tool contract", () => {
   const tools = [...html.matchAll(/data-tool-panel="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(tools, ["locator", "search", "punctuation", "auto-snap", "legend"]);
+  assert.deepEqual(tools, ["locator", "search", "punctuation", "auto-snap", "merge", "legend"]);
   assert.match(html, /id="autoSnapMenu" class="tool-accordion auto-snap-menu"/);
   assert.match(css, /\.editor-tool-sidebar \.auto-snap-popover \{[^}]*width: 100%;[^}]*min-width: 0;/s);
   assert.match(js, /#detectSpeakers"/);
@@ -22,9 +22,9 @@ test("release keeps the non-dubbing editor tool contract", () => {
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
     "editor.css":"20261008-glossary-3",
-    "editor.js":"20261008-glossary-2",
-    "editor_document.js":"20261003-overlay-1",
-    "editor_timeline.js":"20261005-waveform-selection-1",
+    "editor.js":"20261009-workspace-sizing-5",
+    "editor_document.js":"20261009-merge-tools-2",
+    "editor_timeline.js":"20261009-row-snap-1",
     "editor_tutorial.js":"20260831-v2-contract-1",
   };
   for (const [asset, version] of Object.entries(fingerprints)) {
@@ -48,3 +48,4 @@ test("smart snap and multi-token search producers match their consumers", () => 
   assert.match(documentContract, /function findContiguousTokenMatches/);
   assert.match(js, /contract\.findContiguousTokenMatches\(tokens, query\)/);
 });
+

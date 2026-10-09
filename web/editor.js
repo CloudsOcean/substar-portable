@@ -72,6 +72,7 @@
     operationQueueProjectId:"",
     topologyOperationPending:false,
     autoSnapUndo:null,
+    autoMergeUndo:null,
     taskPanelDismissed:false,
     mediaLoadAttempts:0,
     mediaRetryTimer:null,
@@ -267,7 +268,7 @@
     $("#mediaViewport")?.classList.toggle("audio-mode", normalized === "audio");
     $("#audioPreview")?.classList.toggle("hidden", normalized !== "audio");
     if ($("#mediaPreviewLabel")) {
-      $("#mediaPreviewLabel").textContent = normalized === "audio" ? "音频预览" : "视频预览";
+      $("#mediaPreviewLabel").textContent = "预览";
     }
     if ($("#mediaControls")) {
       $("#mediaControls").ariaLabel = normalized === "audio" ? "音频播放控制" : "视频播放控制";
@@ -864,7 +865,7 @@
     if (item.is_latest) return `${baseName} · 当前编辑`;
     const operation = provenance.metadata?.user_action || provenance.operation;
     const names = {merge:"合并", split_token:"拆分词元", replace:"修改文字", batch_replace:"批量修改文字",
-      set_cue_times:"调整时间", set_cue_time:"调整时间", split_cue:"字幕换行", merge_cues:"合并字幕",
+      set_cue_times:"调整时间", set_cue_time:"调整时间", split_cue:"字幕换行", merge_cues:"合并字幕", auto_merge_cues:"拼接 / 合并字幕",
       set_target:"修改译文", selective_restore:"选择性恢复", delete:"删除", restore_revision:"恢复版本"};
     return `${names[operation] || operation || "编辑"} · r${item.revision_number}`;
   }
@@ -1359,6 +1360,7 @@
     $("#translateDocument").disabled = !revision || locked || textProject
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
     const editingCommandDisabled = !revision || locked || textProject;
+    $("#applyAutoMerge").disabled = !revision || locked || state.topologyOperationPending;
     [
       ["#translationMenu", "#translationMenuSummary"],
       ["#aiCalibrationMenu", "#aiCalibrate"],
@@ -1387,6 +1389,9 @@
     $("#autoSnapMenuSummary")?.setAttribute("aria-disabled", String(!revision || locked));
     $("#undoAutoSnap").disabled = !state.autoSnapUndo
       || state.autoSnapUndo.after !== revision?.revision_id || locked;
+    $("#undoAutoMerge").disabled = !state.autoMergeUndo
+      || state.autoMergeUndo.projectId !== state.projectId
+      || state.autoMergeUndo.after !== revision?.revision_id || locked || state.historyNavigationPending;
     const taskInfoDisabled = !state.projectId || locked;
     const taskInfoMenu = $("#taskInfoMenu");
     taskInfoMenu?.classList.toggle("disabled", taskInfoDisabled);
@@ -2662,7 +2667,7 @@
   }
 
   const TOPOLOGY_OPERATION_TYPES = new Set([
-    "insert_cue", "purge_cue", "split_cue", "merge_cues"
+    "insert_cue", "purge_cue", "split_cue", "merge_cues", "retime_text", "merge", "auto_merge_cues"
   ]);
 
   function isTopologyOperation(operation) {
@@ -2938,9 +2943,7 @@
       try {
         const ids = cue.display_token_ids;
         const provenance = manualProvenance("whole_cue_edit");
-        const operation = ids.length > 1
-          ? contract.mergeOperation(state.revision, ids, text, provenance)
-          : contract.replaceOperation(state.revision, ids[0], text, provenance);
+        const operation = contract.retimeTextOperation(state.revision, cue.cue_id, ids, text, provenance);
         const saved = await sendOperation(operation);
         if (!saved && input.isConnected) {
           finished = false; input.disabled = false; input.focus({preventScroll:true});
@@ -3541,6 +3544,9 @@
       keyboardTarget:document,
       hideCueShortcut:() => state.shortcuts.hideCue,
       zoomModifier:() => state.shortcuts.zoomModifier,
+      spectrogramUrl({start, end}) {
+        return projectPath(`/spectrogram?${new URLSearchParams({start:String(start), end:String(end)})}`);
+      },
       onWaveformWindow({start, end, points}) {
         const query = new URLSearchParams({
           start:String(start), end:String(end), points:String(points)
@@ -3892,7 +3898,7 @@
     reviewSelection = null;
     $(".review-notes-panel")?.classList.add("hidden");
     if ($("#reviewModeToggle")) {
-      $("#reviewModeToggle").textContent = "启动修订";
+      $("#reviewModeToggle").textContent = "修订";
       $("#reviewModeToggle").setAttribute("aria-pressed", "false");
     }
     state.operationQueue?.destroy();
@@ -4797,15 +4803,17 @@
     if (!button || !state.projectId || !state.revision) return;
     $("#exportMenu").open = false;
     try {
-      const savedBase = await ensureOperationQueue().flushAndWait();
-      if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
       const sequence = nextExportSequence();
-      const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
       const spec = systemSaveAs.subtitleSpec(
         window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
         button.dataset.exportMode,
         sequence.value,
-        projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`)
+        async () => {
+          const savedBase = await ensureOperationQueue().flushAndWait();
+          if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+          const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
+          return projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`);
+        }
       );
       const result = await systemSaveAs.saveUrl(spec);
       if (result.cancelled) return;
@@ -4819,6 +4827,51 @@
   $("#mergeTokens").onclick = mergeSelectedTokens;
   $("#deleteTokens").onclick = deleteSelectedTokens;
   $("#restoreTokens").onclick = restoreSelectedTokens;
+  $("#autoMergeForm").onsubmit = async event => {
+    event.preventDefault();
+    const button = $("#applyAutoMerge");
+    if (button.disabled || !state.revision) return;
+    button.disabled = true;
+    const status = $("#autoMergeStatus");
+    status.textContent = "正在拼接 / 合并字幕…";
+    try {
+      await flushActiveEditorInput();
+      const before = state.revision.document.cues.length;
+      const beforeRevision = state.revision.revision_id;
+      const mergeProject = state.projectId;
+      const result = await sendOperation(contract.autoMergeCuesOperation(state.revision, {
+        gap_ms:Number($("#mergeGap").value),
+        short_count:Number($("#mergeShortCount").value),
+        absorb:$("#mergeAbsorb").checked,
+        snap_direction:$("#mergeSnapDirection").value,
+        absorb_direction:$("#mergeAbsorbDirection").value
+      }, manualProvenance("auto_merge_cues")));
+      if (result && state.projectId === mergeProject) state.autoMergeUndo = {
+        projectId:mergeProject, before:beforeRevision, after:state.revision.revision_id
+      };
+      status.textContent = result
+        ? `处理完成，合并 ${Math.max(0, before - state.revision.document.cues.length)} 条字幕；间隔已按设置处理。可使用撤销恢复。`
+        : "未完成，请查看保存提示。";
+    } catch (error) {
+      status.textContent = `未完成：${error.message}`;
+    } finally { renderHeader(); }
+  };
+  $("#mergeAbsorb").onchange = () => {
+    $("#mergeShortCount").disabled = !$("#mergeAbsorb").checked;
+    $("#mergeAbsorbDirection").disabled = !$("#mergeAbsorb").checked;
+  };
+  $("#undoAutoMerge").onclick = async () => {
+    const entry = state.autoMergeUndo;
+    if ($("#undoAutoMerge").disabled || !entry || entry.projectId !== state.projectId || entry.after !== state.revision?.revision_id) return;
+    $("#undoAutoMerge").disabled = true;
+    const restored = await restoreRevision(entry.before);
+    if (restored !== null) {
+      state.autoMergeUndo = null;
+      $("#autoMergeStatus").textContent = "已撤销本次合并。";
+    }
+    renderHeader();
+  };
+
   $("#toolSearchNext").onclick = () => {
     findNextSearch();
     observeEditorTutorialEvent("search", {query:$("#toolSearch").value.trim(), found:state.searchIndex >= 0});
@@ -4935,7 +4988,9 @@
   $("#forwardSnapPreRoll").oninput = selectSmartForwardSnap;
   $("#forwardSnapSensitivity").oninput = selectSmartForwardSnap;
   $("#timelineScrollSlider").oninput = event => {
-    state.timelineController?.revealTime(Number(event.target.value), true);
+    const controller = state.timelineController;
+    if (controller?.scrollToTime) controller.scrollToTime(Number(event.target.value));
+    else controller?.revealTime(Number(event.target.value), true);
   };
   function updateTimelineHeight() {
     const hasTarget = $("#showTranslations").checked && (state.view?.cue_views || []).some(cue => cue.state !== "deleted" && cue.target?.target_text);
@@ -5675,7 +5730,7 @@
     const button = document.createElement("button");
     button.type = "button";
     button.id = "reviewModeToggle";
-    button.textContent = "启动修订";
+    button.textContent = "修订";
     button.setAttribute("aria-pressed", "false");
     const selector = $("#timelineLayout").parentElement;
     if (document.documentElement.dataset.editorLayout === "experimental") $(".pane-live-controls").prepend(button);
@@ -6034,7 +6089,7 @@
       $("#editorWorkbench").classList.toggle("review-mode", enabled);
       panel.classList.toggle("hidden", !reviewEnabled);
       if (reviewEnabled) $("#editorTools [data-tool-panel='locator']").open = true;
-      button.textContent = reviewEnabled ? "退出修订" : "启动修订";
+      button.textContent = reviewEnabled ? "退出修订" : "修订";
       button.setAttribute("aria-pressed", String(reviewEnabled));
       render();
       syncRevisionControls();

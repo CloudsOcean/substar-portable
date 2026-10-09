@@ -37,7 +37,7 @@ test("forward-only smart snap does not fill pure silence", () => {
   ]);
 });
 
-test("smart forward snap moves a touching pair as one shared boundary", () => {
+test("smart forward snap never shortens a touching previous cue", () => {
   const touching = view();
   touching.cue_views[0].end = 1.6;
   const intent = timeline.autoSnapPlan(touching, {
@@ -45,10 +45,7 @@ test("smart forward snap moves a touching pair as one shared boundary", () => {
     backwardThresholdMs:500
   });
 
-  assert.deepEqual(intent.changes, [
-    {cue_id:"left", edge:"end", time:1.45},
-    {cue_id:"right", edge:"start", time:1.45}
-  ]);
+  assert.deepEqual(intent.changes, []);
 });
 
 test("waveform bars stop at the physical waveform window", () => {

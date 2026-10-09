@@ -65,12 +65,14 @@ def restore_fields(current, historical, cue_ids, scope):
 
 
 def split_token(document, token_id, offset):
-    """Use existing subdivided source tokens; previous revisions retain original evidence."""
+    """Split display timing while carrying the parent evidence in the snapshot."""
     from substar_core.domain import SourceToken, DisplayToken, stable_id
     token = next((t for t in document.display_tokens if t.token_id == token_id), None)
     cue = next((c for c in document.cues if token_id in c.display_token_ids), None)
     if token is None or cue is None or token.state is not EntityState.ACTIVE or cue.state is not EntityState.ACTIVE:
         raise ValueError("请选择未隐藏的词元")
+    if any(c.state is not EntityState.ACTIVE for c in document.cues if token_id in c.display_token_ids):
+        raise ValueError("共享词元包含隐藏字幕，请先恢复字幕")
     if not 0 < offset < len(token.text) or not token.text[:offset].strip() or not token.text[offset:].strip():
         raise ValueError("请在词元内部两个字符之间切分")
     source = [s for s in document.source_tokens if s.token_id in token.source_token_ids]
@@ -88,7 +90,8 @@ def split_token(document, token_id, offset):
         item = SourceToken.create(index=source[0].index + index, text=text, start=left, end=right,
                                   speaker=source[0].speaker)
         item = replace(item, timing={"kind": "subdivided", "method": "equal_split",
-                                    "parent_source_ids": list(token.source_token_ids)})
+                                    "parent_source_ids": list(token.source_token_ids),
+                                    "parent_sources": [s.to_dict() for s in source]})
         sources.append(item)
         displays.append(DisplayToken(stable_id("dsp", {"parent":token_id, "offset":offset, "part":index}),
                                      text, text, (item.token_id,), provenance))
@@ -97,9 +100,10 @@ def split_token(document, token_id, offset):
     remaining[first:first] = sources
     source_tokens = tuple(replace(s, index=i) for i, s in enumerate(remaining))
     display_tokens = tuple(part for t in document.display_tokens for part in (displays if t.token_id == token_id else [t]))
-    updated_cue = replace(cue, display_token_ids=tuple(part for tid in cue.display_token_ids
-        for part in ([t.token_id for t in displays] if tid == token_id else [tid])))
+    def update_owner(owner):
+        return replace(owner, display_token_ids=tuple(part for tid in owner.display_token_ids
+            for part in ([t.token_id for t in displays] if tid == token_id else [tid])))
     result = replace(document, source_tokens=source_tokens, display_tokens=display_tokens,
-                     cues=tuple(updated_cue if c.cue_id == cue.cue_id else c for c in document.cues),
+                     cues=tuple(update_owner(c) if token_id in c.display_token_ids else c for c in document.cues),
                      changes=(*document.changes, provenance))
     return synchronize_translation_status(result, {t.token_id for t in displays})

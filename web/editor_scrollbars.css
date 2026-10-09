@@ -1,0 +1,116 @@
+/* One scroll/slider geometry for every editor layout and orientation. */
+body.editor-shell {
+  --scroll-control: 14px;
+  --scroll-rail: 3px;
+  --scroll-thumb: 8px;
+  --scroll-grip: 32px;
+  --scroll-radius: 4px;
+  --scroll-track-color: #252c38;
+  --scroll-thumb-color: #697b93;
+}
+body.editor-shell input[type="range"] {
+  box-sizing: border-box;
+  appearance: none;
+  height: var(--scroll-control);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--scroll-radius);
+  background: transparent;
+  cursor: pointer;
+}
+body.editor-shell input[type="range"]::-webkit-slider-runnable-track {
+  height: var(--scroll-rail);
+  border: 0;
+  border-radius: var(--scroll-radius);
+  background: var(--scroll-track-color);
+}
+body.editor-shell input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--scroll-grip);
+  height: var(--scroll-thumb);
+  margin-top: calc((var(--scroll-rail) - var(--scroll-thumb)) / 2);
+  margin-left: 0;
+  border: 0;
+  border-radius: var(--scroll-radius);
+  background: var(--scroll-thumb-color);
+  box-shadow: none;
+}
+body.editor-shell input[type="range"]::-moz-range-track {
+  height: var(--scroll-rail);
+  border: 0;
+  border-radius: var(--scroll-radius);
+  background: var(--scroll-track-color);
+}
+body.editor-shell input[type="range"]::-moz-range-thumb {
+  width: var(--scroll-grip);
+  height: var(--scroll-thumb);
+  border: 0;
+  border-radius: var(--scroll-radius);
+  background: var(--scroll-thumb-color);
+}
+body.editor-shell input[type="range"]:focus-visible {
+  outline: 1px solid var(--editor-accent, #9670e8);
+  outline-offset: 1px;
+}
+body.editor-shell input[type="range"]:disabled { opacity: .3; cursor: default; }
+body.editor-shell #mediaSeek { height: var(--scroll-control); }
+body.editor-shell #mediaSeek::-webkit-slider-thumb {
+  width: var(--scroll-grip);
+  height: var(--scroll-thumb);
+  margin-top: calc((var(--scroll-rail) - var(--scroll-thumb)) / 2);
+}
+body.editor-shell input:is(.cue-scroll-slider, .waveform-position-slider, .tools-scroll-slider) {
+  writing-mode: vertical-lr;
+  direction: ltr;
+  width: var(--scroll-control);
+  height: 100%;
+  margin: 0;
+}
+body.editor-shell input.cue-scroll-slider { height: calc(100% - 72px); }
+body.editor-shell input:is(.cue-scroll-slider, .waveform-position-slider, .tools-scroll-slider)::-webkit-slider-runnable-track {
+  width: var(--scroll-rail);
+  height: 100%;
+}
+body.editor-shell input:is(.cue-scroll-slider, .waveform-position-slider, .tools-scroll-slider)::-webkit-slider-thumb {
+  width: var(--scroll-thumb);
+  height: var(--scroll-grip);
+  margin-top: 0;
+  margin-left: calc((var(--scroll-rail) - var(--scroll-thumb)) / 2);
+}
+body.editor-shell input:is(.cue-scroll-slider, .waveform-position-slider, .tools-scroll-slider)::-moz-range-track {
+  width: var(--scroll-rail);
+  height: 100%;
+}
+body.editor-shell input:is(.cue-scroll-slider, .waveform-position-slider, .tools-scroll-slider)::-moz-range-thumb {
+  width: var(--scroll-thumb);
+  height: var(--scroll-grip);
+}
+body.editor-shell * { scrollbar-width: auto; scrollbar-color: auto; }
+body.editor-shell ::-webkit-scrollbar { width: var(--scroll-control); height: var(--scroll-control); }
+body.editor-shell ::-webkit-scrollbar-track { background: transparent; }
+body.editor-shell ::-webkit-scrollbar-thumb {
+  border: calc((var(--scroll-control) - var(--scroll-thumb)) / 2) solid transparent;
+  border-radius: calc(var(--scroll-radius) + (var(--scroll-control) - var(--scroll-thumb)) / 2);
+  background: var(--scroll-thumb-color);
+  background-clip: padding-box;
+  min-height: var(--scroll-grip);
+  min-width: var(--scroll-grip);
+}
+body.editor-shell ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+body.editor-shell ::-webkit-scrollbar-corner { background: transparent; }
+body.editor-shell :is(.editor-document-pane .cue-list, .multiline-waveform-viewport) { scrollbar-width: none; }
+body.editor-shell :is(.editor-document-pane .cue-list, .multiline-waveform-viewport)::-webkit-scrollbar { display: none; }
+.multiline-waveform-body { display: grid; grid-template-columns: minmax(0, 1fr) var(--scroll-control); gap: 4px; min-width: 0; min-height: 0; }
+.multiline-waveform-body .multiline-waveform-viewport { min-width: 0; min-height: 0; }
+html[data-editor-layout="experimental"] .basic-waveform-module { grid-template-rows: 30px minmax(0, 1fr) 17px; }
+body.editor-shell .basic-waveform-module .timeline-scrollbar { display: block; }
+body.editor-shell .multiline-waveform-module .timeline-scrollbar { padding-right: calc(var(--scroll-control) + 4px); }
+html[data-editor-layout="experimental"] #editorTools { position: relative; }
+html[data-editor-layout="experimental"] #editorTools > .tool-accordion { scrollbar-width: none; padding-right: 8px; }
+html[data-editor-layout="experimental"] #editorTools > .tool-accordion::-webkit-scrollbar { display: none; }
+html[data-editor-layout="experimental"] #editorTools input.tools-scroll-slider {
+  position: absolute; right: 2px; width: var(--scroll-control); min-height: 0;
+  padding: 0; border: 0; background: transparent !important;
+}
+html[data-editor-layout="experimental"] #editorTools input.tools-scroll-slider[hidden] { display: none; }

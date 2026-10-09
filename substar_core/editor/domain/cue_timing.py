@@ -29,22 +29,11 @@ def smart_snap_search_minimum(
     current_start: float,
     previous_is_manual: bool = False,
 ) -> float:
-    """Return the earliest safe smart-snap boundary for one Cue start.
-
-    A touching pair owns one shared boundary.  Smart forward snapping may move
-    that boundary left while retaining a minimum duration for the left Cue.
-    Real gaps and manual Cues remain hard barriers, so onset detection never
-    searches through unrelated or manually positioned material.
-    """
-
+    """Never search inside the preceding Cue, including touching boundaries."""
     current = max(0.0, float(current_start))
-    if previous_start is None or previous_end is None:
+    if previous_end is None:
         return 0.0
-    prior_start = max(0.0, float(previous_start))
-    prior_end = max(prior_start, float(previous_end))
-    if previous_is_manual or current - prior_end > SHARED_BOUNDARY_EPSILON:
-        return min(current, prior_end)
-    return min(current, prior_start + MIN_CUE_SECONDS)
+    return min(current, max(0.0, float(previous_end)))
 
 
 @dataclass(frozen=True)

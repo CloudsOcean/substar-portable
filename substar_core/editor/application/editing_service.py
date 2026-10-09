@@ -121,6 +121,20 @@ class EditingService:
         if not all(ids) or len(set(ids)) != len(ids):
             raise InvalidEditorOperationError("operation IDs must be nonempty and unique")
         repository = self._repository_factory(project_id)
+        # Reconcile each receipt before replay: refresh can mix an ACK-lost
+        # committed prefix with fresh edits. Hash verification remains mandatory.
+        requested_operations = operations
+        partition = getattr(repository, "uncommitted_operations", None)
+        if partition is not None:
+            try:
+                operations = partition(operations)
+            except RepositoryConflictError as exc:
+                raise InvalidEditorOperationError(str(exc)) from exc
+            except RepositoryError as exc:
+                raise EditorPersistenceError(str(exc)) from exc
+            if not operations:
+                latest = repository.load_latest()
+                return OperationCommit(before=latest, after=latest, action_revisions=tuple(repository.operation_revisions(requested_operations)) if preserve_user_actions else ())
         lookup = getattr(repository, "find_operation_commit", None)
         if lookup is not None:
             try:
@@ -148,14 +162,16 @@ class EditingService:
             )
             if not can_rebase:
                 raise StaleOperationError(expected_base)
+        # Compute each user action once; save_sequence validates and commits
+        # all stages atomically. Do not compute the whole batch before stages.
+        document = None
+        if not preserve_user_actions:
             try:
-                apply_document_batch(latest.document, operations)
+                document = apply_document_batch(latest.document, operations)
             except (KeyError, TypeError, ValueError, DocumentOperationError) as exc:
-                raise StaleOperationError(expected_base) from exc
-        try:
-            document = apply_document_batch(latest.document, operations)
-        except (KeyError, TypeError, ValueError, DocumentOperationError) as exc:
-            raise InvalidEditorOperationError(str(exc), getattr(exc, "operation_id", None)) from exc
+                if any(base.get(key) != value for key, value in expected_base.items()):
+                    raise StaleOperationError(expected_base) from exc
+                raise InvalidEditorOperationError(str(exc), getattr(exc, "operation_id", None)) from exc
         provenance = ChangeProvenance(
             kind=ChangeKind.MANUAL,
             operation="operation_batch",
@@ -193,11 +209,17 @@ class EditingService:
                         )))
                     revisions = repository.save_sequence(stages, expected_revision_id=latest.revision_id)
                     return OperationCommit(before=latest, after=revisions[-1], action_revisions=tuple(revisions))
+            if document is None:
+                document = apply_document_batch(latest.document, operations)
             revision = repository.save(
                 document,
                 provenance=provenance,
                 expected_revision_id=latest.revision_id,
             )
+        except (KeyError, TypeError, ValueError, DocumentOperationError) as exc:
+            if any(base.get(key) != value for key, value in expected_base.items()):
+                raise StaleOperationError(expected_base) from exc
+            raise InvalidEditorOperationError(str(exc), getattr(exc, "operation_id", None)) from exc
         except RepositoryConflictError as exc:
             raise StaleOperationError(expected_base) from exc
         except RepositoryError as exc:

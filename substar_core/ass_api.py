@@ -27,10 +27,16 @@ def _font_files():
     roots = [Path(os.environ.get("WINDIR", "C:/Windows"))/"Fonts",
              Path(os.environ.get("LOCALAPPDATA", str(APP_DATA_DIR)))/"Microsoft/Windows/Fonts"]
     for root in roots:
-        if root.is_dir():
-            for path in root.iterdir():
+        try:
+            paths = list(root.iterdir())
+        except OSError:
+            continue
+        for path in paths:
+            try:
                 if path.suffix.lower() in {".ttf", ".otf", ".ttc"} and path.is_file():
                     result[hashlib.sha256(str(path).encode()).hexdigest()[:24]] = path
+            except OSError:
+                continue
     return result
 
 

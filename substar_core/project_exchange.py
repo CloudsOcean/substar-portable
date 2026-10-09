@@ -801,7 +801,9 @@ def apply_external_split(
 
 
 def write_bytes_zip(target: Path, files: Mapping[str, bytes]) -> None:
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    # Stored entries guarantee every legal export meets the import ratio limit,
+    # including silent PCM and repetitive JSON, without a second compression pass.
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
         for name, content in files.items():
             archive.writestr(name, content)
 
@@ -836,30 +838,57 @@ def _portable_media_entries(entries, job_dir):
     entries.append(('project/run_manifest.json',None,json.dumps(manifest,ensure_ascii=False).encode('utf-8')))
     return entries
 
+def _portable_document_bytes(job_dir: Path, revision: Any) -> bytes:
+    # Carry the necessary ancestry in the snapshot itself. Older revisions may
+    # predate embedded parent_sources; recover those records from local history.
+    value = json.loads(json.dumps(revision.document.to_dict(), ensure_ascii=False, allow_nan=False))
+    known = {s["token_id"]: s for s in value.get("source_tokens", [])}
+    history_loaded = False
+
+    def load_history():
+        nonlocal history_loaded
+        if history_loaded:
+            return
+        history_loaded = True
+        root = job_dir / "project"
+        if not (root / "project.sqlite3").is_file():
+            return
+        store = ProjectStore.open(root)
+        for row in store.list_revision_metadata():
+            historical = store.load_revision(row["revision_id"])
+            for source in historical.document.source_tokens:
+                known.setdefault(source.token_id, source.to_dict())
+
+    def complete(source, ancestors):
+        timing = source.get("timing")
+        if not timing or not timing.get("parent_source_ids"):
+            return
+        embedded = {s["token_id"]: s for s in timing.get("parent_sources", [])}
+        parents, missing = [], []
+        for parent_id in dict.fromkeys(timing["parent_source_ids"]):
+            parent = embedded.get(parent_id) or known.get(parent_id)
+            if parent is None:
+                load_history()
+                parent = known.get(parent_id)
+            if parent is None or parent_id in ancestors:
+                missing.append(parent_id)
+                continue
+            parent = json.loads(json.dumps(parent, allow_nan=False))
+            complete(parent, ancestors | {parent_id})
+            parents.append(parent)
+        timing["parent_sources"] = parents
+        if missing:
+            timing.update(kind="unknown", method="missing_parent_evidence",
+                          missing_parent_source_ids=missing,
+                          parent_source_ids=[p["token_id"] for p in parents])
+
+    for source in value.get("source_tokens", []):
+        complete(source, {source["token_id"]})
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
 def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, revision: Any) -> None:
-    document_bytes = json.dumps(revision.document.to_dict(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    entries: list[tuple[str, Path | None, bytes | None]] = [("document/latest.json", None, document_bytes)]
-    candidates = [job_dir / "audio_16k_mono.wav"]
-    input_dir = job_dir / "input"
-    if input_dir.is_dir():
-        candidates.extend(path for path in input_dir.iterdir() if path.is_file())
-    for name in (
-        "run_manifest.json", "task_info.json", "subtitle_import.json",
-        "reference_alignment.json", "reference_script_alignment.json",
-    ):
-        candidates.append(job_dir / name)
-    for folder in ("calibration", "review"):
-        root = job_dir / folder
-        if root.is_dir():
-            candidates.extend(path for path in root.rglob("*") if path.is_file())
-    seen: set[Path] = set()
-    for path in candidates:
-        if not path.is_file() or path in seen:
-            continue
-        seen.add(path)
-        relative = path.relative_to(job_dir).as_posix()
-        entries.append((f"project/{relative}", path, None))
-    entries = _portable_media_entries(entries, job_dir)
+    entries = _subtitle_project_entries(job_dir=job_dir, revision=revision)
     manifest_files = []
     for name, path, content in entries:
         size = path.stat().st_size if path else len(content or b"")
@@ -873,7 +902,9 @@ def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, rev
         "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "files": manifest_files,
     }
-    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+    # Stored entries guarantee every legal export meets the import ratio limit,
+    # including silent PCM and repetitive JSON, without a second compression pass.
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"))
         for name, path, content in entries:
             if path:
@@ -919,22 +950,20 @@ class _StreamingZipWriter:
 def _subtitle_project_entries(
     *, job_dir: Path, revision: Any
 ) -> list[tuple[str, Path | None, bytes | None]]:
-    document_bytes = json.dumps(
-        revision.document.to_dict(), ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
+    document_bytes = _portable_document_bytes(job_dir, revision)
     entries: list[tuple[str, Path | None, bytes | None]] = [
         ("document/latest.json", None, document_bytes)
     ]
-    candidates = [job_dir / "audio_16k_mono.wav"]
+    candidates = [job_dir / "audio_16k_mono.wav", *job_dir.rglob("recognition_evidence.json")]
     input_dir = job_dir / "input"
     if input_dir.is_dir():
         candidates.extend(path for path in input_dir.iterdir() if path.is_file())
     for name in (
         "run_manifest.json", "task_info.json", "subtitle_import.json",
-        "reference_alignment.json", "reference_script_alignment.json",
+        "reference_alignment.json", "reference_script_alignment.json", "recognition_evidence.json",
     ):
         candidates.append(job_dir / name)
-    for folder in ("calibration", "review"):
+    for folder in ("calibration", "review", "recognition_evidence"):
         root = job_dir / folder
         if root.is_dir():
             candidates.extend(path for path in root.rglob("*") if path.is_file())
@@ -961,12 +990,12 @@ def stream_subtitle_project(
         manifest_files: list[dict[str, Any]] = []
         try:
             with zipfile.ZipFile(
-                writer, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
+                writer, "w", compression=zipfile.ZIP_STORED, allowZip64=True
             ) as archive:
                 for name, path, content in entries:
                     size = path.stat().st_size if path else len(content or b"")
                     digest = hashlib.sha256()
-                    compression = zipfile.ZIP_STORED if size >= 64 * 1024 * 1024 else zipfile.ZIP_DEFLATED
+                    compression = zipfile.ZIP_STORED  # Every exported member obeys the import ratio limit.
                     info = zipfile.ZipInfo(name)
                     info.compress_type = compression
                     with archive.open(info, "w", force_zip64=size >= zipfile.ZIP64_LIMIT) as destination:
@@ -1017,15 +1046,30 @@ def stream_subtitle_project(
         cancelled.set()
 
 
+def _archive_relative_path(name: str) -> PurePosixPath:
+    # Validate raw components: PurePath normalizes away empty and dot segments.
+    from pathlib import PureWindowsPath
+    parts = name.split("/")
+    if (not name or any(p in {"", ".", ".."} for p in parts)
+            or "\\" in name or PureWindowsPath(name).drive
+            or any(":" in p or p.endswith((".", " ")) or PureWindowsPath(p).is_reserved()
+                   or any(ord(c) < 32 for c in p) for p in parts)):
+        raise ProjectExchangeError("字幕工程包含不安全路径")
+    return PurePosixPath(*parts)
+
+
 def _safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     members = archive.infolist()
     if len(members) > MAX_ARCHIVE_FILES:
         raise ProjectExchangeError("字幕工程文件数量超出限制")
     expanded = 0
+    seen = set()
     for member in members:
-        path = PurePosixPath(member.filename)
-        if path.is_absolute() or ".." in path.parts or "\\" in member.filename:
+        path = _archive_relative_path(member.filename[:-1] if member.is_dir() else member.filename)
+        key = str(path).casefold()
+        if key in seen:
             raise ProjectExchangeError("字幕工程包含不安全路径")
+        seen.add(key)
         if (member.external_attr >> 16) & 0o170000 == 0o120000:
             raise ProjectExchangeError("字幕工程不能包含符号链接")
         expanded += member.file_size
@@ -1053,16 +1097,31 @@ def import_subtitle_project(source: BinaryIO, *, projects_root: Path) -> str:
             if manifest.get("schema_version") != EXCHANGE_SCHEMA:
                 raise ProjectExchangeError("字幕工程版本不受支持")
             declared = {str(item["path"]): item for item in manifest.get("files", [])}
+            if len(declared) != len(manifest.get("files", [])):
+                raise ProjectExchangeError("字幕工程包含重复文件清单")
+            outputs = {}
+            for name, row in declared.items():
+                member = by_name.get(name)
+                if member is None or member.is_dir() or member.file_size != int(row.get("size", -1)):
+                    raise ProjectExchangeError(f"字幕工程文件清单不匹配：{name}")
+                if name.startswith("project/"):
+                    relative = _archive_relative_path(name.removeprefix("project/"))
+                    if str(relative).casefold() == "media_reference.json":
+                        raise ProjectExchangeError('工程包不得携带外部媒体引用')
+                    output = temporary.joinpath(*relative.parts).resolve()
+                    if not output.is_relative_to(temporary.resolve()) or output == temporary.resolve():
+                        raise ProjectExchangeError("字幕工程包含不安全路径")
+                    outputs[name] = output
+            destinations = set(outputs.values())
+            if any(parent in destinations for output in destinations for parent in output.parents):
+                raise ProjectExchangeError("字幕工程包含冲突路径")
             document_content: bytes | None = None
             for name, row in declared.items():
                 member = by_name.get(name)
                 if member is None or member.file_size != int(row.get("size", -1)):
                     raise ProjectExchangeError(f"字幕工程文件清单不匹配：{name}")
-                output = None
-                if name.startswith("project/"):
-                    if name == 'project/media_reference.json':
-                        raise ProjectExchangeError('工程包不得携带外部媒体引用')
-                    output = temporary / name.removeprefix("project/")
+                output = outputs.get(name)
+                if output is not None:
                     output.parent.mkdir(parents=True, exist_ok=True)
                 digest = hashlib.sha256()
                 captured = bytearray() if name == "document/latest.json" else None

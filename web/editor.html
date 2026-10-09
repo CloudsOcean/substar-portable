@@ -11,8 +11,9 @@
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
-  <link rel="stylesheet" href="/assets/editor_experimental.css?v=20261005-aligned-layout-1">
-  <script src="/assets/editor_experimental.js?v=20261005-production-workspace-1"></script>
+  <link rel="stylesheet" href="/assets/editor_experimental.css?v=20261009-controls-height-1">
+  <link rel="stylesheet" href="/assets/editor_scrollbars.css?v=20261009-tool-polish-1">
+  <script src="/assets/editor_experimental.js?v=20261009-layout-reference-6"></script>
 </head>
 <body class="editor-shell">
   <div class="editor-command-bar">
@@ -152,8 +153,21 @@
       <details id="autoSnapMenu" class="tool-accordion auto-snap-menu" data-tool-panel="auto-snap"><summary id="autoSnapMenuSummary" aria-disabled="true">自动吸附</summary><div class="tool-panel auto-snap-popover">
         <fieldset><legend>向前吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="forwardSnapMode" value="none"><span>不吸附</span></label><div class="auto-snap-option auto-snap-smart-option"><label class="auto-snap-mode-label"><input type="radio" name="forwardSnapMode" value="smart" checked><span>智能吸附</span></label><label class="auto-snap-parameter"><span>前置静音余量</span><input id="forwardSnapPreRoll" type="number" min="0" max="100" step="5" value="0" aria-label="向前吸附前置静音余量"><span class="auto-snap-unit">ms</span></label><label class="auto-snap-parameter"><span>灵敏度</span><input id="forwardSnapSensitivity" type="number" min="0" max="100" step="5" value="50" aria-label="向前吸附灵敏度"><span class="auto-snap-unit">%</span></label></div></div></fieldset>
         <fieldset><legend>向后吸附</legend><div class="auto-snap-options"><label class="auto-snap-option"><input type="radio" name="backwardSnapMode" value="none"><span>不吸附</span></label><label class="auto-snap-option auto-snap-threshold"><input type="radio" name="backwardSnapMode" value="threshold" checked><span>阈值</span><input id="snapThreshold" type="number" min="0" max="2000" step="25" value="500"><span class="auto-snap-unit">ms</span></label></div></fieldset>
-        <div class="auto-snap-actions"><button id="applyAutoSnap" type="button" disabled>执行</button><button id="undoAutoSnap" type="button" disabled>撤销</button></div><p id="autoSnapStatus" class="muted">智能向前只在检测到可信起音时移动。</p>
+        <div class="auto-snap-actions"><button id="applyAutoSnap" type="button" disabled>执行</button><button id="undoAutoSnap" type="button" disabled>撤销</button></div><p id="autoSnapStatus" class="muted" role="status"></p>
       </div></details>
+      <details class="tool-accordion" data-tool-panel="merge"><summary>拼接 / 合并字幕</summary><form id="autoMergeForm" class="tool-panel merge-settings">
+        <fieldset><legend>间隔吸附</legend><div class="merge-options">
+          <label title="相邻字幕间隔不超过此值时吸附；设为 0 时不处理间隔。"><span>间隔阈值</span><span class="merge-number"><input id="mergeGap" type="number" min="0" max="10000" step="1" value="200" required><span>ms</span></span></label>
+          <label title="向前：后条起点移动到前条终点。向后：前条终点延长到后条起点。"><span>吸附方向</span><select id="mergeSnapDirection"><option value="previous">向前吸附</option><option value="next">向后吸附</option></select></label>
+        </div></fieldset>
+        <fieldset><legend>短字幕吸收</legend><div class="merge-options">
+          <label class="merge-check" title="短字幕在间隔阈值内并入相邻字幕，间隔为 0 也生效；关闭后只处理间隔。"><input id="mergeAbsorb" type="checkbox" checked><span>吸收过短字幕</span></label>
+          <label title="中文少于 N 个字、英文少于 N 个词时，视为短字幕。"><span>字词阈值</span><input id="mergeShortCount" type="number" min="1" max="100" step="1" value="3" required></label>
+          <label title="向前将短字幕并入上一条，向后并入下一条。"><span>吸收方向</span><select id="mergeAbsorbDirection"><option value="previous">并入上一条</option><option value="next">并入下一条</option></select></label>
+        </div></fieldset>
+        <div class="merge-actions"><button id="applyAutoMerge" type="submit" title="按当前设置处理整个工程，可撤销。跳过已删除、叠加、重叠及不同说话人的字幕。" disabled>执行</button><button id="undoAutoMerge" type="button" title="撤销本次合并；后续有其他修改时，请使用全局撤销。" disabled>撤销</button></div>
+        <p id="autoMergeStatus" class="muted" role="status"></p>
+      </form></details>
       <details class="tool-accordion sidebar-legend" data-tool-panel="legend"><summary>变更标记</summary><div class="tool-panel">
         <span><i class="tone-ai"></i>AI 校准</span><span><i class="tone-external-ai-prooftranslation"></i>外部 AI 校译</span><span><i class="tone-reference-applied"></i>参考已采用</span><span><i class="tone-reference-inserted"></i>参考新增</span><span><i class="tone-reference-inserted-deleted"></i>参考新增（已删除）</span><span><i class="tone-reference-suggested"></i>参考建议（保留 ASR）</span><span><i class="tone-reference-retained"></i>参考未含（保留 ASR）</span><span><i class="tone-deleted"></i>已删除但保留</span>
         <div class="sidebar-usage"><strong>使用说明</strong><p>左键词元：选择并编辑</p><p>右键字词间隙或辅助点：切分</p><p>右键行尾紫点：合并下一 Cue</p></div>
@@ -209,7 +223,7 @@
     </section>
 
     <aside class="editor-preview-pane">
-      <div class="preview-heading"><span id="mediaPreviewLabel">视频预览</span><details id="assMenu" class="editor-command-menu">
+      <div class="preview-heading"><span id="mediaPreviewLabel">预览</span><details id="assMenu" class="editor-command-menu">
           <summary>字幕样式</summary>
           <form id="assForm" class="editor-command-popover task-info-popover ass-popover" aria-labelledby="assPanelTitle">
             <div id="assPanelHandle" class="ass-panel-heading"><strong id="assPanelTitle">字幕样式</strong><button id="assClose" type="button" aria-label="关闭字幕样式面板" title="关闭">×</button></div>
@@ -235,7 +249,7 @@
             <div class="ass-checks"><label class="ass-check"><input name="bold" type="checkbox"><span>加粗</span></label><label class="ass-check"><input name="background" type="checkbox"><span>半透明底色</span></label><label class="ass-check"><input name="enabled" type="checkbox"><span>显示此层</span></label></div>
               <label class="ass-check"><input name="word_highlight" type="checkbox"><span>高亮正在播放的词元</span></label>
             <p id="assStatus" role="status">修改后可直接播放预览；应用后写入版本。</p>
-            <div class="ass-output-actions"><button type="button" id="assPreview">预览当前帧</button><button type="button" id="assExport">导出 ASS</button><button type="button" id="assBurn">烧录视频</button></div>
+            <div class="ass-output-actions"><button type="button" id="assPreview">预览当前帧</button><button type="button" id="assExport">导出 ASS</button></div>
             <div class="task-info-actions"><button type="button" id="assReset">恢复项目默认</button><button type="button" id="assCancel">取消</button><button type="submit" class="primary">应用样式</button></div>
           </form>
         </details></div>
@@ -347,12 +361,12 @@
 
   <script src="/assets/editor_cue_ordering.js?v=20260809-cue-order-1"></script>
   <script src="/assets/editor_language.js?v=20260822-virtual-line-3"></script>
-  <script src="/assets/editor_document.js?v=20261003-overlay-1"></script>
+  <script src="/assets/editor_document.js?v=20261009-merge-tools-2"></script>
   <script src="/assets/editor_document_store.js?v=20261005-split-pause-1"></script>
   <script src="/assets/editor_operation_queue.js?v=20261005-serial-batch-1"></script>
   <script src="/assets/editor_waveform_cache.js?v=20260809-refactor-final-1"></script>
-  <script src="/assets/editor_timeline.js?v=20261005-waveform-selection-1"></script>
-  <script src="/assets/editor_multiline_timeline.js?v=20261005-layout-waveform-1"></script>
+  <script src="/assets/editor_timeline.js?v=20261009-row-snap-1"></script>
+  <script src="/assets/editor_multiline_timeline.js?v=20261009-row-snap-1"></script>
   <script src="/assets/editor_cue_time_controller.js?v=20260809-cue-order-1"></script>
   <script src="/assets/editor_cue_list_view.js?v=20261005-draft-session-1"></script>
   <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
@@ -362,7 +376,7 @@
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
   <script src="/assets/vendor/libass/subtitles-octopus.js"></script>
   <script src="/assets/editor_cue_selection.js?v=20260926-cue-hit-14"></script>
-  <script src="/assets/editor_ass_panel.js?v=20260923-preview-selection-1"></script>
-  <script src="/assets/editor.js?v=20261008-glossary-2"></script>
+  <script src="/assets/editor_ass_panel.js?v=20261009-workspace-sizing-5"></script>
+  <script src="/assets/editor.js?v=20261009-workspace-sizing-5"></script>
 </body>
 </html>
