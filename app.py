@@ -1813,7 +1813,8 @@ def test_api_connection(payload: ApiConnectionTestPayload) -> dict[str, Any]:
 
 @app.post("/api/qwen-assist/asr")
 async def start_qwen_assist_asr(
-    media: UploadFile = File(...), source_language: str = Form("Auto"),
+    media: UploadFile | None = File(default=None), source_language: str = Form("Auto"),
+    media_reference_token: str = Form(""),
     profile_id: str = Form("qwen_cloud"),
     asr_glossary_ids: str = Form("[]"),
 ) -> dict[str, Any]:
@@ -1832,6 +1833,15 @@ async def start_qwen_assist_asr(
         injection = injection_preview(selected_ids, [])
         settings["asr_injected_hotwords"] = injection["hotwords"]
         PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
+        if isinstance(media_reference_token, str) and media_reference_token:
+            from substar_core.media_relink import resolve_selection
+            try:
+                external_media = Path(resolve_selection('__import__', media_reference_token))
+            except (OSError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            return await run_in_threadpool(create_assist_task, _task_service(), PROJECTS_ROOT, external_media, source_language, settings, True)
+        if media is None:
+            raise HTTPException(status_code=422, detail="请选择媒体")
         with tempfile.TemporaryDirectory(prefix=".asr-assist-upload-", dir=PROJECTS_ROOT) as staging:
             path = Path(staging) / "upload"
             size = 0
@@ -1843,11 +1853,12 @@ async def start_qwen_assist_asr(
                     output.write(chunk)
             if not size:
                 raise HTTPException(status_code=400, detail="媒体文件为空")
-            return await run_in_threadpool(create_assist_task, _task_service(), PROJECTS_ROOT, path, source_language, settings)
+            return await run_in_threadpool(create_assist_task, _task_service(), PROJECTS_ROOT, path, source_language, settings, False, True)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
-        await media.close()
+        if media is not None:
+            await media.close()
 
 
 @app.get("/api/qwen-assist/asr/{task_id}")
@@ -2705,6 +2716,7 @@ def check_app_update():
     try:
         result = check_update()
         result.pop("asset",None)
+        result.pop("_delta",None)
         return result
     except (ValueError, OSError, requests.RequestException) as exc:
         raise HTTPException(502, detail=f"检查更新失败：{exc}") from exc
@@ -2715,7 +2727,7 @@ def download_app_update(request: Request):
     if request.headers.get("x-substar-instance-id") != APP_INSTANCE_ID:
         raise HTTPException(403,detail="runtime instance identity mismatch")
     from substar_core.updater import download_update
-    result = download_update()
+    result = download_update(expected_mode=request.query_params.get("mode"))
     result.pop("staged",None)
     return result
 

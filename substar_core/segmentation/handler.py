@@ -251,13 +251,18 @@ def build_segmentation_handler(
                 raise InvalidTaskError("segmentation reference document changed")
         previous_artifacts: Path | None = None
         if int(context.task.get("attempt") or 0) > 1:
-            candidate = (
-                context.attempt_directory.parent
-                / str(int(context.task["attempt"]) - 1)
-                / "artifacts"
-            ).resolve()
-            if all((candidate / name).is_file() for name in _ARTIFACT_CONTRACTS):
+            from .worker import validate_recovery_artifacts
+
+            # An intervening failed attempt may have no artifacts. Search all
+            # earlier attempts and ignore incomplete or corrupt deliveries.
+            for number in range(int(context.task["attempt"]) - 1, 0, -1):
+                candidate = (context.attempt_directory.parent / str(number) / "artifacts").resolve()
+                try:
+                    validate_recovery_artifacts(candidate, request)
+                except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                    continue
                 previous_artifacts = candidate
+                break
         credentials = (
             (segmentation_credential_ref(request["provider"]),)
             if request["mode"] == "semantic"

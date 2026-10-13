@@ -793,7 +793,11 @@ class SegmentationRuntimeTests(unittest.TestCase):
         def fail_once(context, completion):
             nonlocal finalize_calls
             finalize_calls += 1
-            if finalize_calls == 1:
+            if finalize_calls <= 2:
+                if finalize_calls == 2:
+                    # Simulate an incomplete intervening attempt. Attempt 3
+                    # must find the accepted artifacts from attempt 1.
+                    (context.attempt_directory / "artifacts" / "segmentation_request.json").write_text("{", encoding="utf-8")
                 raise InvalidTaskError("simulated finalization interruption")
             return original.finalize(context, completion)
 
@@ -854,8 +858,16 @@ class SegmentationRuntimeTests(unittest.TestCase):
             if completed["state"] in {"succeeded", "failed", "interrupted"}:
                 break
             time.sleep(0.02)
+        self.assertIn(completed["state"], {"failed", "interrupted"}, completed)
+        self.service.retry(segmentation["task_id"])
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline:
+            completed = self.service.get_task(segmentation["task_id"])
+            if completed["state"] in {"succeeded", "failed", "interrupted"}:
+                break
+            time.sleep(0.02)
         self.assertEqual(completed["state"], "succeeded", completed)
-        self.assertEqual(finalize_calls, 2)
+        self.assertEqual(finalize_calls, 3)
         self.assertFalse(
             (
                 self.root

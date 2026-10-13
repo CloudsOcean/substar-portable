@@ -31,6 +31,37 @@ class AsrAssistTests(unittest.TestCase):
     def create(self, language="zh", settings=None):
         return create_assist_task(self.service, self.projects, self.media, language, settings or {})
 
+    def test_reference_preserves_original_without_media_copy(self):
+        from substar_core.media_reference import resolve_reference
+        with patch("substar_core.asr_assist.shutil.copyfile", side_effect=AssertionError("must not copy")):
+            row = create_assist_task(self.service, self.projects, self.media, "zh", {}, reference=True)
+        project = self.projects / self.service.get_task(row["task_id"])["project_id"]
+        self.assertEqual(resolve_reference(project), self.media.resolve())
+        self.assertEqual(self.media.read_bytes(), b"test media")
+        self.assertFalse((project / "input" / "media").exists())
+
+    def test_uploaded_staging_is_moved_without_second_copy(self):
+        with patch("substar_core.asr_assist.shutil.copyfile", side_effect=AssertionError("must not copy")):
+            row = create_assist_task(self.service, self.projects, self.media, "zh", {}, adopt=True)
+        project = self.projects / self.service.get_task(row["task_id"])["project_id"]
+        self.assertFalse(self.media.exists())
+        self.assertEqual((project / "input" / "media").read_bytes(), b"test media")
+
+    def test_reference_api_accepts_token_without_upload(self):
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application.app), base_url="http://substar.test") as client:
+                with patch("substar_core.media_relink.resolve_selection", return_value=str(self.media)) as resolve:
+                    response = await client.post("/api/qwen-assist/asr", data={"media_reference_token":"selected"})
+                    self.assertEqual(response.status_code, 200, response.text)
+                    resolve.assert_called_once_with('__import__', 'selected')
+                with patch("substar_core.media_relink.resolve_selection", side_effect=ValueError("expired")):
+                    response = await client.post("/api/qwen-assist/asr", data={"media_reference_token":"expired"})
+                    self.assertEqual(response.status_code, 422)
+                response = await client.post("/api/qwen-assist/asr")
+                self.assertEqual(response.status_code, 422)
+        with patch.object(application, "PROJECTS_ROOT", self.projects), patch.object(application, "_task_service", return_value=self.service), patch.object(application, "load_settings", return_value={}):
+            asyncio.run(run())
+
     def test_same_media_reuses_only_transcription_task(self):
         first = self.create()
         second = self.create()
@@ -62,6 +93,34 @@ class AsrAssistTests(unittest.TestCase):
         self.assertIn("prompt", material["instructions"])
         self.assertIn("hotwords", material["instructions"])
         self.assertIn("未经核对", material["instructions"])
+
+    def test_external_package_python_validator_executes_final_json_rules(self):
+        import json
+        instructions = generation_material("ASR", "zh", "", True)["instructions"]
+        code = instructions.split("```python\n", 1)[1].split("```", 1)[0]
+        namespace = {}
+        exec(compile(code, "external-validator", "exec"), namespace)
+        validate = namespace["validate_final_json"]
+        def payload(prompt="领域", words=None):
+            return json.dumps({"prompt": prompt, "hotwords": words or []}, ensure_ascii=False)
+        validate(payload("😀" * 400, [{"text":"one two three four five six seven", "weight":5}]))
+        validate(payload(words=[{"text":"ABC", "weight":50}]), ["ABC"])
+        invalid = [payload(""), payload("x" * 401),
+            payload(words=[{"text":"中" * 16,"weight":5}]),
+            payload(words=[{"text":"a b c d e f g h","weight":5}]),
+            payload(words=[{"text":"a\nb","weight":5}]),
+            payload(words=[{"text":"a\rb","weight":5}]),
+            payload(words=[{"text":" ","weight":5}]),
+            payload(words=[{"text":"ABC","weight":50}]),
+            payload(words=[{"text":"ABC","weight":4}]),
+            payload(words=[{"text":"ABC","weight":True}]),
+            payload(words=[{"text":"ABC","weight":5},{"text":" abc ","weight":5}]),
+            payload(words=[{"text":str(i),"weight":5} for i in range(101)])]
+        for raw in invalid:
+            with self.subTest(raw=raw), self.assertRaises(AssertionError):
+                validate(raw)
+        with self.assertRaises(AssertionError):
+            validate(payload(words=[{"text":"ABC","weight":5}]), supports_hotwords=False)
 
     def test_cannot_read_other_project_transcript(self):
         with patch.object(self.service, "get_task", return_value={"task_type":"transcription", "project_id":"../other"}):

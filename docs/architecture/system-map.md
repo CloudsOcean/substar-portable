@@ -253,7 +253,7 @@ flowchart LR
 | `model_stage_scheduler` | `application` | Resolve versioned semantic prompts, append one authoritative compact Cue Script grammar, freeze primary/repair policy, archive exact provider-visible exchanges and route text-model requests through one provider-capability-aware gateway and deterministic finalizer. | `substar_core/stage_settings.py`<br>`substar_core/prompt_registry.py`<br>`substar_core/stage_progress.py`<br>`substar_core/ai_progress.py`<br>`substar_core/model_routing.py`<br>`substar_core/model_gateway/gateway.py`<br>`substar_core/cue_script.py` | `settings_snapshot`<br>`model_stage_policy`<br>`production_prompt_component` | `model_stage_policy`<br>`production_prompt_component`<br>`model_text_exchange` | — |
 | `glossary_ui` | `frontend_connector` | Edit, import and export terminology and show its activation scope. | `web/glossary.js`<br>`web/glossary_transfer.js` | `glossary_snapshot` | `glossary_snapshot` | `glossary_service` |
 | `glossary_service` | `domain_service` | Normalize terminology, select active project entries, compile ASR hotwords and LLM prompt context, and import/export XLSX. | `substar_core/glossary.py`<br>`substar_core/glossary_xlsx.py` | `glossary_snapshot`<br>`project_creation_request` | `glossary_snapshot`<br>`transcription_request`<br>`segmentation_request` | — |
-| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py`<br>`substar_core/updater.py`<br>`substar_core/update_helper.ps1` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
+| `launcher_runtime` | `process` | Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely. | `launcher.py`<br>`substar_core/runtime_instance.py`<br>`substar_core/runtime/launch_surface.py`<br>`substar_core/runtime/windows_process.py`<br>`substar_core/process_command.py`<br>`substar_core/updater.py`<br>`substar_core/update_delta.py`<br>`substar_core/update_helper.ps1` | `runtime_identity`<br>`settings_snapshot` | `runtime_identity` | `composition_root`<br>`scheduler` |
 | `local_environment_service` | `optional_capability` | Diagnose source-install local runtimes and manage optional local model paths/assets outside the cloud-only beta path. | `substar_core/environment_doctor.py`<br>`substar_core/model_assets.py`<br>`substar_core/model_paths.py`<br>`substar_core/asr_longform.py` | `settings_snapshot`<br>`release_manifest` | `settings_snapshot` | — |
 | `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js`<br>`web/theme/tokens.css`<br>`web/project_label.js`<br>`web/design-directions.html` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
 | `recognition_contracts` | `contract` | Register supported recognition profiles and validate provider-independent transcription artifacts. | `substar_core/recognition/registry.py`<br>`substar_core/recognition/contracts.py`<br>`substar_core/transcription/contracts.py`<br>`substar_core/transcription/artifacts.py`<br>`substar_core/artifacts.py` | `transcription_request`<br>`recognition_evidence` | `recognition_evidence`<br>`transcription_result` | — |
@@ -2365,6 +2365,7 @@ Code:
 - `substar_core/runtime/windows_process.py`
 - `substar_core/process_command.py`
 - `substar_core/updater.py`
+- `substar_core/update_delta.py` — `verify_manifest`, `baseline_matches`, `stage_delta`
 - `substar_core/update_helper.ps1`
 
 Must not:
@@ -2398,7 +2399,7 @@ Recovery: Probe identity, wait for graceful shutdown, then use strictly verified
 
 Reuses: `runtime identity record`; restarts: `backend after confirmed exit`; terminal behavior: Refuse unsafe takeover or kill.
 
-Tests: `tests/test_visible_backend_policy.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`, `tests/test_editor_actions_ass_updates.py`
+Tests: `tests/test_visible_backend_policy.py`, `tests/test_launcher_instance_policy.py`, `tests/test_runtime_http.py`, `tests/test_editor_actions_ass_updates.py`, `tests/test_update_delta.py`, `tests/test_update_helper_windows.py`
 
 Change impact modules: `composition_root`<br>`scheduler`<br>`worker_supervisor`<br>`settings_service`<br>`packaging`
 

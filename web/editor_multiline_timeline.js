@@ -18,6 +18,15 @@
   function timeLabel(time) {
     return `${String(Math.floor(time / 60)).padStart(2, "0")}:${(time % 60).toFixed(3).padStart(6, "0")}`;
   }
+  const isCjk = text => /[\u3400-\u9fff\uf900-\ufaff]/u.test(text);
+  function spacedText(ctx, text, x, y, draw = false) {
+    const value=String(text || "");
+    if (draw) ctx.fillText(value,x,y);
+    return x + ctx.measureText(value).width;
+  }
+  function subtitleGapIntent(gaps, x, y) {
+    return gaps.find(g => x >= g.left && x <= g.right && y >= g.top && y <= g.bottom)?.intent || null;
+  }
   // Keep the strongest PCM peak per drawing column; never average neighboring peaks.
   function waveformEnvelope(peaks, width, start, end, windowStart, windowEnd, scale = 1, noiseFloor = 0) {
     const values = [];
@@ -38,7 +47,7 @@
   function cueHandles(cue, row, seconds, width) {
     const xAt = time => (time-row.start)/seconds*width;
     const left = Math.max(0,xAt(cue.start)), right = Math.min(width,xAt(cue.end));
-    const cap = Math.min(10,Math.max(0,(right-left)/4));
+    const cap = Math.min(5,Math.max(0,(right-left)/8));
     return {left,right,cap,start:cue.start>=row.start,end:cue.end<=row.end};
   }
   function movePreview(cues, cue, delta, duration) {
@@ -136,7 +145,7 @@
     let active = null, selected = null, preview = null, drag = null;
     const selection = options.selection || selectionApi.createSelection();
     let selectionHandled = false;
-    let hover = null, boundaryOverride = null;
+    let hover = null, boundaryOverride = null, pointer = null;
     let destroyed = false, following = true, frame = 0, playback = 0, generation = 0;
     let firstActive = true, suppressClick = false, mode = "multiline";
     displaySelect.onchange = () => {
@@ -222,13 +231,18 @@
         const row = {...range, canvas, peaks:null, loading:false};
         canvas.addEventListener("pointerdown", event => pointerDown(event, row));
         canvas.addEventListener("pointermove", event => pointerMove(event, row));
-        canvas.addEventListener("pointerleave", () => { if (!drag) { hover = null; redraw(); } });
+        canvas.addEventListener("pointerleave", () => { pointer = null; if (!drag) hover = null; redraw(); });
         canvas.addEventListener("pointerup", event => pointerUp(event, row));
         canvas.addEventListener("pointercancel", () => { drag = null; preview = null; redraw(); });
         canvas.addEventListener("click", event => click(event, row));
         canvas.addEventListener("contextmenu", event => {
           event.preventDefault();
-          const intent = creationIntent(position(event, row).time);
+          const p = position(event,row);
+          const gap = subtitleGapIntent(row.editGaps || [],p.x,p.y);
+          if (gap) { options.onOperation?.(gap.type,gap); return; }
+          // Right-clicking a word is not a request to create a new subtitle.
+          if ([...row.lanes?.values() || []].some(l => p.y >= l.top && p.y <= l.bottom)) return;
+          const intent = creationIntent(p.time);
           if (intent) options.onOperation?.("createManualCue", intent);
         });
         canvas.addEventListener("dblclick", () => {
@@ -331,12 +345,13 @@
         }
       }
       row.lanes=new Map();
+      row.editGaps=[];
       for (const cue of ranges) {
         if (cue.end <= row.start || cue.start >= row.end) continue;
         // In the continuous strip, draw the complete cue through canvas seams.
         // Canvas clipping preserves one label and only the real end handles.
         const handles = mode === "basic"
-          ? {left:xAt(cue.start), right:xAt(cue.end), cap:Math.min(10, (cue.end-cue.start)/seconds*width/4), start:true, end:true}
+          ? {left:xAt(cue.start), right:xAt(cue.end), cap:Math.min(5, (cue.end-cue.start)/seconds*width/8), start:true, end:true}
           : cueHandles(cue,row,seconds,width);
         const {left,right,cap} = handles;
         const isSelected = selection.ids.has(cue.cue_id);
@@ -348,24 +363,46 @@
           const y = top + (firstLane+lane) * (laneHeight + 3);
           ctx.fillStyle = overlay ? "rgba(74,67,94,.94)" : "rgba(66,78,89,.86)";
           ctx.beginPath(); ctx.roundRect(left + .5, y, Math.max(1, right - left - 1), laneHeight, 4); ctx.fill();
-          ctx.save(); ctx.clip();
-          ctx.fillStyle = "rgba(184,195,204,.27)";
-          if(handles.start) ctx.fillRect(left,y,cap,laneHeight);
-          if(handles.end) ctx.fillRect(right-cap,y,cap,laneHeight);
-          ctx.restore();
-          ctx.strokeStyle = isSelected ? "#ffe16b" : "#76838e";
-          ctx.lineWidth = isSelected ? 2 : 1; ctx.stroke();
+          ctx.strokeStyle = isSelected ? "#ffe16b" : "rgba(184,195,204,.48)";
+          ctx.lineWidth = isSelected ? 1.5 : 1; ctx.stroke();
+          ctx.fillStyle="rgba(184,195,204,.28)";
+          if (handles.start) ctx.fillRect(left+1,y+1,cap,Math.max(0,laneHeight-2));
+          if (handles.end) ctx.fillRect(right-cap-1,y+1,cap,Math.max(0,laneHeight-2));
           const textLeft=left+(handles.start?cap:0)+5;
           const available = Math.max(0,right-(handles.end?cap:0)-textLeft-5);
           ctx.save(); ctx.beginPath(); ctx.rect(textLeft, y, available, laneHeight); ctx.clip();
           ctx.font = "14px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.fillStyle = "#edf1f4"; ctx.textBaseline = "middle";
-          let text = mode === "multiline" ? rowCueText(cue, row, !!lane) : (lane ? cue.target_text : cue.text);
-          if (ctx.measureText(text).width > available) {
-            while (text.length && ctx.measureText(text + "…").width > available) text = text.slice(0,-1);
-            text += "…";
+          const tokens = !lane ? cue.timed_tokens || [] : [];
+          if (tokens.length) {
+            let x = textLeft;
+            const visibleTokens = mode === "multiline" ? tokens.filter(t => t.end > row.start && t.start < row.end) : tokens;
+            for (let i=0;i<visibleTokens.length;i++) {
+              const token=visibleTokens[i];
+              x=spacedText(ctx,token.text,x,y+laneHeight/2,true);
+              const next=visibleTokens[i+1];
+              if (next) {
+                const gap=isCjk(token.text+next.text)?0:5;
+                if (x>=Math.max(textLeft,0) && x+gap<=Math.min(textLeft+available,width))
+                  row.editGaps.push({left:x-(gap?0:2),right:x+(gap||2),top:y,bottom:y+laneHeight,
+                    intent:{type:"split_cue",cue_id:cue.cue_id,after_token_id:token.token_id}});
+                x+=gap;
+              }
+              if (x>textLeft+available) break;
+            }
+          } else {
+            const text=mode === "multiline" ? rowCueText(cue,row,!!lane) : (lane?cue.target_text:cue.text);
+            spacedText(ctx,text,textLeft,y+laneHeight/2,true);
           }
-          ctx.fillText(text, textLeft, y + laneHeight / 2); ctx.restore();
+          ctx.restore();
         }
+      }
+      const main=ranges.filter(c=>c.subtitle_track!=="overlay");
+      for(let i=0;i<main.length-1;i++) {
+        const a=main[i], b=main[i+1], lane=row.lanes.get(a.cue_id) || row.lanes.get(b.cue_id);
+        if(!lane || b.start<a.end || a.end<row.start || b.start>row.end) continue;
+        const left=xAt(a.end), right=xAt(b.start), middle=(left+right)/2;
+        row.editGaps.push({left:Math.min(left,middle-3),right:Math.max(right,middle+3),top:lane.top,bottom:lane.bottom,
+          intent:{type:"merge_cues",left_cue_id:a.cue_id,right_cue_id:b.cue_id}});
       }
       drawBoundaryMode(ctx, row, width, height, xAt);
       if(drag?.kind==="create") {
@@ -377,6 +414,16 @@
       if (time >= row.start && time < row.end) {
         ctx.strokeStyle = "#ff6464"; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.moveTo(xAt(time), 0); ctx.lineTo(xAt(time), height); ctx.stroke();
+      }
+      if (!drag && pointer?.row === row) {
+        const gap=row.editGaps.find(g=>pointer.x>=g.left && pointer.x<=g.right && pointer.y>=g.top && pointer.y<=g.bottom);
+        if (gap) {
+          const x=(gap.left+gap.right)/2;
+          const center=gap.intent.type === "split_cue" ? (gap.top+gap.bottom)/2 : clamp(pointer.y,gap.top+10,gap.bottom-10);
+          ctx.save(); ctx.strokeStyle="#55d3e8"; ctx.lineWidth=2;
+          ctx.shadowColor="rgba(70,200,223,.85)"; ctx.shadowBlur=7;
+          ctx.beginPath(); ctx.moveTo(x,center-9); ctx.lineTo(x,center+9); ctx.stroke(); ctx.restore();
+        }
       }
       ctx.font = "12px Consolas, monospace"; ctx.textBaseline = "middle";
       if (mode === "basic") {
@@ -453,7 +500,8 @@
       const color = adjustment === "shared" ? "#70bfff" : "#ffe16b";
       ctx.save(); ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=drag?4:3;
       ctx.beginPath(); ctx.moveTo(badge.x,28); ctx.lineTo(badge.x,height); ctx.stroke();
-      ctx.fillRect(badge.x-4,height-6,8,5);
+      ctx.fillRect(badge.x-4,28,8,8);
+      ctx.fillRect(badge.x-4,height-8,8,8);
       ctx.fillStyle="#111c26"; ctx.fillRect(badge.left,badge.top,badge.width,badge.height);
       ctx.lineWidth=1; ctx.strokeRect(badge.left+.5,badge.top+.5,badge.width-1,badge.height-1);
       ctx.fillStyle=color; ctx.font="bold 12px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.textBaseline="middle";
@@ -471,6 +519,12 @@
       const badge = hover?.row === row ? boundaryBadge(hover,row,p.width) : null;
       if (badge && p.x >= badge.left && p.x <= badge.left+badge.width && p.y >= badge.top && p.y <= badge.top+badge.height)
         return {...hover,kind:"mode-toggle",...p};
+      if (badge && p.y >= 28 && Math.abs(p.x-badge.x) <= 5)
+        return {...hover,kind:"boundary",...p};
+      const playTime=Number(options.media?.currentTime || 0);
+      if (!event.ctrlKey && !event.metaKey && !event.shiftKey && playTime>=row.start && playTime<row.end
+        && Math.abs(p.x-(playTime-row.start)/seconds*p.width)<=5)
+        return {kind:"playhead",row,...p};
       const laneCues=timeline.applyPreview(cues,preview).filter(cue=>{
         const lane=row.lanes?.get(cue.cue_id);
         return lane ? p.y>=lane.top && p.y<=lane.bottom : p.y>=99;
@@ -507,6 +561,11 @@
       const target = hit(event, row);
       row.pointerTime=target.time;
       if (target.kind === "mode-toggle") { event.preventDefault(); return; }
+      if (target.kind === "playhead") {
+        event.preventDefault(); setFollow(false);
+        drag={...target,startX:event.clientX,moved:false,offset:target.time-Number(options.media.currentTime || 0)};
+        row.canvas.setPointerCapture(event.pointerId); return;
+      }
       if((event.ctrlKey || event.metaKey) && target.kind === "blank") {
         event.preventDefault(); drag={kind:"create",time:target.time,startX:event.clientX,moved:false};
         row.canvas.setPointerCapture(event.pointerId); setFollow(false); return;
@@ -526,19 +585,25 @@
       redraw();
     }
     function pointerMove(event, row) {
-      row.pointerTime=position(event,row).time;
+      const p=position(event,row);
+      pointer={row,x:p.x,y:p.y}; row.pointerTime=p.time;
       if (!drag) {
         const target=hit(event,row);
-        row.canvas.title = target.cue ? [target.cue.text, target.cue.target_text].filter(Boolean).join("\n") : "";
+        const gap=subtitleGapIntent(row.editGaps || [],p.x,p.y);
+        row.canvas.title = ["boundary","mode-toggle"].includes(target.kind) || gap?.type === "merge_cues"
+          ? "左键切换边界调整模式\n右键将下句合并到上句"
+          : gap?.type === "split_cue" ? "右键在字词间隙切分字幕"
+          : target.kind === "playhead" ? "左键拖动播放线" : "";
         const badge=hover?.row===row?boundaryBadge(hover,row,target.width):null;
         const inBadgePath=badge && target.x>=Math.min(badge.x-12,badge.left-8)
           && target.x<=Math.max(badge.x+12,badge.left+badge.width+8)
           && target.y>=badge.top-8 && target.y<=row.canvas.getBoundingClientRect().height;
         hover=["boundary","mode-toggle"].includes(target.kind)?target:inBadgePath?hover:null;
-        row.canvas.style.cursor=target.kind==="mode-toggle"?"pointer":target.kind==="boundary"?(boundaryModeFor(target)==="shared"?"col-resize":"ew-resize"):"crosshair";
+        row.canvas.style.cursor=target.kind==="playhead"?"ew-resize":target.kind==="mode-toggle"?"pointer":target.kind==="boundary"?(boundaryModeFor(target)==="shared"?"col-resize":"ew-resize"):"crosshair";
         redraw(); return;
       }
       if (Math.abs(event.clientX - drag.startX) > 2) drag.moved = true;
+      if(drag.kind==="playhead") { row.canvas.style.cursor="ew-resize"; seek(clamp(p.time-drag.offset,0,duration)); return; }
       if(drag.kind==="create") { row.canvas.style.cursor="crosshair"; redraw(); return; }
       if(drag.kind==="move") {
         preview=movePreview(cues,drag.cue,position(event,row).time-drag.time,duration); redraw(); return;
@@ -566,6 +631,7 @@
       if (suppressClick) { suppressClick = false; return; }
       const target = hit(event,row);
       if (["boundary","mode-toggle"].includes(target.kind) && toggleBoundaryMode(target)) return;
+      if (target.kind === "playhead") { seek(target.time); return; }
       hover=null;
       if (!selectionHandled) selectTarget(target,event);
       selectionHandled=false;
@@ -641,5 +707,5 @@
       }
     });
   }
-  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,rowCueText,createTimelineController});
+  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,rowCueText,spacedText,subtitleGapIntent,createTimelineController});
 });

@@ -318,9 +318,9 @@ def direct_seam_request(
     }
 
 
-def cached_semantic_grouping_responses(path: Path | None) -> dict[str, dict[str, Any]]:
+def cached_semantic_grouping_responses(path: Path | None, *, all_candidates: bool = False) -> dict[str, Any]:
     """Recover completed merged responses from a previous interrupted stdout log."""
-    found: dict[str, dict[str, Any]] = {}
+    found: dict[str, Any] = {}
     if path is None or not path.is_file():
         return found
     for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -328,16 +328,23 @@ def cached_semantic_grouping_responses(path: Path | None) -> dict[str, dict[str,
             continue
         try:
             record = json.loads(raw_line.split("\t", 1)[1])
+            if not isinstance(record, dict):
+                continue
             event = str(record.get("event", ""))
             payload = record.get("payload") or {}
+            if not isinstance(payload, dict):
+                continue
             if not event.endswith(" API response"):
                 continue
-            if not event.startswith("semantic_grouping "):
+            if not event.startswith(("semantic_grouping ", "semantic_grouping_repair ")):
                 continue
             block_id = str(payload.get("block_id") or event.split()[1])
-            output = payload.get("output")
+            output = payload.get("finalizedOutput", payload.get("output"))
             if isinstance(output, dict):
-                found[block_id] = output
+                if all_candidates:
+                    found.setdefault(block_id, []).insert(0, output)
+                else:
+                    found[block_id] = output
         except (TypeError, ValueError, json.JSONDecodeError, IndexError):
             continue
     return found
@@ -1217,7 +1224,65 @@ def request_semantic_grouping_block(
     repair_sections.append(output_contract("SEGMENT"))
     full_system_prompt = "\n\n".join(primary_sections)
     full_repair_system_prompt = "\n\n".join(repair_sections)
+    # Content identity deliberately excludes provider/model, but includes the
+    # frozen material, prompts, limits and language. Hits are revalidated below.
+    checkpoint_root = getattr(args, "checkpoint_dir", None)
+    checkpoint_key = hashlib.sha256(json.dumps({
+        "version": 1, "scope": getattr(args, "checkpoint_scope", ""),
+        "request": request, "primary": full_system_prompt, "repair": full_repair_system_prompt,
+    }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    checkpoint_path = Path(checkpoint_root) / (checkpoint_key + ".json") if checkpoint_root else None
+    supplied_response = cached_value if isinstance(cached_value, dict) else None
+    checkpoint_value = None
+    candidates = list(cached_value) if isinstance(cached_value, list) else [cached_value]
+    if checkpoint_path and checkpoint_path.is_file():
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if (isinstance(checkpoint, dict)
+                    and checkpoint.get("schema_version") == "substar.segmentation-checkpoint.v1"
+                    and checkpoint.get("key") == checkpoint_key
+                    and checkpoint.get("accepted") is True):
+                value_digest = hashlib.sha256(json.dumps(checkpoint["value"], sort_keys=True,
+                                                        ensure_ascii=False).encode("utf-8")).hexdigest()
+                if checkpoint.get("value_sha256") == value_digest:
+                    checkpoint_value = checkpoint["value"]
+                    candidates.insert(0, checkpoint_value)
+        except (OSError, ValueError, KeyError, TypeError):
+            pass  # A damaged file affects only this block.
+    cached_value = None
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            validate_semantic_grouping_result(candidate, units, bounds, chunk_number, binding, args.hard_limit)
+            if semantic_grouping_overflow_issues(candidate, units, bounds, chunk_number, binding, args.hard_limit):
+                continue
+        except (ValueError, TypeError, KeyError, SegmentationError):
+            continue
+        cached_value = candidate
+        break
+
+    # A directly supplied response may still enter the existing repair path.
+    # Historical log lists and durable checkpoints only reuse validated results.
+    if cached_value is None and supplied_response is not None:
+        cached_value = supplied_response
+
+    def save_accepted(value, model):
+        if checkpoint_path and value is not checkpoint_value:
+            atomic_write_json(checkpoint_path, {
+                "schema_version": "substar.segmentation-checkpoint.v1", "key": checkpoint_key,
+                "accepted": True, "block_id": block_id, "value": value,
+                "value_sha256": hashlib.sha256(json.dumps(value, sort_keys=True,
+                                                          ensure_ascii=False).encode("utf-8")).hexdigest(),
+                "origin": ({"source": "legacy_response_log", "model": None}
+                           if value is cached_value else
+                           {"source": "model", "model": model, "base_url": args.base_url,
+                            "attempt": getattr(args, "checkpoint_attempt", 0)}),
+            })
+
     initial_error: Exception | None = None
+    if cached_value is None and progress is not None:
+        progress.event("semantic_grouping", "sent", block_id=block_id)
     try:
         value = cached_value or model_cue_script(
             model=args.grouping_model,
@@ -1288,6 +1353,7 @@ def request_semantic_grouping_block(
         spans, groups, corrections, cuts, exceptions = validate_semantic_grouping_result(
             value, units, bounds, chunk_number, binding, args.hard_limit
         )
+        save_accepted(value, getattr(args, "grouping_model", ""))
         if progress is not None:
             progress.event("semantic_grouping", "accepted", block_id=block_id)
         return chunk_number, spans, groups, corrections, cuts, exceptions
@@ -1499,6 +1565,7 @@ def request_semantic_grouping_block(
                     "problem_cue_count": 0,
                 },
             )
+            save_accepted(repair_value, getattr(args, "repair_model", "") or args.grouping_model)
             if progress is not None:
                 progress.event("semantic_grouping", "accepted", block_id=block_id)
             return chunk_number, spans, groups, corrections, cuts, exceptions
@@ -1631,6 +1698,10 @@ def main(
     parser.add_argument("--repair-max-tokens", type=int, default=65536)
     parser.add_argument("--repair-temperature", type=float, default=0.0)
     parser.add_argument("--resume-response-log", type=Path)
+    parser.add_argument("--checkpoint-dir", type=Path)
+    parser.add_argument("--checkpoint-scope", default="")
+    parser.add_argument("--checkpoint-attempt", type=int, default=0)
+    parser.add_argument("--block-concurrency", type=int, default=2)
     parser.add_argument("--target-seconds", type=int, default=180)
     parser.add_argument("--english-hard-limit", type=int, default=55)
     parser.add_argument("--chinese-hard-limit", type=int, default=28)
@@ -1840,25 +1911,30 @@ def main(
     meaning_groups: list[dict[str, Any]] = []
     grouping_exceptions: list[dict[str, Any]] = []
     merged_cuts: set[int] = set()
-    response_cache = cached_semantic_grouping_responses(args.resume_response_log)
+    response_cache = cached_semantic_grouping_responses(args.resume_response_log, all_candidates=True)
     if response_cache:
         emit_runtime_event(
             "semantic grouping 已载入中断响应缓存",
             {"cached_blocks": sorted(response_cache), "count": len(response_cache)},
         )
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(ranges)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(args.block_concurrency, len(ranges)))) as executor:
         futures = []
         for number, bounds in enumerate(ranges, start=1):
             block_id = f"c{number:04d}"
             cached_value = response_cache.get(block_id)
-            if cached_value is None:
-                progress.event("semantic_grouping", "sent", block_id=block_id)
             futures.append(executor.submit(
                 request_semantic_grouping_block,
                 units, bounds, number, args, grouping_system_prompt, glossary,
                 progress, cached_value, grouping_repair_system_prompt,
             ))
-        rows = [future.result() for future in concurrent.futures.as_completed(futures)]
+        try:
+            rows = [future.result() for future in concurrent.futures.as_completed(futures)]
+        except Exception:
+            # Do not start all queued blocks after a provider/auth/rate-limit failure.
+            # Already running blocks may finish and commit their checkpoints.
+            for future in futures:
+                future.cancel()
+            raise
     for _number, _spans, groups, _corrections, local_cuts, exceptions in sorted(rows):
         meaning_groups.extend(groups)
         merged_cuts.update(local_cuts)

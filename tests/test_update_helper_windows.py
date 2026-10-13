@@ -11,7 +11,8 @@ import pytest
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows updater")
 @pytest.mark.parametrize("fail",[False,True])
-def test_helper_replaces_or_rolls_back_without_touching_data(tmp_path,fail):
+@pytest.mark.parametrize("delta",[False,True])
+def test_helper_replaces_or_rolls_back_without_touching_data(tmp_path,fail,delta):
     root = tmp_path / "字幕 软件"
     stage = tmp_path / "更新 暂存"
     base = Path(sys.base_prefix)
@@ -24,6 +25,19 @@ def test_helper_replaces_or_rolls_back_without_touching_data(tmp_path,fail):
         (directory / "app.py").write_text(version)
         (directory / "launcher.py").write_text("import sys\nraise SystemExit("+
             ("7" if fail and version == "new" else "0")+")\n")
+        (directory / "启动_Substar.cmd").write_text("test")
+        (directory / "portable_manifest.json").write_text(json.dumps({"version":"2.3.0" if version == "new" else "2.2.7",
+            "package_layout":"transparent-source-runtime"}))
+    if delta:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from scripts.build_update_delta import build
+        from substar_core.update_delta import stage_delta
+        from substar_core.updater import ROOTS
+        output = tmp_path / "delta"
+        _, payload = build(stage, [root], output, Ed25519PrivateKey.generate(), "test")
+        patch = payload["patches"][0]
+        assert not any(name.startswith("runtime/") for name in patch["changed"])
+        stage = stage_delta(output / patch["asset"],root,tmp_path / "增量暂存",payload,patch,ROOTS)
     (root / "data").mkdir()
     (root / "data/user-project.json").write_text('preserve me')
     (root / "models").mkdir()
@@ -31,7 +45,7 @@ def test_helper_replaces_or_rolls_back_without_touching_data(tmp_path,fail):
     plan_path = tmp_path / "pending.json"
     outcome = tmp_path / "outcome.json"
     plan = {"install":str(root),"staged":str(stage),"backup":str(tmp_path / "backup"),
-            "roots":["app.py","launcher.py","runtime"],"outcome":str(outcome),"version":"2.3.0"}
+            "roots":["app.py","launcher.py","runtime","portable_manifest.json"],"outcome":str(outcome),"version":"2.3.0"}
     plan_path.write_text(json.dumps(plan,ensure_ascii=False),encoding="utf-8")
     original = Path(__file__).resolve().parents[1] / "substar_core/update_helper.ps1"
     helper = tmp_path / "helper.ps1"

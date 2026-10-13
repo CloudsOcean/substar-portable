@@ -3493,6 +3493,21 @@
 
   async function handleTimelineIntent(intent) {
     if (!intent) return;
+    if (intent.type === "split_cue" || intent.type === "merge_cues") {
+      try {
+        if (intent.type === "split_cue") {
+          await sendOperation(contract.splitCueOperation(state.revision,intent.cue_id,intent.after_token_id,manualProvenance("split_cue")));
+        } else {
+          const left=state.view.cue_views.find(c=>c.cue_id===intent.left_cue_id);
+          const right=state.view.cue_views.find(c=>c.cue_id===intent.right_cue_id);
+          if (!left || !right) return;
+          if (left.speaker && right.speaker && left.speaker!==right.speaker &&
+              !window.confirm("两个 Cue 属于不同说话人。继续合并会清空合并后 Cue 的说话人标签，是否继续？")) return;
+          await sendOperation(contract.mergeCuesOperation(state.revision,left.cue_id,right.cue_id,manualProvenance("merge_cues")));
+        }
+      } catch(error) { ordinaryError(error.message); }
+      return;
+    }
     if (intent.type === "manual_cue_occupied") {
       state.timelineSelectedCueId = intent.cue_id;
       state.timelineController?.setSelectedCue(intent.cue_id);
@@ -5402,6 +5417,7 @@
     const row=event.target.closest('.cue-row:not(.deleted)') ||
       [...event.currentTarget.querySelectorAll('.cue-row:not(.deleted)')].find(node => node.getBoundingClientRect().bottom>=event.clientY);
     if (!row) return;
+    if (mode === 'tokens') suspendPlaybackFollow();
     suppressCueClick=false;
     const additive=event.ctrlKey || event.metaKey;
     cueDrag={mode,id:event.pointerId,first:row.dataset.cueId,startX:event.clientX,x:event.clientX,

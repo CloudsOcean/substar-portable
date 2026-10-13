@@ -40,7 +40,7 @@ test('drag uses full cue order across virtualization and preserves initial addit
 // Exercise the editor's real event handlers: a pending drag is still a click.
 const fs=require('node:fs'), vm=require('node:vm');
 const editorSource=fs.readFileSync(require('node:path').join(__dirname,'../web/editor.js'),'utf8');
-test('pointerdown preserves focus and playback until a real drag starts',()=>{
+test('token pointerdown preserves focus but suspends playback follow immediately',()=>{
   const start=editorSource.indexOf(`  $("#cueList").addEventListener("pointerdown"`);
   const end=editorSource.indexOf("  window.addEventListener('pointermove'",start);
   let handler, prevented=false, followed=true;
@@ -55,7 +55,7 @@ test('pointerdown preserves focus and playback until a real drag starts',()=>{
     target:{closest:s=>s==='.cue-row.deleted'?null:row},preventDefault(){prevented=true;}});
   assert.equal(prevented,false);
   assert.equal(ctx.state.followPlayback,true);
-  assert.equal(followed,true);
+  assert.equal(followed,false);
   assert.equal(ctx.cueDrag.moved,false);
 });
 test('click release does not rerender token controls before the click event',()=>{
@@ -85,14 +85,14 @@ test('cue centering corrects delayed layout but yields to manual scrolling',()=>
 });
 
 
-test('active cue whitespace selects tokens, number and other cues select rows',()=>{
+test('all cue whitespace selects tokens regardless of playback; number selects rows',()=>{
   const target=(id,button=null,hasTokens=true)=>({closest(selector){
     if(selector==='button') return button;
     if(selector==='.cue-row') return {dataset:{cueId:id},querySelector:()=>hasTokens?{}:null};
     return null;
   }});
   assert.equal(dragMode(target('a'),'a'),'tokens');
-  assert.equal(dragMode(target('b'),'a'),'cues');
+  assert.equal(dragMode(target('b'),'a'),'tokens');
   assert.equal(dragMode(target('a',null,false),'a'),'cues');
   assert.equal(dragMode(target('a',{matches:()=>true}),'a'),'cues');
   assert.equal(dragMode(target('a',{matches:()=>false}),'a'),null);

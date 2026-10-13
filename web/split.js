@@ -1277,7 +1277,22 @@
           event.stopPropagation();
           copyText(errorText, "报错已复制");
         });
-        errorBlock.append(errorValue, copyError);
+        const limited = /\b429\b|\b1302\b|rate.?limit|too many requests|限流|并发数超/.test(errorText.toLowerCase());
+        if (limited) {
+          const explanation = document.createElement("span");
+          explanation.textContent = job.segmentation_task_id
+            ? "模型服务暂时限流，请稍后重试。已验收的切分块会从检查点恢复。"
+            : "模型服务暂时限流，请稍后重试。";
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = "查看原始错误";
+          details.append(summary, errorValue);
+          const body = document.createElement("div");
+          body.append(explanation, details);
+          errorBlock.append(body, copyError);
+        } else {
+          errorBlock.append(errorValue, copyError);
+        }
       }
       const detail = document.createElement("div");
       detail.className = "queue-job-detail";
@@ -1292,7 +1307,7 @@
         if (job.workflow_mode !== "editor_task") {
           const retry = document.createElement("button");
           retry.type = "button";
-          retry.textContent = "重试";
+          retry.textContent = "从断点继续";
           retry.addEventListener("click", () => retryJob(job.id, retry));
           actions.append(retry);
         }
@@ -1716,8 +1731,8 @@
       if (!selected.cancelled) chooseVideo([selected]);
     } catch (error) { toast(`媒体选择失败：${error.message}`); }
   });
-  $("#videoDropZone").addEventListener("click", (event) => { if (!event.target.closest("button")) $("#videoInput").click(); });
-  $("#videoDropZone").addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) $("#videoInput").click(); });
+  $("#videoDropZone").addEventListener("click", (event) => { if (!event.target.closest("button")) $("#chooseVideoButton").click(); });
+  $("#videoDropZone").addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) $("#chooseVideoButton").click(); });
   $("#videoInput").addEventListener("change", (event) => chooseVideo(event.target.files));
   $("#chooseReferenceButton").addEventListener("click", () => $("#referenceInput").click());
   $("#referenceInput").addEventListener("change", (event) => chooseReferences(event.target.files));

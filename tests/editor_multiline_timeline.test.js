@@ -88,6 +88,28 @@ test("dragging inside the end handle preserves the grab offset and moves a share
   ]});
   const row=nodes.find(node=>node.className==="multiline-waveform-row");
   const pointer=x=>({button:0,clientX:x,clientY:125,pointerId:1,preventDefault() {}});
+  // Scrubbing the red playhead must seek without editing or selecting cues.
+  media.currentTime=2;
+  row.listeners.pointermove({...pointer(203),clientY:40});
+  assert.match(row.title,/左键拖动.*播放线/);
+  row.listeners.pointerdown({...pointer(203),clientY:40});
+  row.listeners.pointermove({...pointer(243),clientY:40});
+  row.listeners.pointerup({...pointer(243),clientY:40});
+  row.listeners.click({...pointer(243),clientY:40});
+  assert.ok(Math.abs(media.currentTime-2.4)<1e-9);
+  assert.equal(emitted,undefined);
+  assert.deepEqual([...selection.ids],[]);
+  media.currentTime=0;
+  // Hovering a boundary exposes an upper handle with the same drag behavior.
+  row.listeners.pointermove(pointer(300));
+  row.listeners.pointermove({...pointer(300),clientY:30});
+  assert.equal(row.title,"左键切换边界调整模式\n右键将下句合并到上句");
+  row.listeners.pointerdown({...pointer(300),clientY:30});
+  row.listeners.pointermove({...pointer(320),clientY:30});
+  row.listeners.pointerup({...pointer(320),clientY:30});
+  assert.equal(emitted.mode,"shared");
+  assert.deepEqual(emitted.changes,[{cue_id:"a",edge:"end",time:3.2},{cue_id:"b",edge:"start",time:3.2}]);
+  row.listeners.click({...pointer(320),clientY:30});
   row.listeners.pointerdown(pointer(294));
   row.listeners.pointermove(pointer(314));
   row.listeners.pointerup(pointer(314));
@@ -200,3 +222,62 @@ test("waveform resampling preserves sharp transients without smoothing adjacent 
    assert.equal(rowCueText(cue,{start:4,end:6}),"… two");
    assert.equal(rowCueText({...cue,timed_tokens:[]},{start:4,end:6}),"续 · one two");
  });
+
+test("timeline draws short inline caret only at actionable gaps", t => {
+  const names=["requestAnimationFrame","cancelAnimationFrame","ResizeObserver"];
+  const previous=names.map(n=>Object.getOwnPropertyDescriptor(globalThis,n));
+  t.after(()=>names.forEach((n,i)=>previous[i]?Object.defineProperty(globalThis,n,previous[i]):delete globalThis[n]));
+  const frames=[];
+  globalThis.requestAnimationFrame=fn=>{frames.push(fn);return frames.length;};
+  globalThis.cancelAnimationFrame=()=>{};
+  globalThis.ResizeObserver=class{observe(){} disconnect(){}};
+  const strokes=[], points=[];
+  const ctx=new Proxy({measureText:text=>({width:Array.from(text).length*8}),
+    beginPath(){points.length=0;},moveTo(x,y){points.push([x,y]);},lineTo(x,y){points.push([x,y]);},
+    stroke(){strokes.push({color:this.strokeStyle,points:[...points]});}},
+    {get:(obj,key)=>key in obj?obj[key]:()=>{}});
+  const nodes=[], doc={defaultView:{devicePixelRatio:1},addEventListener(){},removeEventListener(){}};
+  function element(tag){
+    const n={children:[],dataset:{},style:{},listeners:{},ownerDocument:doc,scrollTop:0,scrollLeft:0,
+      clientWidth:1000,clientHeight:180,offsetTop:0,classList:{add(){},remove(){},toggle(){}},
+      append(...c){this.children.push(...c);},prepend(...c){this.children.unshift(...c);},replaceChildren(){this.children=[];},
+      setAttribute(){},remove(){},addEventListener(k,f){this.listeners[k]=f;},removeEventListener(){},
+      getBoundingClientRect(){return{left:0,top:0,width:1000,height:180};},getContext(){return ctx;}};
+    nodes.push(n);return n;
+  }
+  doc.createElement=element;
+  const panel=element('section'),canvas=element('canvas');canvas.closest=()=>panel;canvas.parentElement=element('div');
+  let emitted=null;
+  const controller=createTimelineController({canvas,media:{duration:10,paused:true,currentTime:0,addEventListener(){},removeEventListener(){}},
+    onOperation:(name,intent)=>{emitted=intent;},getShowTranslations:()=>true});
+  controller.setView({token_views:[{token_id:'one',text:'hello',start:1,end:2},{token_id:'two',text:'world',start:2,end:3}],cue_views:[
+    {cue_id:'a',index:0,start:1,end:3,display_token_ids:['one','two'],target:{target_text:'你好世界'}},
+    {cue_id:'b',index:1,start:3,end:5,source_text:'next',target:{target_text:'下一条'}}]});
+  const flush=()=>{const list=frames.splice(0);list.forEach(f=>f());};flush();
+  const row=nodes.find(n=>n.className==='multiline-waveform-row');
+  const event=(x,y=100)=>({clientX:x,clientY:y,preventDefault(){}});
+  row.listeners.contextmenu(event(152));
+  assert.deepEqual(emitted,{type:'split_cue',cue_id:'a',after_token_id:'one'});
+  emitted=null;row.listeners.contextmenu(event(140));assert.equal(emitted,null);
+  row.listeners.contextmenu(event(300));
+  assert.deepEqual(emitted,{type:'merge_cues',left_cue_id:'a',right_cue_id:'b'});
+  row.listeners.pointermove(event(152));flush();
+  assert.match(row.title,/右键.*切分/);
+  assert.ok(strokes.some(s=>s.color==='#55d3e8'&&s.points[0]?.[0]===152.5 && s.points[1][1]-s.points[0][1]===18));
+  strokes.length=0;row.listeners.pointermove(event(140));flush();
+  assert.ok(!strokes.some(s=>s.color==='#55d3e8'));
+  strokes.length=0;row.listeners.pointermove(event(152,40));flush();
+  assert.ok(!strokes.some(s=>s.color==='#55d3e8'));
+  strokes.length=0;row.listeners.pointerleave();flush();
+  assert.ok(!strokes.some(s=>s.color==='#55d3e8'));
+  controller.destroy();
+});
+
+test("Chinese retains normal spacing without changing text",()=>{
+  const {spacedText,subtitleGapIntent}=require('../web/editor_multiline_timeline.js');
+  const drawn=[];const ctx={measureText:text=>({width:Array.from(text).length*10}),fillText:c=>drawn.push(c)};
+  assert.equal(spacedText(ctx,'中文',0,0,true),20);
+  assert.deepEqual(drawn,['中文']);
+  assert.equal(spacedText(ctx,'ab',0,0),20);
+  assert.equal(subtitleGapIntent([{left:10,right:15,top:20,bottom:30,intent:'split'}],12,40),null);
+});

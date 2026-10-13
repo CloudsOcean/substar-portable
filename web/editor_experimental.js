@@ -18,27 +18,31 @@
     const tools = workbench.querySelector("#editorTools");
     const wave = workbench.querySelector(".cue-timeline-panel");
     const cue = workbench.querySelector(".editor-document-pane");
-    const presets = [["standard", "对齐布局右", "字幕在右，左上视频与工具并排，左下波形"],
-      ["aligned-left", "对齐布局左", "字幕在左，右上工具与视频并排，右下波形"],
-      ["classic", "经典布局", "工具在左、字幕居中、预览在右，波形横贯底部"],
+    const presets = [["standard", "字幕布局", "字幕在右，左上视频与工具并排，左下波形"],
+      ["waveform", "波形布局", "左上预览、左下字幕，右侧多行波形"],
+      ["classic", "审阅布局", "工具在左、字幕居中、预览在右，波形横贯底部"],
       ["cinema", "大屏布局", "预览在左，工具与字幕在右，波形横贯底部"]];
     const key = "substar.editor.workspace-layouts-v3";
     const initialSizes = {
-      standard: {left:60, cue:710, tools:365, first:48.6, second:56},
-      "aligned-left": {left:60, cue:710, tools:365, first:48.6, second:56},
-      classic: {left:62, cue:830, tools:250, first:80, second:56},
-      cinema: {left:57.5, first:12, second:47}
+      standard: {left:60, cue:897.3228759765625, tools:365, first:48.6, second:56},
+      classic: {left:62, cue:843.8750305175781, tools:293.3854675292969, first:79.48717948717949, second:56},
+      waveform: {left:31.666850779855533, first:40, second:56},
+      cinema: {left:57.5, first:12, second:67.48717948717949}
     };
+    const initialSwaps = {standard:true, waveform:false, classic:false, cinema:false};
+    const initialModes = {standard:"multiline", waveform:"multiline", classic:"basic", cinema:"basic"};
     let saved = {}; try { saved = JSON.parse(localStorage.getItem(key) || "{}"); } catch {}
     let preset = presets.some(([id]) => id === saved.preset) ? saved.preset : "standard";
     let sizes = saved.sizes || {};
     const waveformModes = saved.waveformModes || {};
+    const swaps = saved.swaps || {};
     // Apply the requested defaults once; subsequent resizing remains personal.
-    const defaultsVersion = 6;
+    const defaultsVersion = 8;
     if (saved.defaultsVersion !== defaultsVersion) {
-      for (const id of ["standard", "aligned-left", "classic"]) {
+      for (const [id] of presets) {
         sizes[id] = {...initialSizes[id]};
-        waveformModes[id] = id === "classic" ? "basic" : "multiline";
+        waveformModes[id] = initialModes[id];
+        swaps[id] = initialSwaps[id];
       }
     }
     const menu = document.createElement("label"); menu.className = "workspace-layout-menu";
@@ -48,8 +52,12 @@
     presets.forEach(([id, name]) => layoutSelect.add(new Option(name, id)));
     layoutSelect.onchange = () => { preset = layoutSelect.value; apply(); persist(); };
     menu.append(caption, layoutSelect); document.querySelector("#taskInfoMenu").after(menu);
+    const reset = document.createElement("button"); reset.type="button"; reset.textContent="恢复布局";
+    reset.title="恢复当前布局的默认大小和位置";
+    reset.onclick=()=>{ sizes[preset]={...initialSizes[preset]}; waveformModes[preset]=initialModes[preset]; swaps[preset]=initialSwaps[preset]; apply(); persist(); };
+    menu.append(reset);
     document.querySelector("#revisionLabel").hidden = true;
-    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes, waveformModes, defaultsVersion})); } catch {} }
+    function persist() { try { localStorage.setItem(key, JSON.stringify({preset, sizes, waveformModes, swaps, defaultsVersion})); } catch {} }
     function config() { return sizes[preset] ||= {...initialSizes[preset]}; }
     wave.addEventListener("workspace-waveform-mode-change", event => {
       waveformModes[preset] = event.detail.mode;
@@ -58,7 +66,8 @@
     });
     function apply() {
       workbench.dataset.workspaceLayout = preset;
-      const waveformMode = waveformModes[preset] || (preset === "classic" || preset === "cinema" ? "basic" : "multiline");
+      workbench.dataset.workspaceSwapped = String(!!swaps[preset]);
+      const waveformMode = waveformModes[preset] || initialModes[preset];
       if (wave.dataset.workspaceWaveformMode !== waveformMode) {
         wave.dataset.workspaceWaveformMode = waveformMode;
         wave.dispatchEvent(new CustomEvent("workspace-waveform-mode", {detail:{mode:waveformMode}}));
@@ -69,7 +78,7 @@
       else size.first = Math.min(size.first, Math.max(preset === "classic" ? 50 : 30, maxUpper));
       const toolsWidth = Math.max(180, Math.min(size.tools || 250, Math.max(180, width-660)));
       const cueWidth = Math.max(320, Math.min(size.cue || 710, width-toolsWidth-300));
-      const left = preset === "cinema"
+      const left = preset === "waveform" ? Math.max(460, Math.min(width-400, width*size.left/100)) : preset === "cinema"
         ? Math.max(380, Math.min(width-540, width*size.left/100))
         : preset === "classic" ? toolsWidth+cueWidth : width-cueWidth;
       workbench.style.setProperty("--workspace-tools", `${toolsWidth}px`);
@@ -116,12 +125,13 @@
       const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
       if (kind === "tools") {
         const total = tools.getBoundingClientRect().width + cue.getBoundingClientRect().width;
-        size.tools = clamp((origin.tools || 250) + dx, 180, total-320);
+        size.tools = clamp((origin.tools || 250) + (swaps[preset] ? -dx : dx), 180, total-320);
         size.cue = total-size.tools;
       } else if (kind === "width") {
-        if (preset === "cinema") size.left = clamp(origin.left+dx/width*100, 380/width*100, (width-540)/width*100);
-        else size.cue = clamp(origin.cue+(preset === "standard" ? -dx : dx), 320, width-(size.tools || 250)-300);
-      } else if (preset === "standard" || preset === "aligned-left") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-240/height*100));
+        if (preset === "waveform") size.left = clamp(origin.left+dx/width*100, 460/width*100, (width-400)/width*100);
+        else if (preset === "cinema") size.left = clamp(origin.left+dx/width*100, 380/width*100, (width-540)/width*100);
+        else size.cue = clamp(origin.cue+(preset === "standard" || swaps[preset] ? -dx : dx), 320, width-(size.tools || 250)-300);
+      } else if (preset === "standard" || preset === "aligned-left" || preset === "waveform") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-240/height*100));
       else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-240/height*100));
       else {
         const delta = dy/height*100;
@@ -140,12 +150,15 @@
       if (preset === "standard") {
         place(handles[0], cueBox.left-8, box.top+8, 8, box.height-16);
         place(handles[1], box.left+8, waveBox.top-8, cueBox.left-box.left-16, 8);
+      } else if (preset === "waveform") {
+        place(handles[0], waveBox.left-8, box.top+8, 8, box.height-16);
+        place(handles[1], previewBox.left, cueBox.top-8, previewBox.width, 8);
       } else if (preset === "aligned-left") {
         place(handles[0], toolsBox.left-8, box.top+8, 8, box.height-16);
         place(handles[1], waveBox.left, waveBox.top-8, waveBox.width, 8);
       } else if (preset === "classic") {
-        place(handles[3], cueBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
-        place(handles[0], previewBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
+        place(handles[3], swaps[preset] ? toolsBox.left-8 : cueBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
+        place(handles[0], swaps[preset] ? cueBox.left-8 : previewBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
         place(handles[1], box.left+8, waveBox.top-8, box.width-16, 8);
       } else {
         place(handles[0], cueBox.left-8, box.top+8, 8, waveBox.top-box.top-16);
@@ -153,6 +166,42 @@
         place(handles[2], box.left+8, waveBox.top-8, box.width-16, 8);
       }
     }
+    let swapDrag=null;
+    function finishSwap(commit=false) {
+      if (!swapDrag) return;
+      const {source,target,ghost,pointerId}=swapDrag;
+      source.releasePointerCapture?.(pointerId); ghost?.remove(); target.classList.remove("workspace-drop-target");
+      document.body.classList.remove("workspace-swapping"); swapDrag=null;
+      if (commit) { swaps[preset]=!swaps[preset]; apply(); persist(); }
+    }
+    for (const source of [preview,tools]) {
+      source.addEventListener("pointerdown",event=>{
+        if (event.button!==0 || !["standard","classic"].includes(preset)) return;
+        if (event.target.closest("button, input, select, summary, a, label")) return;
+        const box=source.getBoundingClientRect();
+        if (event.clientY>box.top+60) return;
+        event.preventDefault();
+        swapDrag={source,target:source===preview?tools:preview,x:event.clientX,y:event.clientY,pointerId:event.pointerId};
+        source.setPointerCapture(event.pointerId);
+      });
+      source.addEventListener("pointermove",event=>{
+        if (!swapDrag || swapDrag.source!==source) return;
+        if (!swapDrag.ghost && Math.hypot(event.clientX-swapDrag.x,event.clientY-swapDrag.y)<6) return;
+        if (!swapDrag.ghost) {
+          const ghost=document.createElement("div"); ghost.className="workspace-drag-ghost";
+          ghost.textContent=source===preview?"预览":"工具箱"; document.body.append(ghost); swapDrag.ghost=ghost;
+          document.body.classList.add("workspace-swapping");
+        }
+        Object.assign(swapDrag.ghost.style,{left:`${event.clientX+14}px`,top:`${event.clientY+14}px`});
+        const box=swapDrag.target.getBoundingClientRect();
+        swapDrag.valid=event.clientX>=box.left && event.clientX<=box.right && event.clientY>=box.top && event.clientY<=box.bottom;
+        swapDrag.target.classList.toggle("workspace-drop-target",swapDrag.valid);
+      });
+      source.addEventListener("pointerup",()=>finishSwap(!!swapDrag?.ghost && swapDrag.valid));
+      source.addEventListener("pointercancel",()=>finishSwap());
+    }
+    document.addEventListener("keydown",event=>{ if(event.key==="Escape") finishSwap(); });
+    layoutSelect.addEventListener("change",()=>finishSwap());
     new ResizeObserver(apply).observe(workbench);
     apply();
     persist();
@@ -298,7 +347,7 @@
       toolsScroll.hidden = true;
       let activePanel = panels[0];
       const workbench = document.querySelector("#editorWorkbench");
-      const isCinema = () => workbench.dataset.workspaceLayout === "cinema";
+      const isCinema = () => ["cinema", "waveform"].includes(workbench.dataset.workspaceLayout);
       let scrollFrame = 0;
       const floatingHeading = document.createElement("div"); floatingHeading.className = "cinema-tool-heading";
       const floatingTitle = document.createElement("strong");

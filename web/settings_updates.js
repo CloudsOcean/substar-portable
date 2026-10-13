@@ -21,10 +21,13 @@
       panel.querySelector('[data-update-version]').textContent = '当前版本 ' + value.current_version;
       install.hidden = value.status !== 'ready';
       install.disabled = !value.supported;
-      download.disabled = value.status === 'downloading';
-      check.disabled = ['downloading','installing'].includes(value.status);
+      download.disabled = ['downloading','verifying','ready','installing'].includes(value.status);
+      check.disabled = ['downloading','verifying','installing'].includes(value.status);
       if (value.status === 'downloading') {
-        status.textContent = `正在下载：${(value.downloaded / 1048576).toFixed(1)} MB`;
+        status.textContent = `正在下载${value.mode === 'delta' ? '增量包' : '完整包'}：${(value.downloaded / 1048576).toFixed(1)} / ${(value.total / 1048576).toFixed(1)} MB`;
+        timer = setTimeout(refresh,1500);
+      } else if (value.status === 'verifying') {
+        status.textContent = '正在校验文件并准备更新，未修改当前安装。';
         timer = setTimeout(refresh,1500);
       } else if (value.status === 'ready') status.textContent = value.supported
         ? '更新包已校验。请保存其他窗口中的编辑，再重启更新。'
@@ -40,14 +43,16 @@
     try {
       const value = await api('check');
       notes.textContent = value.notes;
-      status.textContent = value.available ? `发现新版本 ${value.version}` : '当前已经是最新正式版';
+      status.textContent = value.available ? `发现新版本 ${value.version} · ${value.mode === 'delta' ? '增量更新' : '完整更新'} · 下载 ${(value.download_size / 1048576).toFixed(2)} MB。${value.reason}` : '当前已经是最新正式版';
+      download.dataset.mode = value.mode;
+      download.textContent = value.mode === 'delta' ? '下载增量更新' : '下载完整更新';
       download.hidden = !value.available;
     } catch(error) { status.textContent = error.message; }
     finally { check.disabled = false; }
   };
   download.onclick = async () => {
     download.disabled = true;
-    try { await api('download',true); await refresh(); }
+    try { await api('download?mode=' + encodeURIComponent(download.dataset.mode || 'full'),true); await refresh(); }
     catch(error) { status.textContent = error.message; download.disabled = false; }
   };
   install.onclick = async () => {

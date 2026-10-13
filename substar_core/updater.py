@@ -24,6 +24,7 @@ ROOTS = frozenset({"app.py","launcher.py","substar_core","web","prompts","schema
     "启动_Substar.cmd","停止_Substar.cmd","只检测环境.cmd","便携版说明.txt","README.md","CHANGELOG.md",
     "SECURITY.md","PRIVACY.md","THIRD_PARTY_NOTICES.md","LICENSE"})
 UPDATE_ROOT = APP_DATA_DIR / "updates"
+KEYS_PATH = Path(__file__).with_name("update_keys.json")
 _lock = threading.RLock()
 _state = {"status":"idle"}
 
@@ -61,7 +62,51 @@ def check_update():
     name = f"Substar-Windows-x64-{version}.zip"
     asset = next((a for a in release.get("assets",[]) if a.get("name") == name),None)
     if available and asset is None: raise ValueError("新版本尚未上传完整 Windows 更新包")
-    return {"version":version,"available":available,"notes":str(release.get("body") or ""),"asset":asset}
+    result = {"version":version,"available":available,"notes":str(release.get("body") or ""),"asset":asset,
+              "mode":"full", "download_size":(asset or {}).get("size",0),
+              "reason":"此版本未提供适用的增量包，将下载完整包"}
+    if not available: return result
+    manifest_asset = next((a for a in release.get("assets",[]) if a.get("name") == f"Substar-update-{version}.json"),None)
+    if manifest_asset:
+        from substar_core.update_delta import verify_manifest, baseline_matches
+        data = bytearray()
+        stream_asset(manifest_asset, data.extend, limit=32 * 1024**2)
+        payload = verify_manifest(json.loads(data), json.loads(KEYS_PATH.read_text(encoding="utf-8")), version, REPOSITORY, ROOTS)
+        patch = next((p for p in payload["patches"] if p["from_version"] == "v" + current_version().removeprefix("v")),None)
+        if patch:
+            patch_asset = next((a for a in release.get("assets",[]) if a.get("name") == patch["asset"]),None)
+            if not patch_asset or patch_asset.get("size") != patch["size"] or patch_asset.get("digest") != "sha256:" + patch["sha256"]:
+                raise ValueError("增量附件与签名清单不符")
+            if patch["size"] >= asset.get("size",0):
+                result["reason"] = "完整包更小，将下载完整包"
+            elif baseline_matches(INSTALL_ROOT, payload, patch, ROOTS):
+                result.update(mode="delta", asset=patch_asset, download_size=patch["size"], reason="只下载新增或修改的文件",
+                              full_size=asset["size"], _delta={"payload":payload,"patch":patch})
+            else:
+                result["reason"] = "本地程序文件与增量基线不一致，需要下载完整包"
+    return result
+
+
+def stream_asset(asset, write, *, limit=4 * 1024**3, progress=None):
+    digest = str(asset.get("digest") or "")
+    if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}",digest):
+        raise ValueError("发布包缺少 GitHub SHA-256 校验信息，不能自动安装")
+    url = asset.get("browser_download_url","")
+    if not url.startswith(f"https://github.com/{REPOSITORY}/releases/download/"):
+        raise ValueError("更新包来源无效")
+    size_limit = asset.get("size")
+    if type(size_limit) is not int or not 0 < size_limit <= limit:
+        raise ValueError("更新包大小超过限制")
+    checksum, size = hashlib.sha256(), 0
+    with requests.get(url,stream=True,timeout=(20,60)) as response:
+        response.raise_for_status()
+        for chunk in response.iter_content(1024*1024):
+            size += len(chunk)
+            if size > size_limit: raise ValueError("更新包大小超过限制")
+            checksum.update(chunk); write(chunk)
+            if progress: progress(size, size_limit)
+    if checksum.hexdigest().lower() != digest[7:].lower() or size != size_limit:
+        raise ValueError("下载校验失败，请重试")
 
 
 def validate_archive(archive: Path, destination: Path, expected_version: str):
@@ -95,36 +140,33 @@ def validate_archive(archive: Path, destination: Path, expected_version: str):
     return root
 
 
-def download_update():
+def download_update(expected_mode=None):
     with _lock:
-        if _state["status"] in {"downloading","ready","installing"}: return update_status()
+        if _state["status"] in {"downloading","verifying","ready","installing"}: return update_status()
         _state.clear(); _state.update(status="downloading", downloaded=0)
     def work():
         try:
             release = check_update()
             if not release["available"]: raise ValueError("当前已经是最新正式版")
+            mode = release.get("mode", "full")
+            if expected_mode and expected_mode != mode:
+                raise ValueError("更新方式已变化，请重新检查更新并确认下载大小")
             asset = release["asset"]
-            digest = str(asset.get("digest") or "")
-            if not re.fullmatch(r"sha256:[0-9a-fA-F]{64}",digest):
-                raise ValueError("发布包缺少 GitHub SHA-256 校验信息，不能自动安装")
-            url = asset.get("browser_download_url","")
-            if not url.startswith(f"https://github.com/{REPOSITORY}/releases/download/"):
-                raise ValueError("更新包来源无效")
             directory = UPDATE_ROOT / uuid.uuid4().hex
             directory.mkdir(parents=True)
             archive = directory / "package.zip"
-            checksum, size = hashlib.sha256(), 0
-            with requests.get(url,stream=True,timeout=(20,60)) as response:
-                response.raise_for_status()
-                with archive.open("wb") as output:
-                    for chunk in response.iter_content(1024*1024):
-                        size += len(chunk)
-                        if size > 4 * 1024**3: raise ValueError("更新包大小超过限制")
-                        checksum.update(chunk); output.write(chunk)
-                        with _lock: _state.update(downloaded=size,total=asset.get("size",0))
-            if checksum.hexdigest().lower() != digest[7:].lower() or size != asset.get("size"):
-                raise ValueError("下载校验失败，请重试")
-            staged = validate_archive(archive,directory / "unpacked",release["version"])
+            with _lock: _state.update(mode=mode,total=asset["size"])
+            def progress(size, total):
+                with _lock: _state.update(downloaded=size,total=total)
+            with archive.open("wb") as output:
+                stream_asset(asset, output.write, progress=progress)
+            with _lock: _state.update(status="verifying")
+            if mode == "delta":
+                from substar_core.update_delta import stage_delta
+                delta = release["_delta"]
+                staged = stage_delta(archive, INSTALL_ROOT, directory / "unpacked/Substar", delta["payload"],delta["patch"],ROOTS)
+            else:
+                staged = validate_archive(archive,directory / "unpacked",release["version"])
             with _lock: _state.update(status="ready",version=release["version"],staged=str(staged))
         except Exception as exc:
             with _lock: _state.update(status="failed",error=str(exc))

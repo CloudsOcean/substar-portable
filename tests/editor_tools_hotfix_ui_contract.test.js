@@ -21,8 +21,8 @@ test("release keeps the non-dubbing editor tool contract", () => {
 
 test("hotfix fingerprints every changed editor asset", () => {
   const fingerprints = {
-    "editor.css":"20261008-glossary-3",
-    "editor.js":"20261009-workspace-sizing-5",
+    "editor.css":"20261012-media-selection-1",
+    "editor.js":"20261012-media-selection-1",
     "editor_document.js":"20261009-merge-tools-2",
     "editor_timeline.js":"20261009-row-snap-1",
     "editor_tutorial.js":"20260831-v2-contract-1",

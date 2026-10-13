@@ -24,9 +24,10 @@
       let row = entries.get(key);
       try {
         if (!row) {
-          status.textContent = "正在上传媒体并准备初次听写…";
+          status.textContent = file.token ? "正在读取本地媒体并准备初次听写…" : "正在上传媒体并准备初次听写…";
           const body = new FormData();
-          body.append("media", file, file.name);
+          if (file.token) body.append("media_reference_token", file.token);
+          else body.append("media", file, file.name);
           body.append("asr_glossary_ids", JSON.stringify(getGlossaryIds()));
           body.append("source_language", $("#languageInput").value);
           body.append("profile_id", $("#recognitionProfileInput").value || "qwen_cloud");

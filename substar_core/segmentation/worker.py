@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -548,11 +549,9 @@ def _reference_script_candidate(
     return candidate, document, validation
 
 
-def _recover_accepted_result(
-    source_directory: Path,
-    artifact_directory: Path,
-    request: Mapping[str, Any],
-) -> dict[str, Any]:
+def validate_recovery_artifacts(
+    source_directory: Path, request: Mapping[str, Any],
+) -> tuple[EditorDocument, dict[str, Any]]:
     source_directory = source_directory.resolve()
     if not source_directory.is_dir():
         raise ValueError("segmentation recovery artifacts are unavailable")
@@ -593,6 +592,17 @@ def _recover_accepted_result(
         source = (source_directory / name).resolve()
         if source_directory not in source.parents or not source.is_file():
             raise ValueError(f"segmentation recovery artifact is missing: {name}")
+    return document, validation
+
+
+def _recover_accepted_result(
+    source_directory: Path, artifact_directory: Path, request: Mapping[str, Any],
+) -> dict[str, Any]:
+    source_directory = source_directory.resolve()
+    document, validation = validate_recovery_artifacts(source_directory, request)
+    digest = document.content_hash()
+    for name in _ARTIFACT_CONTRACTS:
+        source = source_directory / name
         temporary = artifact_directory / f".{name}.recovering"
         shutil.copyfile(source, temporary)
         os.replace(temporary, artifact_directory / name)
@@ -620,6 +630,29 @@ def _recover_accepted_result(
             "document_sha256": digest,
         },
     }
+
+
+def collect_resume_responses(work_directory: Path, attempt: int, request: dict, material: dict) -> Path | None:
+    """Import compatible legacy logs in numeric attempt order, without editing them."""
+    logs = []
+    attempts = sorted(work_directory.parent.parent.iterdir(),
+                      key=lambda path: int(path.name) if path.name.isdigit() else -1)
+    for old in attempts:
+        if not old.name.isdigit() or int(old.name) >= attempt:
+            continue
+        try:
+            old_request = json.loads((old / "artifacts" / "segmentation_request.json").read_text(encoding="utf-8"))
+            old_material = json.loads((old / "work" / "segmentation_material.json").read_text(encoding="utf-8"))
+            if old_request != request or old_material != material:
+                continue
+            logs.append((old / "work" / "algorithm.stdout.log").read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError, TypeError):
+            continue
+    if not logs:
+        return None
+    result = work_directory / "resume_responses.log"
+    result.write_text("\n".join(logs), encoding="utf-8")
+    return result
 
 
 def run(command: WorkerCommand) -> int:
@@ -808,6 +841,14 @@ def run(command: WorkerCommand) -> int:
             )
             stdout_path = work_directory / "algorithm.stdout.log"
             stderr_path = work_directory / "algorithm.stderr.log"
+            content_request = {k: v for k, v in request.items() if k not in {"provider", "input_fingerprint"}}
+            scope = hashlib.sha256(json.dumps({"request": content_request, "material": material},
+                sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            argv.extend(["--checkpoint-dir", str(Path(command.paths.project_root) / "segmentation_checkpoints"),
+                         "--checkpoint-scope", scope, "--checkpoint-attempt", str(command.attempt)])
+            resume_log = collect_resume_responses(work_directory, command.attempt, request, material)
+            if resume_log is not None:
+                argv.extend(["--resume-response-log", str(resume_log)])
             # The canonical supervisor already owns this worker process and
             # its timeout/cancellation boundary. Starting another Python
             # interpreter here created an unnecessary nested-process startup
