@@ -55,3 +55,15 @@ test("virtual boundaries are continuous for CJK and spaced for word languages", 
   assert.equal(languageLayout.virtualBoundaryKind("秦", "23", "zh"), "character");
   assert.equal(languageLayout.virtualBoundaryKind("Say", "Goodbye", "zh"), "word");
 });
+
+
+test("per-cue row placement keeps mixed originals upper regardless of assigned languages", () => {
+  const presentation = {translation_layout:{enabled:true,lower_languages:["zh-CN"]}};
+  assert.equal(languageLayout.routedSourceUpper("今天很好", presentation), false);
+  assert.equal(languageLayout.routedSourceUpper("Good morning", presentation), true);
+  assert.equal(languageLayout.routedSourceUpper("おはよう", presentation), true);
+  assert.equal(languageLayout.routedSourceUpper("今天 meeting 取消", presentation), true);
+  presentation.translation_layout.lower_languages = ["en", "ja"];
+  assert.equal(languageLayout.routedSourceUpper("Good morning", presentation), false);
+  assert.equal(languageLayout.routedSourceUpper("今日は meeting", presentation), true);
+});

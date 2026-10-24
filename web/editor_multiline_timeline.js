@@ -360,6 +360,7 @@
         const count=overlay?1:mainLanes;
         row.lanes.set(cue.cue_id,{top:top+firstLane*(laneHeight+3),bottom:top+(firstLane+count)*(laneHeight+3)});
         for (let lane = 0; lane < count; lane++) {
+          const targetLane = count === 2 && cue.source_upper === false ? lane === 0 : lane === 1;
           const y = top + (firstLane+lane) * (laneHeight + 3);
           ctx.fillStyle = overlay ? "rgba(74,67,94,.94)" : "rgba(66,78,89,.86)";
           ctx.beginPath(); ctx.roundRect(left + .5, y, Math.max(1, right - left - 1), laneHeight, 4); ctx.fill();
@@ -372,7 +373,7 @@
           const available = Math.max(0,right-(handles.end?cap:0)-textLeft-5);
           ctx.save(); ctx.beginPath(); ctx.rect(textLeft, y, available, laneHeight); ctx.clip();
           ctx.font = "14px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.fillStyle = "#edf1f4"; ctx.textBaseline = "middle";
-          const tokens = !lane ? cue.timed_tokens || [] : [];
+          const tokens = !targetLane ? cue.timed_tokens || [] : [];
           if (tokens.length) {
             let x = textLeft;
             const visibleTokens = mode === "multiline" ? tokens.filter(t => t.end > row.start && t.start < row.end) : tokens;
@@ -390,7 +391,7 @@
               if (x>textLeft+available) break;
             }
           } else {
-            const text=mode === "multiline" ? rowCueText(cue,row,!!lane) : (lane?cue.target_text:cue.text);
+            const text=mode === "multiline" ? rowCueText(cue,row,targetLane) : (targetLane?cue.target_text:cue.text);
             spacedText(ctx,text,textLeft,y+laneHeight/2,true);
           }
           ctx.restore();

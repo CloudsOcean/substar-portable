@@ -157,6 +157,7 @@ DEFAULTS: dict[str, Any] = {
     "translation_reasoning_effort": "low",
     "translation_style": "corporate_broadcast",
     "target_language_mode": "auto_opposite",
+    "translation_layout": {},
     "display_order": "source_target",
     "top_raised_punctuation": "preserve",
     "top_baseline_punctuation": "preserve",
@@ -576,13 +577,9 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         get_recognition_profile(str(merged.get("recognition_profile_id", "")))
     except ValueError:
         merged["recognition_profile_id"] = DEFAULT_RECOGNITION_PROFILE
-    if merged["target_language_mode"] not in {
-        "auto_opposite",
-        "zh-CN",
-        "en",
-        "ja",
-        "ko",
-    }:
+    from substar_core.translation_layout import normalize_layout, LANGUAGES
+    merged["translation_layout"] = normalize_layout(merged.get("translation_layout"))
+    if merged["target_language_mode"] not in LANGUAGES | {"auto_opposite"}:
         merged["target_language_mode"] = DEFAULTS["target_language_mode"]
     if merged.get("display_order") not in {"en_zh", "zh_en", "source_target", "target_source"}:
         merged["display_order"] = DEFAULTS["display_order"]

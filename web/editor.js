@@ -135,6 +135,7 @@
   }
 
   function applyEditorSettings(settings = {}) {
+    window.SubstarTranslationLayout.configureModel(settings.qwen_cloud_model);
     state.shortcuts = {
       undo:String(settings.shortcut_undo || "Ctrl+Z"),
       redo:String(settings.shortcut_redo || "Ctrl+Y"),
@@ -592,13 +593,15 @@
     const latestCalibration = [...(state.view.changes || [])].reverse().find(
       change => change?.operation === "ai_calibration_apply"
     );
+    const translationNotRequired = new Set((state.revision?.document?.cues || [])
+      .filter(cue => cue.mapping?.translation_not_required).map(cue => cue.cue_id));
     const problemCueIds = new Set(state.view.cue_views.filter(cue => {
       const lines = projectedCueLines(cue);
-      const sourceMetric = subtitleLengthMetric(lines.source, state.trackLanguages.source, "source");
-      const targetMetric = subtitleLengthMetric(lines.target, state.trackLanguages.target, "target");
+      const sourceMetric = subtitleLengthMetric(lines.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
+      const targetMetric = subtitleLengthMetric(lines.target, cue.target?.language || state.trackLanguages.target, "target");
       return sourceMetric.count > sourceMetric.limit
         || (String(lines.target || "").trim() && targetMetric.count > targetMetric.limit)
-        || (latestTranslation && !String(lines.target || "").trim());
+        || (latestTranslation && !translationNotRequired.has(cue.cue_id) && !String(lines.target || "").trim());
     }).map(cue => cue.cue_id));
     (state.view.changes || []).forEach(change => {
       if (!["build_from_segmentation", "build_from_split_stages"].includes(change?.operation)) return;
@@ -673,23 +676,23 @@
 
   function projectedCueLines(cue) {
     const presentation = state.view?.presentation || {};
-    const sourceUpper = presentation.display_order !== "target_above_source";
+    const sourceUpper = languageLayout.routedSourceUpper(cueSourceText(cue), presentation);
     const source = projectPunctuation(
       cueSourceText(cue),
       sourceUpper ? presentation.upper_remove : presentation.lower_remove,
       sourceUpper ? presentation.upper_space : presentation.lower_space
     );
     const target = projectPunctuation(
-      languageLayout.formatText(cue.target?.target_text || "", state.trackLanguages?.target),
+      languageLayout.formatText(cue.target?.target_text || "", cue.target?.language || state.trackLanguages?.target),
       sourceUpper ? presentation.lower_remove : presentation.upper_remove,
       sourceUpper ? presentation.lower_space : presentation.upper_space
     );
     return {source, target, sourceUpper};
   }
 
-  function projectedSourceTokenText(text) {
+  function projectedSourceTokenText(text, cue = null) {
     const presentation = state.view?.presentation || {};
-    const sourceUpper = presentation.display_order !== "target_above_source";
+    const sourceUpper = languageLayout.routedSourceUpper(cue ? cueSourceText(cue) : text, presentation);
     return projectPunctuation(
       text,
       sourceUpper ? presentation.upper_remove : presentation.lower_remove,
@@ -1241,6 +1244,7 @@
     $("#taskMediaStatus").textContent = info.media_missing ? "文件不存在，请重新链接" : "";
     $("#taskInfoSourceLanguage").value = info.language === "zh-CN" ? "zh" : info.language;
     $("#taskInfoTargetLanguage").value = info.target_language_mode;
+    window.SubstarTranslationLayout.write("taskInfoLanguageLayout", info.translation_layout || {});
     $("#taskInfoSourceLimit").value = String(info.source_hard_limit);
     $("#taskInfoTargetLimit").value = String(info.target_hard_limit);
     $("#taskInfoAutosaveDelay").value = String(info.autosave_delay_seconds ?? 1);
@@ -1276,6 +1280,7 @@
           media_selection_token:$("#taskInfoMediaPath").dataset.selection || "",
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
+          translation_layout:window.SubstarTranslationLayout.read("taskInfoLanguageLayout"),
           glossary_id:String(state.taskInfo?.glossary_id || ""),
           llm_provider_id:$("#taskInfoLlmProvider").value || "inherit",
           source_hard_limit:sourceLimit,
@@ -1606,6 +1611,7 @@
     sourceLanguageSelect.disabled = running;
     languageSelect.disabled = running;
     mappingModeSelect.disabled = running;
+    $("#translationLanguageLayout").disabled = running;
     if (running && task?.source_language_selection) {
       sourceLanguageSelect.value = task.source_language_selection;
     }
@@ -1882,6 +1888,7 @@
           expected_revision_id:state.revision.revision_id,
           source_language:sourceLanguage,
           target_language:targetLanguage,
+          translation_layout:window.SubstarTranslationLayout.read("translationLanguageLayout"),
           mapping_mode:mappingMode,
           glossary_ids:glossaryIds
         })
@@ -1921,7 +1928,8 @@
     button.classList.toggle("review-annotated", annotated);
     if (interactive) button.dataset.tokenId = token.token_id;
     const label = document.createElement("b");
-    const projectedText = projectedSourceTokenText(token.text);
+    const tokenCueId = state.indexes?.tokenToCueId?.get(token.token_id);
+    const projectedText = projectedSourceTokenText(token.text, state.indexes?.cueById?.get(tokenCueId));
     label.textContent = projectedText;
     button.classList.toggle("punctuation-elided", !projectedText);
     const source = sourceTextForToken(token);
@@ -1979,7 +1987,8 @@
 
   function subtitleLengthMetric(text, language = null, track = null) {
     const value = String(text || "").trim();
-    const resolvedLanguage = language || detectSubtitleLanguage(value);
+    const routed = Boolean(state.view?.presentation?.translation_layout?.enabled);
+    const resolvedLanguage = routed ? languageLayout.normalizeLanguage(language || detectSubtitleLanguage(value)) : language || detectSubtitleLanguage(value);
     const limits = {
       zh:state.subtitlePolicy.chineseHardLimit,
       mixed:state.subtitlePolicy.mixedHardLimit,
@@ -1990,7 +1999,7 @@
     const override = track === "source"
       ? state.subtitlePolicy.sourceHardLimit
       : track === "target" ? state.subtitlePolicy.targetHardLimit : null;
-    const limit = override || limits[resolvedLanguage] || limits.en;
+    const limit = (!routed && override) || limits[resolvedLanguage] || limits.en;
     const count = languageLayout.characterCount(value, resolvedLanguage, {
       countSpaces: state.subtitlePolicy.countSpaces,
       countPunctuation: state.subtitlePolicy.countPunctuation
@@ -2029,8 +2038,8 @@
     const bilingualProject = state.view?.cue_views.some(item => item.subtitle_track !== "overlay" && item.target);
     const hasTarget = (Boolean(cue.target) || (bilingualProject && cue.subtitle_track !== "overlay"))
       && $("#showTranslations").checked;
-    const sourceMetric = subtitleLengthMetric(projected.source, state.trackLanguages.source, "source");
-    const targetMetric = subtitleLengthMetric(projected.target, state.trackLanguages.target, "target");
+    const sourceMetric = subtitleLengthMetric(projected.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
+    const targetMetric = subtitleLengthMetric(projected.target, cue.target?.language || state.trackLanguages.target, "target");
     const overLimit = sourceMetric.count > sourceMetric.limit
       || (Boolean(cue.target) && targetMetric.count > targetMetric.limit);
     row.className = `cue-row${hasTarget ? " has-target" : " source-only"}${cue.cue_id === state.activeCueId ? " current" : ""}${cue.state === "deleted" ? " deleted" : ""}${overLimit ? " over-limit" : ""}`;
@@ -2150,7 +2159,8 @@
       target.disabled = cue.state === "deleted" || editorAiTaskLocksEditor();
       target.value = projected.target;
       if (!cue.target) target.placeholder = "\u8bd1\u6587";
-      content.append(target);
+      if (projected.sourceUpper) content.append(target);
+      else content.prepend(target);
     }
     const actions = document.createElement("div");
     actions.className = "cue-actions";
@@ -2381,11 +2391,8 @@
       const time = activeMedia()?.currentTime || 0;
       const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time && (!overlayPreview || item.subtitle_track !== "overlay"));
       const lines = visible.map(projectedCueLines);
-      const source = lines.map(line => line.source).filter(Boolean).join("\n");
-      const target = lines.map(line => line.target).filter(Boolean).join("\n");
-      const upper = lines[0]?.sourceUpper ?? true;
-      $("#previewSource").textContent = upper ? source : target;
-      $("#previewTarget").textContent = upper ? target : source;
+      $("#previewSource").textContent = lines.map(line => line.sourceUpper ? line.source : line.target).filter(Boolean).join("\n");
+      $("#previewTarget").textContent = lines.map(line => line.sourceUpper ? line.target : line.source).filter(Boolean).join("\n");
       return;
     }
     if (!cue) {
@@ -3230,11 +3237,12 @@
     };
     const configuredSource = String(projectSettings.language || "Auto");
     $("#translationSourceLanguage").value =
-      sourceAliases[configuredSource.toLowerCase()] || "Auto";
+      sourceAliases[configuredSource.toLowerCase()] || (window.SubstarTranslationLayout.languages.some(([code]) => code === configuredSource) ? configuredSource : "Auto");
     const configuredTarget = String(projectSettings.target_language_mode || "zh-CN");
     $("#translationTargetLanguage").value =
-      ["zh-CN", "en", "ja", "ko"].includes(configuredTarget)
+      window.SubstarTranslationLayout.languages.some(([code]) => code === configuredTarget)
         ? configuredTarget : "zh-CN";
+    window.SubstarTranslationLayout.write("translationLanguageLayout", projectSettings.translation_layout || {});
   }
 
   function openAiReview() {

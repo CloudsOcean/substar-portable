@@ -9,7 +9,7 @@
 
   if (!ordering?.canonicalCueOrder) throw new Error("Cue ordering contract is required");
   const languageLayout = (typeof globalThis === "object" && globalThis.SubstarLanguageLayout)
-    || {layoutTokens:values => (values || []).join(" ")};
+    || (typeof module === "object" && module.exports ? require("./editor_language.js") : {layoutTokens:values => (values || []).join(" ")});
 
   const MIN_CUE_SECONDS = 0.04;
   const DEFAULT_MANUAL_SECONDS = 1.5;
@@ -45,7 +45,8 @@
         display_token_ids:[...(cue.display_token_ids || [])],
         text:cue.source_text ?? languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
           .map(id => tokens.get(String(id))?.text || "").filter(Boolean))
-      }));
+      })).map(cue => ({...cue, source_upper: !view?.presentation?.translation_layout?.enabled
+        || languageLayout.routedSourceUpper(cue.text, view.presentation)}));
   }
 
   function timelineDuration(view, mediaDuration = 0) {

@@ -391,6 +391,8 @@ def render_translation_request(
         simple.append(f"TARGET_LIMIT {limit}; COUNT_RULE {count_rule}")
     for alias, cue in by_alias.items():
         prefix = "" if alias in editable else "CONTEXT "
+        if cue.get("target_language"):
+            simple.append(f"TARGET_LANGUAGE {wire_alias(alias)} {cue['target_language']}; TARGET_LIMIT {cue.get('hard_limit', 0)}")
         source = str(cue.get("source_text", "")).replace("\t", " ").replace("\n", " ")
         simple.append(f"{prefix}{wire_alias(alias)}|{source}")
     if repair_issues:

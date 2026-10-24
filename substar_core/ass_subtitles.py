@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 from substar_core.domain import EntityState
+from substar_core.translation_layout import source_is_upper
 
 
 class AssStyle(BaseModel):
@@ -160,17 +161,25 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         tokens = [display[t] for t in cue.display_token_ids if display[t].state is EntityState.ACTIVE]
         source = cue.source_text if cue.source_text is not None else layout_tokens(t.text for t in tokens)
         target = cue.target.target_text if cue.target else ""
+        source_upper = source_is_upper(document, source)
+        routed = bool(document.presentation.translation_layout)
+        cue_mode = options.mode
+        if routed and not source_upper and cue_mode in {"source", "target"}:
+            cue_mode = "target" if cue_mode == "source" else "source"
+        swap_style = routed and options.mode == "ab-double" and source_upper != (document.presentation.display_order.value == "source_above_target")
+        source_style_name = "Target" if swap_style else "Source"
+        target_style_name = "Source" if swap_style else "Target"
         source, target = project_cue_lines(document, source=source, target=target)
         if document.properties.script_projection != "original":
             source = convert_chinese_script(source, document.properties.script_projection)
             target = convert_chinese_script(target, document.properties.script_projection)
-        if options.mode in {"source", "ab-double"} and source:
+        if cue_mode in {"source", "ab-double"} and source:
             # Highlight only the currently spoken token, retaining full line context.
             raw_source = layout_tokens(t.text for t in tokens)
             if options.word_highlight and tokens and cue.source_text is None:
                 spans, cursor = [], 0
                 for token in tokens:
-                    shown, _ = project_cue_lines(document, source=token.text, target="")
+                    shown, _ = project_cue_lines(document, source=token.text, target="", source_upper=source_upper)
                     if document.properties.script_projection != "original":
                         shown = convert_chinese_script(shown, document.properties.script_projection)
                     shown = shown.strip()
@@ -192,14 +201,15 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
                     text = escape_text(source)
                     if active:
                         left,right = active[2:]
-                        text = escape_text(source[:left])+f"{{\\c{ass_color(style.highlight)}&}}"+escape_text(source[left:right])+f"{{\\c{ass_color(style.color)}&}}"+escape_text(source[right:])
-                    event(a,b,"Source",text,True)
+                        active_style = target_style if swap_style else style
+                        text = escape_text(source[:left])+f"{{\\c{ass_color(active_style.highlight)}&}}"+escape_text(source[left:right])+f"{{\\c{ass_color(active_style.color)}&}}"+escape_text(source[right:])
+                    event(a,b,source_style_name,text,True)
             elif options.word_highlight and cue.mapping.get("subtitle_track") != "overlay":
                 raise ValueError("逐词高亮需要可映射的词级时间和显示文字")
             else:
-                event(cue.start,cue.end,"Source",source,overlay=cue.mapping.get("subtitle_track") == "overlay")
-        if options.mode in {"target", "ab-double"}:
-            event(cue.start,cue.end,"Target",target)
+                event(cue.start,cue.end,source_style_name,source,overlay=cue.mapping.get("subtitle_track") == "overlay")
+        if cue_mode in {"target", "ab-double"}:
+            event(cue.start,cue.end,target_style_name,target)
     return "\n".join(output)+"\n"
 
 

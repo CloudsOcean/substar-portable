@@ -56,6 +56,8 @@ TRANSCRIPTION_OPTION_KEYS = frozenset(
         "qwen_asr_model",
         "qwen_cloud_base_url",
         "qwen_cloud_model",
+        "qwen_language_hints",
+        "qwen_keep_dialect",
         "qwen_cloud_poll_interval_seconds",
         "qwen_cloud_region",
         "qwen_cloud_request_timeout_seconds",
@@ -241,6 +243,12 @@ def build_transcription_request(
         for key in sorted(TRANSCRIPTION_OPTION_KEYS)
         if key in settings and settings[key] is not None
     }
+    layout = settings.get("translation_layout") or {}
+    if layout.get("enabled") and "source_languages" in layout:
+        from substar_core.translation_layout import normalize_layout
+        layout = normalize_layout(layout)
+        options["qwen_keep_dialect"] = bool(layout.get("keep_dialect", False))
+        options["qwen_language_hints"] = "" if layout.get("auto_detect") else ",".join(layout["source_languages"])
     body: dict[str, Any] = {
         "schema_version": TRANSCRIPTION_INPUT_SCHEMA,
         "media": {

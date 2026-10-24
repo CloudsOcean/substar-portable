@@ -1831,9 +1831,13 @@ def external_translation_text(revision, *, source_language, target_language,
     from substar_core.glossary import glossary_prompt
     if mapping_mode not in {"many_to_many", "one_to_one"}:
         raise ProjectExchangeError("不支持的翻译模式")
-    source, target, variant = _external_language_route(revision.document, source_language, target_language)
+    layout = revision.document.presentation.translation_layout
+    if layout:
+        source, target, variant = "mixed", layout["lower_target"], "generic"
+    else:
+        source, target, variant = _external_language_route(revision.document, source_language, target_language)
     prompt = render_prompt("contextual_translation", variant=variant, mode=mapping_mode).text
-    material = render_document_srt(revision.document, "source")
+    material = render_document_srt(revision.document, "source", language_rows=False)
     if not material.strip():
         raise ProjectExchangeError("当前项目没有可导出的上行字幕")
     count_rule = "包括空格" if normalize_language(target) in {"en", "mixed"} else "不计空格"
@@ -1842,6 +1846,12 @@ def external_translation_text(revision, *, source_language, target_language,
         prompt,
         f"# TASK CONFIGURATION\n源语言：{source}\n目标语言：{target}\n翻译模式：{mapping_mode}\nTARGET_LIMIT：{int(target_hard_limit)}\nCOUNT_RULE：{count_rule}，标点计数。",
     ]
+    if layout:
+        from substar_core.translation_layout import route_text, routing_prompt
+        from substar_core.editor.application.srt_import import parse_srt
+        sections.append(routing_prompt(layout) + "\n" + "\n".join(
+            f"TARGET_LANGUAGE {row['number']} {route_text(row['text'], layout)['target_language']}"
+            for row in parse_srt(material)))
     if glossary:
         sections.append(glossary_prompt(list(glossary)))
     sections.extend([

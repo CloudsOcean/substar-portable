@@ -77,7 +77,7 @@ def preview_srt(document, text, mode='auto'):
     rows = parse_srt(text)
     cues = sorted((c for c in document.cues if c.state is EntityState.ACTIVE), key=lambda c: c.start)
     # Use the export projection, including punctuation and Chinese-script preferences.
-    source_rows = parse_srt(render_document_srt(document, 'source'))
+    source_rows = parse_srt(render_document_srt(document, 'source', language_rows=False))
     if mode in {'auto', 'ab-single'} and len(rows) > len(source_rows) and all(
         (row['start'], row['end'], norm(row['text'])) == (source['start'], source['end'], norm(source['text']))
         for row, source in zip(rows, source_rows)
@@ -118,7 +118,7 @@ def preview_srt(document, text, mode='auto'):
                  for row, cue, source in matches]
     # Track-wide decision only: never strip individual same-language sentences.
     target_language = primary_language('\n'.join(t for t in extracted if t))
-    same_language = target_language == source_language
+    same_language = target_language == source_language and not document.presentation.translation_layout
     preview = []
     for (row, cue, source), target in zip(matches, extracted):
         reason = ''
@@ -128,7 +128,9 @@ def preview_srt(document, text, mode='auto'):
         elif not target: reason = '无法按当前原文分离双语轨道'
         elif same_language: reason = '轨道主要语言与节目原文相同，不导入'
         elif target_language == 'unknown': reason = '无法判断轨道语言'
-        preview.append({**row, 'cue_id': cue.cue_id if cue else None, 'source': source,
+        from substar_core.translation_layout import route_text
+        row_language = route_text(source, document.presentation.translation_layout)['target_language'] if document.presentation.translation_layout else target_language
+        preview.append({**row, 'cue_id': cue.cue_id if cue else None, 'source': source, 'target_language': row_language,
                         'target': target or '', 'reason': reason, 'importable': not reason,
                         'overwrite': bool(not reason and cue.target and cue.target.target_text)})
     return {'format': mode, 'source_language': source_language, 'target_language': target_language,
@@ -148,12 +150,13 @@ def import_srt(store, *, text, mode, expected_revision_id, request_id):
         raise ProjectConflictError('项目已变化，请重新预览后导入')
     preview = preview_srt(latest.document, text, mode)
     targets = {row['cue_id']: row['target'] for row in preview['rows'] if row['importable']}
+    languages = {row['cue_id']: row['target_language'] for row in preview['rows'] if row['importable']}
     if not targets:
         raise ValueError('没有可导入的译文')
     provenance = ChangeProvenance(kind=ChangeKind.IMPORT, operation='srt_translation_import', actor='user',
                                  metadata={'format': preview['format'], 'count': len(targets), 'request_id': request_id})
     cues = tuple(replace(c, target=TranslationTrack(target_text=targets[c.cue_id], original_text=targets[c.cue_id],
-                        language=preview['target_language'], provenance=provenance)) if c.cue_id in targets else c
+                        language=languages[c.cue_id], provenance=provenance)) if c.cue_id in targets else c
                  for c in latest.document.cues)
     candidate = replace(latest.document, cues=cues, changes=(*latest.document.changes, provenance))
     candidate = synchronize_translation_status(candidate, set(targets))

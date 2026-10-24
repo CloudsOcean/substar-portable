@@ -397,6 +397,7 @@ class SettingsPayload(BaseModel):
         default="low", pattern=r"^(low|medium|high|max|xhigh)$"
     )
     translation_style: str = "corporate_broadcast"
+    translation_layout: dict[str, Any] = Field(default_factory=dict)
     target_language_mode: str = "auto_opposite"
     display_order: str = "en_zh"
     translation_api_key: str = ""
@@ -1245,6 +1246,7 @@ def _automatic_settings_from_payload(
         "translation_enabled",
         "calibration_enabled",
         "target_language_mode",
+        "translation_layout",
         "segmentation_chunk_seconds",
         "translation_workers",
         "http_retry_attempts",
@@ -1414,6 +1416,7 @@ def _automatic_settings_from_payload(
                 "recognition_profile_id",
                 "language",
                 "target_language_mode",
+        "translation_layout",
                 "segmentation_enabled",
                 "translation_enabled",
                 "calibration_enabled",
@@ -1818,7 +1821,8 @@ async def start_qwen_assist_asr(
     profile_id: str = Form("qwen_cloud"),
     asr_glossary_ids: str = Form("[]"),
 ) -> dict[str, Any]:
-    if source_language not in {"Auto", "zh", "en", "ja", "ko", "mixed"}:
+    from substar_core.translation_layout import LANGUAGES
+    if source_language not in LANGUAGES | {"Auto", "zh", "mixed"}:
         raise HTTPException(status_code=400, detail="不支持的原文语言")
     settings = load_settings()
     try:
@@ -2271,6 +2275,7 @@ async def create_workbench_split_job(
             ),
             "language": source_language,
             "target_language_mode": target_language,
+            "translation_layout": overrides.get("translation_layout", {}),
             "glossary_id": str(overrides.get("glossary_id") or ""),
             "source_hard_limit": int(overrides.get(source_limit_key, 25)),
             "target_hard_limit": int(overrides.get(target_limit_key, 25)),

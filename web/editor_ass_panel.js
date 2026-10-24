@@ -24,6 +24,8 @@
       if (!currentLayer()) layerId=draft.layers[0].id;
       options($('#assLayer'),draft.layers.map(x=>[x.id,x.name]),layerId);
       const layer=currentLayer(), style=draft.styles[layer.style_id];
+      const routed=!!state.revision?.document?.presentation?.translation_layout?.enabled;
+      options(field('content'),[['source',routed?'上行（按语言分配）':'原文'],['target',routed?'下行（按语言分配）':'译文']],layer.content);
       for (const [key,value] of Object.entries({...style,content:layer.content,enabled:layer.enabled,word_highlight:layer.word_highlight})) {
         const input=field(key); if (!input) continue;
         if (input.type==='checkbox') input.checked=!!value; else input.value=String(value);

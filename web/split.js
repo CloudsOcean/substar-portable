@@ -405,6 +405,7 @@
     return {
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
+      translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
       glossary_id: $("#glossaryInput").value,
       asr_glossary_ids: glossaryInjection?.ids() || [],
       creation_workflow: workflow,
@@ -519,7 +520,7 @@
       description: "案例音频使用中文。打开“原文语言”，选择“中文”。",
     },
     {
-      target: "#targetLanguageInput", title: "将目标语言改为英文",
+      target: "#splitLanguageLayout [data-single-target]", title: "将目标语言改为英文",
       description: "本次案例将生成英文字幕。打开“目标语言”，选择“英文”。",
     },
     {
@@ -650,6 +651,7 @@
     $("#referenceFileName").textContent = "未添加";
     $("#languageInput").value = "en";
     $("#targetLanguageInput").value = "zh-CN";
+    window.SubstarTranslationLayout.write("splitLanguageLayout", {});
     $("#splitWorkflowInput").value = "disabled";
     $("#chineseLimitInput").value = "25";
     syncReferenceBreakPreset();
@@ -671,6 +673,7 @@
     state.tutorial.projectId = "";
     $("#languageInput").value = "en";
     $("#targetLanguageInput").value = "zh-CN";
+    window.SubstarTranslationLayout.write("splitLanguageLayout", {});
     $("#splitWorkflowInput").value = "one_step";
     syncWorkflowControl();
     $("#splitTutorialLayer").classList.remove("hidden");
@@ -847,16 +850,18 @@
   }
 
   function applySharedSettings(settings) {
+    window.SubstarTranslationLayout.configureModel(settings.qwen_cloud_model);
     state.settings = settings;
     const effective = {...settings, ...(state.taskConfigLoaded ? taskConfigFromControls() : storedTaskConfig())};
     $("#recognitionProfileInput").value = settings.recognition_profile_id || "faster_whisper_native";
     if (!$("#recognitionProfileInput").value) $("#recognitionProfileInput").selectedIndex = 0;
-    $("#languageInput").value = ["Auto", "zh", "en", "mixed", "ja", "ko"].includes(effective.language)
+    $("#languageInput").value = ["Auto", "zh", "mixed", ...window.SubstarTranslationLayout.languages.map(([code]) => code)].includes(effective.language)
       ? effective.language : "Auto";
     const configuredTarget = effective.target_language_mode || "zh-CN";
-    $("#targetLanguageInput").value = ["zh-CN", "en", "ja", "ko"].includes(configuredTarget)
+    $("#targetLanguageInput").value = window.SubstarTranslationLayout.languages.some(([code]) => code === configuredTarget)
       ? configuredTarget
       : "zh-CN";
+    window.SubstarTranslationLayout.write("splitLanguageLayout", effective.translation_layout || {});
     // The split page currently uses the global glossary only. Keep the hidden
     // field blank so older saved task settings cannot silently restore a
     // project glossary after the selector has been removed from the UI.
@@ -1054,6 +1059,7 @@
         $("#subtitleFormat").value=result.format; $("#subtitleFirstTrack").value=result.firstTrack; $("#subtitleSeparator").value=result.separator;
         if(result.source) $("#languageInput").value=result.source;
         if(result.target) $("#targetLanguageInput").value=result.target;
+        window.SubstarTranslationLayout.write("splitLanguageLayout", {});
       } catch(e) {referenceParseError = errorMessage(e); toast(referenceParseError);}
     }
     referenceParsing = false;
@@ -1124,6 +1130,7 @@
       language: $("#languageInput").value,
       alignment_language: alignmentLanguage($("#languageInput").value),
       target_language_mode: $("#targetLanguageInput").value,
+      translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
       glossary_id: $("#glossaryInput").value,
       asr_glossary_ids: glossaryInjection?.ids() || [],
       segmentation_enabled: segmentationEnabled,
@@ -1759,6 +1766,7 @@
   $("#recognitionProfileInput").addEventListener("change", () => {
     markSettingsDirty();
   });
+  $("#splitLanguageLayout").addEventListener("change", () => { markSettingsDirty(); syncReferenceBreakPreset(); validateForm(); });
   $("#languageInput").addEventListener("change", syncReferenceBreakPreset);
   $("#languageRatioThresholdInput").addEventListener("input", syncLanguageRatioThreshold);
   for (const selector of [

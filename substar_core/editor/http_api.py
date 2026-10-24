@@ -159,12 +159,13 @@ class ValidateDocumentRequest(BaseModel):
 
 
 class ProjectTaskInfoRequest(BaseModel):
+    translation_layout: dict[str, Any] = Field(default_factory=dict)
     autosave_delay_seconds: int = Field(default=1, ge=0, le=30, strict=True)
     autosave_retry_count: int = Field(default=3, ge=0, le=5, strict=True)
     media_selection_token: str = Field(default="", max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
-    language: Literal["Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"]
-    target_language_mode: Literal["zh-CN", "en", "ja", "ko"]
+    language: Literal['Auto', 'mixed', 'zh', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
+    target_language_mode: Literal['ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
     source_hard_limit: int = Field(ge=1, le=500)
     target_hard_limit: int = Field(ge=1, le=500)
     glossary_id: str = Field(default="", max_length=80)
@@ -175,11 +176,12 @@ class ProjectTaskInfoRequest(BaseModel):
 
 
 class TranslationStartRequest(BaseModel):
+    translation_layout: dict[str, Any] | None = None
     expected_revision_id: str = Field(min_length=1)
     glossary_ids: list[str] | None = Field(default=None, max_length=200)
     workers: int = Field(default=3, ge=1, le=256)
-    source_language: Literal["Auto", "mixed", "zh-CN", "en", "ja", "ko"]
-    target_language: Literal["zh-CN", "en", "ja", "ko"]
+    source_language: Literal['Auto', 'mixed', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
+    target_language: Literal['ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
     mapping_mode: Literal["one_to_one", "many_to_many"] = "many_to_many"
 
 
@@ -2774,6 +2776,11 @@ def start_project_translation(
         settings.update(task_info_settings(load_task_info(job_dir, project_id)))
     except (OSError, TypeError, ValueError):
         pass
+    from substar_core.translation_layout import normalize_layout
+    try:
+        settings["translation_layout"] = normalize_layout(payload.translation_layout if payload.translation_layout is not None else settings.get("translation_layout"))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
     settings["target_language_mode"] = payload.target_language
     settings["translation_mapping_mode"] = payload.mapping_mode
     latest = open_project_store(project_id).load_latest()
@@ -2789,7 +2796,7 @@ def start_project_translation(
         )
         settings["translation_source_language_selection"] = payload.source_language
         settings["translation_source_language"] = source_language
-        if source_language == payload.target_language:
+        if source_language == payload.target_language and not settings.get("translation_layout"):
             language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文"}
             raise HTTPException(
                 status_code=422,
@@ -2831,7 +2838,7 @@ def start_project_translation(
     from dataclasses import asdict
     from substar_core.prompt_registry import translation_variant, opposite_language
     target = opposite_language(source_language) if payload.target_language == "auto_opposite" else payload.target_language
-    variant = translation_variant(source_language, target)
+    variant = "generic" if settings.get("translation_layout") else translation_variant(source_language, target)
     frozen_settings["prompt_snapshot"] = {
         key: asdict(render_prompt(key, variant=variant, mode=payload.mapping_mode))
         for key in ("contextual_translation", "contextual_translation_repair")

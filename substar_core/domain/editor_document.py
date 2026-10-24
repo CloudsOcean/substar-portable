@@ -473,6 +473,7 @@ class PresentationSettings:
     upper_space: str = ""
     lower_remove: str = ""
     lower_space: str = ""
+    translation_layout: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -482,11 +483,14 @@ class PresentationSettings:
             self, "lower_punctuation", PunctuationPresentation(self.lower_punctuation)
         )
         object.__setattr__(self, "display_order", DisplayOrder(self.display_order))
+        from substar_core.translation_layout import normalize_layout
+        object.__setattr__(self, "translation_layout", normalize_layout(self.translation_layout))
         for name in ("upper_remove", "upper_space", "lower_remove", "lower_space"):
             object.__setattr__(self, name, str(getattr(self, name) or ""))
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
+            **({"translation_layout": dict(self.translation_layout)} if self.translation_layout else {}),
             "upper_punctuation": self.upper_punctuation.value,
             "lower_punctuation": self.lower_punctuation.value,
             "display_order": self.display_order.value,
@@ -499,6 +503,7 @@ class PresentationSettings:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "PresentationSettings":
         return cls(
+            translation_layout=value.get("translation_layout", {}),
             upper_punctuation=PunctuationPresentation(value["upper_punctuation"]),
             lower_punctuation=PunctuationPresentation(value["lower_punctuation"]),
             display_order=DisplayOrder(value["display_order"]),

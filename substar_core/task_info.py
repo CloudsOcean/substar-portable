@@ -6,12 +6,13 @@ from pathlib import Path
 import re
 from typing import Any, Mapping
 
+from substar_core.translation_layout import normalize_layout, LANGUAGES
 from substar_core.artifacts import atomic_write_json
 from substar_core.model_providers import MODEL_PROVIDER_IDS
 TASK_INFO_SCHEMA = "substar.task-info.v2"
 TASK_INFO_FILENAME = "task_info.json"
-SOURCE_LANGUAGES = {"Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"}
-TARGET_LANGUAGES = {"auto_opposite", "zh-CN", "en", "ja", "ko"}
+SOURCE_LANGUAGES = LANGUAGES | {"Auto", "mixed", "zh"}
+TARGET_LANGUAGES = LANGUAGES | {"auto_opposite"}
 
 
 def _read_mapping(path: Path) -> dict[str, Any]:
@@ -53,6 +54,7 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
         "display_name": display_name,
         "language": language,
         "target_language_mode": target,
+        "translation_layout": normalize_layout(value.get("translation_layout")),
         "glossary_id": str(value.get("glossary_id") or "").strip()[:80],
         "llm_provider_id": llm_provider_id,
         "autosave_delay_seconds": autosave_delay_seconds,
@@ -86,6 +88,7 @@ def task_info_settings(info: Mapping[str, Any]) -> dict[str, Any]:
     target = str(info["target_language_mode"])
     result = {
         "language": source,
+        "translation_layout": normalize_layout(info.get("translation_layout")),
         "target_language_mode": target,
         "glossary_id": str(info.get("glossary_id") or ""),
         "llm_provider_id": str(info.get("llm_provider_id") or "inherit"),

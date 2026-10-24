@@ -54,7 +54,7 @@ class Configuration(BaseModel):
 
 
 def default_profile(document=None):
-    reverse = document and document.presentation.display_order.value == "target_above_source"
+    reverse = document and not document.presentation.translation_layout and document.presentation.display_order.value == "target_above_source"
     return Profile(styles={
         "upper": AssStyle(size=72, bold=True, margin_y=212, color="#FFFFFF", outline=3, shadow=3, background=True),
         "lower": AssStyle(size=64, bold=True, margin_y=119, color="#FFE083", outline=3, shadow=3, background=True),
