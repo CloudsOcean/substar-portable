@@ -16,7 +16,7 @@
   const OPERATION_TYPES = new Set([
     "replace", "retime_text", "set_target", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
     "merge", "delete", "purge_cue", "restore", "insert", "split_cue", "merge_cues", "auto_merge_cues",
-    "set_cue_speaker", "set_speaker_names", "batch_replace", "set_ai_calibration"
+    "set_cue_speaker", "set_speaker_names", "batch_replace", "set_ai_calibration", "set_timeline"
   ]);
   const consumedRevisions = new WeakSet();
   const editorViewCache = new WeakMap();
@@ -224,7 +224,7 @@
     const cueIds = [];
     const cueMembers = [];
     let previousCueIndex = -1;
-    let previousCueEnd = -1;
+    const previousCueEnd = new Map();
     cues.forEach((cue, index) => {
       requireObject(cue, `cues[${index}]`);
       assertNoEntityComplete(cue, `cues[${index}]`);
@@ -257,8 +257,8 @@
       previousCueIndex = cue.index;
       const isManualCue = members.every(id => !(displayById.get(id)?.source_token_ids || []).length);
       if (cue.state === ACTIVE && !isManualCue) {
-        if (Number(cue.start) < previousCueEnd) throw new Error("cues must be time ordered and non-overlapping");
-        previousCueEnd = Number(cue.end);
+        if (Number(cue.start) < (previousCueEnd.get(cue.speaker ?? null) ?? -1)) throw new Error("same-speaker cues must be time ordered and non-overlapping");
+        previousCueEnd.set(cue.speaker ?? null, Number(cue.end));
       }
     });
     assertUnique(cueIds, "cue id");
@@ -334,11 +334,12 @@
     }
     const displayById = new Map(revision.document.display_tokens.map(token => [token.token_id, token]));
     const sourceTimes = new Map(revision.document.source_tokens.map(token => [token.token_id, token]));
+    const wordTimes = revision.document.properties.timeline?.word_timings || {};
     const tokenViews = revision.document.display_tokens.map(token => ({
       token_id:token.token_id,
       text:token.text,
-      start:token.source_token_ids.length ? Math.min(...token.source_token_ids.map(id => sourceTimes.get(id)?.start ?? Infinity)) : null,
-      end:token.source_token_ids.length ? Math.max(...token.source_token_ids.map(id => sourceTimes.get(id)?.end ?? -Infinity)) : null,
+      start:wordTimes[token.token_id] ? wordTimes[token.token_id].start/1000 : token.source_token_ids.length ? Math.min(...token.source_token_ids.map(id => sourceTimes.get(id)?.start ?? Infinity)) : null,
+      end:wordTimes[token.token_id] ? wordTimes[token.token_id].end/1000 : token.source_token_ids.length ? Math.max(...token.source_token_ids.map(id => sourceTimes.get(id)?.end ?? -Infinity)) : null,
       original_text:token.original_text,
       source_token_ids:[...token.source_token_ids],
       provenance:clone(token.provenance),
@@ -583,8 +584,8 @@
     const indexes = revisionIndexes(revisionPayload);
     const cue = indexes.cues.get(String(cueId));
     if (!cue) throw new Error("set speaker cue does not exist");
-    if (speaker !== null && !new Set(["speaker_0", "speaker_1", "speaker_2", "speaker_3"]).has(speaker)) {
-      throw new Error("speaker must use one of four palette slots");
+    if (speaker !== null && (typeof speaker !== "string" || !speaker.trim() || speaker.length > 120 || /[\x00-\x1f]/.test(speaker))) {
+      throw new Error("speaker must be a nonempty identifier of at most 120 characters");
     }
     return createOperation(revisionPayload, "set_cue_speaker", {
       cue_id:cue.cue_id, speaker, previous_speaker:cue.speaker ?? null,
@@ -592,9 +593,22 @@
     }, [cue]);
   }
 
+  function setCueSpeakersOperation(revisionPayload, cueIds, speaker, provenance = null) {
+    const ids=[...new Set(cueIds)],indexes=revisionIndexes(revisionPayload);
+    if(!ids.length)throw new Error("speaker assignment needs at least one cue");
+    const cues=ids.map(id=>indexes.cues.get(String(id)));
+    if(cues.some(cue=>!cue))throw new Error("set speaker cue does not exist");
+    if(speaker!==null && (typeof speaker!=="string"||!speaker.trim()||speaker.length>120||/[\x00-\x1f]/.test(speaker)))throw new Error("invalid speaker identifier");
+    return createOperation(revisionPayload,"set_cue_speaker",{cue_ids:ids,speaker,
+      provenance:provenanceInput(provenance,"set_cue_speaker")},cues);
+  }
+
   function setSpeakerNamesOperation(revisionPayload, speakerNames, provenance = null) {
-    const names = {};
-    for (let index = 0; index < 4; index += 1) names[`speaker_${index}`] = String(speakerNames?.[`speaker_${index}`] || "").trim();
+    const names = Object.create(null);
+    for (const [id, name] of Object.entries(speakerNames || {})) {
+      if (!id.trim() || id.length > 120 || /[\x00-\x1f]/.test(id)) throw new Error("invalid speaker identifier");
+      names[id] = String(name || "").trim();
+    }
     return createOperation(revisionPayload, "set_speaker_names", {
       speaker_names:names,
       provenance:provenanceInput(provenance, "set_speaker_names")
@@ -647,17 +661,17 @@
     });
     const byId = new Map(changes.map(change => [change.cue_id, change]));
     const displayById = indexes.display;
-    let previousEnd = -1;
+    const previousEnd = new Map();
     ordering.canonicalCueOrder(indexes.revision.document.cues).forEach(cue => {
       const value = byId.get(cue.cue_id) || cue;
       const isManualCue = cue.display_token_ids.every(id =>
         !(displayById.get(id)?.source_token_ids || []).length
       );
       if (cue.state !== ACTIVE || isManualCue) return;
-      if (value.start < previousEnd - 1e-9) {
+      if (value.start < (previousEnd.get(cue.speaker ?? null) ?? -1) - 1e-9) {
         throw new Error("final cue timeline must not overlap and must remain ordered");
       }
-      previousEnd = value.end;
+      previousEnd.set(cue.speaker ?? null, value.end);
     });
     return createOperation(revisionPayload, "set_cue_times", {
       cues:changes,
@@ -899,6 +913,7 @@
     setTargetOperation,
     setCueSpeakerOperation,
     setSpeakerNamesOperation,
+    setCueSpeakersOperation,
     setCueTimeOperation,
     setCueTimesOperation,
     insertCueOperation,

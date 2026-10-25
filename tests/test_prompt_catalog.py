@@ -18,8 +18,8 @@ def test_prompt_catalog_projects_only_registered_production_components() -> None
     assert catalog["stats"] == {
         "families": 10,
         "variants": 60,
-        "components": 50,
-        "core_components": 32,
+        "components": 52,
+        "core_components": 34,
         "cases": 18,
     }
     assert [item["id"] for item in catalog["categories"]] == [

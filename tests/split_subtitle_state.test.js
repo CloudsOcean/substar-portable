@@ -9,7 +9,7 @@ test('subtitle workflow and format survive settings refresh and stored reload', 
   const $ = key => {if (!nodes.has(key)) nodes.set(key,{value:'',textContent:''}); return nodes.get(key);};
   const state = {taskConfigLoaded:false};
   let saved = {creation_workflow:'subtitle', subtitle_format:'bilingual-inline', subtitle_first_track:'target', subtitle_separator:' / '};
-  const context = vm.createContext({$, state, storedTaskConfig:()=>saved, formatTemporaryHotwords:()=>'',
+  const context = vm.createContext({$, state, window:{SubstarTranslationLayout:{configureModel(){},languages:[["zh-CN","汉语"],["en","英语"]],write(){},read(){return {};}}}, storedTaskConfig:()=>saved, formatTemporaryHotwords:()=>'',
     parseTemporaryHotwords:()=>[], glossaryInjection:null, MAIN_SPLIT_BRANCH:'main',
     syncLanguageRatioThreshold(){},syncQwenEnhancementModel(){},isReferenceBreakPreset:()=>false,
     referenceBreakPreset:()=>'.?!',setSettingsSaveState(){},syncWorkflowControl(){},validateForm(){},syncPrimaryPanel(){}});

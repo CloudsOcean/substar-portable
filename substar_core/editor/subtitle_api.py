@@ -55,7 +55,8 @@ def create_import(subtitle: UploadFile = File(...), secondary: UploadFile | None
                   media: UploadFile | None = File(None), media_reference_token: str = Form(""),
                   mode: str = Form("single"), separator: str = Form("|"), first_track: str = Form("source"),
                   confirmation: str = Form(...), source_language: str = Form("Auto"), target_language: str = Form("zh-CN"),
-                  source_hard_limit: int = Form(55, ge=1, le=500), target_hard_limit: int = Form(24, ge=1, le=500)):
+                  source_hard_limit: int = Form(55, ge=1, le=500), target_hard_limit: int = Form(24, ge=1, le=500),
+                  generate_thumbnails: bool = Form(False)):
     from .http_api import _projects_root, save_task_info
     from substar_core.environment_doctor import _find_tool
     from substar_core.media_relink import resolve_selection
@@ -108,6 +109,9 @@ def create_import(subtitle: UploadFile = File(...), secondary: UploadFile | None
                                      "source_hard_limit": source_hard_limit, "target_hard_limit": target_hard_limit})
     store = ProjectStore.create(root / "project", project_id=project_id)
     store.save(document, provenance=ChangeProvenance(ChangeKind.IMPORT, "subtitle_import"))
+    if generate_thumbnails is True:
+        from substar_core.media.thumbnails import request_generation
+        request_generation(root, source)
     return {"project_id": project_id, "editor_url": f"/editor?project={project_id}"}
 
 

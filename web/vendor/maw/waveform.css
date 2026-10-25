@@ -1,0 +1,1416 @@
+@scope (.maw-waveform-host) {
+/* Waveform-specific styles live here so the same UI can be reused by a desktop shell. */
+
+.toolbar.main-toolbar {
+  margin-bottom: 8px;
+  min-height: 30px;
+}
+/* 主工具栏：左侧依次为 工具切换 / 布局 / 当前状态，「设置·帮助」一组靠右。 */
+.toolbar.main-toolbar .toolbar-utility-group { margin-left: auto; }
+.waveform-mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.toolbar .waveform-mode-switch button {
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  min-height: var(--control-h);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.toolbar .waveform-mode-switch button:last-child { border-right: 0; }
+.toolbar .waveform-mode-switch button:hover { background: var(--accent-tint); color: var(--text-primary); }
+.toolbar .waveform-mode-switch button:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.toolbar .waveform-mode-switch button.active {
+  background: var(--accent-tint-strong);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+.waveform-tool-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-input);
+}
+.toolbar .waveform-tool-switch button {
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  min-height: var(--control-h);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.toolbar .waveform-tool-switch button:last-child { border-right: 0; }
+.toolbar .waveform-tool-switch button:hover { background: var(--accent-tint); color: var(--text-primary); }
+.toolbar .waveform-tool-switch button:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.toolbar .waveform-tool-switch button.active {
+  background: var(--accent-tint-strong);
+  color: var(--accent-hover);
+  font-weight: 600;
+}
+/* 分割工具下字幕块显示拆分光标，提示点击即拆分 */
+.waveform-pane.tool-razor .waveform-cue-block { cursor: crosshair; }
+.waveform-pane.tool-razor .waveform-cue-handle { cursor: crosshair; }
+.waveform-pane.tool-razor .waveform-cue-boundary { cursor: crosshair; }
+.waveform-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+}
+.waveform-status {
+  margin-left: 1em;
+  color: var(--text-muted);
+  max-width: 36vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.waveform-status.error { color: var(--red-hover); }
+.waveform-status.busy { color: var(--amber-hover); }
+.waveform-spectral-status {
+  color: var(--amber-hover);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.waveform-spectral-status[hidden] { display: none; }
+
+.editor-workspace {
+  --waveform-split: 60%;
+  --layout-column: 44%;
+  --layout-row-top: 42%;
+  --layout-row-middle: 18%;
+  --layout-row-bottom: 40%;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+.editor-workspace > .player-wrap {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.editor-workspace > .player-wrap video {
+  width: 100%;
+  background: #000;
+  object-fit: contain;
+}
+.editor-workspace > .player-wrap audio { width: 100%; }
+.editor-workspace > .current-cue-panel,
+.editor-workspace .cues-container {
+  min-height: 0;
+  min-width: 0;
+}
+.editor-workspace > .current-cue-panel { margin: 0; }
+.editor-workspace .player-wrap.empty-state { min-height: 132px; }
+.editor-workspace.layout-classic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.editor-workspace.layout-classic > .player-wrap {
+  flex: 0 0 auto;
+  width: 100%;
+}
+.editor-workspace.layout-classic > .current-cue-panel {
+  flex: 0 0 auto;
+}
+.editor-workspace.layout-classic .waveform-pane {
+  flex: 0 0 156px;
+  width: 100%;
+  display: block;
+}
+.editor-workspace.layout-classic .cues-container { flex: 1 1 auto; }
+.editor-workspace.layout-classic.waveform-multi {
+  display: grid;
+  grid-template-columns: var(--waveform-split) 7px minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas:
+    "player player player"
+    "panel panel panel"
+    "wave divider cues";
+  gap: 0 8px;
+  row-gap: 8px;
+}
+.editor-workspace.layout-classic.waveform-multi.waveform-right {
+  grid-template-columns: minmax(0, 1fr) 7px var(--waveform-split);
+  grid-template-areas:
+    "player player player"
+    "panel panel panel"
+    "cues divider wave";
+}
+.layout-classic.waveform-multi > .player-wrap { grid-area: player; }
+.layout-classic.waveform-multi > .current-cue-panel { grid-area: panel; }
+.layout-classic.waveform-multi .waveform-pane { grid-area: wave; width: auto; }
+.layout-classic.waveform-multi .cues-container { grid-area: cues; }
+.layout-classic.waveform-multi .workspace-divider { grid-area: divider; display: block; }
+.layout-classic.waveform-multi .waveform-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--waveform-content-top) 8px 8px;
+}
+
+.editor-workspace.layout-wave-right {
+  display: grid;
+  grid-template-columns: var(--layout-column) 7px minmax(0, 1fr);
+  grid-template-rows:
+    minmax(56px, calc(var(--layout-row-top) - 9.333px))
+    7px
+    minmax(max-content, calc(var(--layout-row-middle) - 9.333px))
+    7px
+    minmax(56px, calc(var(--layout-row-bottom) - 9.333px));
+  gap: 0 8px;
+  overflow: hidden;
+}
+/* 面板行对选中/未选中使用同一套轨道尺寸：高度只随手动拖拽变化，不再因选中跳变。 */
+.editor-workspace.layout-wave-right > .player-wrap,
+.editor-workspace.layout-wave-right > .current-cue-panel,
+.editor-workspace.layout-wave-right > .waveform-pane,
+.editor-workspace.layout-wave-right > .cues-container {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  position: relative;
+  overflow: hidden;
+}
+.editor-workspace.layout-wave-right > .player-wrap { grid-column: 1; grid-row: 1; }
+.editor-workspace.layout-wave-right > .current-cue-panel { grid-column: 1; grid-row: 3; }
+.editor-workspace.layout-wave-right > .cues-container { grid-column: 1; grid-row: 5; }
+.editor-workspace.layout-wave-right > .waveform-pane { grid-column: 3; grid-row: 1 / 6; }
+.editor-workspace.layout-wave-right > .player-wrap video {
+  width: 100%; height: 100%; max-height: none;
+}
+.editor-workspace.layout-wave-right > .player-wrap audio { width: 100%; }
+.editor-workspace.layout-wave-right > .current-cue-panel {
+  overflow: hidden;
+  padding-top: 10px;
+}
+.editor-workspace.layout-wave-right .cue-panel-text-wrap,
+.editor-workspace.layout-custom .cue-panel-text-wrap { flex: 1 1 auto; }
+.editor-workspace.layout-wave-right .cue-panel-navigation,
+.editor-workspace.layout-wave-right .cue-panel-time-actions,
+.editor-workspace.layout-wave-right .cue-panel-sticker-wrap,
+.editor-workspace.layout-wave-right .cue-panel-time-fields { flex-wrap: wrap; }
+.editor-workspace.layout-wave-right .waveform-pane { display: block; }
+.editor-workspace.layout-wave-right .waveform-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--waveform-content-top) 8px 8px;
+}
+
+.editor-workspace.layout-custom {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  overflow: hidden;
+}
+.free-layout-root,
+.layout-split,
+.layout-child,
+.layout-module-slot {
+  min-width: 0;
+  min-height: 0;
+}
+.free-layout-root {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.layout-split {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.layout-split-row { flex-direction: row; }
+.layout-split-column { flex-direction: column; }
+.layout-child {
+  display: flex;
+  flex: 1 1 0;
+  position: relative;
+  overflow: hidden;
+}
+.layout-child > .layout-split,
+.layout-child > .layout-module-slot {
+  flex: 1 1 0;
+  width: 100%;
+  height: 100%;
+}
+.layout-module-slot {
+  display: flex;
+  flex-direction: column;
+}
+.layout-module-slot > [data-dock-module] {
+  flex: 1 1 0;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  position: relative;
+  overflow: hidden;
+}
+.layout-custom .player-wrap video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+.layout-custom .player-wrap audio { width: 100%; }
+.layout-custom .current-cue-panel {
+  min-height: max-content;
+  overflow: hidden;
+}
+.layout-custom .layout-module-slot[data-layout-module="panel"],
+.layout-custom .layout-child:has(.layout-module-slot[data-layout-module="panel"]) {
+  min-height: max-content;
+}
+.layout-custom .cue-panel-text-wrap { flex: 1 1 auto; }
+.layout-custom .cue-panel-navigation,
+.layout-custom .cue-panel-time-actions,
+.layout-custom .cue-panel-sticker-wrap,
+.layout-custom .cue-panel-time-fields { flex-wrap: wrap; }
+.layout-custom .waveform-pane { display: block; }
+.layout-custom .waveform-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--waveform-content-top) 8px 8px;
+}
+/* 字幕列表本身始终可滚动；不要被预设/停靠模块的 overflow:hidden 截断。 */
+.editor-workspace.layout-wave-right > .cues-container,
+.layout-custom .cues-container {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.layout-custom .layout-resizer { display: none; }
+/* 拖动分隔条默认隐形，悬停/拖动时才浮现，避免常驻线条切割面板。 */
+.layout-split-divider {
+  position: relative;
+  z-index: 35;
+  flex: 0 0 7px;
+  background: transparent;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.layout-split-divider:hover,
+.layout-split-divider.dragging { opacity: 1; }
+.layout-split-divider::after {
+  content: "";
+  position: absolute;
+  background: var(--border-strong);
+  border-radius: 2px;
+  transition: background .12s;
+}
+.layout-split-divider:hover::after,
+.layout-split-divider.dragging::after { background: var(--accent); }
+.layout-split-divider-row { cursor: col-resize; }
+.layout-split-divider-row::after { top: 0; bottom: 0; left: 2px; width: 2px; }
+.layout-split-divider-column { cursor: row-resize; }
+.layout-split-divider-column::after { left: 0; right: 0; top: 2px; height: 2px; }
+
+.waveform-pane {
+  --waveform-content-top: var(--panel-toolbar-h);
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-wave);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.waveform-pane.waveform-media-unavailable canvas { filter: saturate(0.2); }
+.waveform-pane:focus { outline: none; }
+/* 波形顶部工具栏：absolute 覆盖在 scroll 之上；布局编辑模式下让出 dock-handle 高度。 */
+.waveform-pane > .waveform-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--panel-toolbar-bg-wave);
+}
+.editor-workspace.layout-editing .waveform-pane {
+  --waveform-content-top: calc(var(--dock-handle-h) + var(--panel-toolbar-h));
+}
+.editor-workspace.layout-editing .waveform-pane > .waveform-toolbar {
+  top: var(--dock-handle-h);
+}
+.waveform-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  padding: var(--waveform-content-top) 8px 8px;
+}
+.waveform-content {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+.waveform-empty {
+  position: absolute;
+  inset: var(--waveform-content-top) 0 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+  background: linear-gradient(180deg, var(--empty-overlay-1), var(--empty-overlay-2));
+}
+.waveform-empty.hidden { display: none; }
+.workspace-divider {
+  flex: 0 0 7px;
+  position: relative;
+  cursor: col-resize;
+  display: none;
+}
+.workspace-divider-secondary { display: none; }
+.workspace-divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+.workspace-divider:hover::after,
+.workspace-divider.dragging::after { background: var(--accent); }
+
+.layout-resizer {
+  display: none;
+  position: relative;
+  z-index: 50;
+  background: transparent;
+  opacity: 0;
+  transition: opacity .12s;
+}
+.layout-resizer:hover,
+.layout-resizer.dragging { opacity: 1; }
+.layout-resizer::after {
+  content: "";
+  position: absolute;
+  border-radius: 2px;
+  background: var(--border-strong);
+  transition: background .12s;
+}
+.layout-resizer:hover::after,
+.layout-resizer.dragging::after { background: var(--accent); }
+.layout-resizer-v { grid-column: 2; grid-row: 1 / 6; cursor: col-resize; }
+.layout-resizer-v::after { top: 0; bottom: 0; left: 2px; width: 2px; }
+.layout-resizer-h1 { grid-column: 1; grid-row: 2; cursor: row-resize; }
+.layout-resizer-h2 { grid-column: 1; grid-row: 4; cursor: row-resize; }
+.layout-resizer-h1::after, .layout-resizer-h2::after { left: 0; right: 0; top: 2px; height: 2px; }
+.layout-wave-right .layout-resizer-v,
+.layout-wave-right .layout-resizer-h1,
+.layout-wave-right .layout-resizer-h2 { display: block; }
+
+.dock-handle {
+  display: none; position: absolute; z-index: 40; top: 0; left: 0; right: 0; height: var(--dock-handle-h);
+  align-items: center; padding: 0 8px; color: var(--text-secondary); background: var(--dock-bg);
+  border-bottom: 1px solid var(--border-subtle); cursor: grab; user-select: none;
+  font: 11px/1 var(--font-mono); letter-spacing: 0.02em;
+}
+/* 字幕列表自身会滚动：拖拽把手改为 sticky 进入文档流，
+   滚动时始终钉在列表顶部，不会被内容顶走。 */
+.cues-container > .dock-handle {
+  position: sticky;
+  left: auto; right: auto;
+  margin: 0 -4px;
+  border-radius: calc(var(--radius-md) - 2px) calc(var(--radius-md) - 2px) 0 0;
+}
+  .dock-handle:hover { color: var(--amber-hover); background: var(--dock-bg-hover); }
+.dock-handle:active { cursor: grabbing; }
+.editor-workspace.layout-editing .dock-handle { display: flex; }
+.editor-workspace.layout-editing > .player-wrap,
+.editor-workspace.layout-editing > .current-cue-panel,
+.editor-workspace.layout-editing > .waveform-pane,
+.editor-workspace.layout-editing > .cues-container,
+.editor-workspace.layout-editing .layout-module-slot > [data-dock-module] {
+  outline: 1px solid var(--accent-tint);
+}
+.editor-workspace.layout-dragging .layout-resizer { pointer-events: none; }
+.layout-drag-source { opacity: .38; }
+  .layout-drop-target { outline: 2px solid var(--layout-drop-outline) !important; outline-offset: -2px; }
+  .layout-drop-preview {
+    position: absolute;
+    z-index: 100;
+    display: none;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 34px;
+    border: 2px dashed var(--layout-drop-outline);
+    border-radius: 7px;
+    background: var(--layout-drop-bg);
+    color: var(--layout-drop-fg);
+  font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.layout-drop-preview.show { display: flex; }
+.layout-drop-preview.layout-insert-preview {
+  align-items: center;
+  padding: 6px;
+  border-color: var(--layout-insert-outline);
+  background: var(--layout-insert-bg);
+  color: var(--layout-insert-fg);
+  text-align: center;
+}
+.layout-drop-preview.layout-root-insert-preview {
+  overflow: hidden;
+  padding: 4px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.waveform-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  background: var(--bg-wave-row);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-1);
+  touch-action: none;
+  user-select: none;
+}
+.waveform-basic .waveform-row {
+  inset: 8px;
+  width: auto;
+  height: auto;
+}
+.waveform-row canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.waveform-row-time {
+  position: absolute;
+  z-index: 7;
+  left: 6px;
+  top: 5px;
+  padding: 2px 5px;
+  border-radius: var(--radius-sm);
+  color: var(--accent-hover);
+  background: var(--wave-badge-bg);
+  font: 11px/1.3 var(--font-mono);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+/* 时间标签始终固定；标记轨道使用其下方的独立覆盖层。 */
+.waveform-row.multi-subtitle-row::before,
+.waveform-row.multi-subtitle-row::after {
+  position: absolute;
+  z-index: 8;
+  right: 6px;
+  padding: 1px 4px;  border-radius: 2px;
+  color: var(--text-faint);
+  background: var(--wave-badge-bg);
+  font: 10px/1.25 var(--font-mono);
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--multi-subtitle-label-height);
+  padding: 0 4px;
+  pointer-events: none;
+}
+.waveform-row.multi-subtitle-row {
+  /* 从底部向上排布：副字幕在底部，主字幕在上方并紧贴。 */
+  --multi-subtitle-lane-gap: 0px;
+  --multi-subtitle-bottom-inset: 7px;
+  --multi-subtitle-label-height: 15px;
+  --multi-subtitle-lane-height: min(35px, calc((100% - (var(--multi-subtitle-bottom-inset) * 2) - var(--multi-subtitle-lane-gap)) / 2));
+}
+/* 基础波形本身会把单字幕块增高到约 72px；双 lane 也保留适度的增高，
+   但不占满单主字幕的高度，避免两条字幕在共享波形中显得过于拥挤。 */
+.waveform-basic .waveform-row.multi-subtitle-row {
+  --multi-subtitle-lane-height: min(54px, calc((100% - (var(--multi-subtitle-bottom-inset) * 2) - var(--multi-subtitle-lane-gap)) / 2));
+}
+/* 字词叠加时加高垫底句块，露出可点击区域；低行高仍限制在行内。 */
+.waveform-multi .waveform-pane.word-timing-mode .waveform-row.multi-subtitle-row {
+  --multi-subtitle-lane-height: min(44px, calc((100% - (var(--multi-subtitle-bottom-inset) * 2) - var(--multi-subtitle-lane-gap)) / 2));
+}
+.waveform-row.multi-subtitle-row.show-track-badges::before {
+  content: "1";
+  color: var(--active-cue-fg);
+  background: var(--accent);
+  top: auto;
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) + ((var(--multi-subtitle-lane-height) - var(--multi-subtitle-label-height)) / 2));
+}
+.waveform-row.multi-subtitle-row.show-track-badges::after {
+  content: "2";
+  color: var(--mark-fg);
+  background: var(--amber);
+  bottom: calc(var(--multi-subtitle-bottom-inset) + ((var(--multi-subtitle-lane-height) - var(--multi-subtitle-label-height)) / 2));
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="main"] {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) + var(--multi-subtitle-lane-gap));
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="extension"] {
+  bottom: var(--multi-subtitle-bottom-inset);
+  outline-style: dotted;
+  outline-color: color-mix(in srgb, var(--cue-color) 50%, var(--wave-cue-mix));
+  background: var(--wave-cue-extension-bg, color-mix(in srgb, var(--cue-color) 10%, var(--wave-cue-mix)));
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="main"] {
+  background: var(--wave-cue-main-bg, color-mix(in srgb, var(--cue-color) 42%, var(--wave-cue-mix)));
+}
+/* 亮色主题的主字幕默认保持白底，但有颜色映射时不能把 --cue-color 盖掉。 */
+:root[data-theme="light"] .waveform-row.multi-subtitle-row .waveform-cue-block[data-track="main"].has-subtitle-color {
+  background: color-mix(in srgb, var(--cue-color) 42%, var(--wave-cue-main-bg));
+}
+.waveform-row.multi-subtitle-row .waveform-cue-badge {
+  /* 双字幕时 badge 要放在最上方主字幕块之上；单层行继续使用默认 bottom。 */
+  bottom: calc(var(--multi-subtitle-bottom-inset) + (var(--multi-subtitle-lane-height) * 2) + var(--multi-subtitle-lane-gap) + 2px);
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="extension"] .waveform-cue-label {
+  color: var(--text-secondary);
+}
+.waveform-playhead {
+  position: absolute;
+  z-index: 9;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--wave-playhead);
+  box-shadow: 0 0 5px var(--wave-playhead-glow);
+  pointer-events: none;
+  transform: translateX(-1px);
+}
+.waveform-pointer-line {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--wave-pointer-line, rgba(205, 214, 223, 0.78));
+  pointer-events: none;
+  transform: translateX(-0.5px);
+}
+.waveform-pointer-line.boundary-snapped { background: var(--accent); }
+.waveform-pointer-line[hidden] { display: none; }
+.waveform-split-flash {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--wave-split-flash, #ffd43b);
+  box-shadow: 0 0 8px var(--wave-split-flash-glow, rgba(255, 212, 59, 0.85));
+  pointer-events: none;
+  transform: translateX(-1.5px);
+  opacity: 0;
+}
+.waveform-split-flash.is-active {
+  animation: split-flash-once 720ms ease-out both;
+}
+@keyframes split-flash-once {
+  0% {
+    opacity: 0;
+    box-shadow: 0 0 2px transparent;
+  }
+  12% {
+    opacity: 1;
+    box-shadow: 0 0 11px var(--wave-split-flash-glow, rgba(255, 212, 59, 0.85));
+  }
+  30% {
+    opacity: 0.3;
+    box-shadow: 0 0 4px var(--wave-split-flash-glow, rgba(255, 212, 59, 0.85));
+  }
+  100% {
+    opacity: 0;
+    box-shadow: 0 0 2px transparent;
+  }
+}
+.waveform-gap-block {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  box-sizing: border-box;
+  border-left: 1px dashed var(--gap-stripe-border);
+  border-right: 1px dashed var(--gap-stripe-border);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--gap-stripe-a) 0 5px,
+    var(--gap-stripe-b) 5px 10px
+  );
+  cursor: pointer;
+}
+.waveform-gap-block:hover { filter: brightness(var(--wave-gap-hover-brightness)); }
+.waveform-gap-block.protected {
+  border-left-color: var(--gap-protected-edge);
+  border-right-color: var(--gap-protected-edge);
+  box-shadow: inset 0 0 0 4px var(--gap-protected-inset);
+}
+.waveform-gap-block.restored {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--gap-restored-stripe-a) 0 5px,
+    var(--gap-restored-stripe-b) 5px 10px
+  );
+  border-color: var(--gap-restored-border);
+}
+.waveform-gap-label {
+  position: absolute;
+  left: 3px;
+  top: 4px;
+  max-width: calc(100% - 6px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ffe2a7;
+  background: rgba(35, 24, 14, 0.78);
+  border-radius: 2px;
+  padding: 1px 3px;
+  font: 11px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+.waveform-gap-block.restored .waveform-gap-label { color: #b9cbd8; background: rgba(27, 38, 47, 0.76); }
+.waveform-gap-block.boundary-editable { cursor: pointer; }
+.waveform-gap-block.dragging {
+  cursor: grabbing;
+  opacity: .9;
+  border-color: rgba(94, 184, 255, .98);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(65, 153, 229, .62) 0 5px,
+    rgba(29, 74, 128, .62) 5px 10px
+  );
+}
+.waveform-gap-block.waveform-gap-drag-preview,
+.waveform-gap-block.waveform-gap-boundary-preview {
+  z-index: 13;
+  pointer-events: none;
+  border: 1px solid rgba(94, 184, 255, .98);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(65, 153, 229, .58) 0 5px,
+    rgba(29, 74, 128, .58) 5px 10px
+  );
+  opacity: .92;
+}
+.waveform-gap-block.waveform-gap-drag-preview.copy {
+  border-style: dashed;
+  border-color: rgba(140, 222, 255, .98);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(87, 174, 211, .58) 0 5px,
+    rgba(31, 73, 94, .58) 5px 10px
+  );
+}
+.waveform-gap-block.waveform-gap-drag-preview.restored,
+.waveform-gap-block.waveform-gap-boundary-preview.restored {
+  border-color: rgba(128, 198, 255, .98);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(84, 159, 216, .58) 0 5px,
+    rgba(37, 81, 120, .58) 5px 10px
+  );
+}
+.waveform-gap-handle {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  opacity: 0;
+  cursor: ew-resize;
+  transition: opacity .1s ease, background .1s ease;
+}
+.waveform-gap-handle.left { left: -4px; }
+.waveform-gap-handle.right { right: -4px; }
+.waveform-gap-handle::after {
+  content: "";
+  position: absolute;
+  top: 22%;
+  bottom: 22%;
+  left: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: #5ab6ff;
+  box-shadow: 0 0 0 1px rgba(14, 42, 76, .75);
+}
+.waveform-gap-block.boundary-editable:hover .waveform-gap-handle,
+.waveform-gap-block.boundary-editable.dragging .waveform-gap-handle { opacity: 1; }
+.waveform-gap-range-preview {
+  position: absolute;
+  z-index: 12;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  box-sizing: border-box;
+  border: 1px solid rgba(132, 190, 226, 0.95);
+  background: rgba(76, 139, 178, 0.28);
+  pointer-events: none;
+}
+.waveform-gap-range-preview.remove {
+  border-color: rgba(255, 168, 76, 0.98);
+  background: rgba(218, 116, 51, 0.34);
+}
+.waveform-gap-range-preview > span {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: #d9efff;
+  background: rgba(19, 36, 48, 0.86);
+  white-space: nowrap;
+  font: 11px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.waveform-gap-range-preview.remove > span {
+  color: #ffe1b4;
+  background: rgba(49, 27, 14, 0.88);
+}
+/* Shift+左键框选：选框覆盖层。挂在 #waveform-content 内随行滚动，
+   z-index 与空隙范围预览同级（高于字幕块 5/6 与播放头 9），不接收指针事件。 */
+.waveform-marquee {
+  position: absolute;
+  z-index: 12;
+  box-sizing: border-box;
+  border: 1px dashed var(--selection-yellow-line);
+  background: var(--selection-yellow-soft);
+  pointer-events: none;
+}
+.waveform-cue-block {
+  --cue-color: #4f8fc9;
+  position: absolute;
+  z-index: 5;
+  bottom: 7px;
+  height: 35px;
+  min-width: 3px;
+  /* 轮廓用 outline 画在盒外：不占盒内空间、不参与指针命中，
+     避免最外 1px 边界落不到 .waveform-cue-handle 而触发整块拖动。 */
+  outline: 1px solid color-mix(in srgb, var(--cue-color) 80%, white);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cue-color) 42%, var(--wave-cue-mix));
+  color: var(--wave-cue-text);
+  cursor: grab;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 35px;
+  padding: 0 8px;
+  box-shadow: 0 1px 5px var(--wave-cue-shadow);
+  touch-action: none;
+}
+/* 多行波形中被行边界截开的同一字幕：去掉相接一侧的上下圆角，
+   让上一行末端与下一行起端看起来像一块连续字幕。 */
+.waveform-cue-block.continues-from-previous-row {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.waveform-cue-block.continues-to-next-row {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* 不在块本身使用 filter：滤镜会改变轮廓颜色，并可能影响盒外 outline 的合成。
+   用块内提亮层保留原底色/禁用条纹，文字、手柄与外轮廓不参与合成。 */
+.waveform-cue-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: white;
+  opacity: 0;
+  pointer-events: none;
+}
+.waveform-cue-block:hover::before { opacity: calc(var(--wave-hover-brightness) - 1); }
+/* 分组徽章：放在块上方的行内区域（bottom = 块高35 + 块底7 + 间距2），
+   纯视觉提示不遮挡块内文字；left 由 JS 按块位置写入 */
+.waveform-cue-badge {
+  position: absolute; bottom: calc(44px + var(--badge-stack-index, 0) * 16px); z-index: 6;
+  font-size: 11px; line-height: 1.3; padding: 1px 5px; white-space: nowrap;
+  color: var(--text-secondary); background: var(--wave-badge-bg); border-radius: 3px;
+  pointer-events: none; font-family: var(--font-mono);
+}
+.waveform-cue-badge.color { color: var(--selection-yellow); }
+.waveform-cue-badge.sticker { color: var(--wave-badge-sticker); }
+/* 单行（基础）模式块高不是固定 35px，而是 max(35px, min(72px, 40%))
+   （见 .waveform-basic .waveform-cue-block）；徽章 bottom 同步按
+   「块底 7 + 实际块高 + 间距 2」计算，否则会嵌进更高的单行块内。 */
+.waveform-basic .waveform-cue-badge {
+  bottom: calc(9px + max(35px, min(72px, 40%)) + var(--badge-stack-index, 0) * 16px);
+}
+/* 框选拖动中的命中预览：比正式选中的实线弱一档的虚线；
+   松开后由选中契约替换为 .selected。 */
+.waveform-cue-block.marquee-preview {
+  outline: 2px dashed var(--selection-yellow-line);
+}
+.waveform-cue-block.active {
+  color: var(--active-cue-fg);
+}
+/* 播放中块的轮廓让位于选中轮廓，避免覆盖 .selected 的黄色 outline。
+   带 .waveform-row 前缀把特异性追平到 (0,4,0)，与多重字幕轨道规则
+   （.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="extension"]）
+   打平后靠本规则在文件中更靠后胜出：播放中的副轨块显示播放头轮廓，
+   而不是轨道底色的 dotted 淡轮廓。 */
+.waveform-row .waveform-cue-block.active:not(.selected) {
+  outline: solid 1px var(--wave-playhead);
+}
+.waveform-cue-block.disabled {
+  opacity: 0.48;
+  color: var(--wave-disabled-text);
+  outline-color: var(--wave-disabled-border);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--wave-disabled-a) 0 5px,
+    var(--wave-disabled-b) 5px 10px
+  );
+}
+.waveform-cue-block.disabled:hover { opacity: 0.7; }
+.waveform-cue-block.dragging { cursor: grabbing; }
+/* 字词码垫底句块：不透明度压暗提示叠加态；账本 #24 后与常规句块一致
+   可拖动，光标沿用 grab（原 pointer 是“仅选中”时期的遗留）。 */
+.waveform-cue-block.word-timing-background { opacity: 0.28; cursor: grab; }
+/* 紧凑叠加仍保留选中句描边；去掉额外辉光以减少字词层视觉干扰。 */
+.waveform-pane.word-timing-mode .waveform-cue-block.word-timing-background.selected,
+.waveform-pane.word-timing-mode .waveform-cue-block.word-timing-background.selected:hover {
+  opacity: 0.45;
+  box-shadow: none;
+}
+/* 单行双语仍使用紧凑布局，整句文字留在字词块上方的可见区域。 */
+.waveform-basic .waveform-pane.word-timing-mode .waveform-cue-block.word-timing-background {
+  align-items: flex-start;
+}
+.waveform-basic .waveform-pane.word-timing-mode .waveform-cue-block.word-timing-background .waveform-cue-label {
+  margin-top: 6px;
+}
+/* 选中句的两端手柄在字词模式下仍可拖动整句边界；句块本身是背景，
+   手柄沿用句块透明度之上再提亮，保证可发现。 */
+.waveform-pane.word-timing-mode .waveform-cue-block.word-timing-background .waveform-cue-handle {
+  opacity: 0.9;
+}
+/* 字词时间码布局分级：
+   - 单行波形或行高 ≥96 的非双语行（word-timing-full）：字词条带浮在字幕块
+     正上方的独立一层（两者 y 范围不重叠、无半透明叠加），整体作为浮层叠在
+     波形背景上（波形峰形在块间/块后可见）。波形 canvas 保持全行高，几何不随
+     字词码开关变化；单行模式的字幕块保持原有厚度（max(35px, min(72px, 40%))），
+     并保持全功能——位置/样式/拖动都不降级，选中句高亮照旧。
+   - 行高不足或双语行（word-timing-compact / background）：沿用叠加显示，
+     字幕块垫底变暗、受限为点击选中（无双重描边），但垫高到 44px，顶部露出
+     一条操作区域；字词块叠在其上。 */
+:is(.waveform-basic, .waveform-multi) .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) :is(.waveform-word-block, .waveform-word-boundary).word-timing-full {
+  bottom: 44px;
+  height: 35px;
+}
+/* 多行行高的字幕块仍是固定 35px（无 40% 增高），条带保持紧贴其上；
+   单行模式的块会增高到 max(35px, min(72px, 40%))，条带 bottom 同步按
+   「块底 7 + 间距 2 + 原厚度块高」计算（与 .waveform-basic .waveform-cue-badge 同式）。 */
+.waveform-basic .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) :is(.waveform-word-block, .waveform-word-boundary).word-timing-full {
+  bottom: calc(9px + max(35px, min(72px, 40%)));
+}
+:is(.waveform-basic, .waveform-multi) .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-word-block.word-timing-full {
+  display: flex;
+  align-items: center;
+}
+:is(.waveform-basic, .waveform-multi) .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-word-block.word-timing-full .waveform-word-label {
+  line-height: normal;
+}
+.waveform-multi .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-cue-block.word-timing-background.word-timing-compact {
+  bottom: 7px;
+  height: 44px;
+  line-height: 44px;
+}
+.waveform-multi .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-word-block.word-timing-compact,
+.waveform-multi .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-word-boundary.word-timing-compact {
+  bottom: 9px;
+  height: 31px;
+}
+:is(.waveform-basic, .waveform-multi) .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-cue-badge.word-timing-full {
+  bottom: calc(81px + var(--badge-stack-index, 0) * 16px);
+}
+/* 单行模式徽章随条带上移：条带 bottom (9 + 原厚度块高) + 条带高 35 + 间距 2。 */
+.waveform-basic .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-cue-badge.word-timing-full {
+  bottom: calc(46px + max(35px, min(72px, 40%)) + var(--badge-stack-index, 0) * 16px);
+}
+.waveform-multi .waveform-pane.word-timing-mode .waveform-row:not(.multi-subtitle-row) .waveform-cue-badge {
+  bottom: calc(53px + var(--badge-stack-index, 0) * 16px);
+}
+.waveform-word-block {
+  position: absolute; z-index: 6; bottom: 9px; height: 31px; min-width: 2px;
+  padding: 2px 7px; box-sizing: border-box; border-radius: 4px;
+  outline: 1px solid color-mix(in srgb, var(--cue-color) 80%, white);
+  background: color-mix(in srgb, var(--cue-color) 65%, var(--wave-cue-mix));
+  color: var(--wave-cue-text); box-shadow: 0 1px 5px var(--wave-cue-shadow);
+  overflow: hidden; cursor: grab; touch-action: none;
+}
+.waveform-word-label {
+  display: block; font-size: 11px; line-height: 26px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.waveform-word-block.selected { outline: 2px solid var(--selection-yellow); }
+.waveform-word-block.disabled { opacity: 0.55; }
+.waveform-pane .waveform-word-block .waveform-cue-handle { cursor: ew-resize; width: min(7px, 25%); }
+.waveform-word-block.continues-from-previous-row { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.waveform-word-block.continues-to-next-row { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.waveform-word-boundary {
+  position: absolute; z-index: 7; bottom: 9px; width: 8px; height: 31px;
+  transform: translateX(-50%); cursor: ew-resize; touch-action: none;
+  background: color-mix(in srgb, var(--cue-color, #4f8fc9) 35%, transparent);
+}
+.waveform-row.multi-subtitle-row .waveform-word-block,
+.waveform-row.multi-subtitle-row .waveform-word-boundary {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) + var(--multi-subtitle-lane-gap) + 2px);
+  height: max(1px, min(31px, calc(var(--multi-subtitle-lane-height) - 12px)));
+}
+.waveform-cue-block.dragging::before { opacity: calc(var(--wave-drag-brightness) - 1); }
+.waveform-cue-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 2;
+  background: var(--wave-cue-handle);
+  cursor: ew-resize;
+}
+.waveform-cue-handle.left {
+  left: 0;
+  border-radius: 3px 0 0 3px;
+}
+.waveform-cue-handle.right {
+  right: 0;
+  border-radius: 0 3px 3px 0;
+}
+/* 手柄悬停反馈：加亮提示「这里是单侧调整手柄」，与中缝区的 hover 亮度区分。 */
+.waveform-cue-handle:hover { background: var(--wave-cue-handle-hover); }
+/* 中缝联动模式：相接侧手柄加宽，让「手柄（单侧调整）— 中缝（联动拖动）
+   — 手柄」三个命中区域都有约 7px 的稳定宽度。 */
+.waveform-cue-block.has-shared-boundary-right .waveform-cue-handle.right { width: 11px; }
+.waveform-cue-block.has-shared-boundary-left .waveform-cue-handle.left { width: 11px; }
+/* 字词紧凑叠加布局：贴缝词块手柄与中缝区同层，中缝区占中央 8px 后
+   内半段被覆盖；同款加宽到 11px（短词仍按 25% 封顶），保留约 7px
+   独立命中。等高分层（full）的中缝区在整句块层、与字词条带不同层，
+   不会加这些 class，词块手柄保持 min(7px, 25%) 原样。 */
+.waveform-word-block.has-shared-boundary-right .waveform-cue-handle.right,
+.waveform-word-block.has-shared-boundary-left .waveform-cue-handle.left { width: min(11px, 25%); }
+/* 中缝拖动区：8px 命中区覆盖精确接缝，可见线由伪元素单独绘制。 */
+.waveform-cue-boundary {
+  position: absolute;
+  bottom: 7px;
+  height: 35px;
+  width: 8px;
+  z-index: 7;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: transparent;
+  opacity: 0.5;
+  transition: opacity 0.12s ease;
+  cursor: var(--wave-shared-boundary-cursor);
+  touch-action: none;
+}
+.waveform-pane {
+  /* assets/cursors/shared-boundary.svg 内嵌副本，兼容便携 HTML；热点位于中央。 */
+  --wave-shared-boundary-cursor: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2240%22%20viewBox%3D%220%200%2040%2040%22%3E%0A%20%20%3Cpath%20transform%3D%22scale(1.25)%22%20d%3D%22M2%2016l5-4v3h4v2H7v3z%20M13%2010h2v12h-2z%20M17%2010h2v12h-2z%20M21%2015h4v-3l5%204-5%204v-3h-4z%22%20fill%3D%22%23fff%22%20stroke%3D%22%2318212b%22%20stroke-width%3D%221%22%20stroke-linejoin%3D%22round%22%2F%3E%0A%3C%2Fsvg%3E") 20 20, ew-resize;
+}
+.waveform-pane.shared-boundary-drag-active { cursor: var(--wave-shared-boundary-cursor); }
+.waveform-cue-boundary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: var(--wave-cue-boundary);
+  pointer-events: none;
+}
+.waveform-cue-boundary:hover { opacity: 0.78; }
+.waveform-cue-boundary:hover::before,
+.waveform-cue-boundary.dragging::before { background: var(--accent); }
+.waveform-cue-boundary.dragging { opacity: 0.85; }
+/* 行末中缝完整收进所属行，避免被行容器裁掉一半。 */
+.waveform-cue-boundary.at-row-end { transform: translateX(-100%); }
+.waveform-cue-boundary.at-row-end::before { left: auto; right: 0; transform: none; }
+/* 行末中缝占用最后 8px，左侧字幕的独立右手柄向行内退让，两个操作区不重叠。 */
+.waveform-cue-block.shared-boundary-at-row-end-right .waveform-cue-handle.right { right: 8px; }
+.waveform-basic .waveform-cue-boundary {
+  height: 72px;
+  min-height: 35px;
+  max-height: 40%;
+}
+.waveform-row.multi-subtitle-row .waveform-cue-boundary {
+  height: var(--multi-subtitle-lane-height);
+}
+/* 双语波形的主/副字幕共用一行容器，但中缝必须落在对应轨道上；
+   默认 bottom: 7px 只适用于底部的副字幕，会让主轨中缝被副轨覆盖。 */
+.waveform-row.multi-subtitle-row .waveform-cue-boundary[data-track="main"] {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) + var(--multi-subtitle-lane-gap));
+}
+.waveform-row.multi-subtitle-row .waveform-cue-boundary[data-track="extension"] {
+  bottom: var(--multi-subtitle-bottom-inset);
+}
+.waveform-cue-label { position: relative; z-index: 1; pointer-events: none; }
+.waveform-binding-marker {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
+}
+.waveform-cue-block.has-binding-marker .waveform-cue-label {
+  display: block;
+  max-width: calc(100% - 22px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waveform-basic .waveform-cue-block {
+  height: 72px;
+  min-height: 35px;
+  max-height: 40%;
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+  line-height: 1.35;
+}
+/* 字词码模式下单行字幕块不再另设高度：沿用上面的原厚度（几何不随
+   字词码开关变化），条带与徽章按 max(35px, min(72px, 40%)) 上移。 */
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="main"],
+.waveform-row.multi-subtitle-row .waveform-cue-block[data-track="extension"] {
+  /* 标签和字幕块都使用同一个 lane 高度；块轮廓是画在盒外的 outline，
+     不占盒内高度，右侧“主/副”标记与轨道中心始终对齐。 */
+  height: var(--multi-subtitle-lane-height);
+  box-sizing: border-box;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.waveform-row.multi-subtitle-row .waveform-cue-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 多字幕轨道的主/副背景选择器与通用 disabled 选择器同样具体；
+   disabled 放在这里确保条纹背景和禁用文字不会被轨道底色盖掉。 */
+.waveform-row.multi-subtitle-row .waveform-cue-block.disabled {
+  opacity: 0.48;
+  color: var(--wave-disabled-text);
+  outline-style: dashed;
+  outline-color: var(--wave-disabled-border);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--wave-disabled-a) 0 5px,
+    var(--wave-disabled-b) 5px 10px
+  );
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block.disabled:hover { opacity: 0.7; }
+/* Selection wins over track, disabled, and hover decoration on every lane. */
+.waveform-cue-block.selected,
+.waveform-cue-block.selected:hover,
+.waveform-row.multi-subtitle-row .waveform-cue-block.selected,
+.waveform-row.multi-subtitle-row .waveform-cue-block.selected:hover {
+  z-index: 6;
+  opacity: 1;
+  outline: 2px solid var(--selection-yellow);
+  box-shadow: 0 0 0 1px rgba(89, 62, 0, .72), 0 0 8px var(--selection-yellow-glow);
+}
+
+/* Ctrl(Cmd)+左键拖动空白处：使用和正式字幕块一致的几何形状，
+   以半透明虚影预览将要创建的时间范围。 */
+.waveform-cue-block.waveform-create-preview {
+  z-index: 12;
+  outline-style: dashed;
+  border-style: dashed;
+  outline-color: color-mix(in srgb, var(--cue-color) 80%, white);
+  background: color-mix(in srgb, var(--cue-color) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cue-color) 30%, transparent);
+  cursor: grabbing;
+  opacity: 0.62;
+  pointer-events: none;
+}
+.waveform-cue-block.waveform-create-preview > .waveform-cue-label {
+  color: var(--wave-cue-text);
+}
+
+@media (max-width: 820px) {
+  .waveform-status { display: none; }
+  .editor-workspace.layout-classic.waveform-multi {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .editor-workspace.layout-classic.waveform-multi .waveform-pane {
+    flex: 0 0 48%;
+    width: 100%;
+  }
+  .editor-workspace.layout-classic.waveform-multi .workspace-divider { display: none; }
+  .editor-workspace.layout-wave-right,
+  .editor-workspace.layout-custom {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .editor-workspace.layout-wave-right > .player-wrap,
+  .editor-workspace.layout-wave-right > .current-cue-panel,
+  .editor-workspace.layout-wave-right > .waveform-pane,
+  .editor-workspace.layout-wave-right > .cues-container { min-height: 170px; }
+  .editor-workspace.layout-wave-right .layout-resizer { display: none; }
+  .editor-workspace.layout-custom .free-layout-root { flex-direction: column; }
+  .editor-workspace.layout-custom .layout-module-slot { min-height: 170px; }
+}
+
+/* === 独立叠加字幕轨的波形块 ===
+   bottom 固定取波形行高的一半：主字幕（与其徽章）占下半区，叠加字幕占上半区，
+   互不遮挡，也直观表达「最多上下两层」。多重字幕行主字幕在上一格、副字幕
+   贴底，叠加块位于 50% 线、仍在主字幕格之上。高度与主字幕块一致（35px）。
+   行高不足 84px（50% 线放不下 35px 块）时由 JS 加 overlay-cover-mode：
+   叠加块直接盖在主字幕块上方（同位覆盖、z-index 置顶），此时不渲染叠加徽章。 */
+.waveform-cue-block.waveform-overlay-block {
+  bottom: 50%;
+  height: 35px;
+  line-height: 35px;
+  z-index: 7;
+}
+.waveform-cue-block.waveform-overlay-block.overlay-cover-mode {
+  bottom: 7px;
+}
+/* 双语行内叠加块不再使用 50% 线：双语行主块顶 = inset + 两格 lane，
+   基础波形（lane 54px、行高 192）的主块顶会越过 50% 线与叠加块重叠。
+   这里把叠加块放到主字幕格上方 1px；放不下时由 JS 回退 overlay-cover-mode。 */
+.waveform-row.multi-subtitle-row .waveform-cue-block.waveform-overlay-block {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) * 2 + 1px);
+}
+.waveform-row.multi-subtitle-row .waveform-cue-block.waveform-overlay-block.overlay-cover-mode {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) + var(--multi-subtitle-lane-gap));
+  height: var(--multi-subtitle-lane-height);
+  line-height: var(--multi-subtitle-lane-height);
+}
+/* 叠加块的徽章：挂在叠加块（bottom 50% + 高 35px）上方，避免与下半区徽章混叠。 */
+.waveform-cue-badge.waveform-overlay-cue-badge {
+  bottom: calc(50% + 37px + var(--badge-stack-index, 0) * 16px);
+}
+.waveform-row.multi-subtitle-row .waveform-cue-badge.waveform-overlay-cue-badge {
+  bottom: calc(var(--multi-subtitle-bottom-inset) + var(--multi-subtitle-lane-height) * 2 + 38px + var(--badge-stack-index, 0) * 16px);
+}
+
+/* === 通用 Marker / Region 轨道 ===
+   每个可见波形行顶部的一条独立细轨：空白点击只定位，右键显式添加标记；
+   圆点 / 区段条与字幕块、静音空隙手势完全分离，拖尾巴延长当前标记。 */
+.waveform-marker-track {
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  right: 0;
+  top: 25px;
+  height: 16px;
+  cursor: default;
+  touch-action: none;
+}
+.waveform-marker-item {
+  position: absolute;
+  top: 0;
+  height: 16px;
+  background: var(--marker-color, #3e63dd);
+  border-radius: 2px;
+  cursor: grab;
+  touch-action: none;
+}
+.waveform-marker-item.point {
+  width: 30px;
+  transform: translateX(-4px);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+.waveform-marker-point-shape {
+  position: absolute; left: 0; top: 4px; width: 8px; height: 8px; pointer-events: none;
+  background: var(--marker-color, #3e63dd);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker-color, #3e63dd) 70%, black);
+}
+.waveform-marker-item.point .waveform-marker-point-extension {
+  left: 8px;
+  right: 0;
+  width: auto;
+}
+.waveform-marker-item.point .waveform-marker-point-extension::after {
+  left: 0;
+  right: 2px;
+  top: 6px;
+  bottom: auto;
+  height: 4px;
+  width: auto;
+  border-radius: 2px;
+  background: var(--marker-color, #3e63dd);
+  opacity: 0.7;
+}
+.waveform-marker-item.point .waveform-marker-point-extension:hover::after { opacity: 1; }
+.waveform-marker-item.region {
+  height: 12px;
+  top: 2px;
+  opacity: 0.92;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--marker-color, #3e63dd) 70%, black);
+}
+.waveform-marker-item.region .waveform-marker-point-shape { left: -4px; top: 2px; }
+.waveform-marker-item .waveform-marker-label {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #fff;
+  font: 600 10px/1 var(--font-ui, sans-serif);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.waveform-marker-item.region .waveform-marker-label {
+  position: absolute;
+  inset: 0;
+  padding: 0 8px;
+}
+/* 名称显示在点及延长拖柄右侧。 */
+.waveform-marker-item.point .waveform-marker-label {
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 0;
+  height: 100%;
+  max-width: 180px;
+  text-shadow: 0 1px 2px var(--bg-wave-row, #fff), 0 0 4px var(--bg-wave-row, #fff), 0 1px 1px rgba(0, 0, 0, 0.35);
+  color: var(--text-primary, #222);
+}
+.waveform-marker-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+.waveform-marker-handle.left { left: 0; }
+.waveform-marker-handle.right { right: 0; }
+.waveform-marker-handle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  left: 3px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.waveform-marker-handle.right::after { left: auto; right: 3px; }
+.waveform-marker-item:hover { filter: brightness(1.12); }
+.waveform-marker-item.dragging,
+.waveform-marker-item.drag-preview { cursor: grabbing; }
+.waveform-marker-item.drag-preview {
+  pointer-events: none;
+  z-index: 12;
+  opacity: 0.85;
+}
+/* 复核状态统一显示在左侧；已确认保留名称，整体降低透明度。 */
+.waveform-marker-item.review-confirmed { opacity: 0.5; }
+.waveform-marker-item.review-pending::before,
+.waveform-marker-item.review-confirmed::before {
+  content: "?";
+  position: absolute;
+  right: calc(100% + 3px);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--amber, #f5a623);
+  font: 700 11px/1 var(--font-ui, sans-serif);
+  text-shadow: 0 1px 2px var(--bg-wave-row, #fff), 0 0 3px var(--bg-wave-row, #fff);
+  pointer-events: none;
+}
+.waveform-marker-item.review-confirmed::before {
+  content: "✓";
+  color: var(--green, #46a758);
+}
+/* 波形上的标记快速编辑浮层（双击 marker 打开；定位在滚动容器内）。 */
+.waveform-marker-quick-edit {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  gap: 8px;
+  width: 208px;
+  padding: 9px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2, 0 8px 24px rgba(0, 0, 0, 0.25));
+}
+.waveform-marker-quick-edit .markers-edit-field {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.waveform-marker-quick-edit input[type="text"] {
+  width: 100%;
+  padding: 5px 7px;
+  box-sizing: border-box;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.waveform-marker-quick-edit input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.waveform-marker-quick-edit .markers-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Independent navigation strip above the unchanged waveform/subtitle region. */
+.waveform-row-shell { position: absolute; left: 0; touch-action: none; }
+.waveform-row-shell .waveform-row { top: 48px; left: 0; right: 0; }
+.waveform-row-shell-basic { left: 8px; right: 8px; top: 8px; }
+.waveform-basic .waveform-row-shell .waveform-row { inset: 48px 0 auto; width: 100%; }
+.waveform-filmstrip { display: block; position: absolute; top: 0; left: 1px; width: calc(100% - 2px); height: 48px; cursor: crosshair; border-radius: var(--radius-sm); }
+
+#waveform-thumbnail-setting { margin: 8px 0; flex-wrap: wrap; }
+#waveform-thumbnail-decode-setting { margin: 8px 0; padding-left: 22px; }
+/* 状态文字仅保留给辅助技术：select 的 tooltip 已展示同样内容（
+   updateThumbnailStatus 会同步写父级 title），可见行冗余移除。
+   不用 display:none——该 span 挂 aria-live 且被 select 与补间开关
+   aria-describedby 引用，须留在可访问性树内，故用 sr-only 视觉隐藏。 */
+.waveform-thumbnail-status { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+}

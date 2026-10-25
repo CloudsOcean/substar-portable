@@ -257,6 +257,9 @@ def _submission_body(
     requested_language = (
         "" if language in {"", "auto", "automatic"} else language.split("-")[0]
     )
+    hints_value = settings.get("qwen_language_hints")
+    hints = list(dict.fromkeys(code.split("-")[0] for code in str(hints_value).split(",") if code)) if hints_value is not None else ([requested_language] if requested_language not in {"", "mixed"} else [])
+    requested_language = hints[0] if len(hints) == 1 else ""
     context = str(settings.get("context", "")).strip()
     parameters: dict[str, Any] = {"channel_id": [0]}
 
@@ -274,8 +277,10 @@ def _submission_body(
         # timestamps are always enabled; it accepts immediate vocabulary,
         # conversation context and native speaker diarization.
         parameters["diarization_enabled"] = True
-        if requested_language:
-            parameters["language_hints"] = [requested_language]
+        if model.startswith("qwen-audio-3.1-asr-flash-filetrans"):
+            parameters["keep_dialect"] = bool(settings.get("qwen_keep_dialect", False))
+        if hints:
+            parameters["language_hints"] = hints[:4]
         raw_hotwords = settings.get("hotwords")
         if isinstance(raw_hotwords, dict):
             vocabulary = {
@@ -553,6 +558,11 @@ def _parse_result(
                 units.append(unit)
     if not units:
         raise QwenCloudAsrError("Qwen 云端转写没有返回词级时间戳；请确认模型支持词级时间并已开启该选项")
+    # Interleaved speakers may be returned sentence-by-sentence. Preserve each
+    # word's speaker and sentence evidence while giving the document a time order.
+    units.sort(key=lambda unit: (float(unit["start"]), int(unit["index"])))
+    for index, unit in enumerate(units):
+        unit["index"] = index
     text = " ".join(text_parts).strip()
     if not text:
         text = " ".join(str(item["text"]) for item in units).strip()

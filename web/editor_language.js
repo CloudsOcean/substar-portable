@@ -12,7 +12,7 @@
 
   function normalizeLanguage(language) {
     const value = String(language || "").trim().toLowerCase().replaceAll("_", "-");
-    return ["zh", "ja", "ko", "en", "mixed"].find(code => value.startsWith(code)) || "";
+    return ["zh", "ja", "ko", "en", "th", "ar", "fr", "de", "es", "pt", "ru", "it", "vi", "id", "ms", "tl", "hi", "nl", "sv", "da", "fi", "no", "el", "pl", "cs", "hu", "ro", "bg", "hr", "sk", "mixed"].find(code => value.startsWith(code)) || "";
   }
   function detectLanguage(text, fallback = "en") {
     const value = String(text || "");
@@ -21,6 +21,16 @@
     if (HAN.test(value) && /[A-Za-z]/.test(value)) return "mixed";
     if (HAN.test(value)) return "zh";
     return normalizeLanguage(fallback) || "en";
+  }
+  function routedSourceUpper(text, presentation = {}) {
+    const layout = presentation.translation_layout;
+    if (!layout?.enabled) return presentation.display_order !== "target_above_source";
+    const value = String(text || "");
+    const kana = KANA.test(value), han = HAN.test(value), hangul = HANGUL.test(value);
+    const extra = [["ar", /[؀-ۿݐ-ݿࢠ-ࣿ]/], ["th", /[฀-๿]/], ["ru", /[Ѐ-ԯ]/], ["el", /[Ͱ-Ͽ]/], ["hi", /[ऀ-ॿ]/]].filter(([,pattern]) => pattern.test(value));
+    const mixed = extra.length + Number(kana || han) + Number(hangul) + Number(/[A-Za-z]/.test(value)) > 1;
+    const language = mixed ? "mixed" : extra.length ? extra[0][0] : kana ? "ja" : hangul ? "ko" : han ? "zh-CN" : "en";
+    return language === "mixed" || !layout.lower_languages.includes(language);
   }
   function resolveSourceLanguage(configuredLanguage, documentText) {
     // The user-confirmed project snapshot is the authority. Content detection
@@ -84,6 +94,7 @@
     return leftKind === "character" && rightKind === "character" ? "character" : "word";
   }
   return Object.freeze({
+    routedSourceUpper,
     normalizeLanguage,
     detectLanguage,
     resolveSourceLanguage,

@@ -1,0 +1,173 @@
+<aside class="editor-settings-window ass-style-window" id="ass-style-window" role="dialog" aria-modal="false" aria-label="ASS 样式库" aria-hidden="true">
+  <header class="editor-settings-window-header ass-style-window-header" id="ass-style-drag-handle">
+    <span class="editor-settings-window-title">ASS 样式库</span>
+    <span class="ass-style-library-status" id="ass-style-library-status" role="status" aria-live="polite">正在加载…</span>
+    <button type="button" class="editor-settings-window-close" id="ass-style-window-close" title="关闭（Esc）" aria-label="关闭 ASS 样式库">×</button>
+  </header>
+  <div class="ass-style-window-body">
+    <aside class="ass-style-library-sidebar" aria-label="样式与方案列表">
+      <div class="ass-style-section-heading"><span>样式</span><span class="ass-style-section-count" id="ass-style-count">0</span></div>
+      <div class="ass-style-list" id="ass-style-list" role="listbox" aria-label="ASS 样式"></div>
+      <div class="ass-style-list-actions">
+        <button type="button" id="ass-style-new">＋ 新建样式</button>
+        <button type="button" id="ass-style-duplicate">复制当前</button>
+      </div>
+      <div class="ass-style-section-heading ass-profile-heading"><span>ASS 输出方案</span><span class="ass-style-section-count" id="ass-profile-count">0</span></div>
+      <div class="ass-style-list" id="ass-profile-list" role="listbox" aria-label="ASS 输出方案"></div>
+      <div class="ass-style-list-actions ass-profile-list-actions">
+        <button type="button" id="ass-profile-new">＋ 新建方案</button>
+      </div>
+      <div class="ass-style-assignment-card">
+        <div class="ass-style-section-heading"><span>默认槽位</span></div>
+        <label class="ass-style-assignment-row" for="ass-ass-default-profile">ASS 导出
+          <select id="ass-ass-default-profile" aria-label="ASS 导出默认方案"></select>
+        </label>
+        <small>ASS 导出使用此方案及其动画；双语字幕的副字幕样式在该方案的表单中配置。</small>
+      </div>
+    </aside>
+    <main class="ass-style-editor" aria-live="polite">
+      <div class="ass-style-editor-empty" id="ass-style-editor-empty" hidden>从左侧选择一个样式或 ASS 方案。</div>
+      <section class="ass-style-form" id="ass-style-form" aria-labelledby="ass-style-form-title">
+        <div class="ass-style-form-header">
+          <div class="ass-style-form-heading">
+            <span class="ass-style-form-kicker">STYLE</span>
+            <div class="ass-style-form-title-row">
+              <h3 id="ass-style-form-title">样式</h3>
+              <span class="ass-style-srt-hint" id="ass-style-srt-hint" hidden>这里用来配置 SRT 字幕默认烧录样式，用于工具箱的「烧录字幕」功能。</span>
+              <span class="ass-style-preview-mode-hint" id="ass-style-preview-mode-hint" data-ass-style-preview-hint>
+                <span class="ass-style-preview-mode-hint-prefix"></span><span class="ass-style-preview-mode-hint-status"></span>
+              </span>
+            </div>
+          </div>
+          <div class="ass-style-form-header-side">
+            <span class="ass-style-builtin-badge" id="ass-style-builtin-badge" hidden>内置</span>
+            <span class="ass-style-delete-slot" id="ass-style-delete-slot">
+              <button type="button" class="ass-style-delete" id="ass-style-delete" title="删除当前样式或方案">删除当前</button>
+              <button type="button" class="ass-style-reset" id="ass-style-reset" title="恢复此内置条目的默认值" hidden>重置</button>
+            </span>
+          </div>
+        </div>
+        <div class="ass-style-fields ass-style-fields-main">
+          <label class="ass-style-field ass-style-field-wide">名称<input type="text" id="ass-style-name" data-ass-style-field="name" maxlength="80" autocomplete="off"></label>
+        </div>
+        <section class="ass-style-form-section" aria-labelledby="ass-style-basic-heading">
+          <div class="ass-style-subheading" id="ass-style-basic-heading">基础样式</div>
+          <div class="ass-style-fields ass-style-fields-basic">
+            <label class="ass-style-color-field">字幕颜色<input type="color" id="ass-style-primary-color" data-ass-style-field="primaryColor"></label>
+            <label class="ass-style-color-field"><span id="ass-style-outline-color-label">描边颜色</span><input type="color" id="ass-style-outline-color" data-ass-style-field="outlineColor"></label>
+            <label class="ass-style-field"><span id="ass-style-outline-label">描边宽度</span><input type="number" id="ass-style-outline" data-ass-style-field="outline" min="0" max="100" step="1"></label>
+            <label class="ass-style-field"><span id="ass-style-outline-opacity-label">描边不透明度</span><input type="number" id="ass-style-outline-opacity" data-ass-style-field="outlineOpacity" min="0" max="100" step="5" title="0 = 全透明，100 = 不透明；对应 ASS 颜色的 alpha 通道"><span class="ass-style-unit">%</span></label>
+          </div>
+
+          <div class="ass-style-fields ass-style-fields-extended">
+            <div class="ass-style-field ass-style-field-wide ass-style-font-field">
+              <label for="ass-style-font-name">字体</label>
+              <div class="ass-style-font-row">
+                <div class="font-combobox" id="ass-style-font-picker">
+                  <input type="text" id="ass-style-font-name" data-ass-style-field="fontName" maxlength="128" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="ass-font-name-options" placeholder="Arial">
+                  <button type="button" class="font-combobox-toggle" id="ass-style-font-toggle" tabindex="-1" aria-label="展开字体列表"></button>
+                  <div class="font-combobox-options" id="ass-font-name-options" role="listbox" aria-label="可选字体" hidden></div>
+                </div>
+                <button type="button" id="ass-style-local-font-scan" title="读取本机字体，填充字体下拉列表">读取本机字体</button>
+              </div>
+            </div>
+            <label class="ass-style-field">字号<input type="number" id="ass-style-font-size" data-ass-style-field="fontSize" min="1" max="512" step="1"></label>
+            <label class="ass-style-field">字距<input type="number" id="ass-style-spacing" data-ass-style-field="spacing" min="-100" max="100" step="1"><span class="ass-style-unit">px</span></label>
+            <label class="toggle ass-style-check"><input type="checkbox" id="ass-style-bold" data-ass-style-field="bold"> 加粗</label>
+            <label class="ass-style-color-field" id="ass-style-secondary-color-field" hidden title="次色仅在 \k 卡拉 OK 标签中使用，当前未支持">次色<input type="color" id="ass-style-secondary-color" data-ass-style-field="secondaryColor"></label>
+            <label class="toggle ass-style-check"><input type="checkbox" id="ass-style-italic" data-ass-style-field="italic"> 斜体</label>
+            <label class="toggle ass-style-check"><input type="checkbox" id="ass-style-underline" data-ass-style-field="underline"> 下划线</label>
+            <label class="toggle ass-style-check"><input type="checkbox" id="ass-style-strike-out" data-ass-style-field="strikeOut"> 删除线</label>
+          </div>
+          <div class="ass-style-subheading ass-style-subheading-nested" id="ass-style-border-shadow-heading">边框与阴影</div>
+          <div class="ass-style-fields ass-style-fields-border-shadow" aria-labelledby="ass-style-border-shadow-heading">
+            <label class="ass-style-field">边框样式<select id="ass-style-border-style" data-ass-style-field="borderStyle"><option value="1">描边</option><option value="3">背景底框</option></select></label>
+            <label class="ass-style-color-field">阴影/背景<input type="color" id="ass-style-back-color" data-ass-style-field="backColor"></label>
+            <label class="ass-style-field">阴影距离<input type="number" id="ass-style-shadow" data-ass-style-field="shadow" min="0" max="100" step="1"></label>
+            <label class="ass-style-field">阴影不透明度<input type="number" id="ass-style-back-opacity" data-ass-style-field="backOpacity" min="0" max="100" step="5" title="0 = 全透明（阴影/底框消失），100 = 不透明；对应 ASS 颜色的 alpha 通道"><span class="ass-style-unit">%</span></label>
+          </div>
+          <div class="ass-style-layout-row">
+            <fieldset class="ass-style-alignment-field" id="ass-style-alignment">
+              <legend>对齐</legend>
+              <div class="ass-style-alignment-matrix" role="radiogroup" aria-label="ASS 对齐位置">
+                <label title="左上"><input type="radio" name="ass-style-alignment" value="7" data-ass-style-field="alignment" aria-label="左上"><span aria-hidden="true">↖</span></label>
+                <label title="中上"><input type="radio" name="ass-style-alignment" value="8" data-ass-style-field="alignment" aria-label="中上"><span aria-hidden="true">↑</span></label>
+                <label title="右上"><input type="radio" name="ass-style-alignment" value="9" data-ass-style-field="alignment" aria-label="右上"><span aria-hidden="true">↗</span></label>
+                <label title="左中"><input type="radio" name="ass-style-alignment" value="4" data-ass-style-field="alignment" aria-label="左中"><span aria-hidden="true">←</span></label>
+                <label title="中中"><input type="radio" name="ass-style-alignment" value="5" data-ass-style-field="alignment" aria-label="中中"><span aria-hidden="true">•</span></label>
+                <label title="右中"><input type="radio" name="ass-style-alignment" value="6" data-ass-style-field="alignment" aria-label="右中"><span aria-hidden="true">→</span></label>
+                <label title="左下"><input type="radio" name="ass-style-alignment" value="1" data-ass-style-field="alignment" aria-label="左下"><span aria-hidden="true">↙</span></label>
+                <label title="中下"><input type="radio" name="ass-style-alignment" value="2" data-ass-style-field="alignment" aria-label="中下"><span aria-hidden="true">↓</span></label>
+                <label title="右下"><input type="radio" name="ass-style-alignment" value="3" data-ass-style-field="alignment" aria-label="右下"><span aria-hidden="true">↘</span></label>
+              </div>
+            </fieldset>
+            <div class="ass-style-fields ass-style-fields-margins">
+              <label class="ass-style-field">左边距<input type="number" id="ass-style-margin-l" data-ass-style-field="marginL" min="0" max="9999" step="1"></label>
+              <label class="ass-style-field">右边距<input type="number" id="ass-style-margin-r" data-ass-style-field="marginR" min="0" max="9999" step="1"></label>
+              <label class="ass-style-field">垂直边距<input type="number" id="ass-style-margin-v" data-ass-style-field="marginV" min="0" max="9999" step="1"></label>
+            </div>
+            <div class="ass-style-fields ass-style-fields-scale-stack">
+              <label class="ass-style-field">横向缩放<input type="number" id="ass-style-scale-x" data-ass-style-field="scaleX" min="0" max="1000" step="1"><span class="ass-style-unit">%</span></label>
+              <label class="ass-style-field">纵向缩放<input type="number" id="ass-style-scale-y" data-ass-style-field="scaleY" min="0" max="1000" step="1"><span class="ass-style-unit">%</span></label>
+              <label class="ass-style-field">旋转<input type="number" id="ass-style-angle" data-ass-style-field="angle" min="-360" max="360" step="1"><span class="ass-style-unit">°</span></label>
+            </div>
+          </div>
+        </section>
+        <div class="ass-style-preview-card"><span class="ass-style-preview-label">ASS 预览</span><canvas id="ass-style-preview-sample" aria-label="字幕样式示例"></canvas></div>
+        <p class="ass-style-preview-actions editor-settings-hint" hidden><span>如果想要查看当前画面实际的 ASS 字幕效果，可以</span> <button type="button" class="ass-preview-link" id="ass-style-frame-preview-open" hidden>打开 ASS 实际画面预览窗口</button>。</p>
+      </section>
+      <section class="ass-style-form" id="ass-profile-form" aria-labelledby="ass-profile-form-title" hidden>
+        <div class="ass-style-form-header">
+          <div><span class="ass-style-form-kicker">PROFILE</span><h3 id="ass-profile-form-title">ASS 输出方案</h3></div>
+          <div class="ass-style-form-header-side">
+            <span class="ass-style-builtin-badge" id="ass-profile-builtin-badge" hidden>内置</span>
+            <span class="ass-style-delete-slot" id="ass-profile-delete-slot"></span>
+          </div>
+        </div>
+        <small class="ass-profile-effects-hint" id="ass-profile-effects-hint">在这里配置的覆盖标签会应用到每一句字幕上，例如批量淡入淡出。</small>
+        <div class="ass-style-fields ass-style-fields-main">
+          <label class="ass-style-field ass-style-field-wide">名称<input type="text" id="ass-profile-name" data-ass-profile-field="name" maxlength="80" autocomplete="off"></label>
+          <label class="ass-style-field ass-style-field-wide">主字幕样式<select id="ass-profile-style-id" data-ass-profile-field="styleId"></select></label>
+          <label class="ass-style-field ass-style-field-wide" id="ass-profile-extension-style-field" hidden>副字幕默认样式<select id="ass-profile-extension-style" aria-label="副字幕默认样式"></select></label>
+        </div>
+        <div class="ass-style-subheading">逐句动画（导出时自动添加到每一句）</div>
+        <div class="ass-animation-card">
+          <label class="toggle ass-animation-title"><input type="checkbox" id="ass-animation-fad-enabled" data-ass-animation="fad.enabled"> <code>\fad</code> 淡入淡出</label>
+          <div class="ass-animation-fields"><label>淡入<input type="number" id="ass-animation-fad-in" data-ass-animation="fad.inMs" min="0" max="60000" step="10"><span>ms</span></label><label>淡出<input type="number" id="ass-animation-fad-out" data-ass-animation="fad.outMs" min="0" max="60000" step="10"><span>ms</span></label></div>
+          <small>最常用的整句淡入淡出，预览和导出均支持。</small>
+        </div>
+        <div class="ass-animation-card">
+          <label class="toggle ass-animation-title"><input type="checkbox" id="ass-animation-pop-enabled" data-ass-animation="pop.enabled"> 放大出现</label>
+          <div class="ass-animation-fields"><label>起点倍率<input type="number" id="ass-animation-pop-from" data-ass-animation="pop.fromScale" min="1" max="10" step="0.1"><span>×</span></label><label>入场<input type="number" id="ass-animation-pop-in" data-ass-animation="pop.inMs" min="0" max="60000" step="10"><span>ms</span></label><label>加速度<input type="number" id="ass-animation-pop-accel" data-ass-animation="pop.accel" min="0.01" max="100" step="0.1"></label></div>
+          <small>文字从起点倍率缩小落定到正常字号。预览和导出使用相同的 ASS 动画标签。</small>
+        </div>
+        <details class="ass-animation-advanced-group" id="ass-animation-advanced-group">
+          <summary>进阶动画</summary>
+          <div>
+            <div class="ass-animation-card">
+              <label class="toggle ass-animation-title"><input type="checkbox" id="ass-animation-fade-enabled" data-ass-animation="fade.enabled"> <code>\fade</code> 复杂淡入淡出</label>
+              <div class="ass-animation-fields ass-animation-fields-alpha"><label>α1<input type="number" data-ass-animation="fade.alpha1" min="0" max="255" step="1"></label><label>α2<input type="number" data-ass-animation="fade.alpha2" min="0" max="255" step="1"></label><label>α3<input type="number" data-ass-animation="fade.alpha3" min="0" max="255" step="1"></label></div>
+              <div class="ass-animation-fields ass-animation-fields-times"><label>t1<input type="number" data-ass-animation="fade.t1" min="0" max="60000" step="10"><span>ms</span></label><label>t2<input type="number" data-ass-animation="fade.t2" min="0" max="60000" step="10"><span>ms</span></label><label>t3<input type="number" data-ass-animation="fade.t3" min="0" max="60000" step="10"><span>ms</span></label><label>t4<input type="number" data-ass-animation="fade.t4" min="0" max="60000" step="10"><span>ms</span></label></div>
+            </div>
+            <div class="ass-animation-card">
+              <label class="toggle ass-animation-title"><input type="checkbox" id="ass-animation-move-enabled" data-ass-animation="move.enabled"> <code>\move</code> 位移</label>
+              <div class="ass-animation-fields ass-animation-fields-times"><label>x1<input type="number" data-ass-animation="move.x1" min="-65535" max="65535" step="1"></label><label>y1<input type="number" data-ass-animation="move.y1" min="-65535" max="65535" step="1"></label><label>x2<input type="number" data-ass-animation="move.x2" min="-65535" max="65535" step="1"></label><label>y2<input type="number" data-ass-animation="move.y2" min="-65535" max="65535" step="1"></label></div>
+              <div class="ass-animation-fields ass-animation-fields-pair"><label>t1<input type="number" data-ass-animation="move.t1" min="0" max="60000" step="10"><span>ms</span></label><label>t2<input type="number" data-ass-animation="move.t2" min="0" max="60000" step="10"><span>ms</span></label></div>
+            </div>
+            <div class="ass-animation-card">
+              <label class="toggle ass-animation-title"><input type="checkbox" id="ass-animation-t-enabled" data-ass-animation="t.enabled"> <code>\t</code> 变换</label>
+              <div class="ass-animation-fields ass-animation-fields-alpha"><label>开始<input type="number" data-ass-animation="t.startMs" min="0" max="60000" step="10"><span>ms</span></label><label>结束<input type="number" data-ass-animation="t.endMs" min="0" max="60000" step="10"><span>ms</span></label><label>加速度<input type="number" data-ass-animation="t.accel" min="0.01" max="100" step="0.1"></label></div>
+              <label class="ass-style-field ass-style-transform-tags">自定义 ASS 标签（不含大括号）<input type="text" data-ass-animation="t.tags" maxlength="512" placeholder="例如 \fs36\bord4；不要填写大括号" autocomplete="off" spellcheck="false"></label>
+              <small>实时预览与导出均由 libass 渲染。</small>
+            </div>
+          </div>
+        </details>
+        <div class="ass-style-preview-card ass-profile-preview-card"><span class="ass-style-preview-label">当前方案</span><span id="ass-profile-preview-summary">未选择</span></div>
+      </section>
+    </main>
+  </div>
+  <footer class="ass-style-window-footer">
+    <label class="ass-host-scope">应用范围<select id="maw-ass-scope"><option value="project">项目默认</option><option value="selection">选中的字幕</option></select></label>
+    <div><button type="button" id="ass-style-save" class="primary">保存样式库</button><button type="button" id="maw-ass-export">导出 ASS</button><button type="button" id="maw-ass-apply" class="primary">应用到字幕</button><button type="button" id="ass-style-window-close-footer">取消</button></div>
+  </footer>
+</aside>

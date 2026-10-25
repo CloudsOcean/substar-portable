@@ -12,9 +12,6 @@
   // versioned key so a newly installed build never revives an older build's
   // browser draft merely because both launch on 127.0.0.1:8769.
   const TASK_CONFIG_STORAGE_KEY = "substar.split.task-config.v3";
-  const TUTORIAL_STATUS_KEY = "substar.split.tutorial.v1";
-  const TUTORIAL_AUDIO_URL = "/api/examples/tutorials/reference-script-v1/assets/media";
-  const TUTORIAL_REFERENCE_URL = "/api/examples/tutorials/reference-script-v1/assets/reference";
   const state = {
     videos: [],
     references: [],
@@ -368,6 +365,7 @@
     }
     button.disabled = true;
     button.textContent = "正在填写…";
+    status.setAttribute("aria-busy", "true");
     status.textContent = "AI 正在生成 Qwen Prompt 和多语言临时热词…";
     try {
       const generated = await api("/api/qwen-assist", {
@@ -394,6 +392,7 @@
     } finally {
       button.disabled = false;
       button.textContent = "直接生成";
+      status.setAttribute("aria-busy", "false");
     }
   }
 
@@ -403,8 +402,10 @@
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     return {
+      generate_thumbnails: $("#generateThumbnailsInput").checked,
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
+      translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
       glossary_id: $("#glossaryInput").value,
       asr_glossary_ids: glossaryInjection?.ids() || [],
       creation_workflow: workflow,
@@ -419,7 +420,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
-      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
+      other_hard_limit: Number($("#otherLimitInput")?.value || 55),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       qwen_ai_brief: $("#qwenAiBriefInput").value,
@@ -489,374 +490,24 @@
     }
   }
 
-  function syncLanguageRatioThreshold() {
-    $("#languageRatioThresholdValue").value = `${Number($("#languageRatioThresholdInput").value)}%`;
-  }
 
-  const TUTORIAL_CONTROL_IDS = [
-    "languageInput", "targetLanguageInput", "glossaryInput", "splitWorkflowInput", "referenceBreakSymbolsInput",
-    "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "languageRatioThresholdInput", "japaneseLimitInput", "koreanLimitInput",
-  ];
-
-  const TUTORIAL_STEPS = [
-    {
-      target: "#qwenQuickCard", title: "连接 QWEN 听写服务",
-      description: "听写模块负责将音视频转换成文字信息。输入百炼 API Key，然后点击“测试连接”。",
-      link: { label: "点击注册并获取 API Key", href: "https://bailian.console.aliyun.com/cn-beijing#/home" },
-    },
-    {
-      target: "#glmQuickCard", title: "连接智谱 GLM 文本服务",
-      description: "文本模块负责语义切分，以及后续翻译、校准和审阅。输入智谱 API Key，然后点击“测试连接”。",
-      link: { label: "点击注册并获取 API Key", href: "https://bigmodel.cn/" },
-    },
-    {
-      target: "#videoDropZone", title: "载入教程音频",
-      description: "点击“载入教程音频”，将内置案例添加到当前任务。",
-      primary: "载入教程音频",
-    },
-    {
-      target: "#languageInput", title: "将原文语言改为中文",
-      description: "案例音频使用中文。打开“原文语言”，选择“中文”。",
-    },
-    {
-      target: "#targetLanguageInput", title: "将目标语言改为英文",
-      description: "本次案例将生成英文字幕。打开“目标语言”，选择“英文”。",
-    },
-    {
-      target: ".language-limit-settings", title: "将中文字符上限改为 16",
-      description: "字符数上限控制单条字幕的长度。把“中文”从 25 改为 16。",
-    },
-    {
-      target: "#splitWorkflowInput", title: "选择参考文稿辅助切分",
-      description: "仅使用听写结果：直接沿用听写分段\nAI 辅助切分：由 AI 按语义重新分段\n参考文稿辅助切分：结合听写时间信息和参考文稿，本案例请选择此项",
-    },
-    {
-      target: "#referenceRow", title: "载入教程参考文稿",
-      description: "参考文稿用于校正听写文字并提供标点断点。点击“载入教程参考稿”。",
-      primary: "载入教程参考稿",
-    },
-    {
-      target: "#startButton", title: "创建字幕项目",
-      description: "音频、参考文稿和任务配置已准备完成。点击页面中的“创建项目”。",
-    },
-    {
-      target: ".pipeline-card", title: "查看任务进度",
-      description: "任务会在后台继续运行。你可以离开本页，失败时这里会显示具体阶段。",
-      primary: "完成切分页教程",
-    },
-  ];
-
-  const ADVANCED_TUTORIAL_STEPS = [
-    {
-      target: ".language-limit-settings", title: "恢复中文字符上限",
-      description: "初级教程会把中文字符数上限改为 16。开始进阶流程前，请展开字符数上限设置，把中文改回 25；设置正确后教程会自动继续。",
-    },
-    {
-      target: "#splitWorkflowInput", title: "AI 辅助切分",
-      description: "进阶教程直接使用预存的英文 ASR 材料，并载入已经通过校验的 AI 切分结果。这里展示正式工作流的阶段边界，不重复文件选择和基础设置。",
-      primary: "模拟执行 AI 切分",
-    },
-    {
-      target: ".pipeline-card", title: "载入切分阶段快照",
-      description: "正在依次载入 ASR 材料、语义分组和 34 条 Cue。此过程只读取软件内置案例，不会调用 Qwen 或 DeepSeek。",
-    },
-    {
-      target: ".recent-section", title: "切分完成，进入 AI 编辑链",
-      description: "切分结果已经按正式 EditorDocument 契约注册。下一页将依次展示 AI 校准、AI 翻译和 AI 审阅，每一步同样载入预存结果。",
-      primary: "进入进阶教程编辑页",
-    },
-  ];
-
-  function currentTutorialSteps() {
-    return state.tutorial.kind === "advanced" ? ADVANCED_TUTORIAL_STEPS : TUTORIAL_STEPS;
-  }
-
-  function tutorialSnapshot() {
-    return {
-      controls: Object.fromEntries(TUTORIAL_CONTROL_IDS.map((id) => [id, $(`#${id}`).value])),
-      videos: [...state.videos],
-      references: [...state.references],
-      storedTaskConfig: localStorage.getItem(TASK_CONFIG_STORAGE_KEY),
-    };
-  }
-
-  function clearTutorialTarget() {
-    document.querySelectorAll(".tutorial-target").forEach((node) => node.classList.remove("tutorial-target"));
-  }
-
-  function restoreTutorialSnapshot(snapshot) {
-    if (!snapshot) return;
-    for (const [id, value] of Object.entries(snapshot.controls || {})) {
-      const control = $(`#${id}`);
-      if (control) control.value = value;
-    }
-    if (snapshot.storedTaskConfig === null) localStorage.removeItem(TASK_CONFIG_STORAGE_KEY);
-    else localStorage.setItem(TASK_CONFIG_STORAGE_KEY, snapshot.storedTaskConfig);
-    state.videos = [...(snapshot.videos || [])];
-    state.references = [...(snapshot.references || [])];
-    const total = state.videos.reduce((sum, file) => sum + file.size, 0);
-    $("#videoFileChip").textContent = state.videos.length === 1
-      ? `${state.videos[0].name} · ${formatBytes(total)}`
-      : state.videos.length ? `${state.videos.length} 个素材 · ${formatBytes(total)}` : "";
-    $("#videoFileChip").classList.toggle("hidden", !state.videos.length);
-    $("#referenceFileName").textContent = state.references.length === 0
-      ? "未添加" : state.references.length === 1 ? state.references[0].name : `${state.references.length} 份参考文稿`;
-    syncWorkflowControl();
-    validateForm();
-  }
-
-  function exitSplitTutorial({ completed = false } = {}) {
-    const snapshot = state.tutorial.snapshot;
-    const shouldRestore = !completed && !state.tutorial.submitted;
-    state.tutorial.active = false;
-    state.tutorial.kind = "beginner";
-    state.tutorial.step = 0;
-    state.tutorial.tests = { qwen: false, glm: false };
-    state.tutorial.snapshot = null;
-    clearTutorialTarget();
-    $("#splitTutorialLayer").classList.add("hidden");
-    $("#splitTutorialLayer").setAttribute("aria-hidden", "true");
-    if (shouldRestore) restoreTutorialSnapshot(snapshot);
-    if (completed) localStorage.setItem(TUTORIAL_STATUS_KEY, "completed");
-    syncPrimaryPanel();
-  }
-
-  function syncTutorialEntry() {
-    const unseen = !localStorage.getItem(TUTORIAL_STATUS_KEY);
-    const muted = localStorage.getItem("substar.split.tutorial.pulse-dismissed") === "1";
-    $("#creationTutorialActions").classList.toggle("tutorial-pulse", unseen && !muted);
-    $("#dismissTutorialPulse").hidden = !unseen || muted;
-  }
-
-  function markTutorialStarted() {
-    if (!localStorage.getItem(TUTORIAL_STATUS_KEY)) localStorage.setItem(TUTORIAL_STATUS_KEY, "started");
-    $("#creationTutorialActions").open = false;
-    syncTutorialEntry();
-  }
-
-  function startSplitTutorial() {
-    if (!state.settings) return toast("正在读取配置，请稍候再开始教程");
-    markTutorialStarted();
-    state.tutorial.snapshot = tutorialSnapshot();
-    state.tutorial.active = true;
-    state.tutorial.kind = "beginner";
-    state.tutorial.step = 0;
-    state.tutorial.submitted = false;
-    state.tutorial.tests = { qwen: false, glm: false };
-    state.videos = [];
-    state.references = [];
-    $("#videoFileChip").textContent = "";
-    $("#videoFileChip").classList.add("hidden");
-    $("#referenceFileName").textContent = "未添加";
-    $("#languageInput").value = "en";
-    $("#targetLanguageInput").value = "zh-CN";
-    $("#splitWorkflowInput").value = "disabled";
-    $("#chineseLimitInput").value = "25";
-    syncReferenceBreakPreset();
-    markSettingsDirty();
-    $("#splitTutorialLayer").classList.remove("hidden");
-    $("#splitTutorialLayer").setAttribute("aria-hidden", "false");
-    syncPrimaryPanel();
-    renderSplitTutorial();
-  }
-
-  function startAdvancedSplitTutorial() {
-    if (!state.settings) return toast("正在读取配置，请稍候再开始教程");
-    markTutorialStarted();
-    state.tutorial.snapshot = tutorialSnapshot();
-    state.tutorial.active = true;
-    state.tutorial.kind = "advanced";
-    state.tutorial.step = 0;
-    state.tutorial.submitted = false;
-    state.tutorial.projectId = "";
-    $("#languageInput").value = "en";
-    $("#targetLanguageInput").value = "zh-CN";
-    $("#splitWorkflowInput").value = "one_step";
-    syncWorkflowControl();
-    $("#splitTutorialLayer").classList.remove("hidden");
-    $("#splitTutorialLayer").setAttribute("aria-hidden", "false");
-    renderSplitTutorial();
-    maybeAdvanceTutorial();
-  }
-
-  async function launchAdvancedTutorial() {
-    const primary = $("#splitTutorialPrimary");
-    primary.disabled = true;
-    primary.textContent = "正在载入切分结果…";
-    state.tutorial.step = 2;
-    renderSplitTutorial();
-    try {
-      await new Promise(resolve => window.setTimeout(resolve, 650));
-      const launch = await api("/api/examples/tutorials/advanced-ai-v1/launch", {method:"POST"});
-      state.tutorial.projectId = launch.project_id;
-      state.tutorial.submitted = true;
-      advanceSplitTutorial(3);
-      await refreshJobs();
-    } catch (error) {
-      toast(`进阶教程载入失败：${errorMessage(error)}`);
-      state.tutorial.step = 1;
-      renderSplitTutorial();
-    } finally {
-      primary.disabled = false;
-    }
-  }
-
-  function positionSplitTutorial() {
-    if (!state.tutorial.active) return;
-    clearTutorialTarget();
-    const step = currentTutorialSteps()[state.tutorial.step];
-    const target = document.querySelector(step.target);
-    if (!target) return;
-    target.classList.add("tutorial-target");
-    const rect = target.getBoundingClientRect();
-    const pad = 6;
-    const spotlight = $("#splitTutorialSpotlight");
-    spotlight.style.left = `${Math.max(6, Math.round(rect.left - pad))}px`;
-    spotlight.style.top = `${Math.max(6, Math.round(rect.top - pad))}px`;
-    spotlight.style.width = `${Math.round(rect.width + pad * 2)}px`;
-    spotlight.style.height = `${Math.round(rect.height + pad * 2)}px`;
-    const card = $("#splitTutorialCard");
-    if (window.innerWidth <= 900) {
-      card.dataset.placement = "mobile";
-      return;
-    }
-    const margin = 18;
-    const gap = 20;
-    const cardWidth = card.offsetWidth;
-    const cardHeight = card.offsetHeight;
-    const clamp = (value, min, max) => Math.min(Math.max(value, min), Math.max(min, max));
-    const centeredTop = clamp(rect.top + (rect.height - cardHeight) / 2, margin, window.innerHeight - cardHeight - margin);
-    const centeredLeft = clamp(rect.left + (rect.width - cardWidth) / 2, margin, window.innerWidth - cardWidth - margin);
-    const candidates = {
-      right: { x: rect.right + gap, y: centeredTop },
-      left: { x: rect.left - gap - cardWidth, y: centeredTop },
-      below: { x: centeredLeft, y: rect.bottom + gap },
-      above: { x: centeredLeft, y: rect.top - gap - cardHeight },
-    };
-    const horizontalOrder = rect.left + rect.width / 2 > window.innerWidth / 2
-      ? ["left", "right"] : ["right", "left"];
-    const order = [...horizontalOrder, "below", "above"];
-    const fits = ({ x, y }) => x >= margin && y >= margin
-      && x + cardWidth <= window.innerWidth - margin
-      && y + cardHeight <= window.innerHeight - margin;
-    let placement = order.find((name) => fits(candidates[name]));
-    if (!placement) {
-      const available = {
-        right: window.innerWidth - rect.right,
-        left: rect.left,
-        below: window.innerHeight - rect.bottom,
-        above: rect.top,
-      };
-      placement = order.reduce((best, name) => available[name] > available[best] ? name : best, order[0]);
-    }
-    const chosen = candidates[placement];
-    card.style.left = `${Math.round(clamp(chosen.x, margin, window.innerWidth - cardWidth - margin))}px`;
-    card.style.top = `${Math.round(clamp(chosen.y, margin, window.innerHeight - cardHeight - margin))}px`;
-    card.style.right = "auto";
-    card.style.bottom = "auto";
-    card.dataset.placement = placement;
-  }
-
-  function renderSplitTutorial() {
-    if (!state.tutorial.active) return;
-    const steps = currentTutorialSteps();
-    const step = steps[state.tutorial.step];
-    $("#splitTutorialProgress").textContent = `${state.tutorial.kind === "advanced" ? "进阶教程" : "初级教程"} · ${state.tutorial.step + 1} / ${steps.length}`;
-    $("#splitTutorialTitle").textContent = step.title;
-    $("#splitTutorialDescription").textContent = step.description;
-    const tutorialLink = $("#splitTutorialLink");
-    tutorialLink.classList.toggle("hidden", !step.link);
-    tutorialLink.textContent = step.link?.label || "";
-    tutorialLink.href = step.link?.href || "#";
-    const primary = $("#splitTutorialPrimary");
-    primary.classList.toggle("hidden", !step.primary);
-    primary.textContent = step.primary || "";
-    $("#splitTutorialSecondary").classList.add("hidden");
-    if ((state.tutorial.kind === "beginner" && state.tutorial.step === 5)
-      || (state.tutorial.kind === "advanced" && state.tutorial.step === 0)) {
-      $(".language-limit-settings").open = true;
-    }
-    syncPrimaryPanel();
-    const target = document.querySelector(step.target);
-    target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
-    window.setTimeout(positionSplitTutorial, 260);
-    $("#splitTutorialCard").focus({ preventScroll: true });
-  }
-
-  function advanceSplitTutorial(nextStep = state.tutorial.step + 1) {
-    if (!state.tutorial.active || nextStep >= currentTutorialSteps().length) return;
-    state.tutorial.step = nextStep;
-    renderSplitTutorial();
-  }
-
-  function maybeAdvanceTutorial() {
-    if (!state.tutorial.active) return;
-    if (state.tutorial.kind === "advanced") {
-      if (state.tutorial.step === 0 && Number($("#chineseLimitInput").value) === 25) {
-        window.setTimeout(() => {
-          if (state.tutorial.active
-            && state.tutorial.kind === "advanced"
-            && state.tutorial.step === 0
-            && Number($("#chineseLimitInput").value) === 25) {
-            advanceSplitTutorial(1);
-          }
-        }, 180);
-      }
-      return;
-    }
-    if (state.tutorial.kind !== "beginner") return;
-    const step = state.tutorial.step;
-    const complete = [
-      state.tutorial.tests.qwen,
-      state.tutorial.tests.glm,
-      state.videos.some((file) => file.name === "教程音频.mp3"),
-      $("#languageInput").value === "zh",
-      $("#targetLanguageInput").value === "en",
-      Number($("#chineseLimitInput").value) === 16,
-      $("#splitWorkflowInput").value === "reference_script",
-      state.references.some((file) => file.name === "教程参考文稿.txt"),
-      false,
-      false,
-    ][step];
-    if (complete) window.setTimeout(() => {
-      if (state.tutorial.active && state.tutorial.step === step) advanceSplitTutorial();
-    }, 180);
-  }
-
-  async function loadTutorialAsset(kind) {
-    const primary = $("#splitTutorialPrimary");
-    primary.disabled = true;
-    primary.textContent = "正在载入…";
-    try {
-      const audio = kind === "audio";
-      const response = await fetch(audio ? TUTORIAL_AUDIO_URL : TUTORIAL_REFERENCE_URL);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const blob = await response.blob();
-      const file = new File([blob], audio ? "教程音频.mp3" : "教程参考文稿.txt", {
-        type: audio ? "audio/mpeg" : "text/plain",
-      });
-      if (audio) chooseVideo([file]);
-      else chooseReferences([file]);
-      maybeAdvanceTutorial();
-    } catch (error) {
-      toast(`教程素材载入失败：${errorMessage(error)}`);
-      renderSplitTutorial();
-    } finally {
-      primary.disabled = false;
-    }
-  }
+  // Archived tutorials no longer attach UI, listeners or startup flows.
+  function syncTutorialEntry() {}
+  function maybeAdvanceTutorial() {}
 
   function applySharedSettings(settings) {
+    window.SubstarTranslationLayout.configureModel(settings.qwen_cloud_model);
     state.settings = settings;
     const effective = {...settings, ...(state.taskConfigLoaded ? taskConfigFromControls() : storedTaskConfig())};
     $("#recognitionProfileInput").value = settings.recognition_profile_id || "faster_whisper_native";
     if (!$("#recognitionProfileInput").value) $("#recognitionProfileInput").selectedIndex = 0;
-    $("#languageInput").value = ["Auto", "zh", "en", "mixed", "ja", "ko"].includes(effective.language)
+    $("#languageInput").value = ["Auto", "zh", "mixed", ...window.SubstarTranslationLayout.languages.map(([code]) => code)].includes(effective.language)
       ? effective.language : "Auto";
     const configuredTarget = effective.target_language_mode || "zh-CN";
-    $("#targetLanguageInput").value = ["zh-CN", "en", "ja", "ko"].includes(configuredTarget)
+    $("#targetLanguageInput").value = window.SubstarTranslationLayout.languages.some(([code]) => code === configuredTarget)
       ? configuredTarget
       : "zh-CN";
+    window.SubstarTranslationLayout.write("splitLanguageLayout", effective.translation_layout || {});
     // The split page currently uses the global glossary only. Keep the hidden
     // field blank so older saved task settings cannot silently restore a
     // project glossary after the selector has been removed from the UI.
@@ -864,8 +515,7 @@
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
     $("#chineseLimitInput").value = effective.chinese_hard_limit || 20;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
-    $("#languageRatioThresholdInput").value = effective.language_ratio_threshold_percent ?? 20;
-    syncLanguageRatioThreshold();
+    if ($("#otherLimitInput")) $("#otherLimitInput").value = effective.other_hard_limit ?? 55;
     $("#japaneseLimitInput").value = effective.japanese_hard_limit || 24;
     $("#koreanLimitInput").value = effective.korean_hard_limit || 28;
     $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
@@ -883,6 +533,7 @@
     if (state.edition === "slim") {
       $("#recognitionProfileInput").value = "qwen_cloud";
     }
+    $("#generateThumbnailsInput").checked = effective.generate_thumbnails === true;
     $("#chunkSecondsInput").value = settings.segmentation_chunk_seconds || 90;
     $("#workersInput").value = settings.translation_workers || 16;
     $("#retryInput").value = settings.http_retry_attempts ?? 3;
@@ -1054,6 +705,7 @@
         $("#subtitleFormat").value=result.format; $("#subtitleFirstTrack").value=result.firstTrack; $("#subtitleSeparator").value=result.separator;
         if(result.source) $("#languageInput").value=result.source;
         if(result.target) $("#targetLanguageInput").value=result.target;
+        window.SubstarTranslationLayout.write("splitLanguageLayout", {});
       } catch(e) {referenceParseError = errorMessage(e); toast(referenceParseError);}
     }
     referenceParsing = false;
@@ -1116,6 +768,7 @@
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     const result = {
+      generate_thumbnails: $("#generateThumbnailsInput").checked,
       active_model_provider: current.active_model_provider,
       translation_api_base_url: current.translation_api_base_url,
       translation_api_model: current.translation_api_model,
@@ -1124,6 +777,7 @@
       language: $("#languageInput").value,
       alignment_language: alignmentLanguage($("#languageInput").value),
       target_language_mode: $("#targetLanguageInput").value,
+      translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
       glossary_id: $("#glossaryInput").value,
       asr_glossary_ids: glossaryInjection?.ids() || [],
       segmentation_enabled: segmentationEnabled,
@@ -1134,7 +788,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
-      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
+      other_hard_limit: Number($("#otherLimitInput")?.value || 55),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       context: $("#qwenPromptInput").value,
@@ -1177,7 +831,6 @@
       } else form.append("reference_document", references[0], references[0].name);
     }
     form.append("settings_json", JSON.stringify(automaticSettings()));
-    if (state.tutorial.active && state.tutorial.kind === "beginner") form.append("tutorial_case_id", "reference-script-v1");
     return api("/api/project-creations", {
       method: "POST",
       headers: {"Idempotency-Key": state.submissionKey},
@@ -1198,10 +851,6 @@
       clearSubmission();
       toast(`${mediaFiles.length} 个任务已进入流水线`);
       await refreshJobs();
-      if (state.tutorial.active && state.tutorial.step === 8) {
-        state.tutorial.submitted = true;
-        advanceSplitTutorial(9);
-      }
     } catch (error) {
       state.submitting = false;
       validateForm();
@@ -1662,7 +1311,7 @@
         created_at:task.created_at,
       }));
       renderQueue([...taskJobs, ...state.jobs]);
-      renderRecent([...tutorialProjectRows, ...state.jobs]
+      renderRecent(state.jobs.filter(job => !job.tutorial_case_id)
         .sort((left, right) => Number(right.created_at || 0) - Number(left.created_at || 0)));
     } catch (error) {
       if (error.status || error.code === "POLL_TIMEOUT") {
@@ -1759,16 +1408,16 @@
   $("#recognitionProfileInput").addEventListener("change", () => {
     markSettingsDirty();
   });
+  $("#splitLanguageLayout").addEventListener("change", () => { markSettingsDirty(); syncReferenceBreakPreset(); validateForm(); });
   $("#languageInput").addEventListener("change", syncReferenceBreakPreset);
-  $("#languageRatioThresholdInput").addEventListener("input", syncLanguageRatioThreshold);
   for (const selector of [
     "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
-    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#languageRatioThresholdInput", "#japaneseLimitInput", "#koreanLimitInput",
-    "#chunkSecondsInput", "#workersInput", "#retryInput",
+    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#otherLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
+    "#chunkSecondsInput", "#workersInput", "#retryInput", "#generateThumbnailsInput",
     "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {
-    $(selector).addEventListener("input", markSettingsDirty);
-    $(selector).addEventListener("change", markSettingsDirty);
+    $(selector)?.addEventListener("input", markSettingsDirty);
+    $(selector)?.addEventListener("change", markSettingsDirty);
   }
   $("#qwenPromptInput").addEventListener("input", syncQwenEnhancementCounts);
   $("#qwenHotwordsInput").addEventListener("input", syncQwenEnhancementCounts);
@@ -1820,21 +1469,6 @@
   $("#renameProjectDialog").addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeRenameDialog();
   });
-  $("#dismissTutorialPulse").addEventListener("click", () => {
-    localStorage.setItem("substar.split.tutorial.pulse-dismissed", "1");
-    syncTutorialEntry();
-  });
-  document.addEventListener("click", event => {
-    if (!$("#creationTutorialActions").contains(event.target)) $("#creationTutorialActions").open = false;
-  });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") $("#creationTutorialActions").open = false;
-  });
-  syncTutorialEntry();
-  $("#creationTutorialButton").addEventListener("click", startSplitTutorial);
-  $("#advancedTutorialButton").addEventListener("click", startAdvancedSplitTutorial);
-  $("#quickStartTutorial").addEventListener("click", startSplitTutorial);
-  $("#quickStartAdvancedTutorial").addEventListener("click", startAdvancedSplitTutorial);
   $("#qwenQuickTest").addEventListener("click", () => testQuickProvider("qwen"));
   $("#glmQuickTest").addEventListener("click", () => testQuickProvider("glm"));
   document.querySelectorAll(".quick-reveal").forEach((button) => button.addEventListener("click", () => {
@@ -1843,27 +1477,6 @@
     input.type = reveal ? "text" : "password";
     button.textContent = reveal ? "隐藏" : "显示";
   }));
-  $("#skipSplitTutorial").addEventListener("click", () => exitSplitTutorial());
-  $("#splitTutorialPrimary").addEventListener("click", () => {
-    if (state.tutorial.kind === "advanced" && state.tutorial.step === 1) launchAdvancedTutorial();
-    else if (state.tutorial.kind === "advanced" && state.tutorial.step === 3) {
-      const projectId = state.tutorial.projectId;
-      exitSplitTutorial({completed:true});
-      window.location.href = `/editor?project=${encodeURIComponent(projectId)}&tutorial=advanced`;
-    }
-    else if (state.tutorial.step === 2) loadTutorialAsset("audio");
-    else if (state.tutorial.step === 7) loadTutorialAsset("reference");
-    else if (state.tutorial.step === 9) exitSplitTutorial({ completed: true });
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    if (state.tutorial.active) {
-      event.preventDefault();
-      exitSplitTutorial();
-    }
-  });
-  window.addEventListener("resize", positionSplitTutorial);
-  window.addEventListener("scroll", positionSplitTutorial, true);
   window.addEventListener("focus", refreshSharedSettings);
 
   function initializeSubtitleImport() {
@@ -1928,11 +1541,12 @@
         throw new Error(issues.slice(0, 5).map(issue => `第 ${issue.entry + 1} 条：${issue.message}`).join("；") || "字幕格式无效，请检查所选格式和文件");
       }
       form.append("confirmation", preview.confirmation);
+      form.append("generate_thumbnails", String($("#generateThumbnailsInput").checked));
       if (media.token) form.append("media_reference_token", media.token);
       else form.append("media", media, media.name);
       form.append("source_language", $("#languageInput").value);
       form.append("target_language", $("#targetLanguageInput").value);
-      const limitFor = language => Number($(({zh:"#chineseLimitInput", "zh-CN":"#chineseLimitInput", en:"#englishLimitInput", ja:"#japaneseLimitInput", ko:"#koreanLimitInput"})[language] || "#mixedLimitInput").value);
+      const limitFor = language => Number($(({zh:"#chineseLimitInput", "zh-CN":"#chineseLimitInput", en:"#englishLimitInput", ja:"#japaneseLimitInput", ko:"#koreanLimitInput"})[language] || "#otherLimitInput").value);
       form.append("source_hard_limit", String(limitFor($("#languageInput").value)));
       form.append("target_hard_limit", String(limitFor($("#targetLanguageInput").value)));
       $("#formMessage").textContent = "正在生成波形并保存字幕工程，不执行 ASR 或 AI…";

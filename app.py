@@ -397,6 +397,7 @@ class SettingsPayload(BaseModel):
         default="low", pattern=r"^(low|medium|high|max|xhigh)$"
     )
     translation_style: str = "corporate_broadcast"
+    translation_layout: dict[str, Any] = Field(default_factory=dict)
     target_language_mode: str = "auto_opposite"
     display_order: str = "en_zh"
     translation_api_key: str = ""
@@ -410,6 +411,7 @@ class SettingsPayload(BaseModel):
     english_count_punctuation: bool = True
     chinese_hard_limit: int = 20
     mixed_hard_limit: int = 25
+    other_hard_limit: int = 55
     japanese_hard_limit: int = 24
     korean_hard_limit: int = 28
     target_visual_width_limit: int = 48
@@ -1224,6 +1226,7 @@ def _automatic_settings_from_payload(
         )
     }
     allowed = {
+        "generate_thumbnails",
         "active_model_provider",
         "translation_api_base_url",
         "translation_api_model",
@@ -1245,13 +1248,14 @@ def _automatic_settings_from_payload(
         "translation_enabled",
         "calibration_enabled",
         "target_language_mode",
+        "translation_layout",
         "segmentation_chunk_seconds",
         "translation_workers",
         "http_retry_attempts",
         "english_hard_limit",
         "chinese_hard_limit",
         "mixed_hard_limit",
-        "language_ratio_threshold_percent",
+        "other_hard_limit",
         "japanese_hard_limit",
         "korean_hard_limit",
         "recognition_profile_id",
@@ -1359,12 +1363,7 @@ def _automatic_settings_from_payload(
     mixed_hard_limit = bounded_int(
         "mixed_hard_limit", int(saved.get("mixed_hard_limit", 25)), 1, 200
     )
-    language_ratio_threshold_percent = bounded_int(
-        "language_ratio_threshold_percent",
-        int(saved.get("language_ratio_threshold_percent", 20)),
-        0,
-        100,
-    )
+    other_hard_limit = bounded_int("other_hard_limit", int(saved.get("other_hard_limit", 55)), 1, 200)
     japanese_hard_limit = bounded_int(
         "japanese_hard_limit", int(saved["japanese_hard_limit"]), 1, 100
     )
@@ -1399,6 +1398,7 @@ def _automatic_settings_from_payload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     overrides = {
+        "generate_thumbnails": raw.get("generate_thumbnails") is True,
         "asr_glossary_ids": injection["collection_ids"],
         "asr_glossary_snapshot": injection["entries"],
         "asr_injected_hotwords": injection["hotwords"],
@@ -1414,6 +1414,7 @@ def _automatic_settings_from_payload(
                 "recognition_profile_id",
                 "language",
                 "target_language_mode",
+        "translation_layout",
                 "segmentation_enabled",
                 "translation_enabled",
                 "calibration_enabled",
@@ -1452,7 +1453,7 @@ def _automatic_settings_from_payload(
         ],
         "chinese_hard_limit": chinese_hard_limit,
         "mixed_hard_limit": mixed_hard_limit,
-        "language_ratio_threshold_percent": language_ratio_threshold_percent,
+        "other_hard_limit": other_hard_limit,
         "japanese_hard_limit": japanese_hard_limit,
         "korean_hard_limit": korean_hard_limit,
         "reference_script_mode": reference_script_mode,
@@ -1818,7 +1819,8 @@ async def start_qwen_assist_asr(
     profile_id: str = Form("qwen_cloud"),
     asr_glossary_ids: str = Form("[]"),
 ) -> dict[str, Any]:
-    if source_language not in {"Auto", "zh", "en", "ja", "ko", "mixed"}:
+    from substar_core.translation_layout import LANGUAGES
+    if source_language not in LANGUAGES | {"Auto", "zh", "mixed"}:
         raise HTTPException(status_code=400, detail="不支持的原文语言")
     settings = load_settings()
     try:
@@ -2259,11 +2261,11 @@ async def create_workbench_split_job(
             "en": "english_hard_limit", "zh": "chinese_hard_limit",
             "zh-CN": "chinese_hard_limit", "ja": "japanese_hard_limit",
             "ko": "korean_hard_limit", "mixed": "mixed_hard_limit",
-        }.get(source_language, "mixed_hard_limit")
+        }.get(source_language, "other_hard_limit")
         target_limit_key = {
             "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
             "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-        }.get(target_language, "chinese_hard_limit")
+        }.get(target_language, "other_hard_limit")
         save_task_info(job_dir, job_id, {
             "display_name": (
                 "初级教程" if tutorial_case_id == "reference-script-v1"
@@ -2271,6 +2273,7 @@ async def create_workbench_split_job(
             ),
             "language": source_language,
             "target_language_mode": target_language,
+            "translation_layout": overrides.get("translation_layout", {}),
             "glossary_id": str(overrides.get("glossary_id") or ""),
             "source_hard_limit": int(overrides.get(source_limit_key, 25)),
             "target_hard_limit": int(overrides.get(target_limit_key, 25)),
@@ -2359,6 +2362,9 @@ async def create_workbench_split_job(
                 JOBS.pop(job_id, None)
             shutil.rmtree(job_dir, ignore_errors=True)
             raise
+    if overrides.get("generate_thumbnails"):
+        from substar_core.media.thumbnails import request_generation
+        request_generation(job_dir, media_path)
     return JSONResponse(job.public(), status_code=202)
 
 

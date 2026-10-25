@@ -18,11 +18,11 @@ from substar_core.domain import (
     stable_id,
 )
 from substar_core.editor.translation.grouping import translation_groups
+from substar_core.editor.translation.regroup import review_request_groups, translation_prompt_variant
 from substar_core.glossary import active_glossary, glossary_prompt
 from substar_core.prompt_registry import (
     opposite_language,
     render_prompt, frozen_prompt,
-    translation_variant,
 )
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
@@ -67,6 +67,7 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
                     "end": cue.get("end"),
                     "hard_limit": cue.get("hard_limit"),
                     "count_rule": cue.get("count_rule"),
+                    **({"target_language": cue["target_language"]} if cue.get("target_language") else {}),
                 }
                 for cue in group["cues"]
             ],
@@ -1096,12 +1097,12 @@ def _repair_over_limit_plans_blockwise(
     return _compile_translation_plans(groups, merged_units, mapping_mode), audit_rows
 
 
-def warning_report(translations: dict[str, str], settings: dict[str, Any]) -> list[dict[str, Any]]:
+def warning_report(translations: dict[str, str], settings: dict[str, Any], languages: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
     warnings = []
     policy = SubtitlePolicy.from_settings(settings)
     for cue_id, value in translations.items():
         count = policy.line_length(value)
-        limit = policy.hard_limit(value)
+        limit = policy.hard_limit(value, (languages or {}).get(cue_id))
         if count > limit:
             warnings.append({"code": "target_character_limit_warning", "cue_id": cue_id, "count": count, "limit": limit})
     return warnings
@@ -1110,6 +1111,7 @@ def warning_report(translations: dict[str, str], settings: dict[str, Any]) -> li
 def materialize_presentation(
     document: Any, plans: list[dict[str, Any]], target_language: str,
     candidate_targets_by_cue: Mapping[str, str] | None = None,
+    target_languages_by_cue: Mapping[str, str] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Register the model-authored display grid without changing its content."""
 
@@ -1143,6 +1145,7 @@ def materialize_presentation(
                 provenance,
                 metadata={
                     **dict(provenance.metadata),
+                    "target_language": (target_languages_by_cue or {}).get(source_cue.cue_id, target_language),
                     "omitted_filler": omitted_filler,
                     "meaning_unit_id": row["meaning_unit_id"],
                     "source_evidence_cue_ids": unit["source_evidence_cue_ids"],
@@ -1171,10 +1174,11 @@ def materialize_presentation(
                 target=TranslationTrack(
                     target_text=target_text,
                     original_text=target_text,
-                    language=target_language,
+                    language=(target_languages_by_cue or {}).get(source_cue.cue_id, target_language),
                     provenance=target_provenance,
                 ),
                 speaker=source_cue.speaker,
+                source_text=source_cue.source_text,
                 state=EntityState.ACTIVE,
                 group_id=source_cue.group_id,
                 mapping=mapping,
@@ -1215,6 +1219,7 @@ def materialize_presentation(
         previous_target = (
             source_cue.target.target_text.strip()
             if source_cue.target is not None
+            and (target_languages_by_cue is None or source_cue.target.language == target_languages_by_cue.get(source_cue.cue_id, target_language))
             and source_cue.target.target_text.strip()
             and source_mapping.get("translation_unresolved") is not True
             else ""
@@ -1250,8 +1255,9 @@ def materialize_presentation(
             target=TranslationTrack(
                 target_text=target_text,
                 original_text=target_text,
-                language=target_language,
-                provenance=unresolved_provenance,
+                language=(target_languages_by_cue or {}).get(source_cue.cue_id, target_language),
+                provenance=replace(unresolved_provenance, metadata={**unresolved_provenance.metadata,
+                    "target_language": (target_languages_by_cue or {}).get(source_cue.cue_id, target_language)}),
                 translation_status="manual_required" if needs_review else "translated",
                 issue_code="translation_unresolved" if needs_review else None,
                 editable=True,
@@ -1305,13 +1311,43 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
         raise RuntimeError("项目缺少可翻译版本")
     if revision.revision_id != expected_revision_id:
         raise RuntimeError("翻译期间编辑版本已变化；结果未写入")
+    from substar_core.translation_layout import normalize_layout, route_text
+    from substar_core.language_layout import layout_tokens
+    layout = normalize_layout(settings.get("translation_layout"))
+    tokens = {token.token_id: token for token in revision.document.display_tokens}
+    target_languages = {
+        cue.cue_id: route_text(cue.source_text if cue.source_text is not None else
+            layout_tokens(tokens[key].text for key in cue.display_token_ids), layout)["target_language"]
+        for cue in revision.document.cues
+    } if layout else ({cue.cue_id: target_language for cue in revision.document.cues}
+                     if revision.document.presentation.translation_layout else None)
     candidate, presentation_report = materialize_presentation(
-        revision.document, plans, target_language, candidate_targets_by_cue
+        revision.document, plans, target_language, candidate_targets_by_cue, target_languages
     )
+    if settings.get("translation_layout"):
+        from substar_core.translation_layout import normalize_layout, route_text
+        from substar_core.language_layout import layout_tokens
+        layout = normalize_layout(settings["translation_layout"])
+        tokens = {token.token_id: token for token in candidate.display_tokens}
+        routed = []
+        for cue in candidate.cues:
+            text = cue.source_text if cue.source_text is not None else layout_tokens(tokens[key].text for key in cue.display_token_ids)
+            route = route_text(text, layout)
+            target = cue.target
+            not_required = not route["source_upper"] and not layout.get("bidirectional", True)
+            if not_required:
+                target = None
+            routed.append(replace(cue, mapping={**cue.mapping, "language_route": route, "translation_not_required": not_required},
+                target=replace(target, language=route["target_language"]) if target else None))
+        candidate = replace(candidate, cues=tuple(routed),
+                            presentation=replace(candidate.presentation, translation_layout=layout))
+    elif candidate.presentation.translation_layout:
+        candidate = replace(candidate, presentation=replace(candidate.presentation, translation_layout={}))
     translations = {
         cue.cue_id: cue.target.target_text for cue in candidate.cues if cue.target is not None and cue.state is EntityState.ACTIVE
     }
-    warnings = warning_report(translations, settings)
+    warnings = warning_report(translations, settings,
+        {cue.cue_id: cue.target.language for cue in candidate.cues if cue.target} if layout else None)
     report = {"validation": {"warnings": warnings}, "presentation": presentation_report}
     report["contextual_translation"] = metadata
     problem_reasons: dict[str, list[str]] = {
@@ -1328,6 +1364,9 @@ def _save_translation(*, work: Path, plans: list[dict[str, Any]], settings: dict
         for source_id in (cue.mapping or {}).get("source_cue_ids", []):
             if source_id in quality_by_source:
                 problem_reasons.setdefault(cue.cue_id, []).extend(quality_by_source[source_id])
+    for cue in candidate.cues:
+        if cue.mapping.get("translation_not_required"):
+            problem_reasons.pop(cue.cue_id, None)
     provenance = ChangeProvenance(
         kind=ChangeKind.AI,
         operation="contextual_translation",
@@ -1392,12 +1431,19 @@ def run_contextual_translation(
         opposite_language(source_language)
         if configured_target == "auto_opposite" else configured_target
     )
-    if source_language == target_language:
+    if source_language == target_language and not settings.get("translation_layout"):
         raise RuntimeError(
             f"目标语言与已确认的原始语言相同（{target_language}），请选择其他目标语言"
         )
-    variant = translation_variant(source_language, target_language)
+    variant = translation_prompt_variant(settings, source_language, target_language, groups)
     mapping_mode = str(settings.get("translation_mapping_mode") or "many_to_many")
+    groups = review_request_groups(
+        groups, settings,
+        progress=(lambda done, total: progress_callback(
+            "planning", completed=0, planned=0,
+            detail=f"增强分组 {done}/{total}",
+        )) if progress_callback is not None else None,
+    )
     prompt = frozen_prompt(settings,
         "contextual_translation", variant=variant, mode=mapping_mode
     )
@@ -1409,8 +1455,11 @@ def run_contextual_translation(
         "# TASK CONFIGURATION\n"
         f"源语言：{language_names.get(source_language, source_language)}\n"
         f"目标语言：{language_names.get(target_language, target_language)}\n"
-        f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'english_hard_limit'), 55))}。"
+        f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'other_hard_limit'), 55))}。"
     )
+    if settings.get("translation_layout"):
+        from substar_core.translation_layout import routing_prompt
+        direction = routing_prompt(settings["translation_layout"])
     task_info = load_task_info(work, work.name)
     glossary_entries = settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(task_info.get("glossary_id") or ""))
     system_prompt = _translation_system_prompt(

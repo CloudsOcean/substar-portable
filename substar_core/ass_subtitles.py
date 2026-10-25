@@ -9,29 +9,51 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 from substar_core.domain import EntityState
+from substar_core.translation_layout import source_is_upper
 
 
 class AssStyle(BaseModel):
-    font: str = Field(default="Microsoft YaHei", min_length=1, max_length=100)
-    size: int = Field(default=54, ge=8, le=300)
+    font: str = Field(default="Microsoft YaHei", min_length=1, max_length=128)
+    size: int = Field(default=54, ge=1, le=512)
     color: str = "#FFFFFF"
     highlight: str = "#FFFF00"
     outline_color: str = "#000000"
-    outline: float = Field(default=2, ge=0, le=15)
-    shadow: float = Field(default=1, ge=0, le=15)
+    outline: float = Field(default=2, ge=0, le=100)
+    shadow: float = Field(default=1, ge=0, le=100)
+    italic: bool = False
+    underline: bool = False
+    strike_out: bool = False
+    scale_x: float = Field(default=100, ge=0, le=1000)
+    scale_y: float = Field(default=100, ge=0, le=1000)
+    spacing: float = Field(default=0, ge=-100, le=100)
+    angle: float = Field(default=0, ge=-360, le=360)
+    border_style: int = Field(default=1, ge=1, le=3)
+    back_color: str = "#000000"
+    outline_opacity: int = Field(default=100, ge=0, le=100)
+    back_opacity: int = Field(default=50, ge=0, le=100)
+    margin_l: int | None = Field(default=None, ge=0, le=9999)
+    margin_r: int | None = Field(default=None, ge=0, le=9999)
+    override_tags: str = Field(default="", max_length=2048)
     bold: bool = False
     background: bool = False
     alignment: int = Field(default=2, ge=1, le=9)
-    margin_x: int = Field(default=60, ge=0, le=2000)
-    margin_y: int = Field(default=60, ge=0, le=2000)
-    fade_ms: int = Field(default=0, ge=0, le=2000)
+    margin_x: int = Field(default=60, ge=0, le=9999)
+    margin_y: int = Field(default=60, ge=0, le=9999)
+    fade_ms: int = Field(default=0, ge=0, le=9999)
 
-    @field_validator("color", "highlight", "outline_color")
+    @field_validator("color", "highlight", "outline_color", "back_color")
     @classmethod
     def color_value(cls, value):
         if not re.fullmatch(r"#[0-9A-Fa-f]{6}", value):
             raise ValueError("颜色应为 #RRGGBB")
         return value.upper()
+
+    @field_validator("override_tags")
+    @classmethod
+    def tags_value(cls, value):
+        if any(c in value for c in "{}\r\n"):
+            raise ValueError("ASS 动画标签不能包含大括号或换行")
+        return value
 
     @field_validator("font")
     @classmethod
@@ -57,8 +79,8 @@ class AssOptions(BaseModel):
         return value
 
 
-def ass_color(value):
-    return "&H00" + value[5:7] + value[3:5] + value[1:3]
+def ass_color(value, opacity=100):
+    return f"&H{round((100-opacity)*255/100):02X}" + value[5:7] + value[3:5] + value[1:3]
 
 
 def escape_text(value):
@@ -75,7 +97,7 @@ def wrap_ass_text(text, style, width):
     Use a conservative em budget; native wrapping can still break earlier.
     ASS control tags do not consume width or interrupt word highlighting.
     """
-    available = max(style.size, width - 2 * style.margin_x - 2 * (style.outline + style.shadow + 6))
+    available = max(style.size, width - (style.margin_l if style.margin_l is not None else style.margin_x) - (style.margin_r if style.margin_r is not None else style.margin_x) - 2 * (style.outline + style.shadow + 6))
     budget = available / style.size
     tokens = re.findall(r"\{[^{}]*\}|\\[Nnh]|.", text)
     lines, line, used, space = [], [], 0.0, None
@@ -125,13 +147,15 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"]
     for name, item in (("Source", style), ("Target", target_style)):
         output.append(f"Style: {name},{item.font},{item.size},{ass_color(item.color)},{ass_color(item.highlight)},"
-            f"{ass_color(item.outline_color)},&H80000000,{-1 if item.bold else 0},0,0,0,100,100,0,0,1,"
-            f"{item.outline},{item.shadow},{item.alignment},{item.margin_x},{item.margin_x},{item.margin_y},1")
+            f"{ass_color(item.outline_color,item.outline_opacity)},{ass_color(item.back_color,item.back_opacity)},{-1 if item.bold else 0},{-1 if item.italic else 0},{-1 if item.underline else 0},{-1 if item.strike_out else 0},{item.scale_x},{item.scale_y},{item.spacing},{item.angle},{item.border_style},"
+            f"{item.outline},{item.shadow},{item.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{item.margin_y},1")
         if item.background:
             output.append(f"Style: {name}Box,{item.font},{item.size},&HFF000000,&HFF000000,"
                 f"&H80000000,&H80000000,{-1 if item.bold else 0},0,0,0,100,100,0,0,3,"
-                f"6,0,{item.alignment},{item.margin_x},{item.margin_x},{item.margin_y},1")
+                f"6,0,{item.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{item.margin_y},1")
     output += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    import json
+    word_timing_overlays = json.loads(document.properties.timeline_json or "{}").get("word_timings", {})
     source_by_id = {t.token_id:t for t in document.source_tokens}
     display = {t.token_id:t for t in document.display_tokens}
     from substar_core.language_layout import layout_tokens
@@ -147,6 +171,8 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
             encoded = f"{{\\an8\\pos({options.width / 2:g},{chosen.margin_y})}}" + encoded
         fade = min(chosen.fade_ms, round((end-start)*500))
         effect = f"{{\\fad({fade},{fade})}}" if fade and not raw else ""
+        if chosen.override_tags:
+            effect = "{" + chosen.override_tags + "}"
         if chosen.background:
             plain = re.sub(r"\{\\c&H[0-9A-Fa-f]+&\}", "", encoded) if raw else encoded
             output.append(f"Dialogue: 0,{stamp(start)},{stamp(end)},{name}Box,,0,0,0,,{effect}{plain}")
@@ -160,17 +186,25 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         tokens = [display[t] for t in cue.display_token_ids if display[t].state is EntityState.ACTIVE]
         source = cue.source_text if cue.source_text is not None else layout_tokens(t.text for t in tokens)
         target = cue.target.target_text if cue.target else ""
+        source_upper = source_is_upper(document, source)
+        routed = bool(document.presentation.translation_layout)
+        cue_mode = options.mode
+        if routed and not source_upper and cue_mode in {"source", "target"}:
+            cue_mode = "target" if cue_mode == "source" else "source"
+        swap_style = routed and options.mode == "ab-double" and source_upper != (document.presentation.display_order.value == "source_above_target")
+        source_style_name = "Target" if swap_style else "Source"
+        target_style_name = "Source" if swap_style else "Target"
         source, target = project_cue_lines(document, source=source, target=target)
         if document.properties.script_projection != "original":
             source = convert_chinese_script(source, document.properties.script_projection)
             target = convert_chinese_script(target, document.properties.script_projection)
-        if options.mode in {"source", "ab-double"} and source:
+        if cue_mode in {"source", "ab-double"} and source:
             # Highlight only the currently spoken token, retaining full line context.
             raw_source = layout_tokens(t.text for t in tokens)
             if options.word_highlight and tokens and cue.source_text is None:
                 spans, cursor = [], 0
                 for token in tokens:
-                    shown, _ = project_cue_lines(document, source=token.text, target="")
+                    shown, _ = project_cue_lines(document, source=token.text, target="", source_upper=source_upper)
                     if document.properties.script_projection != "original":
                         shown = convert_chinese_script(shown, document.properties.script_projection)
                     shown = shown.strip()
@@ -183,8 +217,11 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
                     if not bounds:
                         raise ValueError("词元缺少时间，不能生成逐词高亮")
                     if bounds:
-                        spans.append((max(cue.start,min(t.start for t in bounds)),
-                                      min(cue.end,max(t.end for t in bounds)), begin, begin+len(shown)))
+                        overlay = word_timing_overlays.get(token.token_id)
+                        token_start = overlay["start"]/1000 if overlay else min(t.start for t in bounds)
+                        token_end = overlay["end"]/1000 if overlay else max(t.end for t in bounds)
+                        spans.append((max(cue.start,token_start),
+                                      min(cue.end,token_end), begin, begin+len(shown)))
                     cursor = begin+len(shown)
                 edges = sorted({cue.start,cue.end,*[v for a,b,_,_ in spans if b>a for v in (a,b)]})
                 for a,b in zip(edges,edges[1:]):
@@ -192,14 +229,15 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
                     text = escape_text(source)
                     if active:
                         left,right = active[2:]
-                        text = escape_text(source[:left])+f"{{\\c{ass_color(style.highlight)}&}}"+escape_text(source[left:right])+f"{{\\c{ass_color(style.color)}&}}"+escape_text(source[right:])
-                    event(a,b,"Source",text,True)
+                        active_style = target_style if swap_style else style
+                        text = escape_text(source[:left])+f"{{\\c{ass_color(active_style.highlight)}&}}"+escape_text(source[left:right])+f"{{\\c{ass_color(active_style.color)}&}}"+escape_text(source[right:])
+                    event(a,b,source_style_name,text,True)
             elif options.word_highlight and cue.mapping.get("subtitle_track") != "overlay":
                 raise ValueError("逐词高亮需要可映射的词级时间和显示文字")
             else:
-                event(cue.start,cue.end,"Source",source,overlay=cue.mapping.get("subtitle_track") == "overlay")
-        if options.mode in {"target", "ab-double"}:
-            event(cue.start,cue.end,"Target",target)
+                event(cue.start,cue.end,source_style_name,source,overlay=cue.mapping.get("subtitle_track") == "overlay")
+        if cue_mode in {"target", "ab-double"}:
+            event(cue.start,cue.end,target_style_name,target)
     return "\n".join(output)+"\n"
 
 

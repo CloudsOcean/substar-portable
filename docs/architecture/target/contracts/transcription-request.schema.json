@@ -75,6 +75,8 @@
           "qwen_asr_model",
           "qwen_cloud_base_url",
           "qwen_cloud_model",
+          "qwen_language_hints",
+          "qwen_keep_dialect",
           "qwen_cloud_poll_interval_seconds",
           "qwen_cloud_region",
           "qwen_cloud_request_timeout_seconds",

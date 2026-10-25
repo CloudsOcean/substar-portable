@@ -1,0 +1,23 @@
+import {createMawAssPanel} from './editor_maw_ass.js';
+import './editor_maw_model.js';
+import './vendor/maw/shared/gap-remove-core.js';
+import {createUtilsModule as markerUtils} from './vendor/maw/shared/utils/markers.js';
+import {createWordTiming} from './vendor/maw/shared/utils/word-timing.js';
+import {createUtilsModule as segmentTiming} from './vendor/maw/shared/utils/segment-timing.js';
+import {createUtilsModule as dataUtils} from './vendor/maw/shared/utils/data.js';
+import {createUtilsModule as assStyle} from './vendor/maw/shared/utils/ass-style.js';
+import {createUtilsModule as textProcessing} from './vendor/maw/shared/utils/text-processing.js';
+import {createUtilsModule as timedTextCore} from './vendor/maw/shared/utils/timed-text-core.js';
+import {initWaveform} from './vendor/maw/editor/media/waveform.js?v=20261025-marker-blank-guard-1';
+import {createTimelineController} from './editor_maw_timeline.js?v=20261025-thumbnails-polish-3';
+
+const cloneJsonValue=v=>v==null?v:JSON.parse(JSON.stringify(v));
+const data=dataUtils({}),style=assStyle({cloneJsonValue,getNavigator:()=>navigator}),text=textProcessing(style),timed=timedTextCore({cloneJsonValue});
+const wordTiming=createWordTiming({cloneJsonValue,...data,...text,...timed});
+window.MaweHost={storage:{getItem:k=>localStorage.getItem('substar.maw.'+k),setItem:(k,v)=>localStorage.setItem('substar.maw.'+k,v),removeItem:k=>localStorage.removeItem('substar.maw.'+k)}};
+window.MaweSettings={EDITOR_SETTINGS:{markerEditingEnabled:true}};
+window.AsrEditorUtils={...data,...text,...timed,...window.AsrGapRemoveCore,...markerUtils(),...wordTiming,...segmentTiming({...timed,isShortSubtitleText:(text,n)=>String(text).replace(/\s/g,'').length<=n})};
+window.EditorMawAssPanel={create:createMawAssPanel};
+initWaveform();
+window.EditorMawTimeline={createTimelineController};
+const editor=document.createElement('script');editor.src='/assets/editor.js?v=20261025-thumbnails-2';document.body.append(editor);

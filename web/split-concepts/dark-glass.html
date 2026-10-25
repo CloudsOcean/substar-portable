@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
+  <title>B · 纸感创作室 · Substar</title>
+  <link rel="stylesheet" href="/assets/split.css?v=20261025-thumbnails-1">
+  <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
+  <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
+  <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
+  <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
+<link rel="stylesheet" href="/assets/split-concepts/concepts.css?v=1">
+<link rel="stylesheet" href="/assets/split-concepts/dark-glass.css?v=1">
+</head>
+<body>
+  <header class="app-bar app-header">
+    <a class="brand" href="/split" aria-label="Substar 首页">
+      <svg class="ui-icon brand-mark" aria-hidden="true"><use href="/assets/ui-icons.svg?v=20260814-star-1#brand"></use></svg><span>Substar</span>
+    </a>
+    <nav class="main-nav app-nav" aria-label="主导航">
+      <a class="active" href="/split">切分</a>
+      <a href="/editor">编辑</a>
+      <a href="/glossary">词库</a>
+      <a href="/settings">设置</a>
+    </nav>
+    <div class="app-header-actions">
+      <div class="system-state app-status" id="systemState"><i></i><span>正在检查环境</span></div>
+    </div>
+  </header>
+
+  <main class="page-shell concept-page" data-concept="paper" data-finish="dark-glass">
+<div class="concept-switcher"><span class="concept-label">B / LIQUID GLASS <b>深色 · 液态玻璃</b></span><div class="glass-materials" role="group" aria-label="玻璃质感"><button type="button" data-glass-material="soft" aria-pressed="true">柔和</button><button type="button" data-glass-material="clear" aria-pressed="false">通透</button></div><a href="/assets/split-concepts/paper.html">对比原 B ↗</a></div>
+<section class="concept-intro"><div><span class="concept-eyebrow">SUBSTAR / B — 纸感创作室</span><h1>让好内容，清晰表达。</h1><p>从一段音视频开始，完成听写、切分与翻译。</p></div><span class="concept-local">✦ 本地字幕工作空间</span></section>
+
+    <div class="workspace-grid">
+      <section class="creation-card" aria-labelledby="createTitle">
+        <div class="section-heading">
+          <div><span class="step-number">01</span><h2 id="createTitle">任务配置</h2></div>
+          <details id="creationTutorialActions" class="creation-tutorial-actions">
+            <summary class="creation-tutorial-button">启动教程</summary>
+            <div class="creation-tutorial-menu">
+              <button id="creationTutorialButton" type="button">基础教程</button>
+              <button id="advancedTutorialButton" type="button">进阶教程</button>
+              <button id="dismissTutorialPulse" type="button">关闭闪烁</button>
+            </div>
+          </details>
+        </div>
+
+        <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
+          <input id="videoInput" type="file" accept="video/*,audio/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.mp3,.wav,.m4a,.aac,.flac,.ogg" hidden>
+          <span class="drop-icon" aria-hidden="true"><svg class="ui-icon"><use href="/assets/ui-icons.svg?v=20260828-upload-media-1#upload-media"></use></svg></span>
+          <strong id="dropTitle">拖入视频或音频</strong>
+          <span id="dropHint">MP4 / MOV / MKV / WEBM / MP3 / WAV / M4A</span>
+          <button class="secondary-button" type="button" id="chooseVideoButton">选择文件</button>
+          <div class="file-chip hidden" id="videoFileChip"></div>
+        </div>
+
+        <div class="srt-row reference-row hidden" id="referenceRow">
+          <div>
+            <strong>参考文稿 <em id="referenceRequirement">选填</em></strong>
+            <span id="referenceHelp">支持 TXT / DOCX / SRT；用于校正词元，不替代 AI 语义切分</span>
+          </div>
+          <input id="referenceInput" type="file" multiple accept=".txt,.docx,.srt,text/plain,application/x-subrip,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+          <button class="secondary-button" type="button" id="chooseReferenceButton">选择参考文稿</button>
+          <span class="selected-file" id="referenceFileName">未添加</span>
+        </div>
+
+        <div class="parameter-panel">
+          <!-- Legacy wording retained for old static-contract readers only: 原文字符数上限 → 译文字符数上限 -->
+          <div class="parameter-grid primary-parameters">
+            <input id="recognitionProfileInput" type="hidden" value="qwen_cloud">
+            <input id="glossaryInput" type="hidden" value="">
+            <input type="hidden" id="languageInput" value="Auto">
+            <input type="hidden" id="targetLanguageInput" value="zh-CN">
+            <fieldset id="splitLanguageLayout" class="translation-language-layout"></fieldset>
+            <label>
+              <span>切分模式</span>
+              <select id="splitWorkflowInput">
+                <option value="disabled">仅使用听写结果</option>
+                <option value="one_step">AI 辅助切分</option>
+                <option value="reference_script">按参考稿标点切分</option>
+              </select>
+              <small id="splitWorkflowHelp">启用后生成适合逐词编辑的字幕草稿</small>
+            </label>
+            <label id="referenceBreakSymbolsField" class="hidden">
+              <span>切分符号</span>
+              <input id="referenceBreakSymbolsInput" type="text" maxlength="32" value="，。？！.?!" autocomplete="off">
+              <small>按原文语言提供预设；可自定义，每个字符都会产生断点并保留在左侧字幕</small>
+            </label>
+          </div>
+
+          <details class="qwen-enhancement-settings">
+            <summary>Qwen 听写增强 <span>AI 填写 Prompt 与本次临时热词</span></summary>
+            <div class="qwen-enhancement-body">
+              <label class="qwen-field">
+                <span>节目内容与识别重点</span>
+                <textarea id="qwenAiBriefInput" rows="3" maxlength="4000" placeholder="描述本期节目内容、涉及领域，以及希望准确识别的人名、品牌、术语或外语词。&#10;直接点名的词语会作为超级热词。"></textarea>
+              </label>
+              <div class="qwen-assist-row">
+                <span id="qwenAssistStatus" aria-live="polite"></span>
+                <button id="asrAssistCancel" class="text-button" type="button" hidden>取消听写</button>
+                <div class="qwen-assist-actions">
+                  <button id="qwenAssistButton" class="primary-button qwen-assist-button" type="button">直接生成</button>
+                  <div class="asr-assist-menu">
+                    <button id="asrAssistButton" class="primary-button qwen-assist-button" type="button" aria-expanded="false" aria-controls="asrAssistChoices" disabled>根据听写结果生成 ▾</button>
+                    <div id="asrAssistChoices" class="creation-tutorial-menu" hidden>
+                      <button type="button" data-asr-assist="internal">使用内置模型生成</button>
+                      <button type="button" data-asr-assist="external">提交外部模型生成</button>
+                      <button type="button" data-asr-assist="open">打开填写界面</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="qwen-output-grid">
+                <label class="qwen-field">
+                  <span>Qwen Prompt <em id="qwenPromptCount">0 / 400</em></span>
+                  <textarea id="qwenPromptInput" rows="5" maxlength="400" placeholder="向 Qwen 说明节目领域、人物与主题，有助于结合上下文消歧，并提高专名识别准确率。&#10;使用所选原文语言组织，但不会限制音频中出现其他语言。"></textarea>
+                </label>
+                <label class="qwen-field">
+                  <span>临时热词 <em id="qwenHotwordCount">0 / 2000</em></span>
+                  <textarea id="qwenHotwordsInput" rows="5" placeholder="英伟达：50&#10;超微电子：5&#10;AMD：4&#10;&#10;1–5 = 普通热词权重，数字越大优先级越高；4 = 默认，5 = 最高。50 = 必须重点命中的超级热词。中英文冒号均可，保存时会自动统一。"></textarea>
+                </label>
+              </div>
+              <section class="glossary-injection"><div class="glossary-injection-grid"><label class="qwen-field"><span>词库热词</span><textarea id="glossaryInjectionPreview" readonly rows="5" placeholder="所选词库中去重后的热词"></textarea></label><div><span>选择词库</span><div id="glossaryInjectionChoices"></div><a href="/glossary" target="_blank" rel="noopener">管理注入权限</a></div></div><small id="glossaryInjectionStatus">读取词库…</small></section>
+            </div>
+          </details>
+
+          <details class="language-limit-settings">
+            <summary>字符数上限设置 <span>按原文与目标语言自动选用硬上限</span></summary>
+            <div class="parameter-grid language-limit-grid">
+              <label class="language-ratio-field">
+                <span>语言比例阈值 <output id="languageRatioThresholdValue" for="languageRatioThresholdInput">20%</output></span>
+                <input id="languageRatioThresholdInput" type="range" min="0" max="100" step="1" value="20">
+                <small>其他语言占比不超过该值时按主要语言处理；超过时按混合处理</small>
+              </label>
+              <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
+              <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="20"><em>字符</em></div></label>
+              <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="24"><em>字符</em></div></label>
+              <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
+              <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="28"><em>字符</em></div></label>
+            </div>
+          </details>
+
+          <label class="thumbnail-generation-option"><input id="generateThumbnailsInput" type="checkbox"><span>生成高精度画面预览图</span></label>
+          <input id="chunkSecondsInput" type="hidden" value="180">
+          <input id="workersInput" type="hidden" value="16">
+          <input id="retryInput" type="hidden" value="3">
+        </div>
+
+        <div class="create-footer">
+          <p id="formMessage">选择素材后即可开始</p>
+          <button class="primary-button" id="startButton" type="button" disabled>
+            <span>创建项目</span><b>→</b>
+          </button>
+        </div>
+      </section>
+
+      <aside class="pipeline-card" aria-labelledby="pipelineTitle">
+        <div class="section-heading compact">
+          <div><span class="step-number">02</span><h2 id="pipelineTitle">流水线作业</h2></div>
+        </div>
+        <section id="quickStartPanel" class="quick-start hidden" aria-label="快速开始">
+          <div class="quick-start-intro">
+            <span class="quick-start-mark">✦</span>
+            <div><strong>先连接完成字幕所需的两项服务</strong><p>密钥只保存在本机。测试通过后自动保存，不需要离开当前页面。</p></div>
+            <button id="quickStartTutorial" type="button"><span><b>启动初级教程</b><small>跟随内置案例完成配置并创建第一个项目</small></span><strong aria-hidden="true">→</strong></button>
+            <button id="quickStartAdvancedTutorial" class="quick-advanced-tutorial" type="button"><span><b>启动进阶教程</b><small>载入固定案例，体验 AI 切分、校准、翻译与审阅</small></span><strong aria-hidden="true">→</strong></button>
+          </div>
+          <article id="qwenQuickCard" class="quick-provider-card" data-provider="qwen">
+            <div class="quick-provider-heading">
+              <span class="quick-provider-index">1</span>
+              <div><strong>Qwen ASR</strong><small>把音视频转换为带时间信息的听写结果</small></div>
+              <span id="qwenQuickState" class="quick-provider-state">待配置</span>
+            </div>
+            <label class="quick-secret-field">
+              <span>阿里云百炼 API Key</span>
+              <div><input id="qwenQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="qwenQuickKey" aria-label="显示 Qwen 密钥">显示</button></div>
+            </label>
+            <button id="qwenQuickTest" class="quick-test-button" type="button">测试连接</button>
+            <p id="qwenQuickResult" class="quick-test-result" aria-live="polite">使用 Qwen 云端文件听写默认配置</p>
+          </article>
+          <article id="glmQuickCard" class="quick-provider-card" data-provider="glm">
+            <div class="quick-provider-heading">
+              <span class="quick-provider-index">2</span>
+              <div><strong>智谱 GLM</strong><small>负责语义切分，以及后续翻译、校准和审阅</small></div>
+              <span id="glmQuickState" class="quick-provider-state">待配置</span>
+            </div>
+            <label class="quick-secret-field">
+              <span>智谱 API Key</span>
+              <div><input id="glmQuickKey" type="password" autocomplete="new-password" placeholder="输入 API Key"><button class="quick-reveal" type="button" data-reveal="glmQuickKey" aria-label="显示智谱密钥">显示</button></div>
+            </label>
+            <button id="glmQuickTest" class="quick-test-button" type="button">测试连接</button>
+            <p id="glmQuickResult" class="quick-test-result" aria-live="polite">使用智谱官方 API 与 glm-5.3-flash</p>
+          </article>
+          <div class="quick-start-footer"><span id="quickStartProgress">完成 0 / 2</span><small>连接完成后，这里会自动变为流水线作业。</small></div>
+        </section>
+        <div id="pipelinePanel" class="pipeline-panel">
+          <div class="empty-pipeline" id="emptyPipeline">
+            <svg class="ui-icon"><use href="/assets/ui-icons.svg#align"></use></svg>
+            <strong>还没有正在处理的任务</strong>
+            <p>开始后可以离开本页，任务会在后台继续运行。</p>
+          </div>
+          <div class="pipeline-jobs hidden" id="pipelineJobs" aria-live="polite"></div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="recent-section">
+      <div class="recent-head"><div><span class="step-number">03</span><h2>最近任务</h2></div><div><button id="refreshJobsButton" class="text-button" type="button">刷新</button><button id="importProjectButton" class="text-button" type="button">导入</button><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden></div></div>
+      <div class="recent-list" id="recentJobs"><p class="recent-empty">正在读取任务…</p></div>
+    </section>
+  </main>
+  <div id="splitTutorialLayer" class="split-tutorial-layer hidden" aria-hidden="true">
+    <div id="splitTutorialSpotlight" class="split-tutorial-spotlight" aria-hidden="true"></div>
+    <section id="splitTutorialCard" class="split-tutorial-card" role="dialog" aria-modal="false" aria-labelledby="splitTutorialTitle" tabindex="-1">
+      <header><span id="splitTutorialProgress">初级教程 · 1 / 10</span><button id="skipSplitTutorial" type="button">退出教程</button></header>
+      <div class="split-tutorial-copy"><h2 id="splitTutorialTitle">连接 QWEN 听写服务</h2><p id="splitTutorialDescription"></p><a id="splitTutorialLink" class="split-tutorial-link hidden" href="#" target="_blank" rel="noopener noreferrer"></a></div>
+      <div class="split-tutorial-actions"><button id="splitTutorialSecondary" class="tutorial-secondary hidden" type="button"></button><button id="splitTutorialPrimary" class="tutorial-primary hidden" type="button"></button></div>
+    </section>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <dialog id="asrAssistExternal" class="asr-assist-external">
+    <header><strong>提交外部模型生成</strong><button id="asrAssistClose" class="text-button" type="button" aria-label="关闭">×</button></header>
+    <label>ASR 文本与生成要求<textarea id="asrAssistPackage" rows="9" readonly></textarea></label>
+    <button id="asrAssistCopy" class="secondary-button" type="button">复制内容包</button>
+    <label>粘贴外部模型返回的 JSON<textarea id="asrAssistResult" rows="6" placeholder='{"prompt":"…","hotwords":[{"text":"…","weight":5}]}'></textarea></label>
+    <div id="asrAssistImportStatus" role="status"></div>
+    <footer><button id="asrAssistApply" class="primary-button" type="button">填入 Prompt 和热词</button></footer>
+  </dialog>
+  <div id="renameProjectDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="renameProjectTitle">
+    <form id="renameProjectForm" class="text-dialog">
+      <strong id="renameProjectTitle">重命名项目</strong>
+      <label><span>项目名称</span><input id="renameProjectName" maxlength="120" autocomplete="off" required></label>
+      <div><button id="cancelRenameProject" type="button">取消</button><button class="primary-button" type="submit">保存名称</button></div>
+    </form>
+  </div>
+  <script src="/assets/ai_progress_summary.js?v=20260903-counts-2" defer></script>
+  <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
+<script src="/assets/glossary_injection.js?v=20260911-glossary-weight-5" defer></script>
+<script src="/assets/asr_assist.js?v=20261012-media-selection-1" defer></script>
+  <script src="/assets/system_save_as.js?v=20260911-export-track-major-1" defer></script>
+  <script src="/assets/subtitle_input.js?v=20260911-single-project-1"></script>
+<script src="/assets/split.js?v=20261025-thumbnails-1" defer></script>
+<script src="/assets/translation_layout.js?v=20261024-languages-1"></script>
+<script src="/assets/split-concepts/concepts.js?v=1"></script>
+<script src="/assets/split-concepts/dark-glass.js?v=1"></script>
+</body>
+</html>

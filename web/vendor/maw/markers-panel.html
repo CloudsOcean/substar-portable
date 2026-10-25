@@ -1,0 +1,58 @@
+<aside class="gap-remove-panel markers-panel" id="markers-panel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="markers-panel-title">
+  <header class="gap-remove-panel-header" id="markers-drag-handle">
+    <div class="gap-remove-heading">
+      <span class="gap-remove-eyebrow">媒体标记</span>
+      <h3 id="markers-panel-title">标记与区段</h3>
+    </div>
+    <button type="button" id="markers-close" class="gap-remove-close" title="关闭（Esc）" aria-label="关闭标记与区段工具窗">×</button>
+  </header>
+  <div class="gap-remove-panel-body">
+    <div class="markers-actions">
+      <div class="markers-actions-primary">
+        <button type="button" id="markers-add-current" class="markers-inline-button">在播放头添加标记</button>
+        <button type="button" id="markers-help" class="markers-inline-button" data-help-tab-target="markers" aria-controls="help-tab-panel-markers">帮助</button>
+        <button type="button" id="markers-batch-select" class="markers-inline-button" aria-pressed="false">批量选择</button>
+      </div>
+      <label class="markers-filter-item markers-show-notes">
+        <input type="checkbox" id="markers-show-notes"> 显示备注
+      </label>
+    </div>
+    <div class="markers-summary-row">
+      <div class="markers-summary" id="markers-summary" aria-live="polite">尚无标记；在波形顶部标记轨道空白处点击或拖动即可添加。</div>
+      <input type="search" id="markers-search" class="markers-search-input" placeholder="按名称或备注搜索" maxlength="200" aria-label="按名称或备注搜索">
+    </div>
+    <div class="markers-filters-field">
+      <div class="markers-filters">
+        <label class="markers-filter-item">类型
+          <select id="markers-filter-kind">
+            <option value="all">全部</option>
+            <option value="marker">标记</option>
+            <option value="region">区段</option>
+          </select>
+        </label>
+        <label class="markers-filter-item">颜色
+          <select id="markers-filter-color">
+            <option value="all">全部</option>
+          </select>
+        </label>
+        <label class="markers-filter-item">复核
+          <select id="markers-filter-review">
+            <option value="all">全部</option>
+            <option value="pending">待复核</option>
+            <option value="confirmed">已确认</option>
+            <option value="plain">普通标记</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="markers-batch-actions" id="markers-batch-actions" hidden>
+      <button type="button" id="markers-select-all" class="markers-inline-button" title="仅选择当前筛选结果">全选</button>
+      <button type="button" id="markers-delete-selected" class="markers-inline-button danger" disabled>批量删除</button>
+      <span id="markers-selection-summary" aria-live="polite">已选 0 项</span>
+    </div>
+    <div class="markers-list" id="markers-list" aria-live="polite"></div>
+    <footer class="gap-remove-panel-footer">
+      <span>点击列表项定位试听 · Esc 关闭</span>
+    </footer>
+  </div>
+</aside>

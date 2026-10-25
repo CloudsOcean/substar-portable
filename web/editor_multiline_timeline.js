@@ -51,7 +51,7 @@
     return {left,right,cap,start:cue.start>=row.start,end:cue.end<=row.end};
   }
   function movePreview(cues, cue, delta, duration) {
-    const main=cues.filter(c=>c.subtitle_track!=="overlay");
+    const main=cues.filter(c=>c.subtitle_track!=="overlay" && c.speaker===cue.speaker);
     const index=main.findIndex(c=>c.cue_id===cue.cue_id);
     const low=cue.subtitle_track==="overlay"?0:(main[index-1]?.end ?? 0);
     const high=cue.subtitle_track==="overlay"?duration:(main[index+1]?.start ?? duration);
@@ -73,6 +73,16 @@
         + (tokens.indexOf(included[included.length-1]) < tokens.length-1 ? " …" : "");
     }
     return cue.start < row.start ? "续 · " + full : full;
+  }
+  function packSubtitleLanes(cues) {
+    const ends=[], lanes=new Map();
+    for(const cue of [...cues].sort((a,b)=>a.start-b.start||a.end-b.end||a.cue_id.localeCompare(b.cue_id))){
+      let index=ends.findIndex(end=>end<=cue.start);
+      if(index<0)index=ends.length;
+      if(index>=3)continue;
+      ends[index]=cue.end;lanes.set(cue.cue_id,index);
+    }
+    return {lanes,count:Math.max(1,ends.length)};
   }
   function createTimelineController(options) {
     const doc = options.canvas.ownerDocument;
@@ -215,6 +225,7 @@
       options.onViewportChange?.({start, end:Math.min(duration, start + span), duration});
     }
     function creationIntent(start, end = Math.min(duration, start + 1.5)) {
+      if(options.tools?.creationIntent)return options.tools.creationIntent(start,end);
       return timeline.manualCueIntent(view, start, end-start, duration);
     }
     function rebuild() {
@@ -238,6 +249,7 @@
         canvas.addEventListener("contextmenu", event => {
           event.preventDefault();
           const p = position(event,row);
+          if (options.tools?.context(event,row,p)) return;
           const gap = subtitleGapIntent(row.editGaps || [],p.x,p.y);
           if (gap) { options.onOperation?.(gap.type,gap); return; }
           // Right-clicking a word is not a request to create a new subtitle.
@@ -245,7 +257,8 @@
           const intent = creationIntent(p.time);
           if (intent) options.onOperation?.("createManualCue", intent);
         });
-        canvas.addEventListener("dblclick", () => {
+        canvas.addEventListener("dblclick", event => {
+          if (options.tools?.doubleClick(event,row,position(event,row))) return;
           if (options.media?.paused) options.media.play(); else options.media?.pause();
         });
         canvas.addEventListener("keydown", event => {
@@ -290,8 +303,26 @@
       ctx.fillStyle = "#0e1419"; ctx.fillRect(0, 0, width, height);
       const xAt = time => (time - row.start) / seconds * width;
       const hasOverlay = cues.some(cue=>cue.subtitle_track === "overlay" && cue.end>row.start && cue.start<row.end);
-      const center = mode === "basic" ? Math.max(hasOverlay ? 58 : 83, (hasOverlay ? 58 : 83) + (height - ROW_HEIGHT) / 2) : hasOverlay ? 58 : 83;
-      const amplitude = mode === "basic" ? Math.max(8, center - 6) : hasOverlay ? 52 : 77;
+      const filter=options.tools?.speaker();
+      const ranges = timeline.applyPreview(cues, preview).filter(c=>!filter || (c.speaker||"unassigned")===filter);
+      const trackIds=mode==="basic" ? options.tools?.tracks() || [] : [];
+      const trackLane=new Map(trackIds.map((id,i)=>[id,i]));
+      const translations = options.getShowTranslations?.() !== false && ranges.some(cue => cue.target_text);
+      const overlays = ranges.filter(cue=>cue.subtitle_track === "overlay" && cue.end>row.start && cue.start<row.end);
+      const overlayEnds=[], overlayLanes=new Map();
+      for(const cue of overlays) {
+        let lane=overlayEnds.findIndex(end=>end<=cue.start);
+        if(lane<0) lane=overlayEnds.length;
+        overlayEnds[lane]=cue.end; overlayLanes.set(cue.cue_id,lane);
+      }
+      const packed=mode==="multiline"&&options.tools?packSubtitleLanes(ranges.filter(c=>c.end>row.start&&c.start<row.end)):null;
+      const mainLanes=trackIds.length?trackIds.length*(translations?2:1):translations?2:1;
+      const laneHeight=packed?Math.min(34,Math.floor(112/(packed.count*(translations?2:1)))-3):trackIds.length?32:hasOverlay?Math.min(36,106/(mainLanes+overlayEnds.length)-3):(translations?40:48);
+      const top=packed?height-6-packed.count*(translations?2:1)*(laneHeight+3):height-6-(mainLanes+(trackIds.length?0:overlayEnds.length))*(laneHeight+3)-trackIds.length*16;
+      // Reserve the ruler and subtitle lanes before fitting the waveform to the panel.
+      const waveTop=28, waveBottom=Math.max(waveTop+2,top-4);
+      const center=(mode==='basic'||packed)?(waveTop+waveBottom)/2:hasOverlay?58:83;
+      const amplitude=(mode==='basic'||packed)?Math.max(1,(waveBottom-waveTop)/2):hasOverlay?52:77;
       ctx.strokeStyle = "#334149"; ctx.lineWidth = .7;
       ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(width, center); ctx.stroke();
       if (displaySelect.value !== "spectrogram") requestPeaks(row, width);
@@ -311,23 +342,12 @@
         const gain = Number(gainInput.value);
         for (let x = 0; x < values.length; x++) {
           if (!values[x]) continue;
-          const top = Math.max(2, Math.floor((center-values[x]*amplitude*gain)*ratio)/ratio);
-          const bottom = Math.min(height-2, Math.ceil((center+values[x]*amplitude*gain)*ratio)/ratio);
+          const top = Math.max((mode === "basic" || packed) ? waveTop : 2, Math.floor((center-values[x]*amplitude*gain)*ratio)/ratio);
+          const bottom = Math.min((mode === "basic" || packed) ? waveBottom : height-2, Math.ceil((center+values[x]*amplitude*gain)*ratio)/ratio);
           ctx.fillRect(x*columnWidth, top, columnWidth, bottom-top);
         }
       }
-      const ranges = timeline.applyPreview(cues, preview);
-      const translations = options.getShowTranslations?.() !== false && ranges.some(cue => cue.target_text);
-      const overlays = ranges.filter(cue=>cue.subtitle_track === "overlay" && cue.end>row.start && cue.start<row.end);
-      const overlayEnds=[], overlayLanes=new Map();
-      for(const cue of overlays) {
-        let lane=overlayEnds.findIndex(end=>end<=cue.start);
-        if(lane<0) lane=overlayEnds.length;
-        overlayEnds[lane]=cue.end; overlayLanes.set(cue.cue_id,lane);
-      }
-      const mainLanes=translations?2:1;
-      const laneHeight=hasOverlay?Math.min(36,106/(mainLanes+overlayEnds.length)-3):(translations?40:48);
-      const top=height-6-(mainLanes+overlayEnds.length)*(laneHeight+3);
+      if(trackIds.length){ctx.font="11px 'Microsoft YaHei',sans-serif";for(const [sid,index] of trackLane){const y=top+index*((translations?2:1)*(laneHeight+3)+16);ctx.fillStyle="#101a24";ctx.fillRect(0,y,width,(translations?2:1)*(laneHeight+3)+16);ctx.fillStyle=globalThis.EditorSpeakers.color(sid);ctx.fillText(sid==='unassigned'?'未分配':globalThis.EditorSpeakers.label(sid,view?.properties?.speaker_names),5,y+12);}}
       if (displaySelect.value === "spectrogram") {
         requestSpectrum(row);
         const image = spectra.get(row), plotTop = 30, plotHeight = Math.max(16, top - plotTop - 4);
@@ -346,6 +366,7 @@
       }
       row.lanes=new Map();
       row.editGaps=[];
+      row.wordHits=[];
       for (const cue of ranges) {
         if (cue.end <= row.start || cue.start >= row.end) continue;
         // In the continuous strip, draw the complete cue through canvas seams.
@@ -356,14 +377,19 @@
         const {left,right,cap} = handles;
         const isSelected = selection.ids.has(cue.cue_id);
         const overlay=cue.subtitle_track === "overlay";
-        const firstLane=overlay?mainLanes+overlayLanes.get(cue.cue_id):0;
-        const count=overlay?1:mainLanes;
-        row.lanes.set(cue.cue_id,{top:top+firstLane*(laneHeight+3),bottom:top+(firstLane+count)*(laneHeight+3)});
+        if(packed&&!packed.lanes.has(cue.cue_id))continue;
+        const firstLane=packed?packed.lanes.get(cue.cue_id)*(translations?2:1):trackIds.length?(trackLane.get(cue.speaker||"unassigned")||0)*(translations?2:1):overlay?mainLanes+overlayLanes.get(cue.cue_id):0;
+        const count=packed?(translations?2:1):trackIds.length?(translations?2:1):overlay?1:mainLanes;
+        const trackOffset=trackIds.length?((trackLane.get(cue.speaker||"unassigned")||0)+1)*16:0;
+        row.lanes.set(cue.cue_id,{top:top+firstLane*(laneHeight+3)+trackOffset,bottom:top+(firstLane+count)*(laneHeight+3)+trackOffset});
         for (let lane = 0; lane < count; lane++) {
-          const y = top + (firstLane+lane) * (laneHeight + 3);
-          ctx.fillStyle = overlay ? "rgba(74,67,94,.94)" : "rgba(66,78,89,.86)";
-          ctx.beginPath(); ctx.roundRect(left + .5, y, Math.max(1, right - left - 1), laneHeight, 4); ctx.fill();
-          ctx.strokeStyle = isSelected ? "#ffe16b" : "rgba(184,195,204,.48)";
+          const targetLane = count === 2 && cue.source_upper === false ? lane === 0 : lane === 1;
+          const y = top + (firstLane+lane) * (laneHeight + 3)+trackOffset;
+          const tint=options.tools?.colorize?.()?globalThis.EditorSpeakers?.color(cue.speaker||''):null;
+          ctx.fillStyle = tint || (overlay ? "rgba(74,67,94,.94)" : "rgba(66,78,89,.86)");
+          ctx.globalAlpha=tint ? .26 : 1;
+          ctx.beginPath(); ctx.roundRect(left + .5, y, Math.max(1, right - left - 1), laneHeight, 5); ctx.fill();ctx.globalAlpha=1;
+          ctx.strokeStyle = isSelected ? "#ffe16b" : tint || "rgba(184,195,204,.22)";
           ctx.lineWidth = isSelected ? 1.5 : 1; ctx.stroke();
           ctx.fillStyle="rgba(184,195,204,.28)";
           if (handles.start) ctx.fillRect(left+1,y+1,cap,Math.max(0,laneHeight-2));
@@ -372,7 +398,24 @@
           const available = Math.max(0,right-(handles.end?cap:0)-textLeft-5);
           ctx.save(); ctx.beginPath(); ctx.rect(textLeft, y, available, laneHeight); ctx.clip();
           ctx.font = "14px 'Segoe UI', 'Microsoft YaHei', sans-serif"; ctx.fillStyle = "#edf1f4"; ctx.textBaseline = "middle";
-          const tokens = !lane ? cue.timed_tokens || [] : [];
+          const tokens = !targetLane ? cue.timed_tokens || [] : [];
+          if(!targetLane && options.tools?.wordLayer() && tokens.length){
+            ctx.restore();
+            for(const token of tokens){if(!Number.isFinite(token.start)||!Number.isFinite(token.end)||token.end<=row.start||token.start>=row.end)continue;
+              const l=xAt(token.start),r=xAt(token.end),chosen=options.tools.selected(token.token_id);
+              ctx.save();ctx.beginPath();ctx.rect(Math.max(left,l),y,Math.max(0,Math.min(right,r)-Math.max(left,l)),laneHeight);ctx.clip();
+              // Every timed word remains a distinct range at every zoom level.
+              const inset=Math.min(1,Math.max(0,(r-l)/8)),boxWidth=Math.max(.5,r-l-inset*2);
+              ctx.beginPath();ctx.roundRect(l+inset,y+3,boxWidth,laneHeight-6,Math.min(3,boxWidth/2));
+              ctx.strokeStyle=chosen?'#d4b5ed':'rgba(190,210,225,.3)';ctx.lineWidth=chosen?1:.6;ctx.stroke();
+              ctx.font="13px 'Segoe UI', 'Microsoft YaHei', sans-serif";ctx.fillStyle=chosen?'#fff':'#e0e8f0';
+              const room=Math.max(0,r-l-10);let label=token.text;
+              if(ctx.measureText(label).width>room){while(label&&ctx.measureText(label+'…').width>room)label=label.slice(0,-1);label=label?label+'…':room>=ctx.measureText('…').width?'…':'';}
+              if(label)ctx.fillText(label,l+5,y+laneHeight/2);ctx.restore();
+              const next=tokens[tokens.indexOf(token)+1];if(next){const boundary=xAt((token.end+next.start)/2);row.editGaps.push({left:boundary-3,right:boundary+3,top:y,bottom:y+laneHeight,intent:{type:'split_cue',cue_id:cue.cue_id,after_token_id:token.token_id}});}
+              row.wordHits.push({left:l,right:r,top:y,bottom:y+laneHeight,id:token.token_id,cue_id:cue.cue_id,start:token.start,end:token.end,speaker:cue.speaker||"unassigned",text:token.text});}
+            continue;
+          }
           if (tokens.length) {
             let x = textLeft;
             const visibleTokens = mode === "multiline" ? tokens.filter(t => t.end > row.start && t.start < row.end) : tokens;
@@ -390,21 +433,21 @@
               if (x>textLeft+available) break;
             }
           } else {
-            const text=mode === "multiline" ? rowCueText(cue,row,!!lane) : (lane?cue.target_text:cue.text);
+            const text=mode === "multiline" ? rowCueText(cue,row,targetLane) : (targetLane?cue.target_text:cue.text);
             spacedText(ctx,text,textLeft,y+laneHeight/2,true);
           }
           ctx.restore();
         }
       }
-      const main=ranges.filter(c=>c.subtitle_track!=="overlay");
-      for(let i=0;i<main.length-1;i++) {
-        const a=main[i], b=main[i+1], lane=row.lanes.get(a.cue_id) || row.lanes.get(b.cue_id);
-        if(!lane || b.start<a.end || a.end<row.start || b.start>row.end) continue;
-        const left=xAt(a.end), right=xAt(b.start), middle=(left+right)/2;
-        row.editGaps.push({left:Math.min(left,middle-3),right:Math.max(right,middle+3),top:lane.top,bottom:lane.bottom,
-          intent:{type:"merge_cues",left_cue_id:a.cue_id,right_cue_id:b.cue_id}});
+      const tracks=new Map();for(const cue of ranges.filter(c=>c.subtitle_track!=="overlay")){const id=cue.speaker||'unassigned';if(!tracks.has(id))tracks.set(id,[]);tracks.get(id).push(cue);}
+      for(const main of tracks.values())for(let i=0;i<main.length-1;i++) {
+        const a=main[i],b=main[i+1],lane=row.lanes.get(a.cue_id)||row.lanes.get(b.cue_id);
+        if(!lane||b.start<a.end||a.end<row.start||b.start>row.end)continue;
+        const left=xAt(a.end),right=xAt(b.start);
+        row.editGaps.push({left:left-4,right:right+4,top:lane.top,bottom:lane.bottom,intent:{type:'merge_cues',left_cue_id:a.cue_id,right_cue_id:b.cue_id}});
       }
       drawBoundaryMode(ctx, row, width, height, xAt);
+      options.tools?.draw(ctx,row,{width,height,xAt,mode});
       if(drag?.kind==="create") {
         const end=row.pointerTime ?? drag.time, left=xAt(Math.min(drag.time,end)),right=xAt(Math.max(drag.time,end));
         ctx.fillStyle="rgba(174,153,215,.18)"; ctx.fillRect(left,0,right-left,height);
@@ -476,7 +519,7 @@
         time:clamp(row.start + (event.clientX - rect.left) / rect.width * seconds, 0, duration), width:rect.width};
     }
     function boundaryTrack(target) {
-      const track = target.cue.subtitle_track === "overlay" ? [target.cue] : cues.filter(c => c.subtitle_track !== "overlay");
+      const track = target.cue.subtitle_track === "overlay" ? [target.cue] : cues.filter(c => c.subtitle_track !== "overlay" && c.speaker===target.cue.speaker);
       return {track, index:track.findIndex(c => c.cue_id === target.cue.cue_id)};
     }
     function boundaryModeFor(target) {
@@ -527,12 +570,13 @@
         return {kind:"playhead",row,...p};
       const laneCues=timeline.applyPreview(cues,preview).filter(cue=>{
         const lane=row.lanes?.get(cue.cue_id);
-        return lane ? p.y>=lane.top && p.y<=lane.bottom : p.y>=99;
+        return lane ? p.y>=lane.top && p.y<=lane.bottom : !options.tools && p.y>=99;
       });
       const cue = timeline.cueAtTime(laneCues, p.time);
       if (p.y >= 70) {
         for (let index = 0; index < cues.length; index++) {
           const lane=row.lanes?.get(cues[index].cue_id);
+          if(options.tools && !lane)continue;
           if(lane && (p.y<lane.top || p.y>lane.bottom)) continue;
           for (const edge of ["start", "end"]) {
             const time = cues[index][edge];
@@ -556,6 +600,7 @@
     }
     function pointerDown(event, row) {
       if (event.button !== 0) return;
+      if(options.tools?.pointerDown(event,row,position(event,row))) {suppressClick=true;return;}
       selectionHandled=false;
       row.canvas.focus({preventScroll:true});
       const target = hit(event, row);
@@ -586,6 +631,7 @@
     }
     function pointerMove(event, row) {
       const p=position(event,row);
+      if(options.tools?.pointerMove(event,row,p))return;
       pointer={row,x:p.x,y:p.y}; row.pointerTime=p.time;
       if (!drag) {
         const target=hit(event,row);
@@ -594,6 +640,8 @@
           ? "左键切换边界调整模式\n右键将下句合并到上句"
           : gap?.type === "split_cue" ? "右键在字词间隙切分字幕"
           : target.kind === "playhead" ? "左键拖动播放线" : "";
+        const word=(row.wordHits||[]).find(w=>p.x>=w.left&&p.x<=w.right&&p.y>=w.top&&p.y<=w.bottom);
+        if(word&&!gap)row.canvas.title=`${word.text} · ${word.start.toFixed(3)}—${word.end.toFixed(3)} 秒`;
         const badge=hover?.row===row?boundaryBadge(hover,row,target.width):null;
         const inBadgePath=badge && target.x>=Math.min(badge.x-12,badge.left-8)
           && target.x<=Math.max(badge.x+12,badge.left+badge.width+8)
@@ -608,7 +656,7 @@
       if(drag.kind==="move") {
         preview=movePreview(cues,drag.cue,position(event,row).time-drag.time,duration); redraw(); return;
       }
-      const track=drag.cue.subtitle_track === "overlay" ? [drag.cue] : cues.filter(c=>c.subtitle_track!=="overlay");
+      const track=drag.cue.subtitle_track === "overlay" ? [drag.cue] : cues.filter(c=>c.subtitle_track!=="overlay" && c.speaker===drag.cue.speaker);
       const index=track.findIndex(c=>c.cue_id===drag.cue.cue_id);
       const adjustment = event.shiftKey ? "single" : boundaryModeFor(drag);
       drag.mode=adjustment;
@@ -616,6 +664,7 @@
       redraw();
     }
     function pointerUp(event, row) {
+      if(options.tools?.pointerUp(event,row,position(event,row))) {suppressClick=true;return;}
       if (!drag) return;
       row.canvas.releasePointerCapture(event.pointerId);
       suppressClick = drag.moved;
@@ -628,6 +677,7 @@
       drag = null; preview = null; redraw();
     }
     function click(event, row) {
+      if(options.tools?.click(event,row,position(event,row))){suppressClick=false;return;}
       if (suppressClick) { suppressClick = false; return; }
       const target = hit(event,row);
       if (["boundary","mode-toggle"].includes(target.kind) && toggleBoundaryMode(target)) return;
@@ -707,5 +757,5 @@
       }
     });
   }
-  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,rowCueText,spacedText,subtitleGapIntent,createTimelineController});
+  return Object.freeze({rowRanges,timeLabel,waveformEnvelope,cueHandles,movePreview,rowCueText,spacedText,subtitleGapIntent,packSubtitleLanes,createTimelineController});
 });

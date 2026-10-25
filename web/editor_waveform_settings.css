@@ -1,0 +1,42 @@
+/* Waveform settings use editor controls, with a scrollable body and stable heading. */
+body.editor-shell .maw-waveform-host #waveform-settings-panel {
+ box-sizing:border-box;display:flex;flex-direction:column;gap:0;width:min(372px,calc(100vw - 24px));
+ padding:0;overflow:hidden;background:var(--theme-panel);color:var(--theme-text);
+ border:1px solid var(--theme-line-strong);border-radius:10px;box-shadow:0 12px 38px #0007;
+ font:13px/1.5 "Microsoft YaHei","Segoe UI",sans-serif;text-align:left;
+}
+body.editor-shell .maw-waveform-host #waveform-settings-panel[hidden] {display:none!important;}
+body.editor-shell #waveform-settings-panel .waveform-settings-header {
+ display:flex;align-items:center;justify-content:space-between;flex:none;gap:12px;padding:12px 16px;border-bottom:1px solid var(--theme-line);
+}
+body.editor-shell #waveform-settings-panel .waveform-settings-header strong {font-size:15px;line-height:24px;color:var(--theme-text);}
+body.editor-shell #waveform-settings-panel .waveform-settings-actions {display:flex;align-items:center;gap:8px;}
+body.editor-shell #waveform-settings-panel .waveform-settings-actions button {height:28px;min-height:28px;padding:0 8px;font-size:12px;}
+body.editor-shell #waveform-settings-panel .waveform-settings-actions .waveform-settings-close {width:28px;min-width:28px;padding:0;font-size:22px;line-height:1;}
+body.editor-shell #waveform-settings-panel .waveform-settings-body {overflow-y:auto;overscroll-behavior:contain;min-height:0;padding:0 16px;scrollbar-gutter:stable;}
+body.editor-shell #waveform-settings-panel .waveform-settings-section {
+ display:flex;flex-direction:column;align-items:stretch;gap:12px;box-sizing:border-box;width:100%;padding:16px 0;margin:0;
+ border:0;border-bottom:1px solid var(--theme-line);border-radius:0;background:transparent;
+}
+body.editor-shell #waveform-settings-panel .waveform-settings-section:last-child {border-bottom:0;}
+body.editor-shell #waveform-settings-panel .waveform-settings-title {flex:none;text-align:left;letter-spacing:0;margin:0;font-size:12px;font-weight:600;color:var(--theme-muted);}
+body.editor-shell #waveform-settings-panel .editor-settings-item {
+ display:flex;flex-direction:row;align-items:center;justify-content:space-between;flex:none;gap:10px;width:100%;min-height:32px;margin:0;padding:0;
+ color:var(--theme-text);font:13px/1.5 "Microsoft YaHei","Segoe UI",sans-serif;white-space:normal;text-align:left;
+}
+body.editor-shell #waveform-settings-panel .editor-settings-item > span:not(.editor-settings-stepper) {font:inherit;white-space:normal;}
+body.editor-shell #waveform-settings-panel select {box-sizing:border-box;width:164px;max-width:60%;height:34px;min-height:34px;padding:0 8px;border:1px solid var(--theme-line-strong);border-radius:6px;background:var(--theme-field);color:var(--theme-text);font-size:13px;}
+body.editor-shell #waveform-settings-panel .editor-settings-item:has(input[type=checkbox]) {justify-content:flex-start;}
+body.editor-shell #waveform-settings-panel input[type=checkbox] {order:2;flex:none;width:16px;height:16px;min-width:16px;margin:0 0 0 auto;accent-color:var(--theme-accent);}
+body.editor-shell #waveform-settings-panel .editor-settings-stepper {display:inline-flex;align-items:center;justify-content:center;gap:0;height:32px;margin-left:auto;border:1px solid var(--theme-line-strong);border-radius:6px;overflow:hidden;}
+body.editor-shell #waveform-settings-panel .editor-settings-stepper button {height:30px;min-height:30px;width:30px;padding:0;border:0;border-radius:0;}
+body.editor-shell #waveform-settings-panel .editor-settings-stepper b {min-width:48px;text-align:center;font:12px/30px Consolas,monospace;color:var(--theme-text);}
+body.editor-shell #waveform-settings-panel .waveform-scale-fit {height:32px;min-height:32px;padding:0 8px;font-size:12px;}
+body.editor-shell #waveform-settings-panel .settings-panel-hint {flex:none;min-height:0;font-size:12px;line-height:1.6;color:var(--theme-muted);margin:-4px 0 0;}
+body.editor-shell #waveform-settings-panel [hidden] {display:none!important;}
+body.editor-shell .maw-waveform-host #waveform-settings-toggle[aria-expanded=true] {border-color:var(--theme-accent);background:color-mix(in srgb,var(--theme-accent) 18%,var(--theme-panel-2));}
+
+body.editor-shell #waveform-settings-panel .waveform-suppression-controls {display:flex;align-items:center;gap:7px;min-width:0;margin-left:auto;}
+body.editor-shell #waveform-settings-panel #waveform-low-energy {width:88px;min-width:60px;height:24px;margin:0;accent-color:var(--theme-accent);}
+body.editor-shell #waveform-settings-panel .waveform-suppression-controls output {width:34px;text-align:right;font:12px Consolas,monospace;}
+body.editor-shell #waveform-settings-panel .waveform-suppression-controls button {height:28px;min-height:28px;padding:0 6px;font-size:12px;}

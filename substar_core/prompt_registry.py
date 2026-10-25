@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .artifacts import atomic_write_text
+from .cue_limits import cue_language
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,12 +69,9 @@ def frozen_prompt(settings: dict[str, Any], key: str, **options: Any) -> Rendere
 def source_language_analysis(
     text: str, language_ratio_threshold_percent: int | float = 20
 ) -> dict[str, Any]:
-    """Resolve one project language from all language-bearing characters.
+    """Inspect language-bearing text. Legacy ratio arguments are ignored.
 
-    The threshold is the combined share of every language except the most-used
-    language. Japanese keeps the established rule that Han characters belong
-    to Japanese when Kana is present, because Kanji cannot be distinguished
-    from Chinese by Unicode script alone.
+    This analysis routes prompts; each displayed cue selects its own cap.
     """
     value = text or ""
     counts = {
@@ -86,13 +84,13 @@ def source_language_analysis(
     if counts["ja"]:
         counts["ja"] += counts["zh-CN"]
         counts["zh-CN"] = 0
-    threshold = max(0.0, min(100.0, float(language_ratio_threshold_percent)))
+    threshold = 0.0  # Accepted only for old callers; ratio policy is retired.
     total = sum(counts.values())
     primary = max(counts, key=counts.get) if total else "en"
     primary_count = counts[primary] if total else 0
     other_count = total - primary_count
     other_ratio = (other_count * 100.0 / total) if total else 0.0
-    resolved = primary if other_ratio <= threshold else "mixed"
+    resolved = {"zh": "zh-CN"}.get(cue_language(value), cue_language(value))
     return {
         "resolved_language": resolved,
         "primary_language": primary,
@@ -211,6 +209,20 @@ def render_prompt(
     entry = entries.get(key) if isinstance(entries, dict) else None
     if not isinstance(entry, dict):
         raise PromptRegistryError(f"未注册提示词：{key}")
+    exact = entry.get("exact_mode_variants", {}).get(mode or entry.get("default_mode"), {}).get(variant)
+    if exact:
+        production = (PROMPT_ROOT / "production").resolve()
+        paths = [(production / relative).resolve() for relative in exact["files"]]
+        if any(production not in path.parents for path in paths):
+            raise PromptRegistryError("提示词路径越界")
+        # The accepted experiment is an exact composition, including newlines.
+        text = "\n\n".join(path.read_text(encoding="utf-8") for path in paths)
+        return RenderedPrompt(
+            key=key, variant=variant, version=exact["version"], text=text,
+            files=tuple(path.relative_to(PROMPT_ROOT).as_posix() for path in paths),
+            sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            mode=mode or entry.get("default_mode"),
+        )
     variants = entry.get("variants", {})
     files = variants.get(variant) if isinstance(variants, dict) else None
     if files is None and variant != "default":
@@ -280,6 +292,9 @@ def _registered_component_paths(registry: dict[str, Any]) -> set[str]:
     for entry in entries.values():
         if not isinstance(entry, dict):
             continue
+        for variants in entry.get("exact_mode_variants", {}).values():
+            for exact in variants.values():
+                paths.update(exact["files"])
         paths.update(str(item).replace("\\", "/") for item in entry.get("shared", []))
         modes = entry.get("modes", {})
         if isinstance(modes, dict):
@@ -339,6 +354,12 @@ def prompt_catalog() -> dict[str, Any]:
             if isinstance(files, list)
         } if isinstance(raw.get("modes", {}), dict) else {}
         mode_variants = raw.get("mode_variants", {})
+        for mode, by_variant in raw.get("exact_mode_variants", {}).items():
+            for variant, exact in by_variant.items():
+                for relative in exact["files"]:
+                    usage.setdefault(relative, []).append({
+                        "family": str(key), "variant": f"exact:{mode}/{variant}",
+                    })
         for relative in shared:
             usage.setdefault(relative, []).append({"family": str(key), "variant": "shared"})
         for mode, files in modes.items():
@@ -375,6 +396,7 @@ def prompt_catalog() -> dict[str, Any]:
             "shared": shared,
             "modes": modes,
             "mode_variants": mode_variants,
+            "exact_mode_variants": raw.get("exact_mode_variants", {}),
             "default_mode": raw.get("default_mode"),
             "variants": variants,
         })

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from substar_core.translation_layout import normalize_layout, route_text
 from substar_core.domain import EditorDocument, EntityState
 
 
@@ -12,6 +13,7 @@ def translation_groups(
 ) -> tuple[list[dict[str, Any]], set[str], dict[str, str]]:
     """Build ordered technical components without semantic-group boundaries."""
 
+    layout = normalize_layout(settings.get("translation_layout"))
     groups_by_id = {group.group_id: group for group in document.groups}
     display_by_id = {token.token_id: token for token in document.display_tokens}
     rows: list[dict[str, Any]] = []
@@ -28,7 +30,8 @@ def translation_groups(
         execution_ids = list(group.execution_block_ids) if group else []
         rows.append({
             "cue": cue,
-            "source_text": " ".join(token.text for token in tokens).strip(),
+            "source_text": cue.source_text if cue.source_text is not None else " ".join(token.text for token in tokens).strip(),
+            "route": route_text(cue.source_text if cue.source_text is not None else " ".join(token.text for token in tokens), layout) if layout else {},
             # Compatibility read only: the legacy group supplies the accepted
             # scheduler block id, never a translation boundary.
             "execution_block_id": execution_ids[0] if execution_ids else "manual",
@@ -52,6 +55,7 @@ def translation_groups(
         if (
             not components
             or components[-1][-1]["execution_block_id"] != row["execution_block_id"]
+            or components[-1][-1]["route"] != row["route"]
             or len(components[-1]) >= max_component_cues
         ):
             components.append([])
@@ -67,8 +71,11 @@ def translation_groups(
             required.add(cue.cue_id)
             cue_to_group[cue.cue_id] = payload_group_id
             current_target = cue.target.target_text if cue.target else ""
-            if configured_target in explicit_limits:
-                limit_key, count_rule = explicit_limits[configured_target]
+            row_target = row["route"].get("target_language", configured_target)
+            if row_target in explicit_limits:
+                limit_key, count_rule = explicit_limits[row_target]
+            elif row_target not in {"", "Auto", "auto", "auto_opposite"}:
+                limit_key, count_rule = "other_hard_limit", "all_characters_including_spaces"
             else:
                 target_is_cjk = not any("\u3400" <= char <= "\u9fff" for char in source_text)
                 limit_key, count_rule = (
@@ -76,9 +83,10 @@ def translation_groups(
                     if target_is_cjk
                     else ("english_hard_limit", "all_characters_including_spaces")
                 )
-            hard_limit = int(settings[limit_key])
+            hard_limit = int(settings.get(limit_key, 55))
             cues.append(
                 {
+                    **row["route"],
                     "cue_id": cue.cue_id,
                     "start": cue.start,
                     "end": cue.end,

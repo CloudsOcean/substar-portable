@@ -926,9 +926,9 @@ def test_main_translation_prompt_uses_target_language_boundaries() -> None:
         "contextual_translation", variant="en_to_zh", mode="many_to_many"
     ).text
     assert "1|译文" in prompt
-    assert "1-4" in prompt
     assert "2-4" in prompt
-    assert "反序" in prompt
+    assert "先分开表达，必要时才共享" in prompt
+    assert "程序不因逗号或风格触发修复" in prompt
     assert "内部不得出现 `，` 或 `；`" not in prompt
     assert "JSON" in output_contract("TRANSLATE")
     assert "group_id" not in prompt

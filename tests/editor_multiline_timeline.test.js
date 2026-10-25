@@ -4,6 +4,13 @@ const assert = require("node:assert/strict");
 const {rowRanges,timeLabel,waveformEnvelope,cueHandles,createTimelineController} = require("../web/editor_multiline_timeline.js");
 const {movePreview} = require("../web/editor_multiline_timeline.js");
 
+test("speaker tracks constrain movement only against their own neighbours", () => {
+  const a={cue_id:"a",start:1,end:2,speaker:"speaker_0"};
+  const b={cue_id:"b",start:1.5,end:8,speaker:"speaker_1"};
+  const c={cue_id:"c",start:5,end:6,speaker:"speaker_0"};
+  assert.deepEqual(movePreview([a,b,c],a,2,10).changes.map(x=>x.time),[3,4]);
+});
+
 test("overlay movement ignores main-track neighbors while main movement stays constrained", () => {
   const a={cue_id:"a",start:0,end:3}, b={cue_id:"b",start:4,end:6};
   const overlay={cue_id:"o",start:1,end:2,subtitle_track:"overlay"};
@@ -280,4 +287,15 @@ test("Chinese retains normal spacing without changing text",()=>{
   assert.deepEqual(drawn,['中文']);
   assert.equal(spacedText(ctx,'ab',0,0),20);
   assert.equal(subtitleGapIntent([{left:10,right:15,top:20,bottom:30,intent:'split'}],12,40),null);
+});
+
+
+test('multiline packs different speakers by overlap, reuses lanes and caps at three', () => {
+  const {packSubtitleLanes}=require('../web/editor_multiline_timeline.js');
+  const cues=[{cue_id:'a',speaker:'a',start:0,end:2},{cue_id:'b',speaker:'b',start:2,end:4},{cue_id:'c',speaker:'c',start:1,end:3},{cue_id:'d',speaker:'d',start:1.5,end:2.5}];
+  const result=packSubtitleLanes(cues);
+  assert.equal(result.count,3);
+  assert.equal(result.lanes.get('a'),result.lanes.get('b'));
+  for(const a of cues)for(const b of cues)if(a!==b&&a.start<b.end&&b.start<a.end)assert.notEqual(result.lanes.get(a.cue_id),result.lanes.get(b.cue_id));
+  assert.deepEqual([...packSubtitleLanes([...cues].reverse()).lanes],[...result.lanes]);
 });

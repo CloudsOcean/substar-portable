@@ -1,0 +1,221 @@
+/* Workspace actions and draggable tool windows. */
+#detectSpeakers[hidden], .workspace-tool-dock[hidden] { display:none !important; }
+.workspace-tool-dock { position:fixed; height:34px; box-sizing:border-box; padding:2px 6px; z-index:60; border:1px solid #383838; border-radius:6px; background:#202020; }
+html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs { display:flex; align-items:center; flex-wrap:nowrap; gap:3px; height:28px; margin:0; padding:0; border:0; overflow-x:auto; }
+html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs button { display:flex; flex-direction:row!important; align-items:center; justify-content:center; flex:0 0 auto; gap:4px; min-width:0; width:auto; height:27px; padding:0 6px; font-size:11px; white-space:nowrap; border-radius:4px; }
+.workspace-tool-dock .experimental-tool-tabs svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.5; }
+.workspace-tool-dock .experimental-tool-tabs button::after { display:none!important; }
+html[data-editor-layout="experimental"] [data-workspace-layout="waveform"] .editor-document-pane { margin-top:42px; }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .cue-timeline-panel { margin-top:42px; }
+html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools { height:auto!important; max-height:calc(100vh - 16px); border:1px solid #444; border-radius:8px; background:#202020; box-shadow:0 12px 36px #0008; }
+html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools.cinema-tools-open { display:flex!important; flex-direction:column; }
+html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools .cinema-tool-heading { flex:none; cursor:move; touch-action:none; border:0; border-bottom:1px solid #3a3a3a; background:#292929; }
+html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools .cinema-tool-heading strong { color:#e0e0e0; }
+html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools > .tool-accordion { position:static!important; flex:1 1 auto; width:100%; max-height:var(--cinema-window-height,520px); overflow-y:auto; border:0; background:#202020; box-shadow:none; }
+.pane-heading #scriptProjectionMenu > summary, .pane-heading #referenceManuscript { height:29px; min-height:0; padding:0 7px; font-size:12px; white-space:nowrap; }
+.pane-heading #scriptProjectionMenu .command-popover { z-index:150; }
+#editorTools .speaker-tool-form { display:flex; flex-direction:column; gap:12px; position:static; width:100%; min-width:0; margin:0; padding:0; border:0; background:transparent; box-shadow:none; }
+#editorTools .speaker-tool-form p { margin:0; font-size:12px; color:#aaa; line-height:1.6; }
+#editorTools .speaker-name-grid { display:grid; gap:8px; }
+#editorTools .speaker-name-grid label { display:flex; align-items:center; gap:8px; }
+#editorTools .speaker-name-grid input { flex:1; min-width:0; width:100%; }
+#editorTools .speaker-tool-form > div:last-child { display:flex; flex-wrap:wrap; gap:6px; }
+
+#editorTools .cinema-tool-heading { order:-1; }
+#editorTools .speaker-tool-form .speaker-name-grid label { flex-direction:row; }
+#editorTools .speaker-tool-form .speaker-swatch { flex:none; width:14px; height:14px; border-radius:4px; }
+.pane-heading #scriptProjectionMenu .editor-command-popover { z-index:150; }
+
+html[data-editor-layout="experimental"] .cue-actions button.speaker { background:color-mix(in srgb,var(--cue-speaker-color,#8996a5) 18%,transparent)!important; border-color:color-mix(in srgb,var(--cue-speaker-color,#8996a5) 42%,transparent)!important; color:var(--cue-speaker-color,#8996a5)!important; box-shadow:none; }
+html[data-editor-layout="experimental"] .cue-actions button.speaker:hover { filter:brightness(1.15); }
+.speaker-color-options { padding:6px 0; }
+.speaker-color-options > div { padding:3px 12px 6px; color:#aaa; font-size:12px; }
+.speaker-color-option { display:flex!important; align-items:center; gap:9px; }
+.speaker-color-option > span { flex:1; }
+.speaker-color-option[aria-checked="true"] { background:#3b3b3b; }
+.speaker-color-swatch { display:inline-block; flex:none; width:18px; height:18px; border-radius:4px; }
+
+/* Selection changes emphasis while keeping the speaker's hue on both subtitle tracks. */
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-cue-block[data-substar-speaker] { background:color-mix(in srgb,var(--substar-speaker-color) 34%,#222)!important; border-color:var(--substar-speaker-color)!important; }
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-cue-block[data-substar-speaker].selected { background:color-mix(in srgb,var(--substar-speaker-color) 48%,#222)!important; outline-color:color-mix(in srgb,var(--substar-speaker-color) 70%,white)!important; }
+
+/* Subtitle and waveform panes share the same heading rhythm and settings icon. */
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading,
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane > .waveform-toolbar {
+  box-sizing:border-box;min-height:44px;height:auto;padding:6px 8px;gap:8px;
+  align-items:center;border-bottom:1px solid var(--theme-line);background:var(--theme-panel);
+}
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading > div:first-child {
+  align-items:center;gap:6px;row-gap:6px;
+}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading .editor-command-menu > summary {
+  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  height:29px;min-height:0;padding:0 8px;font-size:12px;line-height:1.3;white-space:nowrap;
+}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading .editor-command-menu {flex:none;}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading .pane-live-controls {flex:none;margin-left:auto;}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading .editor-command-popover {
+  z-index:160;max-height:calc(100vh - 24px);overflow:auto;box-sizing:border-box;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.pane-heading,#waveform-pane) .workspace-settings-gear {
+  display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  width:30px;min-width:30px;height:30px;min-height:30px;padding:0;
+  border:1px solid var(--theme-line-strong);border-radius:5px;
+  background:var(--theme-panel-2);color:var(--theme-text);
+  font:14px/1 "Microsoft YaHei","Segoe UI Emoji","Segoe UI",sans-serif;cursor:pointer;list-style:none;
+}
+html[data-editor-layout="experimental"] body.editor-shell .workspace-settings-gear::-webkit-details-marker {display:none;}
+
+/* One geometry for pane headers and every outer control box. */
+html[data-editor-layout="experimental"] body.editor-shell {--workspace-pane-header-height:44px;--workspace-pane-control-height:30px;}
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading,
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane > .waveform-toolbar {
+  height:var(--workspace-pane-header-height);min-height:var(--workspace-pane-header-height);
+  flex-shrink:0;line-height:20px;padding:6px 8px;gap:8px;margin:0;
+}
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane {border:0;border-radius:0;}
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading > div:first-child {flex-wrap:nowrap;align-items:center;gap:6px;}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading :is(#cueSplitViewLabel,.editor-command-menu>summary,#referenceManuscript),
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane :is(.waveform-mode-switch,.waveform-quick-toggle) {
+  height:var(--workspace-pane-control-height);min-height:var(--workspace-pane-control-height);box-sizing:border-box;align-self:center;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.cue-view-switch,.waveform-mode-switch) button {
+  height:100%;min-height:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;line-height:16px;padding:0 8px;
+}
+@media(max-width:1100px){
+  html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading {height:auto;}
+  html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading > div:first-child {flex-wrap:wrap;}
+}
+/* Marker quick editor: keep swatches compact instead of inheriting toolbar button padding. */
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit {
+  box-sizing:border-box;width:264px;max-width:calc(100vw - 24px);padding:12px;gap:12px;
+  border:1px solid var(--theme-line-strong);border-radius:8px;box-shadow:0 8px 24px #0005;
+  background:var(--theme-panel-2);color:var(--theme-text);
+}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-edit-field {gap:6px;font-size:12px;}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit input[type=text] {
+  box-sizing:border-box;min-width:0;width:100%;height:34px;padding:6px 8px;font-family:inherit;font-size:13px;line-height:20px;
+}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-color-swatches {display:grid;grid-template-columns:repeat(8,24px);gap:6px;padding:3px 0;}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-color-swatch {
+  box-sizing:border-box;width:24px;min-width:24px;height:24px;min-height:24px;padding:0;border-radius:5px;
+  background:var(--marker-color);border:1px solid #ffffff66;
+}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-color-swatch.active {outline:2px solid var(--theme-accent-soft);outline-offset:1px;}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-item-actions {display:flex;justify-content:space-between;align-items:center;gap:8px;}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-item-actions button {height:30px;min-height:30px;padding:0 10px;font-size:12px;}
+
+/* Mostly solid cue fills keep waveforms from competing with subtitle text. */
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-cue-block[data-substar-speaker] { background:color-mix(in srgb,color-mix(in srgb,var(--substar-speaker-color) 50%,#222) 92%,transparent)!important; }
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-cue-block[data-substar-speaker].selected { background:color-mix(in srgb,color-mix(in srgb,var(--substar-speaker-color) 64%,#222) 96%,transparent)!important; }
+body.editor-shell .maw-waveform-host .waveform-cue-label { text-shadow:0 1px 2px #000d; }
+
+
+/* Shared header dimensions: titles, segmented switches, commands and gears share one centre. */
+html[data-editor-layout="experimental"] body.editor-shell {
+  --workspace-pane-header-height:44px;
+  --workspace-pane-control-height:36px;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.editor-document-pane > .pane-heading,#waveform-pane > .waveform-toolbar) {
+  display:flex;align-items:center;box-sizing:border-box;height:var(--workspace-pane-header-height);
+  min-height:var(--workspace-pane-header-height);padding:3px 8px;line-height:20px;
+}
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading > div:first-child {
+  display:flex;align-items:center;min-height:36px;gap:6px;flex-wrap:wrap;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.editor-document-pane > .pane-heading > div:first-child > strong,#waveform-pane .layout-toolbar-label) {
+  display:flex;align-items:center;align-self:center;height:36px;margin:0;
+  font:700 16px/20px "Microsoft YaHei","Segoe UI",sans-serif;
+}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading :is(.editor-command-menu > summary,#referenceManuscript),
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane .waveform-quick-toggle {
+  display:inline-flex;align-items:center;justify-content:center;height:36px;min-height:36px;
+  padding:0 10px;font:400 14px/20px "Microsoft YaHei","Segoe UI",sans-serif;box-sizing:border-box;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.pane-heading #cueSplitViewLabel,#waveform-pane .waveform-mode-switch) {
+  height:36px;min-height:36px;align-self:center;align-items:stretch;margin:0;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.cue-view-switch,#waveform-pane .waveform-mode-switch) button {
+  font:400 14px/20px "Microsoft YaHei","Segoe UI",sans-serif;height:100%;padding:0 10px;
+}
+html[data-editor-layout="experimental"] body.editor-shell :is(.pane-heading,#waveform-pane) .workspace-settings-gear {
+  width:36px;min-width:36px;height:36px;min-height:36px;font-size:16px;align-self:center;margin-block:0;
+}
+html[data-editor-layout="experimental"] body.editor-shell .pane-heading .pane-live-controls {display:flex;align-items:center;margin-block:0;}
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane {--panel-toolbar-h:44px;}
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane.basic-mode {min-height:244px;}
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading:has(> div:first-child > :nth-child(7)) {height:auto;}
+body.editor-shell #translationMenu .translation-glossary {width:100%;max-width:none;box-sizing:border-box;align-self:stretch;}
+body.editor-shell #translationGlossaryChoices label {display:flex;align-items:center;justify-content:flex-start;gap:7px;width:100%;box-sizing:border-box;background:transparent!important;}
+body.editor-shell #translationGlossaryChoices input[type=checkbox] {width:16px;height:16px;min-width:16px;margin:0;flex:none;}
+
+body.editor-shell #translationMenu .translation-regroup-option {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:8px;}
+body.editor-shell #translationMenu .translation-regroup-option input {width:16px;height:16px;min-width:16px;flex:none;margin:0;}
+html[data-editor-layout="experimental"] body.editor-shell #waveform-pane .layout-toolbar-label {font-style:normal;}
+
+html[data-editor-layout="experimental"] body.editor-shell :is(.editor-document-pane,.editor-preview-pane,.cue-timeline-panel) {padding-top:4px;}
+html[data-editor-layout="experimental"] body.editor-shell .editor-preview-pane {grid-template-rows:44px minmax(0,1fr);}
+html[data-editor-layout="experimental"] body.editor-shell .editor-preview-pane > .preview-heading {
+ display:flex;align-items:center;box-sizing:border-box;height:44px;min-height:44px;padding:3px 8px;margin:0;
+}
+html[data-editor-layout="experimental"] body.editor-shell #mediaPreviewLabel {
+ display:flex;align-items:center;height:36px;margin:0;color:var(--theme-text);font:700 16px/20px "Microsoft YaHei","Segoe UI",sans-serif;
+}
+body.editor-shell .media-speed-control select {width:76px;min-width:76px;height:30px;padding:0 6px;font-size:12px;}
+
+/* Attached translations use neutral fills, independent of the main cue's speaker. */
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-row .waveform-cue-block[data-track="extension"] {
+ background:rgba(46,47,51,.96)!important;border-color:#666970!important;outline-color:#666970!important;
+}
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host .waveform-row .waveform-cue-block[data-track="extension"].selected {
+ background:rgba(66,68,73,.98)!important;border-color:#afb2ba!important;outline-color:#afb2ba!important;
+}
+html[data-theme="light"] body.editor-shell .maw-waveform-host .waveform-row .waveform-cue-block[data-track="extension"] {background:#e2e3e6!important;border-color:#9b9da4!important;outline-color:#9b9da4!important;}
+body.editor-shell #translationLanguageLayout :is(.language-direction,.translation-regroup-option) {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:6px;}
+body.editor-shell #translationLanguageLayout :is(.language-direction,.translation-regroup-option) small {display:inline;flex:1;min-width:0;margin:0 0 0 3px;font-size:12px;line-height:1.5;color:var(--theme-muted);}
+
+/* Keep source-language choices on the same surface as the remaining language settings. */
+body.editor-shell #translationLanguageLayout .language-slot {
+ margin:0 0 14px;padding:0;border:0;border-radius:0;background:transparent;
+}
+html:not([data-theme="light"]) body.editor-shell #translationLanguageLayout .language-slot {background:transparent;border:0;}
+
+/* Word strips match subtitle lane heights and remain neutral. */
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
+ background:rgba(46,47,51,.96)!important;border-color:#6b6d74!important;outline-color:#6b6d74!important;color:var(--theme-text);
+}
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block.selected {
+ background:rgba(66,68,73,.98)!important;border-color:#b4b6bf!important;outline-color:#b4b6bf!important;
+}
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-label {font-size:12px;line-height:1.4;}
+html[data-theme="light"] body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {background:#e2e3e6!important;}
+
+/* Word resize handles and shared seams remain neutral as well. */
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
+ --wave-cue-handle:rgba(180,182,190,.18);--wave-cue-handle-hover:rgba(200,202,210,.35);
+}
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-boundary {
+ background:rgba(180,182,190,.18)!important;
+}
+/* Flat word boundaries: no shadow, gradient, or translucent edge overlay. */
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
+ box-shadow:none!important;background-image:none!important;
+ --wave-cue-handle:#484a50;--wave-cue-handle-hover:#5d5f66;
+}
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block .waveform-cue-handle,
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-boundary {
+ background-image:none!important;box-shadow:none!important;
+}
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-boundary {background:#484a50!important;}
+html[data-theme="light"] body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
+ --wave-cue-handle:#c4c6cb;--wave-cue-handle-hover:#b1b4bb;
+}
+html[data-theme="light"] body.editor-shell .maw-waveform-host .waveform-row .waveform-word-boundary {background:#c4c6cb!important;}
+/* Reserve the 11px shared-edge handle plus a 3px text inset on each side. */
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
+ padding-left:14px;padding-right:14px;
+}
+/* Word edges use the shared Substar boundary interaction; no separate handle strips. */
+body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {padding-left:11px;padding-right:11px;}
+body.editor-shell .maw-waveform-host .waveform-word-block .waveform-cue-handle,
+body.editor-shell .maw-waveform-host .waveform-word-boundary {display:none!important;}

@@ -6,6 +6,7 @@
     "operationType": {
       "type": "string",
       "enum": [
+        "set_timeline",
         "replace",
         "set_target",
         "set_cue_time",

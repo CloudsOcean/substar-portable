@@ -473,6 +473,7 @@ class PresentationSettings:
     upper_space: str = ""
     lower_remove: str = ""
     lower_space: str = ""
+    translation_layout: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -482,11 +483,14 @@ class PresentationSettings:
             self, "lower_punctuation", PunctuationPresentation(self.lower_punctuation)
         )
         object.__setattr__(self, "display_order", DisplayOrder(self.display_order))
+        from substar_core.translation_layout import normalize_layout
+        object.__setattr__(self, "translation_layout", normalize_layout(self.translation_layout))
         for name in ("upper_remove", "upper_space", "lower_remove", "lower_space"):
             object.__setattr__(self, name, str(getattr(self, name) or ""))
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
+            **({"translation_layout": dict(self.translation_layout)} if self.translation_layout else {}),
             "upper_punctuation": self.upper_punctuation.value,
             "lower_punctuation": self.lower_punctuation.value,
             "display_order": self.display_order.value,
@@ -499,6 +503,7 @@ class PresentationSettings:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "PresentationSettings":
         return cls(
+            translation_layout=value.get("translation_layout", {}),
             upper_punctuation=PunctuationPresentation(value["upper_punctuation"]),
             lower_punctuation=PunctuationPresentation(value["lower_punctuation"]),
             display_order=DisplayOrder(value["display_order"]),
@@ -514,6 +519,7 @@ class DocumentProperties:
     complete: bool = False
     speaker_names: tuple[tuple[str, str], ...] = ()
     script_projection: str = "original"
+    timeline_json: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.complete, bool):
@@ -528,6 +534,10 @@ class DocumentProperties:
         }:
             raise DocumentValidationError("properties.script_projection is unsupported")
         object.__setattr__(self, "script_projection", projection)
+        if self.timeline_json:
+            import json
+            from substar_core.cut_timeline import validate_timeline
+            object.__setattr__(self, "timeline_json", json.dumps(validate_timeline(json.loads(self.timeline_json)), ensure_ascii=False, sort_keys=True))
 
     def to_dict(self) -> dict[str, Any]:
         # Omit the default to preserve the content hash of existing projects.
@@ -536,6 +546,9 @@ class DocumentProperties:
             value["script_projection"] = self.script_projection
         if self.speaker_names:
             value["speaker_names"] = dict(self.speaker_names)
+        if self.timeline_json:
+            import json
+            value["timeline"] = json.loads(self.timeline_json)
         return value
 
     @classmethod
@@ -545,6 +558,7 @@ class DocumentProperties:
             complete=value["complete"],
             speaker_names=tuple(dict(names).items()),
             script_projection=str(value.get("script_projection", "original")),
+            timeline_json=__import__("json").dumps(value["timeline"], ensure_ascii=False) if value.get("timeline") is not None else "",
         )
 
 
@@ -663,7 +677,7 @@ class EditorDocument:
         display_by_id = {token.token_id: token for token in self.display_tokens}
         cue_members: list[str] = []
         cue_owners: dict[str, list[DisplayCue]] = {}
-        previous_active_end = -1.0
+        previous_active_end = {}
         for cue in self.cues:
             unknown = set(cue.display_token_ids) - known_display
             if unknown:
@@ -678,11 +692,11 @@ class EditorDocument:
                 for token_id in cue.display_token_ids
             )
             if cue.state is EntityState.ACTIVE and not is_manual_cue:
-                if cue.start < previous_active_end:
+                if cue.start < previous_active_end.get(cue.speaker, -1.0):
                     raise DocumentValidationError(
                         "active cues must not overlap and must be time ordered"
                     )
-                previous_active_end = cue.end
+                previous_active_end[cue.speaker] = cue.end
         repeated_members = {
             token_id: owners for token_id, owners in cue_owners.items() if len(owners) > 1
         }

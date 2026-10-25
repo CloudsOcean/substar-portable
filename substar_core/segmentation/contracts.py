@@ -34,7 +34,7 @@ def resolve_segmentation_language(
     """Resolve the one language policy shared by every block in a task."""
 
     constraints = request.get("constraints", {})
-    threshold = int(constraints.get("language_ratio_threshold_percent", 20))
+    threshold = 0  # Legacy ratio settings no longer suppress mixed text.
     analysis = source_language_analysis(source_text, threshold)
     selection = str(request.get("language") or "Auto")
     automatic = selection.strip().lower() in {"", "auto", "automatic"}
@@ -47,7 +47,7 @@ def resolve_segmentation_language(
         "ko": "korean_hard_limit",
         "mixed": "mixed_hard_limit",
     }
-    limit_key = limits.get(resolved, "english_hard_limit")
+    limit_key = limits.get(resolved, "other_hard_limit")
     break_symbols = str(constraints.get("reference_break_symbols") or "")
     presets = {
         reference_break_symbols_for_language(language)
@@ -279,6 +279,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         frozenset(constraints) if isinstance(constraints, Mapping) else frozenset()
     )
     legacy_constraint_fields = constraint_fields - {"language_ratio_threshold_percent"}
+    actual_constraint_fields = actual_constraint_fields - {"other_hard_limit"}
     if actual_constraint_fields not in {
         frozenset(legacy_constraint_fields),
         frozenset(constraint_fields),
@@ -292,6 +293,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
     if boundary_policy not in {"reference", "reconstruct", "unpunctuated"}:
         raise InvalidTaskError("sentence_boundary_policy is invalid")
     normalized_constraints = {
+        **({"other_hard_limit": _integer(constraints["other_hard_limit"], "constraints.other_hard_limit", 1, 200)} if "other_hard_limit" in constraints else {}),
         "target_seconds": _integer(constraints["target_seconds"], "constraints.target_seconds", 30, 600),
         "english_hard_limit": _integer(constraints["english_hard_limit"], "constraints.english_hard_limit", 1, 200),
         "chinese_hard_limit": _integer(constraints["chinese_hard_limit"], "constraints.chinese_hard_limit", 1, 200),
@@ -422,9 +424,7 @@ def build_segmentation_request(
             "english_hard_limit": int(settings.get("english_hard_limit", 55)),
             "chinese_hard_limit": int(settings.get("chinese_hard_limit", 20)),
             "mixed_hard_limit": int(settings.get("mixed_hard_limit", 25)),
-            "language_ratio_threshold_percent": int(
-                settings.get("language_ratio_threshold_percent", 20)
-            ),
+            "other_hard_limit": int(settings.get("other_hard_limit", 55)),
             "japanese_hard_limit": int(settings.get("japanese_hard_limit", 24)),
             "korean_hard_limit": int(settings.get("korean_hard_limit", 28)),
             "sentence_boundary_policy": str(settings.get("sentence_boundary_policy", "unpunctuated")),

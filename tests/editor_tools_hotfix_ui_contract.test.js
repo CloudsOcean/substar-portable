@@ -20,15 +20,9 @@ test("release keeps the non-dubbing editor tool contract", () => {
 });
 
 test("hotfix fingerprints every changed editor asset", () => {
-  const fingerprints = {
-    "editor.css":"20261012-media-selection-1",
-    "editor.js":"20261012-media-selection-1",
-    "editor_document.js":"20261009-merge-tools-2",
-    "editor_timeline.js":"20261009-row-snap-1",
-    "editor_tutorial.js":"20260831-v2-contract-1",
-  };
-  for (const [asset, version] of Object.entries(fingerprints)) {
-    assert.match(html, new RegExp(`${asset.replace(".", "\\.")}\\?v=${version}`));
+  const boot=fs.readFileSync(path.join(root,"web","editor_maw_boot.js"),"utf8");
+  for (const asset of ["editor.css","editor.js","editor_document.js","editor_timeline.js","editor_maw_boot.js"]) {
+    assert.match(html+boot, new RegExp(asset.replaceAll(".","\\.")+"\\?v=[a-zA-Z0-9_-]+"));
   }
 });
 

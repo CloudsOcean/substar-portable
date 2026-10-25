@@ -78,6 +78,9 @@
     const cueById = new Map(document.cues.map(cue => [cue.cue_id, cue]));
     const provenance = localProvenance(operation);
     switch (operation.type) {
+      case "set_timeline":
+        document.properties.timeline = clone(payload.timeline);
+        break;
       case "replace": {
         const token = tokenById.get(String(payload.token_id));
         if (token) {
@@ -117,8 +120,10 @@
         break;
       }
       case "set_cue_speaker": {
-        const cue = cueById.get(String(payload.cue_id));
-        if (cue) cue.speaker = payload.speaker ?? null;
+        for(const id of payload.cue_ids || [payload.cue_id]) {
+          const cue = cueById.get(String(id));
+          if (cue) cue.speaker = payload.speaker ?? null;
+        }
         break;
       }
       case "set_speaker_names":
@@ -133,6 +138,7 @@
         break;
       }
       case "set_cue_times":
+        if (payload.word_timings) { const timeline=document.properties.timeline || {}; document.properties.timeline={...timeline,word_timings:{...timeline.word_timings,...clone(payload.word_timings)}}; }
         (payload.cues || []).forEach(item => {
           const cue = cueById.get(String(item.cue_id));
           if (cue) {

@@ -25,6 +25,7 @@ DEFAULT_RELAY_PROFILE: dict[str, Any] = {
     "english_count_punctuation": True,
     "chinese_hard_limit": 20,
     "mixed_hard_limit": 25,
+    "other_hard_limit": 55,
     "japanese_hard_limit": 24,
     "korean_hard_limit": 28,
     "minimum_cue_duration_ms": 400,

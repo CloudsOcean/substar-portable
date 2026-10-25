@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .language_layout import format_text
+from .cue_limits import CueLimits
 
 
 LanguageClass = Literal[
@@ -33,6 +34,7 @@ class SubtitlePolicy:
     english_count_punctuation: bool = True
     chinese_hard_limit: int = 20
     mixed_hard_limit: int = 25
+    other_hard_limit: int = 55
     japanese_hard_limit: int = 24
     korean_hard_limit: int = 28
     target_visual_width_limit: int = 48
@@ -78,16 +80,7 @@ class SubtitlePolicy:
         )
 
     def hard_limit(self, text: str, language: LanguageClass | None = None) -> int:
-        language = language or classify_language(text)
-        if str(language).lower() in {"mixed", "mixed_zh", "mixed_en"}:
-            return self.mixed_hard_limit
-        if language in {"zh", "mixed_zh"}:
-            return self.chinese_hard_limit
-        if language == "ja":
-            return self.japanese_hard_limit
-        if language == "ko":
-            return self.korean_hard_limit
-        return self.english_hard_limit
+        return CueLimits.from_settings(self.to_dict(), str(language or "")).for_text(text)
 
     def exceeds_hard_limit(
         self, text: str, language: LanguageClass | None = None

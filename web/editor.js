@@ -4,7 +4,6 @@
   const contract = window.EditorDocument;
   const languageLayout = window.SubstarLanguageLayout;
   const externalReview = window.SubstarExternalReview;
-  const tutorialResolver = window.EditorTutorial;
   const systemSaveAs = window.SubstarSystemSaveAs;
   const $ = selector => document.querySelector(selector);
   const CUE_PAGE_SIZE = 160;
@@ -114,7 +113,8 @@
     }
     if (!response.ok) {
       const detail = body?.detail || body || {};
-      const error = new Error(detail.message || `请求失败 (${response.status})`);
+      const reason = typeof detail === "string" ? detail : Array.isArray(detail) ? detail.map(item => item.msg || "请求参数无效").join("；") : detail.message;
+      const error = new Error(reason || `请求失败 (${response.status})`);
       error.code = detail.code || "request_failed";
       error.status = response.status;
       error.detail = detail;
@@ -135,6 +135,7 @@
   }
 
   function applyEditorSettings(settings = {}) {
+    window.SubstarTranslationLayout.configureModel(settings.qwen_cloud_model);
     state.shortcuts = {
       undo:String(settings.shortcut_undo || "Ctrl+Z"),
       redo:String(settings.shortcut_redo || "Ctrl+Y"),
@@ -350,7 +351,6 @@
     $("#mediaMute").title = silent ? "已静音，点击恢复声音" : "静音";
     const speed = Number(media?.playbackRate) || 1;
     $("#mediaSpeed").value = String(speed);
-    $("#mediaSpeedValue").textContent = `${speed.toFixed(2)}x`;
   }
 
   function syncPlaybackPosition(time) {
@@ -592,13 +592,15 @@
     const latestCalibration = [...(state.view.changes || [])].reverse().find(
       change => change?.operation === "ai_calibration_apply"
     );
+    const translationNotRequired = new Set((state.revision?.document?.cues || [])
+      .filter(cue => cue.mapping?.translation_not_required).map(cue => cue.cue_id));
     const problemCueIds = new Set(state.view.cue_views.filter(cue => {
       const lines = projectedCueLines(cue);
-      const sourceMetric = subtitleLengthMetric(lines.source, state.trackLanguages.source, "source");
-      const targetMetric = subtitleLengthMetric(lines.target, state.trackLanguages.target, "target");
+      const sourceMetric = subtitleLengthMetric(lines.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
+      const targetMetric = subtitleLengthMetric(lines.target, cue.target?.language || state.trackLanguages.target, "target");
       return sourceMetric.count > sourceMetric.limit
         || (String(lines.target || "").trim() && targetMetric.count > targetMetric.limit)
-        || (latestTranslation && !String(lines.target || "").trim());
+        || (latestTranslation && !translationNotRequired.has(cue.cue_id) && !String(lines.target || "").trim());
     }).map(cue => cue.cue_id));
     (state.view.changes || []).forEach(change => {
       if (!["build_from_segmentation", "build_from_split_stages"].includes(change?.operation)) return;
@@ -673,23 +675,23 @@
 
   function projectedCueLines(cue) {
     const presentation = state.view?.presentation || {};
-    const sourceUpper = presentation.display_order !== "target_above_source";
+    const sourceUpper = languageLayout.routedSourceUpper(cueSourceText(cue), presentation);
     const source = projectPunctuation(
       cueSourceText(cue),
       sourceUpper ? presentation.upper_remove : presentation.lower_remove,
       sourceUpper ? presentation.upper_space : presentation.lower_space
     );
     const target = projectPunctuation(
-      languageLayout.formatText(cue.target?.target_text || "", state.trackLanguages?.target),
+      languageLayout.formatText(cue.target?.target_text || "", cue.target?.language || state.trackLanguages?.target),
       sourceUpper ? presentation.lower_remove : presentation.upper_remove,
       sourceUpper ? presentation.lower_space : presentation.upper_space
     );
     return {source, target, sourceUpper};
   }
 
-  function projectedSourceTokenText(text) {
+  function projectedSourceTokenText(text, cue = null) {
     const presentation = state.view?.presentation || {};
-    const sourceUpper = presentation.display_order !== "target_above_source";
+    const sourceUpper = languageLayout.routedSourceUpper(cue ? cueSourceText(cue) : text, presentation);
     return projectPunctuation(
       text,
       sourceUpper ? presentation.upper_remove : presentation.lower_remove,
@@ -865,7 +867,7 @@
     if (item.is_latest) return `${baseName} · 当前编辑`;
     const operation = provenance.metadata?.user_action || provenance.operation;
     const names = {merge:"合并", split_token:"拆分词元", replace:"修改文字", batch_replace:"批量修改文字",
-      set_cue_times:"调整时间", set_cue_time:"调整时间", split_cue:"字幕换行", merge_cues:"合并字幕", auto_merge_cues:"拼接 / 合并字幕",
+      set_timeline:"修改标记与剪辑方案", set_cue_times:"调整时间", set_cue_time:"调整时间", split_cue:"字幕换行", merge_cues:"合并字幕", auto_merge_cues:"拼接 / 合并字幕",
       set_target:"修改译文", selective_restore:"选择性恢复", delete:"删除", restore_revision:"恢复版本"};
     return `${names[operation] || operation || "编辑"} · r${item.revision_number}`;
   }
@@ -1241,6 +1243,7 @@
     $("#taskMediaStatus").textContent = info.media_missing ? "文件不存在，请重新链接" : "";
     $("#taskInfoSourceLanguage").value = info.language === "zh-CN" ? "zh" : info.language;
     $("#taskInfoTargetLanguage").value = info.target_language_mode;
+    window.SubstarTranslationLayout.write("taskInfoLanguageLayout", info.translation_layout || {});
     $("#taskInfoSourceLimit").value = String(info.source_hard_limit);
     $("#taskInfoTargetLimit").value = String(info.target_hard_limit);
     $("#taskInfoAutosaveDelay").value = String(info.autosave_delay_seconds ?? 1);
@@ -1276,6 +1279,7 @@
           media_selection_token:$("#taskInfoMediaPath").dataset.selection || "",
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
+          translation_layout:window.SubstarTranslationLayout.read("taskInfoLanguageLayout"),
           glossary_id:String(state.taskInfo?.glossary_id || ""),
           llm_provider_id:$("#taskInfoLlmProvider").value || "inherit",
           source_hard_limit:sourceLimit,
@@ -1350,8 +1354,6 @@
     $("#toggleComplete").textContent = complete ? "取消完成标记" : "标记完成";
     $("#toggleComplete").disabled = !revision || locked || tutorial;
     $("#toggleComplete").classList.toggle("hidden", tutorial);
-    $("#startEditorTutorial").classList.toggle("hidden", !tutorial);
-    $("#startEditorTutorial").textContent = isAdvancedTutorial() ? "启动进阶教程" : "启动初级教程";
     $("#toggleComplete").classList.toggle("complete", complete);
     $("#toggleComplete").title = complete ? "完成只是属性；取消后仍是同一可编辑项目" : "标记后仍可继续编辑";
     $("#exportMenu").classList.toggle("disabled", !revision);
@@ -1606,6 +1608,9 @@
     sourceLanguageSelect.disabled = running;
     languageSelect.disabled = running;
     mappingModeSelect.disabled = running;
+    const regroupControl = $("#translationRegroup");
+    if (regroupControl) regroupControl.disabled = running;
+    $("#translationLanguageLayout").disabled = running;
     if (running && task?.source_language_selection) {
       sourceLanguageSelect.value = task.source_language_selection;
     }
@@ -1866,6 +1871,10 @@
     const sourceLanguage = $("#translationSourceLanguage").value;
     const targetLanguage = $("#translationTargetLanguage").value;
     const mappingMode = $("#translationMappingMode").value;
+    const regroupControl = $("#translationRegroup");
+    const regroup = Boolean(regroupControl?.checked || (
+      state.translationTask?.state === "failed" && state.translationTask?.regroup
+    ));
     $("#translateDocument").disabled = true;
     $("#translationSourceLanguage").disabled = true;
     $("#translationTargetLanguage").disabled = true;
@@ -1882,11 +1891,14 @@
           expected_revision_id:state.revision.revision_id,
           source_language:sourceLanguage,
           target_language:targetLanguage,
+          translation_layout:window.SubstarTranslationLayout.read("translationLanguageLayout"),
           mapping_mode:mappingMode,
+          regroup,
           glossary_ids:glossaryIds
         })
       });
       followTranslationTask(task);
+      if (regroupControl) regroupControl.checked = false;
     } catch (error) {
       ordinaryError(`翻译启动失败：${error.message}`);
       renderTranslationTask({
@@ -1921,7 +1933,8 @@
     button.classList.toggle("review-annotated", annotated);
     if (interactive) button.dataset.tokenId = token.token_id;
     const label = document.createElement("b");
-    const projectedText = projectedSourceTokenText(token.text);
+    const tokenCueId = state.indexes?.tokenToCueId?.get(token.token_id);
+    const projectedText = projectedSourceTokenText(token.text, state.indexes?.cueById?.get(tokenCueId));
     label.textContent = projectedText;
     button.classList.toggle("punctuation-elided", !projectedText);
     const source = sourceTextForToken(token);
@@ -1979,7 +1992,8 @@
 
   function subtitleLengthMetric(text, language = null, track = null) {
     const value = String(text || "").trim();
-    const resolvedLanguage = language || detectSubtitleLanguage(value);
+    const routed = Boolean(state.view?.presentation?.translation_layout?.enabled);
+    const resolvedLanguage = routed ? languageLayout.normalizeLanguage(language || detectSubtitleLanguage(value)) : language || detectSubtitleLanguage(value);
     const limits = {
       zh:state.subtitlePolicy.chineseHardLimit,
       mixed:state.subtitlePolicy.mixedHardLimit,
@@ -1990,7 +2004,7 @@
     const override = track === "source"
       ? state.subtitlePolicy.sourceHardLimit
       : track === "target" ? state.subtitlePolicy.targetHardLimit : null;
-    const limit = override || limits[resolvedLanguage] || limits.en;
+    const limit = (!routed && override) || limits[resolvedLanguage] || limits.en;
     const count = languageLayout.characterCount(value, resolvedLanguage, {
       countSpaces: state.subtitlePolicy.countSpaces,
       countPunctuation: state.subtitlePolicy.countPunctuation
@@ -2029,8 +2043,8 @@
     const bilingualProject = state.view?.cue_views.some(item => item.subtitle_track !== "overlay" && item.target);
     const hasTarget = (Boolean(cue.target) || (bilingualProject && cue.subtitle_track !== "overlay"))
       && $("#showTranslations").checked;
-    const sourceMetric = subtitleLengthMetric(projected.source, state.trackLanguages.source, "source");
-    const targetMetric = subtitleLengthMetric(projected.target, state.trackLanguages.target, "target");
+    const sourceMetric = subtitleLengthMetric(projected.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
+    const targetMetric = subtitleLengthMetric(projected.target, cue.target?.language || state.trackLanguages.target, "target");
     const overLimit = sourceMetric.count > sourceMetric.limit
       || (Boolean(cue.target) && targetMetric.count > targetMetric.limit);
     row.className = `cue-row${hasTarget ? " has-target" : " source-only"}${cue.cue_id === state.activeCueId ? " current" : ""}${cue.state === "deleted" ? " deleted" : ""}${overLimit ? " over-limit" : ""}`;
@@ -2150,7 +2164,8 @@
       target.disabled = cue.state === "deleted" || editorAiTaskLocksEditor();
       target.value = projected.target;
       if (!cue.target) target.placeholder = "\u8bd1\u6587";
-      content.append(target);
+      if (projected.sourceUpper) content.append(target);
+      else content.prepend(target);
     }
     const actions = document.createElement("div");
     actions.className = "cue-actions";
@@ -2158,7 +2173,15 @@
       <button type="button" class="restore" data-cue-action="restore" title="恢复 Cue">↶ 恢复</button>` : `
       <button type="button" class="hide-cue" data-cue-action="hide" title="隐藏 Cue（可恢复）"><svg class="ui-icon"><use href="/assets/ui-icons.svg#eye-off"></use></svg></button>
       <button type="button" class="danger" data-cue-action="purge" title="永久删除 Cue（可用全局撤销恢复）"><svg class="ui-icon"><use href="/assets/ui-icons.svg#trash"></use></svg></button>
-      <button type="button" class="speaker${cue.speaker ? ` ${cue.speaker.replace("_", "-")}` : ""}" data-cue-action="speaker" title="${speakerLabel(cue.speaker)}；点击切换"><svg class="ui-icon"><use href="/assets/ui-icons.svg#user"></use></svg></button>`;
+      <button type="button" class="speaker" data-cue-action="speaker"><svg class="ui-icon"><use href="/assets/ui-icons.svg#user"></use></svg></button>`;
+    const speakerButton = actions.querySelector('[data-cue-action="speaker"]');
+    if (speakerButton) {
+      speakerButton.title = `${speakerLabel(cue.speaker)}；点击切换下一位说话人`;
+      speakerButton.style.setProperty("--cue-speaker-color", window.EditorSpeakers.color(cue.speaker));
+      speakerButton.setAttribute("aria-label", speakerButton.title);
+      speakerButton.style.color = window.EditorSpeakers.color(cue.speaker);
+      speakerButton.style.borderColor = window.EditorSpeakers.color(cue.speaker);
+    }
     row.append(meta, content, actions);
     if ((cue.source_text != null && cue.subtitle_track !== "overlay") || editorAiTaskLocksEditor()) actions.querySelectorAll("button").forEach(node => {node.disabled = true;});
     return row;
@@ -2169,29 +2192,44 @@
   }
 
   function speakerLabel(speaker) {
-    if (!speaker) return "未分配说话人";
-    const index = Number(String(speaker).split("_").at(-1));
-    return speakerNames()[speaker] || `说话人 ${Number.isFinite(index) ? index + 1 : ""}`.trim();
+    return window.EditorSpeakers.label(speaker, speakerNames());
   }
 
-  function nextSpeaker(speaker) {
-    const values = [null, "speaker_0", "speaker_1", "speaker_2", "speaker_3"];
-    return values[(values.indexOf(speaker ?? null) + 1) % values.length];
+  function appendSpeakerInput(id, name) {
+    const label = document.createElement("label");
+    const swatch = document.createElement("i");
+    swatch.className = "speaker-swatch";
+    swatch.style.background = window.EditorSpeakers.color(id);
+    const input = document.createElement("input");
+    input.dataset.speakerName = id; input.maxLength = 60;
+    input.value = name; input.placeholder = window.EditorSpeakers.label(id);
+    input.setAttribute("aria-label", `${id} 名称`);
+    label.append(swatch, input);
+    $("#speakerDialogForm .speaker-name-grid").append(label);
+    return input;
   }
 
-  function openSpeakerDialog() {
+  function populateSpeakerSettings() {
     if (!state.revision) return;
     const names = speakerNames();
-    document.querySelectorAll("[data-speaker-name]").forEach((input, index) => {
-      input.value = names[input.dataset.speakerName] || `说话人 ${index + 1}`;
-    });
+    $("#speakerDialogForm .speaker-name-grid").replaceChildren();
+    const ids = window.EditorSpeakers.ids(state.view);
+    if (!ids.length) ids.push("speaker_0");
+    ids.forEach(id => appendSpeakerInput(id, names[id] || window.EditorSpeakers.label(id)));
+  }
+  document.addEventListener('substar:tool-activated',event=>{if(event.detail==='dubbing')populateSpeakerSettings();});
+  function openSpeakerDialog() {
+    populateSpeakerSettings();
+    if($('#speakerDialogForm').closest('[data-tool-panel="dubbing"]')){
+      document.dispatchEvent(new CustomEvent('substar:activate-tool',{detail:'dubbing'}));return;
+    }
     const menu = $("#speakerMenu");
     if (menu) menu.open = true;
     else $("#speakerDialog").classList.remove("hidden");
     requestAnimationFrame(() => $("[data-speaker-name]")?.focus());
   }
 
-  function closeSpeakerDialog() { if ($("#speakerMenu")) $("#speakerMenu").open = false; $("#speakerDialog").classList.add("hidden"); }
+  function closeSpeakerDialog() { if($("#speakerDialogForm").closest('[data-tool-panel="dubbing"]')){populateSpeakerSettings();return;} if ($("#speakerMenu")) $("#speakerMenu").open = false; $("#speakerDialog").classList.add("hidden"); }
 
   function renderCues({preservePage = false} = {}) {
     const list = $("#cueList");
@@ -2381,11 +2419,8 @@
       const time = activeMedia()?.currentTime || 0;
       const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time && (!overlayPreview || item.subtitle_track !== "overlay"));
       const lines = visible.map(projectedCueLines);
-      const source = lines.map(line => line.source).filter(Boolean).join("\n");
-      const target = lines.map(line => line.target).filter(Boolean).join("\n");
-      const upper = lines[0]?.sourceUpper ?? true;
-      $("#previewSource").textContent = upper ? source : target;
-      $("#previewTarget").textContent = upper ? target : source;
+      $("#previewSource").textContent = lines.map(line => line.sourceUpper ? line.source : line.target).filter(Boolean).join("\n");
+      $("#previewTarget").textContent = lines.map(line => line.sourceUpper ? line.target : line.source).filter(Boolean).join("\n");
       return;
     }
     if (!cue) {
@@ -3230,11 +3265,18 @@
     };
     const configuredSource = String(projectSettings.language || "Auto");
     $("#translationSourceLanguage").value =
-      sourceAliases[configuredSource.toLowerCase()] || "Auto";
+      sourceAliases[configuredSource.toLowerCase()] || (window.SubstarTranslationLayout.languages.some(([code]) => code === configuredSource) ? configuredSource : "Auto");
     const configuredTarget = String(projectSettings.target_language_mode || "zh-CN");
     $("#translationTargetLanguage").value =
-      ["zh-CN", "en", "ja", "ko"].includes(configuredTarget)
+      window.SubstarTranslationLayout.languages.some(([code]) => code === configuredTarget)
         ? configuredTarget : "zh-CN";
+    const layout = {...(projectSettings.translation_layout || {})};
+    // Older layouts store routing languages, which are not source selections.
+    if (!Array.isArray(layout.source_languages) && $("#translationSourceLanguage").value !== "Auto") {
+      layout.source_languages = [$("#translationSourceLanguage").value];
+      layout.auto_detect = false;
+    }
+    window.SubstarTranslationLayout.write("translationLanguageLayout", layout);
   }
 
   function openAiReview() {
@@ -3454,15 +3496,16 @@
     await state.cueTimeController?.commitCueTime(cueId, parts[0], parts[1]);
   }
 
-  async function insertTimelineCue(start, end) {
+  async function insertTimelineCue(start, end, speaker = null, overlay = false) {
     const experimental = document.documentElement.dataset.editorLayout === "experimental";
     const text = experimental ? "新字幕" : await askText("新建人工 cue", "字幕文字（独立字幕，不含词级时间）", "");
     if (!text?.trim()) return;
     const beforeIds = new Set(state.view.cue_views.map(cue => cue.cue_id));
     const saved = await sendOperation(contract.insertCueOperation(
-      state.revision, start, end, text.trim(), manualProvenance("insert_cue")
+      state.revision, start, end, text.trim(), manualProvenance("insert_cue"), {speaker,overlay}
     ));
-    if (!experimental || !saved) return;
+    if (!saved) throw new Error('人工字幕未保存，请重试');
+    if (!experimental) return;
     const created = state.view.cue_views.find(cue => !beforeIds.has(cue.cue_id));
     if (!created) return;
     selectCue(created.cue_id);
@@ -3520,7 +3563,7 @@
       return;
     }
     if (intent.type === "create_manual_cue") {
-      await insertTimelineCue(intent.start, intent.end);
+      await insertTimelineCue(intent.start, intent.end, intent.speaker || null);
       return;
     }
     if (intent.type === "delete_cue") {
@@ -3535,13 +3578,77 @@
   }
 
   function initializeTimelineController() {
-    const factory = document.documentElement.dataset.editorLayout === "experimental"
-      ? window.EditorMultilineTimeline : window.EditorTimeline;
+    const factory = window.EditorMawTimeline || window.EditorTimelineTools || (document.documentElement.dataset.editorLayout === "experimental"
+      ? window.EditorMultilineTimeline : window.EditorTimeline);
     const canvas = $("#timelineCanvas");
     if (!factory?.createTimelineController || !canvas) return;
     state.timelineController?.destroy?.();
     state.waveformCache = window.EditorWaveformCache?.createWaveformCache?.({limit:16}) || null;
     state.timelineController = factory.createTimelineController({
+      getRevisionId:() => state.revision?.revision_id,
+      onWaveformPayload:({signal} = {}) => api(projectPath('/waveform-maw'), {signal}),
+      onDetailWaveformPayload:({signal} = {}) => api(projectPath('/waveform-maw-detail'), {signal}),
+      async onCommitTimelineTimes(changes,wordTimings) {
+        const operation=contract.setCueTimesOperation(state.revision,changes,manualProvenance('maw_waveform'));
+        if(wordTimings)operation.payload.word_timings=wordTimings;
+        const saved = await sendOperation(operation);
+        if (!saved) throw new Error('字幕时间未保存，请重试');
+      },
+      onNativeMawOperation:async(type,payload) => {
+        const operation=type==='hide_cues'?contract.deleteOperation(state.revision,{cue_ids:payload.cue_ids},manualProvenance('maw_hide_cues')):contract.createOperation(state.revision,type,{...payload,provenance:manualProvenance(type)});
+        if(!await sendOperation(operation))throw Error('修改未保存，请重试');
+      },
+      async onTimelineSpeakerChange(cueIds,speaker) {
+        const changed=[...new Set(cueIds)].filter(id=>state.view.cue_views.find(cue=>cue.cue_id===id)?.speaker!==speaker);
+        if(changed.length&&!await sendOperation(contract.setCueSpeakersOperation(state.revision,changed,speaker,manualProvenance('set_cue_speaker'))))throw Error('说话人未保存，请重试');
+        if(document.querySelector('#editor-dubbing-tool-content')?.closest('.experimental-tool-active'))populateSpeakerSettings();
+      },
+      onUndo:() => $('#undoDocument').click(),
+      onRedo:() => $('#redoDocument').click(),
+      onCreateTimelineCue:insertTimelineCue,
+      getTimelineCueText:cueSourceText,
+      async onTimelineTextEdit({cueId,tokenId,text,track}) {
+        if(state.topologyOperationPending||editorAiTaskLocksEditor())throw Error('请等待当前任务完成');
+        const cue=state.view.cue_views.find(c=>c.cue_id===cueId);
+        if(!cue)throw Error('字幕已不存在');
+        if(track==='extension') {
+          if(!await sendOperation(contract.setTargetOperation(state.revision,cueId,text,manualProvenance('maw_translation_edit'))))throw Error('译文未保存，请重试');
+          return;
+        }
+        const operation=tokenId?contract.replaceOperation(state.revision,tokenId,text,manualProvenance('inline_replace')):cue.source_text!=null?contract.createOperation(state.revision,'set_source_text',{cue_id:cueId,text,provenance:manualProvenance('maw_manual_edit')}):contract.retimeTextOperation(state.revision,cueId,cue.display_token_ids,text,manualProvenance('whole_cue_edit'));
+        if(!await sendOperation(operation))throw Error('编辑尚未保存，请重试');
+      },
+      async onCreateSpeaker(name) {
+        const id=window.EditorSpeakers.nextId(window.EditorSpeakers.ids(state.view));
+        const names={...state.view.properties.speaker_names,[id]:name};
+        await sendOperation(contract.setSpeakerNamesOperation(state.revision,names,manualProvenance("set_speaker_names")));
+        if(state.view.properties.speaker_names?.[id]!==name)throw new Error("轨道未保存，请重试");
+        return id;
+      },
+      async onTimelineChange(timeline) {
+        const operation = contract.createOperation(state.revision, "set_timeline", {
+          timeline, expected_timeline:state.revision.document.properties.timeline || null,
+          provenance:manualProvenance("set_timeline")
+        });
+        await sendOperation(operation);
+        if (JSON.stringify(state.view?.properties?.timeline) !== JSON.stringify(timeline)) {
+          // The server canonicalizes object key order; compare values recursively.
+          const canonical = value => JSON.stringify(value, function(key, item) {
+            return item && typeof item === "object" && !Array.isArray(item)
+              ? Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]])) : item;
+          });
+          if (canonical(state.view?.properties?.timeline) !== canonical(timeline)) throw new Error("剪辑修改未保存，请重试");
+        }
+      },
+      onAiPlan:(goal,basePlanId) => api(projectPath("/cut-ai"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision_id:state.revision.revision_id,goal,base_plan_id:basePlanId||null})}),
+      async onCutExport(planId, format, subtitleMode) {
+        const response = await fetch(projectPath("/cut-export"), {method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({revision_id:state.revision.revision_id,plan_id:planId,format,subtitle_mode:subtitleMode})});
+        if (!response.ok) {const error=await response.json();throw new Error(typeof error.detail === "string" ? error.detail : "导出失败");}
+        const url=URL.createObjectURL(await response.blob()), link=document.createElement("a");
+        link.href=url;link.download=`substar-cut.${({video:"mp4",audio:"wav"})[format]||format}`;link.click();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+      },
       getLayout:() => state.timelineLayout,
       getShowTranslations:() => $("#showTranslations").checked,
       getReviewCueIds:() => reviewEnabled ? reviewData.notes.filter(note => note.status === "open").map(note => note.anchor.cue_id) : [],
@@ -3556,6 +3663,8 @@
       },
       canvas,
       media:activeMedia(),
+      thumbnailsUrl:projectPath("/thumbnails"),
+      getThumbnailsUrl:() => projectPath("/thumbnails"),
       keyboardTarget:document,
       hideCueShortcut:() => state.shortcuts.hideCue,
       zoomModifier:() => state.shortcuts.zoomModifier,
@@ -3888,8 +3997,11 @@
         return;
       }
       if (action === "speaker") {
+        const speakers = [null, ...window.EditorSpeakers.ids(state.view)];
+        const nextSpeaker = speakers[(speakers.indexOf(cue.speaker ?? null) + 1) % speakers.length];
+        if (nextSpeaker === (cue.speaker ?? null)) return;
         await sendOperation(contract.setCueSpeakerOperation(
-          state.revision, cueId, nextSpeaker(cue.speaker), manualProvenance("set_cue_speaker")
+          state.revision, cueId, nextSpeaker, manualProvenance("set_cue_speaker")
         ));
       }
     } catch (error) {
@@ -3907,6 +4019,7 @@
       return;
     }
     const epoch = ++projectEpoch;
+    if ($("#translationRegroup")) $("#translationRegroup").checked = false;
     reviewEnabled = false;
     $("#editorWorkbench").classList.remove("review-mode");
     reviewData = {version:0, notes:[]};
@@ -4002,7 +4115,7 @@
       // A direct editor link must never wait for the unrelated project catalog.
       if (requested) await loadProject(requested);
       const response = await api("/api/projects");
-      state.projects = response.projects || [];
+      state.projects = (response.projects || []).filter(project => !project.tutorial_case_id);
       //  links use `project`; accepting the same project id from the
       // short-lived `job` link keeps already-open  pages from becoming an
       // empty editor while all new links are emitted with the  contract.
@@ -4043,533 +4156,17 @@
     }
   }
 
-  const EDITOR_TUTORIAL_STEPS = [
-    {title:"选择与播放", description:"自由选择 Cue 并播放，观察 Cue 编辑区、字幕预览和时间轴的三方联动。体验完成后继续。", focus:() => $("#editorWorkbench")},
-    {title:"定位问题字幕", description:"点击“问题字幕”的下一条，定位到第一条超出字符上限的字幕。", focus:() => $("#toolHardIssueNext")?.closest(".tool-locator-row")},
-    {title:"合并相邻 Cue", description:"找到只有“但，”的字幕，在行尾紫色点上右键，把它和下一条合并。", focus:() => tutorialCueRow(state.tutorial.anchors?.mergeLeftCue)},
-    {title:"在文字间切分", description:"在合并后的字幕中，右键点击“压缩”和“章邯”之间的边界条。", focus:() => tutorialCueRow(state.tutorial.anchors?.mergedCue)},
-    {title:"处理下一条问题", description:"再次点击问题字幕的“下一条”，定位到下一条超限字幕。", focus:() => $("#toolHardIssueNext")?.closest(".tool-locator-row")},
-    {title:"再次切分", description:"右键点击“威胁”和“是”之间的边界条。", focus:() => tutorialCueRow(state.tutorial.anchors?.threatCue)},
-    {title:"判断参考稿差异", description:"已定位到包含“二十万”的参考差异。点击“二十”，查看听写结果与参考稿的差别。", focus:() => tutorialCueRow(state.tutorial.anchors?.referenceCue)},
-    {title:"选择采用哪一稿", description:"当前采用的是参考稿“二十”。点击“保留听写结果”，切换回原听写“20”。", focus:() => [tutorialCueRow(state.tutorial.anchors?.referenceCue), $("#referenceSelectionMenu:not(.hidden)")]},
-    {title:"编辑词元", description:"双击“20”进入编辑，改成“二十”，然后按 Enter 或点击空白处保存。", focus:() => tutorialCueRow(state.tutorial.anchors?.referenceCue)},
-    {title:"选择并合并词元", description:"选中“二十”和“万”：可以按住左键拖选，也可以用 Ctrl＋左键逐个选择，或用 Shift＋左键连续选择。然后点击浮动菜单中的“合并”。", focus:() => [tutorialCueRow(state.tutorial.anchors?.referenceCue), $("#tokenSelectionMenu:not(.hidden)")]},
-    {title:"撤销与重做", description:() => `点击编辑区底部的“撤销”，恢复合并前的状态。也可以按 ${state.shortcuts.undo}；重做可使用 ${state.shortcuts.redo}。`, focus:() => document.querySelector("#cueTaskIsland .cue-history-row")},
-    {title:"调整时间边界", description:() => tutorialPlayheadBlocksBoundary()
-      ? "红色播放线挡住了左边界。先单击当前时间块中部，把播放线移开，再把左边界向左拖动。"
-      : "沿虚拟鼠标提示，把当前字幕的左边界向左拖动。", focus:() => tutorialTimelineFocus()},
-    {title:"放大时间轴", description:"教程已标出一处稳定空隙。把鼠标放在标记线上，按住 Alt 并向上滚动鼠标滚轮，放大时间轴。", focus:() => tutorialTimelineFocus()},
-    {title:"创建新 Cue", description:"在标记线位置右键创建 Cue。字幕内容可自由填写，任意非空字符都算完成。", focus:() => tutorialTimelineFocus()},
-    {title:"隐藏、恢复与删除", description:() => tutorialCreatedCueInstruction(), focus:() => tutorialCreatedCueFocus()},
-    {title:"查找字幕", description:"查找“控制”，然后点击查找下一个。", focus:() => document.querySelector('[data-tool-panel="search"]')},
-    {title:"标点处理", description:"在上行字幕的“消除符号”中填写“，。”，然后应用规则。", focus:() => document.querySelector('[data-tool-panel="punctuation"]')},
-    {title:"自动吸附", description:"选择智能吸附，把阈值从 400 改为 500，然后点击执行。", focus:() => $("#autoSnapMenu")},
-    {title:"导出字幕", description:"点击“导出...”，选择一种字幕格式。", focus:() => [$("#exportDocument"), $("#exportMenu[open] .export-popover")]}
-  ];
-
-  const ADVANCED_EDITOR_TUTORIAL_STEPS = [
-    {title:"AI 切分结果已载入", description:"切分页刚才载入的 34 条 Cue 已按正式文档契约注册。进阶教程从这里开始，不再重复选择、播放和基础编辑操作。", focus:() => $("#cueList"), continue:true},
-    {title:"执行 AI 校准", description:"打开“AI 校准”，可以填写本次额外要求，再点击“执行校准”。教程会载入预存的真实校准结果，不会请求云端模型。", focus:() => [$("#aiCalibrate"), $("#aiCalibrationMenu[open] .calibration-popover")]},
-    {title:"查看校准痕迹", description:"浅蓝色背景标出 AI 实际改动过的词元。校准结果保留原 Cue 身份与可追溯 provenance。", focus:() => $("#cueList"), continue:true},
-    {title:"执行 AI 翻译", description:"打开“AI 翻译”，确认英文到简体中文后点击“执行”。载入的翻译快照包含一对一和多对多意义组映射。", focus:() => [$("#translationMenuSummary"), $("#translationMenu[open] .translation-popover")]},
-    {title:"查看多对多译文", description:"译文已经进入 B 语言轨道。相邻 Cue 可以共享一个意义单元，映射信息保存在 Cue，而不是靠逐行硬译。", focus:() => $("#cueList"), continue:true},
-    {title:"打开外部 AI 审阅", description:"点击“外部 AI 审阅”，打开可拖动吸附面板；它不会调用工程内模型，也不会改写稿件。", focus:() => $("#aiReview")},
-    {title:"复制审阅内容", description:"选择审阅范围并点击“复制审阅内容”。内容会带上固定的前后各 5 条上下文，可粘贴到任意 Web AI。", focus:() => [$("#aiReviewMenu[open] .external-review-popover"), $("#copyExternalReview")]},
-    {title:"进阶教程完成", description:"你已经走完 AI 切分、AI 校准、AI 翻译，并生成了可交给外部 Web AI 的审阅内容。", focus:() => $("#aiReviewMenu[open] .external-review-popover"), continue:true},
-  ];
-
-  function tutorialProject() {
-    return state.projects.find(item => item.project_id === state.projectId && item.tutorial_case_id);
-  }
-
-  function isAdvancedTutorial() {
-    return tutorialProject()?.tutorial_case_id === "advanced-ai-v1";
-  }
-
-  function currentEditorTutorialSteps() {
-    return isAdvancedTutorial() ? ADVANCED_EDITOR_TUTORIAL_STEPS : EDITOR_TUTORIAL_STEPS;
-  }
-
-  async function runPackagedTutorialStage(stage) {
-    if (!state.revision || state.operationPending) return;
-    const title = ({calibration:"AI 校准", translation:"AI 翻译"})[stage];
-    const expectedStep = ({calibration:1, translation:3})[stage];
-    state.operationPending = true;
-    renderHeader();
-    renderWorkbenchTask(title, 18, "正在读取内置阶段快照…");
-    try {
-      await new Promise(resolve => window.setTimeout(resolve, 420));
-      renderWorkbenchTask(title, 64, "正在校验身份、结构与阶段依赖…");
-      const result = await api(projectPath(`/tutorial/stages/${stage}`), {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({expected_revision_id:state.revision.revision_id})
-      });
-      setRevision(result);
-      recordCommittedRevision(state.revision, {
-        kind:"ai", operation:`tutorial_snapshot_${stage}`, metadata:{simulated:true}
-      });
-      renderWorkbenchTask(title, 100, "内置结果已通过校验并载入", "completed");
-      if (state.tutorial.active && state.tutorial.step === expectedStep) advanceEditorTutorial(expectedStep);
-    } catch (error) {
-      renderWorkbenchTask(title, 100, error.message, "failed");
-    } finally {
-      state.operationPending = false;
-      renderHeader();
-    }
-  }
-
-  function tutorialCueEnd(cueId) {
-    return cueId ? document.querySelector(`.cue-row[data-cue-id="${CSS.escape(cueId)}"] [data-boundary-action="merge-next"]`) : null;
-  }
-
-  function tutorialCueRow(cueId) {
-    return cueId ? document.querySelector(`.cue-row[data-cue-id="${CSS.escape(cueId)}"]`) : null;
-  }
-
-  function tutorialTokenView(cueId, text) {
-    const cue = state.view?.cue_views.find(item => item.cue_id === cueId);
-    return cue?.display_token_ids.map(id => state.view.token_views.find(item => item.token_id === id))
-      .find(item => item?.text === text) || null;
-  }
-
-  function tutorialToken(cueId, text) {
-    const token = tutorialTokenView(cueId, text);
-    return token ? document.querySelector(`[data-token-id="${CSS.escape(token.token_id)}"]`) : null;
-  }
-
-  function tutorialBoundary(cueId, leftText) {
-    const cue = state.view?.cue_views.find(item => item.cue_id === cueId);
-    if (!cue) return null;
-    const token = cue.display_token_ids.map(id => state.view.token_views.find(item => item.token_id === id))
-      .find(item => item?.text === leftText);
-    return token ? document.querySelector(`[data-cue-id="${CSS.escape(cueId)}"][data-boundary-after="${CSS.escape(token.token_id)}"]`) : null;
-  }
-
-  function clearEditorTutorialTarget() {
-    state.tutorial.focus = null;
-    $("#editorTutorialSpotlight").style.display = "none";
-    $("#editorTutorialTimelineTarget")?.classList.add("hidden");
-    $("#editorTutorialGhostMouse")?.classList.add("hidden");
-  }
-
-  function tutorialTimelineFocus() {
-    const target = $("#editorTutorialTimelineTarget");
-    return target && !target.classList.contains("hidden") ? target : $("#timelineTrack");
-  }
-
-  function tutorialPlayheadBlocksBoundary() {
-    const anchors = state.tutorial.anchors;
-    const timeline = state.timelineController;
-    if (!anchors?.referenceCue || !timeline?.getState) return false;
-    const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
-    const info = timeline.getState();
-    if (!cue || !Number.isFinite(Number(info?.playhead_time))) return false;
-    const span = Math.max(.001, Number(info.view_end) - Number(info.view_start));
-    return Math.abs(Number(info.playhead_time) - Number(cue.start)) <= Math.max(.04, span * .009);
-  }
-
-  function tutorialCreatedCueInstruction() {
-    const flags = state.tutorial.flags || {};
-    if (!flags.hiddenCue) return "教程已定位并高亮你刚创建的 Cue。点击右侧的隐藏按钮。";
-    if (!flags.restoredCue) return "该 Cue 已隐藏。点击它右侧的“恢复”，让它重新回到时间轴。";
-    return "Cue 已恢复。点击右侧的删除按钮并确认；之后仍可通过全局撤销或历史版本找回。";
-  }
-
-  function tutorialCreatedCueFocus() {
-    const row = tutorialCueRow(state.tutorial.flags?.createdCueId);
-    if (!row) return $("#cueList");
-    const selector = !state.tutorial.flags?.hiddenCue
-      ? '[data-cue-action="hide"]'
-      : !state.tutorial.flags?.restoredCue ? '[data-cue-action="restore"]' : '[data-cue-action="purge"]';
-    return [row, row.querySelector(selector)];
-  }
-
-  function positionEditorTutorialTimelineGuide() {
-    const target = $("#editorTutorialTimelineTarget");
-    const ghost = $("#editorTutorialGhostMouse");
-    if (!target || !ghost) return;
-    target.classList.add("hidden");
-    ghost.className = "editor-tutorial-ghost-mouse hidden";
-    if (isAdvancedTutorial() || ![11,12,13].includes(state.tutorial.step)) return;
-    const timeline = state.timelineController;
-    const anchors = state.tutorial.anchors || {};
-    let rect = null;
-    let ghostX = null;
-    let label = "";
-    let mode = "";
-    let badge = "";
-    if (state.tutorial.step === 11) {
-      const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
-      if (!cue) return;
-      rect = timeline?.getTimeRect?.(cue.start, cue.start);
-      if (!rect) return;
-      const cueRect = timeline.getTimeRect(cue.start, cue.end);
-      const blocked = tutorialPlayheadBlocksBoundary();
-      const description = $("#editorTutorialDescription");
-      if (description) description.textContent = blocked
-        ? "红色播放线挡住了左边界。先单击当前时间块中部，把播放线移开，再把左边界向左拖动。"
-        : "沿虚拟鼠标提示，把当前字幕的左边界向左拖动。";
-      ghostX = blocked ? Math.min(cueRect.right - 18, cueRect.left + Math.max(42, cueRect.width * .45)) : rect.left;
-      label = blocked ? "先移开红线" : "向左拖边界";
-      mode = blocked ? "click" : "drag";
-      badge = blocked ? "单击" : "拖动";
-      rect = {...rect, left:rect.left - 8, right:rect.right + 8, width:16};
-    } else {
-      const gap = anchors.manualGap;
-      if (!gap) return;
-      rect = timeline?.getTimeRect?.(gap.start, gap.end);
-      if (!rect) return;
-      ghostX = rect.left + rect.width / 2;
-      label = state.tutorial.step === 12 ? "在这里放大" : "在这里右键";
-      mode = state.tutorial.step === 12 ? "zoom" : "context";
-      badge = state.tutorial.step === 12 ? "Alt＋滚轮↑" : "右键";
-    }
-    const visibleLeft = Math.max(0, rect.left);
-    const visibleRight = Math.min(innerWidth, rect.right);
-    if (!(visibleRight > visibleLeft)) return;
-    Object.assign(target.style, {
-      left:`${visibleLeft}px`, top:`${rect.top + 22}px`,
-      width:`${Math.max(8, visibleRight - visibleLeft)}px`, height:`${Math.max(28, rect.bottom - rect.top - 26)}px`
-    });
-    $("#editorTutorialTimelineTargetLabel").textContent = label;
-    target.classList.remove("hidden");
-    $("#editorTutorialGhostBadge").textContent = badge;
-    ghost.className = `editor-tutorial-ghost-mouse ${mode}`;
-    Object.assign(ghost.style, {
-      left:`${Math.max(4, Math.min(innerWidth - 34, ghostX - 12))}px`,
-      top:`${Math.max(4, rect.top + Math.max(42, (rect.bottom - rect.top) * .48))}px`
-    });
-  }
-
-  function editorTutorialFocusRect(value) {
-    const nodes = (Array.isArray(value) ? value : [value]).filter(node => node?.isConnected);
-    if (!nodes.length) return null;
-    const rects = nodes.map(node => node.getBoundingClientRect()).filter(rect => rect.width > 0 && rect.height > 0);
-    if (!rects.length) return null;
-    return {
-      left:Math.min(...rects.map(rect => rect.left)), top:Math.min(...rects.map(rect => rect.top)),
-      right:Math.max(...rects.map(rect => rect.right)), bottom:Math.max(...rects.map(rect => rect.bottom))
-    };
-  }
-
-  function positionEditorTutorial() {
-    if (!state.tutorial.active) return;
-    positionEditorTutorialTimelineGuide();
-    const step = currentEditorTutorialSteps()[state.tutorial.step];
-    const focus = step?.focus?.() || $("#editorWorkbench");
-    state.tutorial.focus = focus;
-    const margin = 8;
-    const rect = editorTutorialFocusRect(focus) || $("#editorWorkbench").getBoundingClientRect();
-    const hole = {
-      left:Math.max(0, rect.left - margin), top:Math.max(0, rect.top - margin),
-      right:Math.min(innerWidth, rect.right + margin), bottom:Math.min(innerHeight, rect.bottom + margin)
-    };
-    const shades = [$("#editorTutorialShadeTop"), $("#editorTutorialShadeLeft"), $("#editorTutorialShadeRight"), $("#editorTutorialShadeBottom")];
-    Object.assign(shades[0].style, {left:"0px", top:"0px", width:"100vw", height:`${hole.top}px`});
-    Object.assign(shades[1].style, {left:"0px", top:`${hole.top}px`, width:`${hole.left}px`, height:`${Math.max(0, hole.bottom-hole.top)}px`});
-    Object.assign(shades[2].style, {left:`${hole.right}px`, top:`${hole.top}px`, width:`${Math.max(0, innerWidth-hole.right)}px`, height:`${Math.max(0, hole.bottom-hole.top)}px`});
-    Object.assign(shades[3].style, {left:"0px", top:`${hole.bottom}px`, width:"100vw", height:`${Math.max(0, innerHeight-hole.bottom)}px`});
-    const spotlight = $("#editorTutorialSpotlight");
-    spotlight.style.display = "block";
-    Object.assign(spotlight.style, {left:`${hole.left}px`, top:`${hole.top}px`, width:`${Math.max(0, hole.right-hole.left)}px`, height:`${Math.max(0, hole.bottom-hole.top)}px`});
-    const card = $("#editorTutorialCard");
-    const gap = 20;
-    const cardWidth = Math.min(460, innerWidth - 36);
-    const cardHeight = Math.min(card.scrollHeight || 260, innerHeight - 36);
-    const spaces = [
-      {side:"right", room:innerWidth-hole.right, left:hole.right+gap, top:hole.top},
-      {side:"left", room:hole.left, left:hole.left-gap-cardWidth, top:hole.top},
-      {side:"bottom", room:innerHeight-hole.bottom, left:hole.left, top:hole.bottom+gap},
-      {side:"top", room:hole.top, left:hole.left, top:hole.top-gap-cardHeight}
-    ].sort((a,b) => b.room-a.room);
-    const place = spaces.find(item => item.room >= (item.side === "left" || item.side === "right" ? cardWidth+gap : cardHeight+gap)) || spaces[0];
-    card.style.left = `${Math.max(18, Math.min(innerWidth-cardWidth-18, place.left))}px`;
-    card.style.top = `${Math.max(18, Math.min(innerHeight-cardHeight-18, place.top))}px`;
-  }
-
-  function scheduleEditorTutorialPosition() {
-    if (!state.tutorial.active) return;
-    requestAnimationFrame(positionEditorTutorial);
-    window.setTimeout(positionEditorTutorial, 100);
-    window.setTimeout(positionEditorTutorial, 320);
-  }
-
-  function centerEditorTutorialCue(cueId) {
-    const container = $("#cueList");
-    const row = tutorialCueRow(cueId);
-    if (!container || !row) return;
-    const desired = row.offsetTop - (container.clientHeight - row.offsetHeight) / 2;
-    container.scrollTop = Math.max(0, Math.min(container.scrollHeight - container.clientHeight, desired));
-    positionEditorTutorial();
-  }
-
-  function scheduleEditorTutorialCueCenter(cueId) {
-    if (!cueId) return;
-    requestAnimationFrame(() => centerEditorTutorialCue(cueId));
-    window.setTimeout(() => centerEditorTutorialCue(cueId), 100);
-  }
-
-  function prepareEditorTutorialStep() {
-    if (isAdvancedTutorial()) {
-      state.tutorial.centerCueId = null;
-      if (state.tutorial.step === 0) {
-        $("#cueList").scrollTop = 0;
-        const cue = state.view?.cue_views.find(item => item.state === "active");
-        if (cue) selectCue(cue.cue_id, true);
-      }
-      if (state.tutorial.step === 3) $("#aiCalibrationMenu").open = false;
-      if ([2,4].includes(state.tutorial.step)) $("#cueList").scrollTop = 0;
-      if ([6,7].includes(state.tutorial.step)) openAiReview();
-      scheduleEditorTutorialPosition();
-      return;
-    }
-    const anchors = state.tutorial.anchors;
-    if (!anchors) return;
-    state.tutorial.centerCueId = null;
-    let cueId = null;
-    if (state.tutorial.step === 0) { $("#cueList").scrollTop = 0; selectCue(anchors.cue1, true); }
-    if (state.tutorial.step === 2) cueId = anchors.mergeLeftCue;
-    if (state.tutorial.step === 3) cueId = anchors.mergedCue;
-    if (state.tutorial.step === 5) cueId = anchors.threatCue;
-    if ([6,7,8,9,10].includes(state.tutorial.step)) cueId = anchors.referenceCue;
-    if ([12,13].includes(state.tutorial.step)) cueId = anchors.manualGap?.followingCueId;
-    if (state.tutorial.step === 14) cueId = state.tutorial.flags?.createdCueId;
-    if (cueId) {
-      selectCue(cueId, false);
-      state.tutorial.centerCueId = cueId;
-      scheduleEditorTutorialCueCenter(cueId);
-    }
-    if ([12,13].includes(state.tutorial.step) && anchors.manualGap) {
-      state.timelineController?.revealRange?.(anchors.manualGap.start, anchors.manualGap.end);
-    }
-    const panel = ({1:"locator", 4:"locator", 15:"search", 16:"punctuation", 17:"auto-snap"})[state.tutorial.step];
-    if (panel) document.querySelector(`[data-tool-panel="${panel}"]`)?.setAttribute("open", "");
-    if (state.tutorial.step === 17) $("#snapThreshold").value = "400";
-    scheduleEditorTutorialPosition();
-  }
-
-  function renderEditorTutorial() {
-    const steps = currentEditorTutorialSteps();
-    const step = steps[state.tutorial.step];
-    if (!step) return exitEditorTutorial();
-    $("#editorTutorialProgress").textContent = `${isAdvancedTutorial() ? "进阶教程" : "初级教程"} · ${state.tutorial.step + 1} / ${steps.length}`;
-    $("#editorTutorialTitle").textContent = step.title;
-    $("#editorTutorialDescription").textContent = typeof step.description === "function"
-      ? step.description() : step.description;
-    $("#editorTutorialFooter").classList.toggle("hidden", !step.continue && state.tutorial.step !== 0);
-    $("#editorTutorialNext").textContent = state.tutorial.step === steps.length - 1 ? "完成教程" : "继续";
-    prepareEditorTutorialStep();
-    positionEditorTutorial();
-  }
-
-  function exitEditorTutorial() {
-    state.tutorial.active = false;
-    if (state.tutorial.positionTimer) window.clearInterval(state.tutorial.positionTimer);
-    state.tutorial.positionTimer = 0;
-    clearEditorTutorialTarget();
-    $("#editorTutorialLayer").classList.add("hidden");
-    $("#editorTutorialLayer").setAttribute("aria-hidden", "true");
-  }
-
-  function advanceEditorTutorial(expectedStep = state.tutorial.step) {
-    if (!state.tutorial.active || state.tutorial.step !== expectedStep) return;
-    if (expectedStep >= currentEditorTutorialSteps().length - 1) {
-      exitEditorTutorial();
-      ordinaryError("案例教程已完成");
-      return;
-    }
-    const retained = expectedStep === 13 && state.tutorial.flags?.createdCueId
-      ? {createdCueId:state.tutorial.flags.createdCueId, createdCueText:state.tutorial.flags.createdCueText} : {};
-    state.tutorial.step += 1;
-    state.tutorial.flags = retained;
-    renderEditorTutorial();
-  }
-
-  function tutorialOperationName(operation) {
-    return String(operation?.payload?.provenance?.operation || operation?.type || "");
-  }
-
-  function tutorialOperationCueIds(operation) {
-    const payload = operation?.payload || {};
-    return new Set([
-      payload.cue_id, ...(payload.cue_ids || []), ...(payload.cues || []).map(cue => cue.cue_id)
-    ].filter(Boolean).map(String));
-  }
-
-  function observeEditorTutorialOperations(operations) {
-    if (!state.tutorial.active) return;
-    if (isAdvancedTutorial()) return;
-    for (const operation of operations || []) observeEditorTutorialOperation(operation);
-  }
-
-  function observeEditorTutorialOperation(operation) {
-    const step = state.tutorial.step;
-    const anchors = state.tutorial.anchors || {};
-    const flags = state.tutorial.flags || (state.tutorial.flags = {});
-    const payload = operation?.payload || {};
-    const name = tutorialOperationName(operation);
-    const cueIds = tutorialOperationCueIds(operation);
-    if (step === 2 && name === "merge_cues" && cueIds.has(anchors.mergeLeftCue) && cueIds.has(anchors.mergeRightCue)) {
-      const tokenById = new Map((state.view?.token_views || []).map(token => [token.token_id, token]));
-      const merged = state.view?.cue_views.find(cue => {
-        const text = cue.display_token_ids.map(id => tokenById.get(id)?.text || "").join("");
-        return cue.state === "active" && text.includes("但，") && text.includes("压缩章邯");
-      });
-      if (!merged) return;
-      anchors.mergedCue = merged.cue_id;
-      return advanceEditorTutorial(2);
-    }
-    if (step === 3 && name === "split_cue" && payload.cue_id === anchors.mergedCue && payload.after_token_id === anchors.firstSplitAfter) return advanceEditorTutorial(3);
-    if (step === 5 && name === "split_cue" && payload.cue_id === anchors.threatCue && payload.after_token_id === anchors.threatSplitAfter) return advanceEditorTutorial(5);
-    if (step === 7 && name === "reference_keep_asr" && payload.token_id === anchors.referenceTwenty) return advanceEditorTutorial(7);
-    if (step === 8 && name === "inline_replace" && payload.token_id === anchors.referenceTwenty && payload.text === "二十") return advanceEditorTutorial(8);
-    if (step === 9 && name === "merge"
-      && (payload.token_ids || []).includes(anchors.referenceTwenty) && (payload.token_ids || []).includes(anchors.referenceWan)) return advanceEditorTutorial(9);
-    if (step === 11 && ["timeline_boundary", "timeline_shared_boundary"].includes(name) && cueIds.has(anchors.referenceCue)) {
-      const cue = state.view?.cue_views.find(item => item.cue_id === anchors.referenceCue);
-      if (cue && Number(cue.start) < Number(anchors.referenceStart) - 0.0005) return advanceEditorTutorial(11);
-    }
-    if (step === 13 && name === "insert_cue" && String(payload.text || "").trim()) {
-      const baselineCueIds = new Set((anchors.baselineCueIds || []).map(String));
-      const gap = anchors.manualGap || {};
-      const tokenById = new Map((state.view?.token_views || []).map(token => [String(token.token_id), token]));
-      const created = state.view?.cue_views.find(cue => {
-        const text = (cue.display_token_ids || []).map(id => tokenById.get(String(id))?.text || "").join("").trim();
-        return cue.state === "active" && !baselineCueIds.has(String(cue.cue_id)) && text
-          && Number(cue.start) >= Number(gap.start) - .01 && Number(cue.end) <= Number(gap.end) + .01;
-      });
-      if (created) {
-        flags.createdCueId = created.cue_id;
-        flags.createdCueText = (created.display_token_ids || []).map(id => tokenById.get(String(id))?.text || "").join("").trim();
-      }
-      return created ? advanceEditorTutorial(13) : undefined;
-    }
-    const createdCueId = flags.createdCueId;
-    if (step === 14 && createdCueId && cueIds.has(createdCueId)) {
-      if (name === "hide_cue") flags.hiddenCue = true;
-      if (name === "restore_cue" && flags.hiddenCue) flags.restoredCue = true;
-      if (name === "purge_cue" && flags.restoredCue) return advanceEditorTutorial(14);
-      renderEditorTutorial();
-    }
-  }
-
-  function observeEditorTutorialEvent(type, detail = {}) {
-    if (!state.tutorial.active) return;
-    if (isAdvancedTutorial()) return;
-    const step = state.tutorial.step;
-    const flags = state.tutorial.flags || (state.tutorial.flags = {});
-    if (step === 1 && type === "hard_issue_next") return advanceEditorTutorial(1);
-    if (step === 4 && type === "hard_issue_next") return advanceEditorTutorial(4);
-    if (step === 6 && type === "token_select" && detail.tokenId === state.tutorial.anchors?.referenceTwenty) return advanceEditorTutorial(6);
-    if (step === 10 && type === "revision_restore" && detail.navigation === "undo") return advanceEditorTutorial(10);
-    if (step === 12 && type === "timeline_zoom" && detail.direction === "in") {
-      const gap = state.tutorial.anchors?.manualGap;
-      if (gap && Number(detail.pointer_time) >= Number(gap.start) - .02 && Number(detail.pointer_time) <= Number(gap.end) + .02) {
-        return advanceEditorTutorial(12);
-      }
-    }
-    if (step === 15 && type === "search" && detail.query === "控制" && detail.found) return advanceEditorTutorial(15);
-    if (step === 16 && type === "punctuation_apply" && detail.upperRemove?.includes("，") && detail.upperRemove?.includes("。")) return advanceEditorTutorial(16);
-    if (step === 17 && type === "auto_snap" && detail.smart && detail.threshold === 500) return advanceEditorTutorial(17);
-    if (step === 18 && type === "export") return advanceEditorTutorial(18);
-  }
-
-  function beginEditorTutorialState() {
-    const cues = (state.view?.cue_views || []).filter(cue => cue.state === "active");
-    if (isAdvancedTutorial()) {
-      if (cues.length !== 34) return ordinaryError("进阶教程案例内容不完整，无法启动引导");
-      state.cueSplitView = "virtual";
-      $("#cueSplitView").value = "virtual"; syncCueViewSwitch();
-      state.tutorial = {active:true, step:0, focus:null, flags:{}, anchors:{}, positionTimer:0, centerCueId:null};
-      $("#editorTutorialLayer").classList.remove("hidden");
-      $("#editorTutorialLayer").setAttribute("aria-hidden", "false");
-      renderCues();
-      renderEditorTutorial();
-      state.tutorial.positionTimer = window.setInterval(positionEditorTutorial, 80);
-      return;
-    }
-    if (cues.length < 37) return ordinaryError("教程案例内容不完整，无法启动引导");
-    if (!tutorialResolver?.resolveBeginnerAnchors) return ordinaryError("初级教程解析器未载入，请刷新后重试");
-    const resolved = tutorialResolver.resolveBeginnerAnchors(
-      state.view, [...(state.referenceChangeByTokenId || new Map()).entries()]
-    );
-    if (!resolved.ok) return ordinaryError(`教程案例缺少：${resolved.missing.join("、")}，无法启动引导`);
-    state.cueSplitView = "virtual";
-    $("#cueSplitView").value = "virtual"; syncCueViewSwitch();
-    const anchors = resolved.anchors;
-    state.tutorial = {
-      active:true, step:0, focus:null, flags:{}, anchors, positionTimer:0,
-      centerCueId:null
-    };
-    $("#editorTutorialLayer").classList.remove("hidden");
-    $("#editorTutorialLayer").setAttribute("aria-hidden", "false");
-    renderCues();
-    renderEditorTutorial();
-    state.tutorial.positionTimer = window.setInterval(() => {
-      positionEditorTutorial();
-    }, 80);
-  }
-
-  async function restartEditorTutorial() {
-    if (!tutorialProject()) return;
-    hideEditorTutorialIntro({seen:true});
-    exitEditorTutorial();
-    await loadProject(state.projectId, {restoreTranslation:false, resetTutorial:true, showTutorialIntro:false});
-    beginEditorTutorialState();
-  }
-
-  function positionEditorTutorialIntro() {
-    const intro = $("#editorTutorialIntro");
-    const target = $("#startEditorTutorial");
-    const card = intro?.querySelector("section");
-    if (!intro || intro.classList.contains("hidden") || !target || !card) return;
-    const targetRect = target.getBoundingClientRect();
-    const cardWidth = card.offsetWidth;
-    const cardHeight = card.offsetHeight;
-    const gap = 14;
-    const edge = 12;
-    const left = Math.max(edge, Math.min(window.innerWidth - cardWidth - edge, targetRect.right - cardWidth));
-    let top = targetRect.bottom + gap;
-    let above = false;
-    if (top + cardHeight > window.innerHeight - edge) {
-      top = Math.max(edge, targetRect.top - cardHeight - gap);
-      above = true;
-    }
-    card.style.left = `${left}px`;
-    card.style.top = `${top}px`;
-    card.style.setProperty(
-      "--tutorial-entry-arrow-x",
-      `${Math.max(18, Math.min(cardWidth - 18, targetRect.left + targetRect.width / 2 - left))}px`
-    );
-    intro.classList.toggle("above", above);
-  }
-
-  function hideEditorTutorialIntro({seen = false} = {}) {
-    const intro = $("#editorTutorialIntro");
-    if (!intro) return;
-    if (seen && intro.dataset.storageKey) localStorage.setItem(intro.dataset.storageKey, "seen");
-    intro.classList.add("hidden");
-    intro.classList.remove("above");
-    $("#startEditorTutorial")?.classList.remove("tutorial-entry-target");
-  }
-
-  function maybeShowTutorialIntro(caseId) {
-    const key = `substar.editor.tutorial-entry-hint:v1:${caseId}`;
-    if (localStorage.getItem(key) === "seen") return;
-    const intro = $("#editorTutorialIntro");
-    intro.dataset.storageKey = key;
-    const advanced = caseId === "advanced-ai-v1";
-    const buttonLabel = advanced ? "启动进阶教程" : "启动初级教程";
-    intro.querySelector("span").textContent = advanced ? "进阶教程" : "初级教程";
-    $("#editorTutorialIntroTitle").textContent = `从这里${buttonLabel}`;
-    $("#editorTutorialIntroTitle").nextElementSibling.textContent = advanced
-      ? "点击右上方按钮，开始体验 AI 切分、校准、翻译和审阅。以后也可以随时从这里重新启动。"
-      : "点击右上方按钮，开始学习定位、切分、参考稿取舍、时间轴调整和导出。以后也可以随时从这里重新启动。";
-    intro.classList.remove("hidden");
-    $("#startEditorTutorial").classList.add("tutorial-entry-target");
-    window.requestAnimationFrame(positionEditorTutorialIntro);
-  }
+  // Tutorial implementations are archived outside the published application.
+  function isAdvancedTutorial() { return false; }
+  function positionEditorTutorial() {}
+  function scheduleEditorTutorialPosition() {}
+  function exitEditorTutorial() {}
+  function advanceEditorTutorial() {}
+  function observeEditorTutorialOperations() {}
+  function observeEditorTutorialEvent() {}
+  function positionEditorTutorialIntro() {}
+  function hideEditorTutorialIntro() {}
+  function maybeShowTutorialIntro() {}
 
   function closeValidationModal() {
     $("#validationModal").classList.add("hidden");
@@ -4679,13 +4276,6 @@
   };
   $("#cancelTaskInfo").onclick = closeTaskInfoMenu;
   $("#toggleComplete").onclick = toggleComplete;
-  $("#startEditorTutorial").onclick = restartEditorTutorial;
-  $("#dismissEditorTutorialIntro").onclick = () => hideEditorTutorialIntro({seen:true});
-  $("#exitEditorTutorial").onclick = exitEditorTutorial;
-  $("#editorTutorialNext").onclick = () => {
-    const step = currentEditorTutorialSteps()[state.tutorial.step];
-    if (state.tutorial.step === 0 || step?.continue) advanceEditorTutorial(state.tutorial.step);
-  };
   $("#translateDocument").onclick = startTranslation;
   $("#dismissTaskPanel").onclick = cancelOrDismissTaskPanel;
   $("#dismissOrdinaryError").onclick = () => ordinaryError("");
@@ -5518,6 +5108,11 @@
     openSpeakerDialog();
   };
   $("#cancelSpeakerDialog").onclick = closeSpeakerDialog;
+  $("#addSpeaker")?.addEventListener("click", () => {
+    const ids = [...document.querySelectorAll("[data-speaker-name]")].map(node => node.dataset.speakerName);
+    const id = window.EditorSpeakers.nextId(ids);
+    appendSpeakerInput(id, window.EditorSpeakers.label(id)).focus();
+  });
   $("#speakerDialogForm").addEventListener("submit", async event => {
     event.preventDefault();
     const names = Object.fromEntries([...document.querySelectorAll("[data-speaker-name]")]
@@ -5526,6 +5121,7 @@
     await sendOperation(contract.setSpeakerNamesOperation(
       state.revision, names, manualProvenance("set_speaker_names")
     ));
+    if($("#speakerDialogForm").closest('[data-tool-panel="dubbing"]'))populateSpeakerSettings();
   });
   $("#closeValidation").onclick = closeValidationModal;
   $("#dismissValidation").onclick = closeValidationModal;
@@ -5575,7 +5171,7 @@
   });
   $("#assClose").onclick = () => {
     $("#assMenu").open = false;
-    $("#assMenu summary").focus();
+    document.querySelector("#experimental-subtitle-panel-open")?.focus();
   };
   $("#assForm").addEventListener("keydown", event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); $("#assClose").click(); }
@@ -5585,12 +5181,11 @@
   const assPanel = window.EditorAssPanel.create({state, api, projectPath, activeMedia, systemSaveAs,
     flush:flushActiveEditorInput, setRevision, loadRevisionHistory,
     askText, onError:ordinaryError});
-  $("#assMenu").addEventListener("toggle", () => { if ($("#assMenu").open) openAssPanelPosition(); });
+  if (window.EditorMawAssPanel) window.SubstarMawAssPanel = window.EditorMawAssPanel.create({bridge:assPanel, state, api});
 
-  $("#mediaSpeed").addEventListener("input", event => {
+  $("#mediaSpeed").addEventListener("change", event => {
     const speed = Math.max(0.25, Math.min(3, Number(event.currentTarget.value) || 1));
     if (activeMedia()) activeMedia().playbackRate = speed;
-    $("#mediaSpeedValue").textContent = `${speed.toFixed(2)}x`;
   });
   $("#mediaPlayToggle").onclick = toggleMediaPlayback;
   $("#mediaSeek").addEventListener("input", event => {
@@ -6125,7 +5720,7 @@
     };
   }
 
-  initializeReviewNotes();
+  // Review notes UI removed; timeline markers are the annotation entry point.
   initializeCueTimeController();
   initializeCueListView();
   configureMedia("video");

@@ -4,6 +4,7 @@ from enum import Enum
 
 from substar_core.chinese_script import convert_chinese_script
 from substar_core.domain import DisplayOrder, EditorDocument, EntityState
+from substar_core.translation_layout import source_is_upper
 from substar_core.presentation import project_cue_lines
 from substar_core.language_layout import layout_tokens
 
@@ -24,14 +25,14 @@ def _stamp(seconds: float) -> str:
 
 
 def render_document_srt(
-    document: EditorDocument, mode: SubtitleExportMode | str
+    document: EditorDocument, mode: SubtitleExportMode | str, *, language_rows: bool = True
 ) -> str:
     """Render the current revision only; completion is never an export gate."""
 
     mode = SubtitleExportMode(mode)
     if mode is SubtitleExportMode.AB_SINGLE:
         # Track-major SRT: complete A followed by complete B, original clocks.
-        tracks = [render_document_srt(document, track) for track in (SubtitleExportMode.SOURCE, SubtitleExportMode.TARGET)]
+        tracks = [render_document_srt(document, track, language_rows=language_rows) for track in (SubtitleExportMode.SOURCE, SubtitleExportMode.TARGET)]
         records = [block for text in tracks for block in text.strip().split("\n\n") if block]
         return "\n\n".join(f"{index}\n{block.split(chr(10), 1)[1]}" for index, block in enumerate(records, 1)) + ("\n" if records else "")
     tokens = {token.token_id: token for token in document.display_tokens}
@@ -48,16 +49,17 @@ def render_document_srt(
         if cue.source_text is not None:
             source = cue.source_text
         target = cue.target.target_text.strip() if cue.target is not None else ""
+        source_upper = source_is_upper(document, source)
         source, target = project_cue_lines(document, source=source, target=target)
         projection = document.properties.script_projection
         if projection != "original":
             source = convert_chinese_script(source, projection)
             target = convert_chinese_script(target, projection)
         if mode is SubtitleExportMode.SOURCE:
-            lines = [source]
+            lines = [source if source_upper or not document.presentation.translation_layout or not language_rows else target]
         elif mode is SubtitleExportMode.TARGET:
-            lines = [target]
-        elif document.presentation.display_order is DisplayOrder.SOURCE_ABOVE_TARGET:
+            lines = [target if source_upper or not document.presentation.translation_layout or not language_rows else source]
+        elif source_upper:
             lines = [value for value in (source, target) if value]
         else:
             lines = [value for value in (target, source) if value]

@@ -13,6 +13,7 @@ from ..policy import (
     count_visible_characters,
 )
 from ..language_layout import layout_tokens
+from ..cue_limits import cue_language
 
 MASTER_RE = re.compile(
     r"^## MASTER_TRANSCRIPT\s*\r?\n\s*```text\s*\r?\n(.*?)\r?\n```",
@@ -279,6 +280,7 @@ def validate_draft(
     english_hard_limit: int = 55,
     chinese_hard_limit: int = 20,
     mixed_hard_limit: int = 25,
+    other_hard_limit: int = 55,
     japanese_hard_limit: int = 24,
     korean_hard_limit: int = 28,
     english_count_spaces: bool = False,
@@ -339,18 +341,7 @@ def validate_draft(
             max_english = max(max_english, english_length)
             max_han = max(max_han, chinese_length)
             max_visible = max(max_visible, english_length)
-            active_source = str(source_language or "").strip().lower().replace("_", "-")
-            language = classify_language(display)
-            if active_source in {"mixed", "zh-en", "en-zh", "zh-en-mixed", "mixed-zh-en"}:
-                language = "mixed"
-            elif active_source.startswith("zh"):
-                language = "zh"
-            elif active_source.startswith("ja"):
-                language = "ja"
-            elif active_source.startswith("ko"):
-                language = "ko"
-            elif active_source.startswith("en"):
-                language = "en"
+            language = cue_language(display, source_language or "")
             if language in {"mixed", "mixed_zh", "mixed_en"}:
                 hard_limit = mixed_hard_limit
                 code_prefix = "mixed"
@@ -367,6 +358,10 @@ def validate_draft(
                 hard_limit = korean_hard_limit
                 code_prefix = "korean"
                 label = "韩文源文"
+            elif language == "other":
+                hard_limit = other_hard_limit
+                code_prefix = "other"
+                label = "其他语言源文"
             else:
                 hard_limit = english_hard_limit
                 code_prefix = "english"

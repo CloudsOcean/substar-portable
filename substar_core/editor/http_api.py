@@ -159,12 +159,13 @@ class ValidateDocumentRequest(BaseModel):
 
 
 class ProjectTaskInfoRequest(BaseModel):
+    translation_layout: dict[str, Any] = Field(default_factory=dict)
     autosave_delay_seconds: int = Field(default=1, ge=0, le=30, strict=True)
     autosave_retry_count: int = Field(default=3, ge=0, le=5, strict=True)
     media_selection_token: str = Field(default="", max_length=64)
     display_name: str = Field(min_length=1, max_length=120)
-    language: Literal["Auto", "mixed", "zh", "zh-CN", "en", "ja", "ko"]
-    target_language_mode: Literal["zh-CN", "en", "ja", "ko"]
+    language: Literal['Auto', 'mixed', 'zh', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
+    target_language_mode: Literal['ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
     source_hard_limit: int = Field(ge=1, le=500)
     target_hard_limit: int = Field(ge=1, le=500)
     glossary_id: str = Field(default="", max_length=80)
@@ -175,11 +176,13 @@ class ProjectTaskInfoRequest(BaseModel):
 
 
 class TranslationStartRequest(BaseModel):
+    regroup: bool = False
+    translation_layout: dict[str, Any] | None = None
     expected_revision_id: str = Field(min_length=1)
     glossary_ids: list[str] | None = Field(default=None, max_length=200)
     workers: int = Field(default=3, ge=1, le=256)
-    source_language: Literal["Auto", "mixed", "zh-CN", "en", "ja", "ko"]
-    target_language: Literal["zh-CN", "en", "ja", "ko"]
+    source_language: Literal['Auto', 'mixed', 'ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
+    target_language: Literal['ar', 'bg', 'cs', 'da', 'de', 'el', 'en', 'es', 'fi', 'fr', 'hi', 'hr', 'hu', 'id', 'it', 'ja', 'ko', 'ms', 'nl', 'no', 'pl', 'pt', 'ro', 'ru', 'sk', 'sv', 'th', 'tl', 'vi', 'zh-CN']
     mapping_mode: Literal["one_to_one", "many_to_many"] = "many_to_many"
 
 
@@ -741,232 +744,6 @@ def get_project(project_id: str) -> dict[str, Any]:
     return revision_payload(revision)
 
 
-@router.post("/projects/{project_id}/tutorial/reset")
-def reset_tutorial_project(project_id: str) -> dict[str, Any]:
-    tutorial = _tutorial_project(project_id)
-    if tutorial is None:
-        raise HTTPException(status_code=409, detail={
-            "code": "not_tutorial_project", "message": "当前项目不是教程案例"
-        })
-    store = open_project_store(project_id)
-    latest = store.load_latest()
-    if latest is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "empty_project", "message": "项目还没有文档版本"
-        })
-    try:
-        baseline = store.load_revision(str(tutorial["baseline_revision_id"]))
-    except KeyError as exc:
-        raise HTTPException(status_code=500, detail={
-            "code": "tutorial_baseline_missing", "message": str(exc)
-        }) from exc
-    for path in (project_job_path(project_id) / "tutorial_progress.json",):
-        path.unlink(missing_ok=True)
-    if latest.document.content_hash() == baseline.document.content_hash() and not latest.document.complete:
-        return revision_payload(latest)
-    document = replace(
-        baseline.document,
-        properties=replace(baseline.document.properties, complete=False),
-    )
-    return _save_document(
-        project_id,
-        expected_revision_id=latest.revision_id,
-        document=document,
-        operation="tutorial_reset",
-        provenance=ChangeProvenance(
-            kind=ChangeKind.MANUAL,
-            operation="tutorial_reset",
-            actor="editor-tutorial",
-            metadata={"case_id": tutorial["case_id"], "baseline_revision_id": baseline.revision_id},
-        ),
-    )
-
-
-@router.post("/examples/tutorials/{case_id}/launch")
-def launch_tutorial_example(case_id: str) -> dict[str, Any]:
-    """Materialize one packaged tutorial as a resettable user-data project."""
-    root, manifest = _tutorial_example(case_id)
-    project_id = {
-        "reference-script-v1": "tutorial_beginner_v1",
-        "advanced-ai-v1": "tutorial_advanced_ai_v1",
-    }[case_id]
-    job_dir = _projects_root() / project_id
-    store_path = job_dir / PROJECT_DIRECTORY
-
-    def register_task_info() -> None:
-        save_task_info(job_dir, project_id, {
-            "display_name": str(manifest["display_name"]),
-            "language": str(manifest["source_language"]),
-            "target_language_mode": str(manifest["target_language"]),
-            "source_hard_limit": int(manifest["source_hard_limit"]),
-            "target_hard_limit": int(manifest["target_hard_limit"]),
-        })
-
-    def register_creation() -> None:
-        """Keep packaged tutorials on the same current project shell as real jobs."""
-        atomic_write_json(job_dir / "project_creation.json", {
-            "schema_version": "substar.project-creation.v2",
-            "input_mode": "packaged_example",
-            "source_file": "audio_16k_mono.wav",
-            "reference_document": "",
-            "settings_overrides": {
-                "language": str(manifest["source_language"]),
-                "target_language_mode": str(manifest["target_language"]),
-                "english_hard_limit": int(manifest["source_hard_limit"]),
-                "chinese_hard_limit": int(manifest["target_hard_limit"]),
-                "segmentation_enabled": True,
-                "reference_script_mode": False,
-            },
-            "profile": {},
-            "recognition_profile": {},
-            "created_at": time.time(),
-            "tutorial_case_id": case_id,
-            "simulated": True,
-        })
-
-    def materialize_media() -> None:
-        media_name = str(manifest["assets"]["media"])
-        media_source = (root / media_name).resolve()
-        expected_media = str(manifest.get("sha256", {}).get(media_name, ""))
-        media_bytes = media_source.read_bytes()
-        media_digest = sha256(media_bytes).hexdigest()
-        if root not in media_source.parents or (
-            expected_media and media_digest != expected_media
-        ):
-            raise ValueError("教程媒体摘要不匹配")
-        targets = (
-            job_dir / "input" / "audio_16k_mono.wav",
-            job_dir / "audio_16k_mono.wav",
-        )
-        for target in targets:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if not target.is_file() or sha256(target.read_bytes()).hexdigest() != media_digest:
-                shutil.copy2(media_source, target)
-
-    if store_path.is_dir():
-        tutorial = _tutorial_project(project_id)
-        if tutorial is None or tutorial.get("case_id") != case_id:
-            raise HTTPException(status_code=409, detail={
-                "code": "tutorial_project_conflict", "message": "教程项目 ID 已被其他项目占用"
-            })
-        revision = reset_tutorial_project(project_id)
-        register_task_info()
-        materialize_media()
-        register_creation()
-        return {
-            "schema_version": "substar.tutorial-launch.v1",
-            "case_id": case_id,
-            "level": manifest.get("level"),
-            "project_id": project_id,
-            "revision": revision,
-            "simulated": True,
-        }
-    if case_id != "advanced-ai-v1":
-        raise HTTPException(status_code=409, detail={
-            "code": "tutorial_creation_required",
-            "message": "初级教程请从引导流程创建案例项目",
-        })
-    job_dir.mkdir(parents=True, exist_ok=False)
-    try:
-        source_document = _load_tutorial_document(root, manifest, "segmentation")
-        store = ProjectStore.create(store_path, project_id=project_id)
-        baseline = store.save(
-            source_document,
-            provenance=ChangeProvenance(
-                kind=ChangeKind.IMPORT,
-                operation="tutorial_snapshot_segmentation",
-                actor="packaged-example-finalizer",
-                metadata={"case_id": case_id, "simulated": True},
-            ),
-        )
-        materialize_media()
-        atomic_write_json(job_dir / "run_manifest.json", {
-            "schema_version": "substar.run-manifest.v1",
-            "source_file": "audio_16k_mono.wav",
-            "media": {"duration_seconds": max((cue.end for cue in source_document.cues), default=0.0)},
-            "tutorial_example": {"case_id": case_id, "simulated": True},
-        })
-        register_task_info()
-        register_creation()
-        atomic_write_json(job_dir / "tutorial_project.json", {
-            "schema_version": "substar.tutorial-project.v2",
-            "case_id": case_id,
-            "level": "advanced",
-            "display_name": "进阶教程",
-            "baseline_revision_id": baseline.revision_id,
-            "baseline_document_hash": baseline.document_hash,
-            "available_stages": ["segmentation", "calibration", "translation"],
-            "simulated": True,
-        })
-    except Exception:
-        if job_dir.is_dir():
-            shutil.rmtree(job_dir)
-        raise
-    return {
-        "schema_version": "substar.tutorial-launch.v1",
-        "case_id": case_id,
-        "level": "advanced",
-        "project_id": project_id,
-        "revision": revision_payload(baseline),
-        "simulated": True,
-    }
-
-
-@router.get("/examples/tutorials/{case_id}/assets/{asset_name}")
-def get_tutorial_example_asset(case_id: str, asset_name: Literal["media", "reference"]) -> FileResponse:
-    root, manifest = _tutorial_example(case_id)
-    filename = str(manifest["assets"].get(asset_name, ""))
-    path = (root / filename).resolve()
-    if not filename or root not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail={
-            "code": "tutorial_asset_not_found", "message": "教程素材不存在"
-        })
-    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0])
-
-
-@router.post("/projects/{project_id}/tutorial/stages/{stage}")
-def apply_tutorial_stage(
-    project_id: str,
-    stage: Literal["calibration", "translation"],
-    payload: TutorialStageRequest,
-) -> dict[str, Any]:
-    """Validate and commit a packaged stage without contacting a provider."""
-    tutorial = _tutorial_project(project_id)
-    if tutorial is None or tutorial.get("case_id") != "advanced-ai-v1":
-        raise HTTPException(status_code=409, detail={
-            "code": "advanced_tutorial_required", "message": "当前项目不是进阶教程"
-        })
-    root, manifest = _tutorial_example("advanced-ai-v1")
-    store = open_project_store(project_id)
-    latest = store.load_latest()
-    if latest is None:
-        raise HTTPException(status_code=404, detail={"code": "empty_project", "message": "教程项目为空"})
-    if latest.revision_id != payload.expected_revision_id:
-        raise HTTPException(status_code=409, detail={
-            "code": "revision_conflict", "message": "教程阶段所依据的版本已经变化"
-        })
-    document = _load_tutorial_document(root, manifest, stage)
-    if document.document_id != latest.document.document_id:
-        raise HTTPException(status_code=500, detail={
-            "code": "tutorial_example_invalid", "message": "教程阶段文档身份不一致"
-        })
-    revision = store.save(
-        document,
-        expected_revision_id=latest.revision_id,
-        provenance=ChangeProvenance(
-            kind=ChangeKind.AI,
-            operation=f"tutorial_snapshot_{stage}",
-            actor="packaged-example-finalizer",
-            metadata={"case_id": tutorial["case_id"], "simulated": True},
-        ),
-    )
-    atomic_write_json(project_job_path(project_id) / "tutorial_progress.json", {
-        "schema_version": "substar.tutorial-progress.v1", "stage": stage,
-        "revision_id": revision.revision_id,
-    })
-    return {**revision_payload(revision), "simulated": True, "tutorial_stage": stage}
-
-
 @router.get("/projects/{project_id}/ai-task")
 def get_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any] | None:
     tasks = request.app.state.task_service.list_tasks(project_id=project_id, limit=20)
@@ -1053,6 +830,7 @@ def _runtime_ai_task_projection(
         "source_language": frozen.get("source_language"),
         "target_language": frozen.get("target_language"),
         "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
+        "regroup": bool(frozen.get("settings", {}).get("translation_regroup")),
         "problem_cue_ids": list(result.get("problem_cue_ids") or []),
         "problem_block_ids": list(result.get("problem_block_ids") or []),
         "ai_progress": projected_progress,
@@ -1330,6 +1108,39 @@ def get_project_media_info(project_id: str) -> dict[str, Any]:
         "content_type": mimetypes.guess_type(source_path.name)[0] or "application/octet-stream",
         "duration": duration,
     }
+
+
+@router.get("/projects/{project_id}/thumbnails")
+def get_project_thumbnails(project_id: str) -> dict[str, Any]:
+    from substar_core.media.thumbnails import status, request_generation
+    source, _ = _project_media_source(project_id)
+    project = project_job_path(project_id)
+    result = status(project, source)
+    if result["requested"] and result["state"] in {"idle", "queued", "generating"}:
+        result = request_generation(project, source)
+    return result
+
+
+@router.post("/projects/{project_id}/thumbnails")
+def generate_project_thumbnails(project_id: str) -> dict[str, Any]:
+    from substar_core.media.thumbnails import request_generation
+    source, _ = _project_media_source(project_id)
+    return request_generation(project_job_path(project_id), source, retry=True)
+
+
+@router.get("/projects/{project_id}/thumbnails/{revision}/{asset}")
+def get_thumbnail_asset(project_id: str, revision: str, asset: str) -> FileResponse:
+    import re
+    from substar_core.media.thumbnails import cache_directory, status
+    source, _ = _project_media_source(project_id)
+    project = project_job_path(project_id)
+    directory = cache_directory(project, source)
+    if revision != directory.name or not re.fullmatch(r"sprite-\d{5}\.jpg", asset):
+        raise HTTPException(404)
+    if status(project, source)["state"] != "ready" or not (directory / asset).is_file():
+        raise HTTPException(404)
+    return FileResponse(directory / asset, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.get("/projects/{project_id}/media")
@@ -2293,11 +2104,11 @@ def _exchange_prompt_options(project_id: str) -> dict[str, Any]:
     source_limit = int(settings.get("source_hard_limit") or settings.get({
         "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
         "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(source_language, "mixed_hard_limit"), 55))
+    }.get(source_language, "other_hard_limit"), 55))
     target_limit = int(settings.get("target_hard_limit") or settings.get({
         "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
         "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(target_language, "mixed_hard_limit"), 55))
+    }.get(target_language, "other_hard_limit"), 55))
     return {
         "source_language": source_language,
         "target_language": target_language,
@@ -2774,8 +2585,14 @@ def start_project_translation(
         settings.update(task_info_settings(load_task_info(job_dir, project_id)))
     except (OSError, TypeError, ValueError):
         pass
+    from substar_core.translation_layout import normalize_layout
+    try:
+        settings["translation_layout"] = normalize_layout(payload.translation_layout if payload.translation_layout is not None else settings.get("translation_layout"))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
     settings["target_language_mode"] = payload.target_language
     settings["translation_mapping_mode"] = payload.mapping_mode
+    settings["translation_regroup"] = payload.regroup
     latest = open_project_store(project_id).load_latest()
     if latest is not None:
         source_text = " ".join(
@@ -2789,7 +2606,7 @@ def start_project_translation(
         )
         settings["translation_source_language_selection"] = payload.source_language
         settings["translation_source_language"] = source_language
-        if source_language == payload.target_language:
+        if source_language == payload.target_language and not settings.get("translation_layout"):
             language_names = {"zh-CN": "简体中文", "en": "英文", "ja": "日文", "ko": "韩文"}
             raise HTTPException(
                 status_code=422,
@@ -2831,7 +2648,9 @@ def start_project_translation(
     from dataclasses import asdict
     from substar_core.prompt_registry import translation_variant, opposite_language
     target = opposite_language(source_language) if payload.target_language == "auto_opposite" else payload.target_language
-    variant = translation_variant(source_language, target)
+    from substar_core.editor.translation.regroup import translation_prompt_variant
+    from substar_core.editor.translation.contextual import clean_groups
+    variant = translation_prompt_variant(settings, source_language, target, clean_groups(latest.document, settings))
     frozen_settings["prompt_snapshot"] = {
         key: asdict(render_prompt(key, variant=variant, mode=payload.mapping_mode))
         for key in ("contextual_translation", "contextual_translation_repair")
@@ -2889,3 +2708,10 @@ def get_project_translation(project_id: str, request: Request) -> dict[str, Any]
     task = tasks[0]
     task_input = request.app.state.task_service.get_task_input(task["task_id"])
     return _runtime_ai_task_projection(task, task_input)
+
+
+from .cut_api import router as cut_router
+router.include_router(cut_router)
+
+from .maw_waveform_api import router as maw_waveform_router
+router.include_router(maw_waveform_router)

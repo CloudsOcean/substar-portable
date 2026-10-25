@@ -1,0 +1,17 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>剪辑时间轴验证</title>
+<link rel="stylesheet" href="../web/editor.css"><link rel="stylesheet" href="../web/editor_experimental.css"><style>body{padding:16px;background:#11151e;color:#eee}.cue-timeline-panel{height:750px;width:1100px}video{width:200px}button,select,input{font:14px sans-serif}</style>
+<h2>独立测试素材 · 不使用用户工程</h2><video id="media" controls></video><button id="undo">撤销剪辑</button><p id="saved"></p>
+<div class="cue-timeline-panel"><div><canvas id="canvas"></canvas></div></div>
+<script src="../web/editor_speakers.js"></script><script src="../web/editor_cue_ordering.js"></script><script src="../web/editor_timeline.js"></script><script src="../web/editor_cut_timeline.js"></script><script src="../web/editor_cue_selection.js"></script><script src="../web/editor_multiline_timeline.js"></script><script src="../web/editor_timeline_tools.js"></script>
+<script>
+let revision=1;const history=[];const view={properties:{speaker_names:{speaker_0:"主播",speaker_1:"嘉宾"}},token_views:[
+{token_id:"w1",start:0,end:1,text:"欢迎"},{token_id:"w2",start:1.3,end:2,text:"大家"},{token_id:"w3",start:2.3,end:3,text:"来看"},{token_id:"w4",start:3.3,end:5,text:"视频"},
+{token_id:"w5",start:2,end:4,text:"你好"}],cue_views:[{cue_id:"a",index:0,start:0,end:5,state:"active",speaker:"speaker_0",display_token_ids:["w1","w2","w3","w4"]},
+{cue_id:"b",index:1,start:2,end:4,state:"active",speaker:"speaker_1",display_token_ids:["w5"]},{cue_id:"c",index:2,start:7,end:9,state:"active",speaker:"speaker_0",source_text:"没有字词时间的字幕",display_token_ids:[]}]};
+const controller=EditorTimelineTools.createTimelineController({canvas:document.querySelector("#canvas"),media:document.querySelector("#media"),
+ onCreateSpeaker:async name=>{const id=EditorSpeakers.nextId(EditorSpeakers.ids(view));history.push(structuredClone(view.properties));view.properties.speaker_names[id]=name;revision++;controller.setView(view);return id;},
+ getRevisionId:()=>String(revision),onWaveformWindow:async()=>({peaks:Array.from({length:1000},(_,i)=>Math.sin(i*.17)*.7)}),
+ onTimelineChange:async timeline=>{history.push(structuredClone(view.properties));view.properties.timeline=timeline;revision++;controller.setView(view);document.querySelector("#saved").textContent="已保存版本 "+revision;},
+ onAiPlan:async()=>({plan:{id:"ai",name:"AI测试建议",goal:"演示",keep:[{start:0,end:5}],cuts:[]}}),onCutExport:async()=>{}});
+controller.setView(view);document.querySelector("#undo").onclick=()=>{if(history.length){view.properties=history.pop();revision++;controller.setView(view);}};
+</script></html>

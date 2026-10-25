@@ -8,8 +8,10 @@
   "use strict";
 
   if (!ordering?.canonicalCueOrder) throw new Error("Cue ordering contract is required");
+  const speakers = (typeof globalThis === "object" && globalThis.EditorSpeakers)
+    || (typeof module === "object" && module.exports ? require("./editor_speakers.js") : null);
   const languageLayout = (typeof globalThis === "object" && globalThis.SubstarLanguageLayout)
-    || {layoutTokens:values => (values || []).join(" ")};
+    || (typeof module === "object" && module.exports ? require("./editor_language.js") : {layoutTokens:values => (values || []).join(" ")});
 
   const MIN_CUE_SECONDS = 0.04;
   const DEFAULT_MANUAL_SECONDS = 1.5;
@@ -45,7 +47,8 @@
         display_token_ids:[...(cue.display_token_ids || [])],
         text:cue.source_text ?? languageLayout.layoutTokens((cue.active_display_token_ids || cue.display_token_ids || [])
           .map(id => tokens.get(String(id))?.text || "").filter(Boolean))
-      }));
+      })).map(cue => ({...cue, source_upper: !view?.presentation?.translation_layout?.enabled
+        || languageLayout.routedSourceUpper(cue.text, view.presentation)}));
   }
 
   function timelineDuration(view, mediaDuration = 0) {
@@ -516,11 +519,12 @@
           speaker_0:colors.speaker0, speaker_1:colors.speaker1,
           speaker_2:colors.speaker2, speaker_3:colors.speaker3
         };
-        context.fillStyle = (!colors.light && speakerColors[cue.speaker])
+        const speakerColor = speakerColors[cue.speaker] || (cue.speaker && speakers?.color(cue.speaker));
+        context.fillStyle = (!colors.light && speakerColor)
           || (cue.index % 2 ? colors.cue : colors.cueAlt);
         context.fillRect(left, top, Math.max(1, right - left), bottom - top);
         if (colors.light) {
-          context.fillStyle = speakerColors[cue.speaker] || colors.outline;
+          context.fillStyle = speakerColor || colors.outline;
           context.fillRect(left + 1, top + 1, Math.max(0, right - left - 2), 3);
         }
         context.strokeStyle = selected ? colors.selected : colors.outline;
@@ -597,7 +601,7 @@
           if (track ? !cue.target_text : !cue.text) continue;
           const left = xAt(cue.start, width), right = xAt(cue.end, width);
           const speakerColors = {speaker_0:colors.speaker0, speaker_1:colors.speaker1, speaker_2:colors.speaker2, speaker_3:colors.speaker3};
-          context.fillStyle = speakerColors[cue.speaker] || colors.cue;
+          context.fillStyle = speakerColors[cue.speaker] || (cue.speaker && speakers?.color(cue.speaker)) || colors.cue;
           context.fillRect(left, top, Math.max(1, right - left - 1), trackHeight);
           context.strokeStyle = cue.cue_id === activeCueId ? colors.selected : colors.outline;
           context.lineWidth = cue.cue_id === activeCueId ? 2 : 1;
