@@ -24,6 +24,7 @@ def overlay_relay_profile(settings: dict[str, Any], stage1_dir: Path) -> dict[st
             "bottom_baseline_punctuation": profile.get("bottom_baseline_punctuation", merged.get("bottom_baseline_punctuation")),
             "english_hard_limit": profile.get("english_hard_limit", merged.get("english_hard_limit")),
             "chinese_hard_limit": profile.get("chinese_hard_limit", merged.get("chinese_hard_limit")),
+            "other_hard_limit": profile.get("other_hard_limit", merged.get("other_hard_limit", 55)),
             "mixed_hard_limit": profile.get("mixed_hard_limit", merged.get("mixed_hard_limit")),
             "japanese_hard_limit": profile.get("japanese_hard_limit", merged.get("japanese_hard_limit")),
             "korean_hard_limit": profile.get("korean_hard_limit", merged.get("korean_hard_limit")),

@@ -435,3 +435,5 @@ summary span { margin-left: 7px; color: #677287; font-size: 13px; }
 
 .translation-language-layout [data-add-language]:not([hidden]) { display:flex; gap:8px; align-items:center; margin:8px 0; }
 .translation-language-layout [data-add-language] select { flex:1; min-width:0; }
+.thumbnail-generation-option { display:flex; align-items:center; gap:12px; padding:13px 18px; border:1px solid var(--border-color, #d1d5db); border-radius:12px; cursor:pointer; }
+.thumbnail-generation-option input { width:18px; height:18px; margin:0; accent-color:var(--accent, #7761cf); }

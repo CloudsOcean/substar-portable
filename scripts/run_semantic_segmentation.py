@@ -41,6 +41,7 @@ from substar_core.domain import (  # noqa: E402
     ChangeProvenance,
 )
 from substar_core.glossary import active_glossary, glossary_prompt  # noqa: E402
+from substar_core.cue_limits import CueLimits, limit_for_text
 from substar_core.prompt_registry import (  # noqa: E402
     normalize_source_language,
     render_prompt,
@@ -207,6 +208,7 @@ def frozen_layout_kwargs(args: Any) -> dict[str, Any]:
         "english_hard_limit": int(args.english_hard_limit),
         "chinese_hard_limit": int(args.chinese_hard_limit),
         "mixed_hard_limit": int(args.mixed_hard_limit),
+        "other_hard_limit": int(getattr(args, "other_hard_limit", 55)),
         "japanese_hard_limit": int(args.japanese_hard_limit),
         "korean_hard_limit": int(args.korean_hard_limit),
         "english_count_spaces": True,
@@ -602,7 +604,7 @@ def semantic_grouping_overflow_issues(
                 and int(item.get("alignment_end", -1)) >= cue_end
                 for item in value.get("exceptions", [])
             )
-            if len(text) > hard_limit and not matching_overflow:
+            if len(text) > limit_for_text(hard_limit, text) and not matching_overflow:
                 legal_candidates = []
                 for candidate in range(cue_start, cue_end):
                     left_text = display_text(
@@ -611,7 +613,7 @@ def semantic_grouping_overflow_issues(
                     right_text = display_text(
                         units, positions[candidate + 1], positions[cue_end]
                     )
-                    if len(left_text) <= hard_limit and len(right_text) <= hard_limit:
+                    if len(left_text) <= limit_for_text(hard_limit, left_text) and len(right_text) <= limit_for_text(hard_limit, right_text):
                         legal_candidates.append({
                             "line_break_after": candidate,
                             "left_length": len(left_text),
@@ -624,7 +626,7 @@ def semantic_grouping_overflow_issues(
                     "cue_start": cue_start,
                     "cue_end": cue_end,
                     "actual_length": len(text),
-                    "hard_limit": hard_limit,
+                    "hard_limit": limit_for_text(hard_limit, text),
                     "text": text,
                     "legal_candidates": legal_candidates,
                 })
@@ -745,7 +747,7 @@ def validate_semantic_grouping_result(
             if cue_start not in positions or cue_end not in positions:
                 raise SegmentationError("semantic grouping 引用了不存在的 alignment index")
             text = display_text(units, positions[cue_start], positions[cue_end])
-            if len(text) > hard_limit:
+            if len(text) > limit_for_text(hard_limit, text):
                 matching_overflow = any(
                     isinstance(item, dict)
                     and item.get("code") == "indivisible_overflow"
@@ -762,7 +764,7 @@ def validate_semantic_grouping_result(
                         right_text = display_text(
                             units, positions[candidate + 1], positions[cue_end]
                         )
-                        if len(left_text) <= hard_limit and len(right_text) <= hard_limit:
+                        if len(left_text) <= limit_for_text(hard_limit, left_text) and len(right_text) <= limit_for_text(hard_limit, right_text):
                             legal_candidates.append(
                                 {
                                     "line_break_after": candidate,
@@ -851,7 +853,7 @@ def _salvage_semantic_groups(
                 if cue_start not in positions or cue_end not in positions:
                     valid = False
                     break
-                if len(display_text(units, positions[cue_start], positions[cue_end])) > hard_limit:
+                if len(display_text(units, positions[cue_start], positions[cue_end])) > limit_for_text(hard_limit, display_text(units, positions[cue_start], positions[cue_end])):
                     valid = False
                     break
                 cue_start = cue_end + 1
@@ -943,7 +945,7 @@ def _local_repair_constraints(
                     cue_start = cue_end + 1
                     continue
                 text = display_text(units, positions[cue_start], positions[cue_end])
-                if len(text) > hard_limit:
+                if len(text) > limit_for_text(hard_limit, text):
                     candidates = []
                     for candidate in range(cue_start, cue_end):
                         left_text = display_text(
@@ -952,7 +954,7 @@ def _local_repair_constraints(
                         right_text = display_text(
                             units, positions[candidate + 1], positions[cue_end]
                         )
-                        if len(left_text) <= hard_limit and len(right_text) <= hard_limit:
+                        if len(left_text) <= limit_for_text(hard_limit, left_text) and len(right_text) <= limit_for_text(hard_limit, right_text):
                             candidates.append(ledger.aliases_by_index[candidate])
                     rows.append("\t".join((
                         "SPLIT_REQUIRED",
@@ -968,10 +970,10 @@ def _local_repair_constraints(
         owned_text = display_text(
             units, positions[scope_start], positions[scope_end]
         )
-        if len(owned_text) > hard_limit:
+        if len(owned_text) > limit_for_text(hard_limit, owned_text):
             candidates = []
             for candidate in range(scope_start, scope_end):
-                if len(display_text(units, positions[scope_start], positions[candidate])) <= hard_limit:
+                if len(display_text(units, positions[scope_start], positions[candidate])) <= limit_for_text(hard_limit, display_text(units, positions[scope_start], positions[candidate])):
                     candidates.append(ledger.aliases_by_index[candidate])
             rows.append("\t".join((
                 "SPLIT_REQUIRED",
@@ -996,8 +998,8 @@ def _minimum_hard_limit_breaks(
             text = display_text(
                 units, positions[cursor], positions[candidate_end]
             )
-            if len(text) > hard_limit:
-                break
+            if len(text) > limit_for_text(hard_limit, text):
+                continue
             if candidate_end < end and must_not_split(
                 units, positions[candidate_end]
             ):
@@ -1012,7 +1014,7 @@ def _minimum_hard_limit_breaks(
             # A finalizer-created line must remain useful on screen.  Rank
             # single-token / very short fragments behind every non-orphan
             # solution even when an ASR timing gap happens to look attractive.
-            orphan_threshold = min(12, max(6, hard_limit // 4))
+            orphan_threshold = min(12, max(6, limit_for_text(hard_limit, text) // 4))
             orphan_cost = int(
                 len(text) < orphan_threshold or len(text.split()) <= 1
             )
@@ -1052,7 +1054,7 @@ def _finalize_repair_hard_limits(
         for raw_end in group.get("line_breaks_after", []):
             cue_end = int(raw_end)
             text = display_text(units, positions[cursor], positions[cue_end])
-            if len(text) <= hard_limit:
+            if len(text) <= limit_for_text(hard_limit, text):
                 final_breaks.append(cue_end)
             else:
                 replacement = _minimum_hard_limit_breaks(
@@ -1210,12 +1212,15 @@ def request_semantic_grouping_block(
         "active_output_profile": {
             "source_language": getattr(args, "source_language", "en"),
             "hard_limit": args.hard_limit,
+            "cue_limit_rules": str(getattr(args, "cue_limits", args.hard_limit)),
+            "cue_limits": vars(args.cue_limits) if hasattr(args, "cue_limits") else None,
             "count_rule": "all_unicode_characters",
         },
     }
     wire_text, wire_ledger = render_segmentation_request(request)
-    primary_sections = [system_prompt]
-    repair_sections = [repair_system_prompt or system_prompt]
+    cue_limit_rules = str(getattr(args, "cue_limits", args.hard_limit))
+    primary_sections = [system_prompt, "逐条字幕硬上限：" + cue_limit_rules]
+    repair_sections = [repair_system_prompt or system_prompt, "逐条字幕硬上限：" + cue_limit_rules]
     if glossary:
         glossary_section = glossary_prompt(glossary)
         primary_sections.append(glossary_section)
@@ -1254,8 +1259,8 @@ def request_semantic_grouping_block(
         if not isinstance(candidate, dict):
             continue
         try:
-            validate_semantic_grouping_result(candidate, units, bounds, chunk_number, binding, args.hard_limit)
-            if semantic_grouping_overflow_issues(candidate, units, bounds, chunk_number, binding, args.hard_limit):
+            validate_semantic_grouping_result(candidate, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit))
+            if semantic_grouping_overflow_issues(candidate, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)):
                 continue
         except (ValueError, TypeError, KeyError, SegmentationError):
             continue
@@ -1340,7 +1345,7 @@ def request_semantic_grouping_block(
         if initial_error is not None:
             raise initial_error
         overflow_issues = semantic_grouping_overflow_issues(
-            value, units, bounds, chunk_number, binding, args.hard_limit
+            value, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
         )
         if overflow_issues:
             ranges = ", ".join(
@@ -1351,7 +1356,7 @@ def request_semantic_grouping_block(
                 f"semantic grouping contains {len(overflow_issues)} Cue overflows: {ranges}"
             )
         spans, groups, corrections, cuts, exceptions = validate_semantic_grouping_result(
-            value, units, bounds, chunk_number, binding, args.hard_limit
+            value, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
         )
         save_accepted(value, getattr(args, "grouping_model", ""))
         if progress is not None:
@@ -1501,14 +1506,14 @@ def request_semantic_grouping_block(
                 )
                 delivery_candidates.append(copy.deepcopy(repair_value))
                 round_issues = semantic_grouping_overflow_issues(
-                    repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                    repair_value, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
                 )
                 if round_issues:
                     raise SegmentationError(
                         f"repair round {repair_round} returned {len(round_issues)} Cue overflows"
                     )
                 spans, candidates, corrections, candidate_cuts, exceptions = validate_semantic_grouping_result(
-                    repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                    repair_value, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
                 )
                 frozen_groups = list(candidates)
                 frozen_cuts = set(candidate_cuts)
@@ -1530,7 +1535,7 @@ def request_semantic_grouping_block(
                 if repair_value is not None and not round_issues:
                     try:
                         round_issues = semantic_grouping_overflow_issues(
-                            repair_value, units, bounds, chunk_number, binding, args.hard_limit
+                            repair_value, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
                         )
                     except Exception:
                         round_issues = []
@@ -1584,7 +1589,7 @@ def request_semantic_grouping_block(
                 max(args.hard_limit, len(display_text(units, left, right))),
             )
             remaining_overflows = semantic_grouping_overflow_issues(
-                candidate, units, bounds, chunk_number, binding, args.hard_limit
+                candidate, units, bounds, chunk_number, binding, getattr(args, "cue_limits", args.hard_limit)
             )
         except (SegmentationError, ValueError, TypeError, KeyError):
             continue
@@ -1706,6 +1711,7 @@ def main(
     parser.add_argument("--english-hard-limit", type=int, default=55)
     parser.add_argument("--chinese-hard-limit", type=int, default=28)
     parser.add_argument("--mixed-hard-limit", type=int, default=25)
+    parser.add_argument("--other-hard-limit", type=int, default=55)
     parser.add_argument("--language-ratio-threshold-percent", type=int, default=20)
     parser.add_argument("--japanese-hard-limit", type=int, default=32)
     parser.add_argument("--korean-hard-limit", type=int, default=40)
@@ -1788,7 +1794,8 @@ def main(
         "mixed": args.mixed_hard_limit,
     }
     args.source_language = source_language
-    args.hard_limit = int(language_limits.get(source_language, args.english_hard_limit))
+    args.hard_limit = int(language_limits.get(source_language, args.other_hard_limit))
+    args.cue_limits = CueLimits.from_settings(vars(args), source_language_selection)
     # The internal layout solver still accepts its former target parameter as
     # a heuristic.  It is equal to the hard cap, so no advisory/soft product
     # threshold remains in the active contract.

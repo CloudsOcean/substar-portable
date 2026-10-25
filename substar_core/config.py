@@ -168,7 +168,7 @@ DEFAULTS: dict[str, Any] = {
     "english_count_punctuation": True,
     "chinese_hard_limit": 20,
     "mixed_hard_limit": 25,
-    "language_ratio_threshold_percent": 20,
+    "other_hard_limit": 55,
     "japanese_hard_limit": 24,
     "korean_hard_limit": 28,
     "target_visual_width_limit": 48,
@@ -594,9 +594,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     merged["english_count_punctuation"] = bool(merged["english_count_punctuation"])
     merged["chinese_hard_limit"] = max(1, min(100, int(merged["chinese_hard_limit"])))
     merged["mixed_hard_limit"] = max(1, min(200, int(merged.get("mixed_hard_limit", 25))))
-    merged["language_ratio_threshold_percent"] = max(
-        0, min(100, int(merged.get("language_ratio_threshold_percent", 20)))
-    )
+    merged["other_hard_limit"] = max(1, min(200, int(merged.get("other_hard_limit", 55))))
     merged["japanese_hard_limit"] = max(1, min(100, int(merged["japanese_hard_limit"])))
     merged["korean_hard_limit"] = max(1, min(120, int(merged["korean_hard_limit"])))
     merged["target_visual_width_limit"] = max(

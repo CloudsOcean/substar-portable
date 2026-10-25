@@ -74,6 +74,8 @@ def translation_groups(
             row_target = row["route"].get("target_language", configured_target)
             if row_target in explicit_limits:
                 limit_key, count_rule = explicit_limits[row_target]
+            elif row_target not in {"", "Auto", "auto", "auto_opposite"}:
+                limit_key, count_rule = "other_hard_limit", "all_characters_including_spaces"
             else:
                 target_is_cjk = not any("\u3400" <= char <= "\u9fff" for char in source_text)
                 limit_key, count_rule = (
@@ -81,7 +83,7 @@ def translation_groups(
                     if target_is_cjk
                     else ("english_hard_limit", "all_characters_including_spaces")
                 )
-            hard_limit = int(settings[limit_key])
+            hard_limit = int(settings.get(limit_key, 55))
             cues.append(
                 {
                     **row["route"],

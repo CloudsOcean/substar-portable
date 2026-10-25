@@ -68,7 +68,7 @@
       const brief = $("#qwenAiBriefInput").value.trim() || "根据初次听写提取节目主题与可信专名。";
       const language = $("#languageInput").value;
       $("#qwenAssistButton").disabled = true; cancel.hidden = false; cancel.disabled = false;
-      status.className = ""; sync();
+      status.className = ""; status.setAttribute("aria-busy", "true"); sync();
       try {
         const injection = await api("/api/glossary/injection-preview", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({collection_ids:getGlossaryIds()})});
         const row = await recognize(selectedFile, selectedConfig + JSON.stringify(injection.hotwords));
@@ -92,7 +92,7 @@
         }
         status.className = "good";
       } catch (error) { status.textContent = error.message; status.className = "bad"; }
-      finally { busy = false; cancel.hidden = true; $("#qwenAssistButton").disabled = false; sync(); }
+      finally { busy = false; status.setAttribute("aria-busy", "false"); cancel.hidden = true; $("#qwenAssistButton").disabled = false; sync(); }
     });
     cancel.addEventListener("click", async () => {
       cancel.disabled = true;

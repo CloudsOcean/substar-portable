@@ -55,6 +55,31 @@ function documentWithGroupOrigin(origin) {
   };
 }
 
+test('revision consumption preserves navigation metadata and edits guard the text actually seen',()=>{
+  const {consumeRevision,setTargetOperation}=require('../web/editor_document.js');
+  const provenance={operation:'restore_revision',metadata:{undo_revision_ids:[],redo_revision_ids:['future']}};
+  const revision=consumeRevision({revision_id:'r',revision_number:2,document_hash:'hash',provenance,
+    document:documentWithGroupOrigin('segmentation')});
+  assert.deepEqual(revision.provenance,provenance);
+  const operation=setTargetOperation(revision,'cue_1','my draft',null,{expected_target_text:'text when editing began'});
+  assert.equal(operation.payload.expected_target_text,'text when editing began');
+});
+
+test('script projection keeps canonical conflict guards through optimistic edits',()=>{
+  const {consumeRevision,replaceOperation,setTargetOperation}=require('../web/editor_document.js');
+  const {applyLocalOperation}=require('../web/editor_document_store.js');
+  const document=documentWithGroupOrigin('segmentation');
+  document.display_tokens[0].text='網絡';document.display_tokens[0].canonical_text='网络';
+  document.cues[0].target={target_text:'滑鼠',canonical_target_text:'鼠标',original_text:'鼠标',
+    language:'zh-CN',translation_status:'translated',provenance:provenance()};
+  const revision=consumeRevision({revision_id:'r',revision_number:1,document_hash:'hash',document});
+  const operation=replaceOperation(revision,'display_1','新的網絡');
+  assert.equal(operation.payload.expected_text,'网络');
+  assert.equal(setTargetOperation(revision,'cue_1','新的滑鼠').payload.expected_target_text,'鼠标');
+  const projected=applyLocalOperation(revision,operation);
+  assert.equal(replaceOperation(projected,'display_1','下一次编辑').payload.expected_text,'新的網絡');
+});
+
 test("canonical segmentation groups are accepted by the editor", () => {
   assert.doesNotThrow(() => validateDocument(documentWithGroupOrigin("segmentation")));
 });

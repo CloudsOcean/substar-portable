@@ -10,6 +10,7 @@
     let debounceMs = Math.max(0, Number(options.debounceMs ?? 60));
     const maxBatchSize = Math.max(1, Number(options.maxBatchSize ?? 100));
     let maxRetries = Math.max(0, Number(options.maxRetries ?? 3));
+    const requestTimeoutMs = Math.max(1, Number(options.requestTimeoutMs ?? 30000));
     const pending = [];
     const failed = [];
     let inFlight = null;
@@ -35,14 +36,23 @@
       };
     }
 
+    function observe(name, ...args) {
+      try { options[name]?.(...args); }
+      catch (error) {
+        // Rendering must never interrupt persistence or turn a committed save
+        // into a retry. Recovery-journal failures are reported by its owner.
+        try { options.onObserverError?.(error, name); } catch (_) { /* Observer only. */ }
+      }
+    }
+
     function publish() {
       const journal = [
         ...failed,
         ...(inFlight?.entries || []),
         ...pending
       ].map(entry => entry.operation);
-      options.onStatus?.(snapshot());
-      options.onJournal?.(journal);
+      observe("onJournal", journal);
+      observe("onStatus", snapshot());
     }
 
     function schedule(delay = debounceMs) {
@@ -74,15 +84,26 @@
       const batch = {
         schema_version:"substar.editor-operation-batch.v1",
         batch_id:`batch_${Date.now().toString(36)}_${(++sequence).toString(36)}`,
-        base:options.base(),
+        base:null,
         preserve_user_actions:!!options.preserveUserActions,
         operations:entries.map(entry => entry.operation)
       };
       inFlight = {entries, batch};
       publish();
       let retryDelay = 0;
+      const controller = new AbortController();
+      let requestTimer;
       try {
-        const result = await options.sendBatch(batch);
+        batch.base = options.base();
+        const result = await Promise.race([
+          Promise.resolve(options.sendBatch(batch, {signal:controller.signal})),
+          new Promise((_, reject) => {
+            requestTimer = setTimeout(() => {
+              controller.abort();
+              reject(new Error("保存请求超时，操作已保留，将按设置重试"));
+            }, requestTimeoutMs);
+          })
+        ]);
         entries.forEach(entry => entry.resolve(result));
         return result;
       } catch (error) {
@@ -95,10 +116,11 @@
         } else {
           failed.push(...entries.map(entry => ({...entry, error, retryBatchId:batch.batch_id})));
           entries.forEach(entry => entry.reject(error));
-          options.onFailed?.(error, entries.map(entry => entry.operation));
+          observe("onFailed", error, entries.map(entry => entry.operation));
         }
         return null;
       } finally {
+        clearTimeout(requestTimer);
         inFlight = null;
         publish();
         schedule(retryDelay);

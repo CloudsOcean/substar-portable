@@ -90,6 +90,9 @@ body.editor-shell {
 .editor-command-menu.disabled { opacity: .36; pointer-events: none; }
 .translation-popover { min-width: 280px !important; max-width: min(340px, calc(100vw - 24px)); }
 .translation-popover label { color: #aeb4c1; font-size: 13px; }
+.translation-popover .translation-regroup-option { display: flex; align-items: center; gap: 8px; }
+.translation-regroup-option input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+.translation-popover > small { color: var(--editor-muted); font-size: 12px; line-height: 1.5; }
 .translation-popover select { height: 32px; padding: 0 8px; font-size: 14px; }
 .translation-popover #translateDocument { width: 100%; justify-content: center; }
 .calibration-popover { left: 50%; width: min(340px, calc(100vw - 28px)); display: grid; gap: 9px; padding: 13px; transform: translateX(-50%); }

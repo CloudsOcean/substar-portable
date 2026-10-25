@@ -82,6 +82,7 @@
         const token = tokenById.get(String(payload.token_id));
         if (token) {
           token.text = String(payload.text || token.text);
+          if (Object.hasOwn(token, "canonical_text")) token.canonical_text = token.text;
           token.provenance = provenance;
         }
         break;
@@ -91,6 +92,7 @@
           const token = tokenById.get(String(item.token_id));
           if (token) {
             token.text = String(item.text || token.text);
+            if (Object.hasOwn(token, "canonical_text")) token.canonical_text = token.text;
             token.provenance = provenance;
           }
         });

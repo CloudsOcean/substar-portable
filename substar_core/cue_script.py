@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 import re
 from typing import Any, Iterable, Mapping
+from .cue_limits import CueLimits
+from .language_layout import format_text
 
 
 HEADER = "SUBSTAR-CUE-SCRIPT/1"
@@ -111,6 +113,9 @@ class SegmentationLedger:
 def render_segmentation_request(request: Mapping[str, Any]) -> tuple[str, SegmentationLedger]:
     rows = [dict(row) for row in request.get("rows", []) if isinstance(row, Mapping)]
     hard_limit = int(request.get("active_output_profile", {}).get("hard_limit", 0) or 0)
+    cue_config = request.get("active_output_profile", {}).get("cue_limits")
+    cue_limits = CueLimits(**cue_config) if cue_config else None
+    maximum_cap = max(value for key, value in vars(cue_limits).items() if key.endswith("_hard_limit")) if cue_limits else hard_limit
     words: dict[str, Mapping[str, Any]] = {}
     aliases_by_index: dict[int, str] = {}
     max_end_by_alias: dict[str, str] = {}
@@ -119,7 +124,7 @@ def render_segmentation_request(request: Mapping[str, Any]) -> tuple[str, Segmen
     lines = [
         "TASK\tSEGMENT",
         f"LANGUAGE\t{request.get('active_output_profile', {}).get('source_language', 'Auto')}",
-        f"HARD_LIMIT\t{hard_limit}",
+        f"HARD_LIMIT\t{cue_limits or hard_limit}",
         "TOKENS",
     ]
     for number, row in enumerate(rows, start=1):
@@ -130,9 +135,15 @@ def render_segmentation_request(request: Mapping[str, Any]) -> tuple[str, Segmen
         maximum_end = number - 1
         for candidate in range(number - 1, len(rows)):
             candidate_length = len(rendered[candidate]) + (1 if candidate > number - 1 else 0)
-            if hard_limit > 0 and visible_length + candidate_length > hard_limit:
-                break
             visible_length += candidate_length
+            if cue_limits:
+                candidate_text = format_text(" ".join(rendered[number - 1:candidate + 1]))
+                if len(candidate_text) > maximum_cap:
+                    break
+                if len(candidate_text) > cue_limits.for_text(candidate_text):
+                    continue
+            elif hard_limit > 0 and visible_length > hard_limit:
+                break
             maximum_end = candidate
         max_end_by_alias[alias] = aliases[maximum_end]
         lines.append(

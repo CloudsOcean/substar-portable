@@ -202,6 +202,8 @@
     });
     $('#assProfileDelete').onclick=()=>action(async()=>{await api('/api/ass/profiles/'+encodeURIComponent($('#assProfile').value),{method:'DELETE'});await refreshLibrary();message('方案已从库中删除，项目内的样式仍然保留。');});
     async function apply(reset=false) {
+      if (state.documentWritePending || state.checkpointPending || state.restorePreparationPending
+        || state.historyNavigationPending) throw new Error('正在保存或恢复文档，请稍候重试');
       const origin=state.projectId, payload={...scopePayload(),reset};
       state.restorePreparationPending=true;
       try {

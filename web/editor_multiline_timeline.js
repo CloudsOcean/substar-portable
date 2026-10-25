@@ -148,6 +148,17 @@
     let hover = null, boundaryOverride = null, pointer = null;
     let destroyed = false, following = true, frame = 0, playback = 0, generation = 0;
     let firstActive = true, suppressClick = false, mode = "multiline";
+    const filmstrip = options.thumbnailsUrl && globalThis.EditorThumbnails?.create({
+      doc, settingsPanel, url:options.thumbnailsUrl,
+      onLayout() { const time = visibleStart(); rebuild(); revealTime(time, true); },
+      onPaint() { redraw(); }
+    });
+    function rowStride() { return ROW_HEIGHT + ROW_GAP + (filmstrip?.enabled ? 48 : 0); }
+    const waveformRetryTimers = new Set();
+    function clearWaveformRetries() {
+      waveformRetryTimers.forEach(timer => clearTimeout(timer));
+      waveformRetryTimers.clear();
+    }
     displaySelect.onchange = () => {
       title.textContent = displaySelect.value === "spectrogram" ? "声谱图" : "波形";
       gainLabel.style.display = displaySelect.value === "spectrogram" ? "none" : "";
@@ -168,8 +179,8 @@
       image.onerror = () => { image.failed = true; if (!destroyed && generation === token) redraw(); };
       image.src = options.spectrogramUrl({start:row.start, end:row.end});
     }
-    function visibleStart() { return mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) * seconds : viewport.scrollTop / (ROW_HEIGHT + ROW_GAP) * seconds; }
-    function visibleSpan() { return mode === "basic" ? seconds : viewport.clientHeight / (ROW_HEIGHT + ROW_GAP) * seconds; }
+    function visibleStart() { return mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) * seconds : viewport.scrollTop / rowStride() * seconds; }
+    function visibleSpan() { return mode === "basic" ? seconds : viewport.clientHeight / rowStride() * seconds; }
     function setMode(next) {
       const time = visibleStart(); mode = next;
       viewport.classList.toggle("basic-waveform-viewport", mode === "basic");
@@ -197,8 +208,8 @@
     doc.addEventListener("pointerdown",dismissSettings);
     settings.addEventListener("keydown",settingsKey);
     function visibleRows() {
-      const offset = mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) : viewport.scrollTop / (ROW_HEIGHT + ROW_GAP);
-      const count = mode === "basic" ? 1 : viewport.clientHeight / (ROW_HEIGHT + ROW_GAP);
+      const offset = mode === "basic" ? viewport.scrollLeft / Math.max(1, viewport.clientWidth) : viewport.scrollTop / rowStride();
+      const count = mode === "basic" ? 1 : viewport.clientHeight / rowStride();
       const first = Math.max(0, Math.floor(offset) - 1);
       const last = Math.min(rows.length, Math.ceil(offset + count) + 1);
       return rows.slice(first, last);
@@ -219,6 +230,7 @@
     }
     function rebuild() {
       generation++;
+      clearWaveformRetries();
       clearSpectra();
       viewport.replaceChildren();
       rows = rowRanges(duration, seconds).map(range => {
@@ -227,8 +239,18 @@
         canvas.tabIndex = 0;
         canvas.setAttribute("aria-label", `${timeLabel(range.start)} 至 ${timeLabel(range.end)} 波形与字幕`);
         canvas.dataset.start = String(range.start); canvas.dataset.end = String(range.end);
-        viewport.append(canvas);
-        const row = {...range, canvas, peaks:null, loading:false};
+        let thumbnailCanvas = null;
+        if (filmstrip?.enabled) {
+          const shell = doc.createElement("div"); shell.className = "thumbnail-waveform-row";
+          thumbnailCanvas = doc.createElement("canvas"); thumbnailCanvas.className = "timeline-filmstrip";
+          thumbnailCanvas.setAttribute("aria-label", "画面预览图，点击定位视频");
+          thumbnailCanvas.onclick = event => {
+            const rect = thumbnailCanvas.getBoundingClientRect();
+            seek(range.start + clamp((event.clientX - rect.left) / Math.max(1, rect.width), 0, 1) * seconds);
+          };
+          shell.append(thumbnailCanvas, canvas); viewport.append(shell);
+        } else viewport.append(canvas);
+        const row = {...range, canvas, thumbnailCanvas, peaks:null, loading:false};
         canvas.addEventListener("pointerdown", event => pointerDown(event, row));
         canvas.addEventListener("pointermove", event => pointerMove(event, row));
         canvas.addEventListener("pointerleave", () => { pointer = null; if (!drag) hover = null; redraw(); });
@@ -263,22 +285,43 @@
       redraw();
     }
     function requestPeaks(row, width) {
-      if (row.loading || row.peaks || !options.onWaveformWindow) return;
+      if (row.loading || row.peaks || row.waveformFailed || !options.onWaveformWindow) return;
       row.loading = true;
       const token = generation;
-      Promise.resolve(options.onWaveformWindow({start:row.start, end:row.end, points:4096}))
+      Promise.resolve().then(() => options.onWaveformWindow({start:row.start, end:row.end, points:4096}))
         .then(payload => {
-          if (destroyed || generation !== token || !payload) return;
+          if (destroyed || generation !== token) return;
+          if (!Array.isArray(payload?.peaks)) throw new Error("波形响应不完整");
           row.peaks = payload.peaks || [];
+          row.loading = false;
           // The server supplies normalized peaks. A common scale keeps quiet rows quiet.
           row.peakScale = 1;
           row.noiseFloor = 0;
           row.waveStart = payload.window_start ?? row.start;
           row.waveEnd = payload.window_end ?? row.end;
           redraw();
-        }).catch(error => { if (!destroyed && generation === token) options.onWaveformError?.(error); });
+        }).catch(error => {
+          if (destroyed || generation !== token) return;
+          row.loading = false;
+          row.waveformAttempts = (row.waveformAttempts || 0) + 1;
+          if (row.waveformAttempts <= 3) {
+            row.loading = true;
+            const timer = setTimeout(() => {
+              waveformRetryTimers.delete(timer);
+              if (destroyed || generation !== token) return;
+              row.loading = false;
+              redraw();
+            }, 500 * 2 ** (row.waveformAttempts - 1));
+            waveformRetryTimers.add(timer);
+          } else {
+            row.waveformFailed = true;
+            options.onWaveformError?.(error);
+          }
+          redraw();
+        });
     }
     function drawRow(row) {
+      if (row.thumbnailCanvas) filmstrip.draw(row.thumbnailCanvas, row.start, seconds);
       const canvas = row.canvas, width = canvas.clientWidth, height = mode === "basic" ? canvas.clientHeight : ROW_HEIGHT;
       if (!width) return;
       const ratio = Math.min(2, doc.defaultView.devicePixelRatio || 1);
@@ -295,6 +338,10 @@
       ctx.strokeStyle = "#334149"; ctx.lineWidth = .7;
       ctx.beginPath(); ctx.moveTo(0, center); ctx.lineTo(width, center); ctx.stroke();
       if (displaySelect.value !== "spectrogram") requestPeaks(row, width);
+      if (!row.peaks && displaySelect.value !== "spectrogram") {
+        ctx.fillStyle = "#a5b0b8";
+        ctx.fillText(row.waveformFailed ? "波形读取失败，请重新打开项目" : "正在读取波形…", 12, 24);
+      }
       const peaks = row.peaks || [];
       if (displaySelect.value !== "spectrogram" && peaks.length) {
         const columns = canvas.width;
@@ -452,7 +499,7 @@
         redraw(); return;
       }
       const index = clamp(Math.floor(time / seconds), 0, Math.max(0, rows.length - 1));
-      const top = index * (ROW_HEIGHT + ROW_GAP);
+      const top = index * rowStride();
       if (center || top < viewport.scrollTop || top + ROW_HEIGHT > viewport.scrollTop + viewport.clientHeight)
         viewport.scrollTop = Math.max(0, top - (center ? (viewport.clientHeight - ROW_HEIGHT) / 2 : 0));
       redraw();
@@ -462,7 +509,7 @@
       const span = Math.min(duration, visibleSpan());
       const start = clamp(Number(time) - span / 2, 0, Math.max(0, duration - span));
       if (mode === "basic") viewport.scrollLeft = start / seconds * viewport.clientWidth;
-      else viewport.scrollTop = start / seconds * (ROW_HEIGHT + ROW_GAP);
+      else viewport.scrollTop = start / seconds * rowStride();
       redraw();
     }
     positionSlider.oninput = () => scrollToTime(positionSlider.value);
@@ -678,6 +725,7 @@
     return Object.freeze({
       scrollToTime,
       setView(next) {
+        filmstrip?.setUrl(options.getThumbnailsUrl?.());
         view = next; cues = timeline.activeCues(view);
         selection.reconcile(cues.map(c=>c.cue_id));
         const nextDuration = Math.max(Number(options.media?.duration) || 0, ...cues.map(cue=>cue.end), .001);
@@ -700,7 +748,8 @@
         return {left,right,top:rect.top,bottom:rect.bottom,width:Math.max(0,right-left),height:rect.height};
       },
       destroy() {
-        destroyed=true; generation++; clearSpectra(); cancelAnimationFrame(frame); cancelAnimationFrame(playback); observer.disconnect();
+        filmstrip?.close();
+        destroyed=true; generation++; clearWaveformRetries(); clearSpectra(); cancelAnimationFrame(frame); cancelAnimationFrame(playback); observer.disconnect();
         panel.removeEventListener?.("workspace-waveform-mode", workspaceMode);
         doc.removeEventListener("pointerdown",dismissSettings);
         options.media?.removeEventListener("timeupdate",mediaUpdate); options.media?.removeEventListener("seeked",mediaUpdate); options.media?.removeEventListener("play",mediaPlay);

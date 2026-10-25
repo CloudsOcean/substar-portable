@@ -5,7 +5,7 @@
 })(typeof globalThis === "object" ? globalThis : this, function () {
   "use strict";
 
-  function createWaveformCache({limit = 16} = {}) {
+  function createWaveformCache({limit = 16, requestTimeoutMs = 15000} = {}) {
     const values = new Map();
     const inFlight = new Map();
     const latestByGroup = new Map();
@@ -36,7 +36,7 @@
         stats.hits += 1;
         return Promise.resolve(value);
       }
-      if (inFlight.has(key)) {
+      if (inFlight.has(key) && !inFlight.get(key).controller.signal.aborted) {
         stats.deduped += 1;
         return inFlight.get(key).promise;
       }
@@ -52,14 +52,26 @@
       }
       const controller = new AbortController();
       latestByGroup.set(group, key);
-      const promise = Promise.resolve(input.load({signal:controller.signal}))
+      let timeout;
+      const promise = Promise.race([
+        Promise.resolve().then(() => input.load({signal:controller.signal})),
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error("波形读取超时，请重试"));
+          }, Math.max(1, Number(requestTimeoutMs)));
+        })
+      ])
         .then(value => {
-          remember(key, value);
+          if (!controller.signal.aborted) remember(key, value);
           return value;
         })
         .finally(() => {
-          inFlight.delete(key);
-          if (latestByGroup.get(group) === key) latestByGroup.delete(group);
+          clearTimeout(timeout);
+          if (inFlight.get(key)?.controller === controller) {
+            inFlight.delete(key);
+            if (latestByGroup.get(group) === key) latestByGroup.delete(group);
+          }
         });
       inFlight.set(key, {promise, controller, group});
       return promise;

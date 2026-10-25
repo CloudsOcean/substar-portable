@@ -89,7 +89,7 @@
       // is already typing in another row. Never replace that live textarea:
       // doing so loses focus, selection, composition and its unsaved draft.
       const focus = document.activeElement;
-      if (focus?.matches?.(".inline-token-editor") && existing.contains?.(focus)) {
+      if ((focus?.matches?.(".inline-token-editor") || focus?.matches?.(".whole-cue-editor")) && existing.contains?.(focus)) {
         // Keep the actual node, including selection and IME composition. A
         // save acknowledgement must never turn DOM removal into a user blur.
         existing.dataset.deferredRefresh = "true";

@@ -176,6 +176,7 @@ class ProjectTaskInfoRequest(BaseModel):
 
 
 class TranslationStartRequest(BaseModel):
+    regroup: bool = False
     translation_layout: dict[str, Any] | None = None
     expected_revision_id: str = Field(min_length=1)
     glossary_ids: list[str] | None = Field(default=None, max_length=200)
@@ -489,10 +490,12 @@ def _project_document_payload(document: EditorDocument) -> dict[str, Any]:
     if target == "original":
         return value
     for token in value.get("display_tokens", []):
+        token["canonical_text"] = token["text"]
         token["text"] = convert_chinese_script(str(token.get("text", "")), target)
     for cue in value.get("cues", []):
         translation = cue.get("target")
         if isinstance(translation, dict):
+            translation["canonical_target_text"] = translation["target_text"]
             translation["target_text"] = convert_chinese_script(
                 str(translation.get("target_text", "")), target
             )
@@ -505,6 +508,7 @@ def revision_payload(revision: Any) -> dict[str, Any]:
         "revision_number": revision.revision_number,
         "parent_revision_id": revision.parent_revision_id,
         "created_at": revision.created_at,
+        "provenance": revision.provenance.to_dict(),
         "document_hash": revision.document_hash or revision.document.content_hash(),
         "document": _project_document_payload(revision.document),
     }
@@ -621,6 +625,7 @@ def revision_delta_payload(before: Any, after: Any) -> dict[str, Any]:
         "revision_number": after.revision_number,
         "parent_revision_id": after.parent_revision_id,
         "created_at": after.created_at,
+        "provenance": after.provenance.to_dict(),
         "document_id": after_document.document_id,
         "document_hash": after.document_hash or after_document.content_hash(),
         "properties": (
@@ -655,10 +660,12 @@ def revision_delta_payload(before: Any, after: Any) -> dict[str, Any]:
     target = after_document.properties.script_projection
     if target != "original":
         for token in value["display_tokens"]["upsert"]:
+            token["canonical_text"] = token["text"]
             token["text"] = convert_chinese_script(str(token.get("text", "")), target)
         for cue in value["cues"]["upsert"]:
             translation = cue.get("target")
             if isinstance(translation, dict):
+                translation["canonical_target_text"] = translation["target_text"]
                 translation["target_text"] = convert_chinese_script(
                     str(translation.get("target_text", "")), target
                 )
@@ -1055,6 +1062,7 @@ def _runtime_ai_task_projection(
         "source_language": frozen.get("source_language"),
         "target_language": frozen.get("target_language"),
         "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
+        "regroup": bool(frozen.get("settings", {}).get("translation_regroup")),
         "problem_cue_ids": list(result.get("problem_cue_ids") or []),
         "problem_block_ids": list(result.get("problem_block_ids") or []),
         "ai_progress": projected_progress,
@@ -1332,6 +1340,39 @@ def get_project_media_info(project_id: str) -> dict[str, Any]:
         "content_type": mimetypes.guess_type(source_path.name)[0] or "application/octet-stream",
         "duration": duration,
     }
+
+
+@router.get("/projects/{project_id}/thumbnails")
+def get_project_thumbnails(project_id: str) -> dict[str, Any]:
+    from substar_core.media.thumbnails import status, request_generation
+    source, _ = _project_media_source(project_id)
+    project = project_job_path(project_id)
+    result = status(project, source)
+    if result["requested"] and result["state"] in {"idle", "queued", "generating"}:
+        result = request_generation(project, source)
+    return result
+
+
+@router.post("/projects/{project_id}/thumbnails")
+def generate_project_thumbnails(project_id: str) -> dict[str, Any]:
+    from substar_core.media.thumbnails import request_generation
+    source, _ = _project_media_source(project_id)
+    return request_generation(project_job_path(project_id), source, retry=True)
+
+
+@router.get("/projects/{project_id}/thumbnails/{revision}/{asset}")
+def get_thumbnail_asset(project_id: str, revision: str, asset: str) -> FileResponse:
+    import re
+    from substar_core.media.thumbnails import cache_directory, status
+    source, _ = _project_media_source(project_id)
+    project = project_job_path(project_id)
+    directory = cache_directory(project, source)
+    if revision != directory.name or not re.fullmatch(r"sprite-\d{5}\.jpg", asset):
+        raise HTTPException(404)
+    if status(project, source)["state"] != "ready" or not (directory / asset).is_file():
+        raise HTTPException(404)
+    return FileResponse(directory / asset, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @router.get("/projects/{project_id}/media")
@@ -2295,11 +2336,11 @@ def _exchange_prompt_options(project_id: str) -> dict[str, Any]:
     source_limit = int(settings.get("source_hard_limit") or settings.get({
         "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
         "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(source_language, "mixed_hard_limit"), 55))
+    }.get(source_language, "other_hard_limit"), 55))
     target_limit = int(settings.get("target_hard_limit") or settings.get({
         "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
         "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(target_language, "mixed_hard_limit"), 55))
+    }.get(target_language, "other_hard_limit"), 55))
     return {
         "source_language": source_language,
         "target_language": target_language,
@@ -2783,6 +2824,7 @@ def start_project_translation(
         raise HTTPException(422, detail=str(exc)) from exc
     settings["target_language_mode"] = payload.target_language
     settings["translation_mapping_mode"] = payload.mapping_mode
+    settings["translation_regroup"] = payload.regroup
     latest = open_project_store(project_id).load_latest()
     if latest is not None:
         source_text = " ".join(
@@ -2838,7 +2880,9 @@ def start_project_translation(
     from dataclasses import asdict
     from substar_core.prompt_registry import translation_variant, opposite_language
     target = opposite_language(source_language) if payload.target_language == "auto_opposite" else payload.target_language
-    variant = "generic" if settings.get("translation_layout") else translation_variant(source_language, target)
+    from substar_core.editor.translation.regroup import translation_prompt_variant
+    from substar_core.editor.translation.contextual import clean_groups
+    variant = translation_prompt_variant(settings, source_language, target, clean_groups(latest.document, settings))
     frozen_settings["prompt_snapshot"] = {
         key: asdict(render_prompt(key, variant=variant, mode=payload.mapping_mode))
         for key in ("contextual_translation", "contextual_translation_repair")

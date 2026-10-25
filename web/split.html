@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20261024-languages-1">
+  <link rel="stylesheet" href="/assets/split.css?v=20261025-thumbnails-1">
   <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
+<link rel="stylesheet" href="/assets/split-refinements.css?v=20261025-1">
 </head>
 <body>
   <header class="app-bar app-header">
@@ -123,21 +124,18 @@
           </details>
 
           <details class="language-limit-settings">
-            <summary>字符数上限设置 <span>按原文与目标语言自动选用硬上限</span></summary>
+            <summary>字符数上限设置 <span>逐条按实际语言选用，行内多语言使用混合上限</span></summary>
             <div class="parameter-grid language-limit-grid">
-              <label class="language-ratio-field">
-                <span>语言比例阈值 <output id="languageRatioThresholdValue" for="languageRatioThresholdInput">20%</output></span>
-                <input id="languageRatioThresholdInput" type="range" min="0" max="100" step="1" value="20">
-                <small>其他语言占比不超过该值时按主要语言处理；超过时按混合处理</small>
-              </label>
-              <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
               <label><span>中文</span><div class="number-field"><input id="chineseLimitInput" type="number" min="8" max="100" value="20"><em>字符</em></div></label>
               <label><span>日文</span><div class="number-field"><input id="japaneseLimitInput" type="number" min="8" max="100" value="24"><em>字符</em></div></label>
-              <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
               <label><span>韩文</span><div class="number-field"><input id="koreanLimitInput" type="number" min="8" max="120" value="28"><em>字符</em></div></label>
+              <label><span>英文</span><div class="number-field"><input id="englishLimitInput" type="number" min="20" max="200" value="55"><em>字符</em></div></label>
+              <label><span>其他</span><div class="number-field"><input id="otherLimitInput" type="number" min="1" max="200" value="55"><em>字符</em></div></label>
+              <label><span>混合</span><div class="number-field"><input id="mixedLimitInput" type="number" min="8" max="200" value="25"><em>字符</em></div></label>
             </div>
           </details>
 
+          <label class="thumbnail-generation-option"><input id="generateThumbnailsInput" type="checkbox"><span>生成高精度画面预览图</span></label>
           <input id="chunkSecondsInput" type="hidden" value="180">
           <input id="workersInput" type="hidden" value="16">
           <input id="retryInput" type="hidden" value="3">
@@ -236,7 +234,8 @@
 <script src="/assets/asr_assist.js?v=20261012-media-selection-1" defer></script>
   <script src="/assets/system_save_as.js?v=20260911-export-track-major-1" defer></script>
   <script src="/assets/subtitle_input.js?v=20260911-single-project-1"></script>
-<script src="/assets/split.js?v=20261024-languages-1" defer></script>
+<script src="/assets/split.js?v=cue-limits-1-20261025-thumbnails-1" defer></script>
 <script src="/assets/translation_layout.js?v=20261024-languages-1"></script>
+<script src="/assets/split-refinements.js?v=20261025-1" defer></script>
 </body>
 </html>

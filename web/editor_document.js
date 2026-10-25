@@ -292,6 +292,7 @@
       revision_number:Number(source.revision_number),
       parent_revision_id:source.parent_revision_id ?? null,
       created_at:source.created_at,
+      provenance:clone(source.provenance),
       document_hash:source.document_hash,
       document:clone(source.document)
     });
@@ -337,6 +338,7 @@
     const tokenViews = revision.document.display_tokens.map(token => ({
       token_id:token.token_id,
       text:token.text,
+      canonical_text:token.canonical_text ?? token.text,
       start:token.source_token_ids.length ? Math.min(...token.source_token_ids.map(id => sourceTimes.get(id)?.start ?? Infinity)) : null,
       end:token.source_token_ids.length ? Math.max(...token.source_token_ids.map(id => sourceTimes.get(id)?.end ?? -Infinity)) : null,
       original_text:token.original_text,
@@ -463,6 +465,7 @@
       revision_number:Number(delta.revision_number),
       parent_revision_id:delta.parent_revision_id ?? null,
       created_at:delta.created_at,
+      provenance:clone(delta.provenance),
       document_hash:delta.document_hash,
       document:nextDocument
     });
@@ -511,7 +514,7 @@
     return {...value, operation:String(value.operation || operation)};
   }
 
-  function replaceOperation(revisionPayload, tokenId, text, provenance = null) {
+  function replaceOperation(revisionPayload, tokenId, text, provenance = null, options = {}) {
     const indexes = revisionIndexes(revisionPayload);
     const token = indexes.display.get(String(tokenId));
     if (!token) throw new Error("replace target display token does not exist");
@@ -519,7 +522,7 @@
       token_id:token.token_id,
       text:String(text),
       original_text:token.text,
-      expected_text:token.text,
+      expected_text:options.expected_text ?? token.canonical_text ?? token.text,
       source_token_ids:[...token.source_token_ids],
       provenance:provenanceInput(provenance, "replace")
     });
@@ -533,7 +536,7 @@
       return {
         token_id:token.token_id,
         text:String(item.text || ""),
-        expected_text:item.expected_text ?? token.text
+        expected_text:item.expected_text ?? token.canonical_text ?? token.text
       };
     });
     if (!prepared.length) throw new Error("batch replace needs replacements");
@@ -572,7 +575,7 @@
     return createOperation(revisionPayload, "set_target", {
       cue_id:cue.cue_id,
       target_text:String(targetText || ""),
-      expected_target_text:cue.target?.target_text || "",
+      expected_target_text:options.expected_target_text ?? cue.target?.canonical_target_text ?? cue.target?.target_text ?? "",
       original_text:options.original_text ?? cue.target?.original_text ?? cue.target?.target_text ?? "",
       language:options.language ?? cue.target?.language ?? "zh-CN",
       provenance:provenanceInput(provenance, "set_target")

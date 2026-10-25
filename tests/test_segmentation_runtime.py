@@ -93,7 +93,7 @@ class SegmentationContractTests(unittest.TestCase):
         request = self.request()
         self.assertEqual(validate_segmentation_request(request), request)
         self.assertEqual(
-            request["constraints"]["language_ratio_threshold_percent"], 20
+            request["constraints"]["other_hard_limit"], 55
         )
         validate_schema(request, "segmentation-request.schema.json")
         rendered = json.dumps(request, ensure_ascii=False)
@@ -107,7 +107,7 @@ class SegmentationContractTests(unittest.TestCase):
 
     def test_request_accepts_legacy_constraints_without_language_ratio(self) -> None:
         request = self.request()
-        request["constraints"].pop("language_ratio_threshold_percent")
+        request["constraints"].pop("other_hard_limit")
         unsigned = {key: value for key, value in request.items() if key != "input_fingerprint"}
         request["input_fingerprint"] = canonical_sha256(unsigned)
 

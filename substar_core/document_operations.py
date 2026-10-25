@@ -517,6 +517,11 @@ def _set_source_text(document: EditorDocument, operation: Mapping[str, Any]) -> 
     text = str(payload.get("text", ""))
     if cue.source_text is None or not text.strip() or len(text) > 20000:
         raise DocumentOperationError("普通字幕原文必须为非空文本")
+    if "expected_source_text" in payload:
+        if cue.source_text == text:
+            return document
+        if cue.source_text != payload["expected_source_text"]:
+            raise DocumentOperationError("原文已被其他编辑修改，原输入已保留，请处理内容冲突")
     updated = replace(cue, source_text=text)
     provenance = _provenance(operation, "set_source_text")
     return replace(document, cues=tuple(updated if c.cue_id == cue.cue_id else c for c in document.cues), changes=(*document.changes, provenance))

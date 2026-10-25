@@ -56,3 +56,36 @@ test("flushing a failed edit reports its original cause and retains it for retry
   assert.equal(queue.getState().hasUnsavedChanges,false);
   queue.destroy();
 });
+
+test('UI observer failures cannot interrupt journaling, saving or subsequent edits',async()=>{
+  let journal=[],calls=0;const errors=[];
+  const q=createOperationQueue({base:()=>({}),onJournal:ops=>journal=ops,
+    onStatus:()=>{throw Error('render failed');},onObserverError:(_,name)=>errors.push(name),
+    sendBatch:async()=>{calls++;return {};}});
+  const first=q.enqueue({operation_id:'a'});
+  assert.equal(journal[0].operation_id,'a');
+  await q.flushAndWait();await first;
+  const second=q.enqueue({operation_id:'b'});await q.flushAndWait();await second;
+  assert.equal(calls,2);assert.equal(journal.length,0);assert.ok(errors.includes('onStatus'));q.destroy();
+});
+
+test('invalid save base keeps the batch in the recovery journal and rejects the waiter',async()=>{
+  let journal=[];
+  const q=createOperationQueue({base:()=>{throw Error('missing base');},maxRetries:0,
+    onJournal:ops=>journal=ops,sendBatch:async()=>assert.fail('must not send'),
+    onFailed:()=>{throw Error('error banner failed');}});
+  const saving=q.enqueue({operation_id:'a'});
+  const rejected=assert.rejects(saving,/missing base/);
+  await assert.rejects(q.flushAndWait(),/missing base/);await rejected;
+  assert.equal(q.getState().failed,1);assert.equal(journal[0].operation_id,'a');q.destroy();
+});
+
+test('a hung save times out, aborts the request and retains its operation for retry',async()=>{
+  let signal,journal=[];
+  const q=createOperationQueue({base:()=>({}),maxRetries:0,requestTimeoutMs:5,
+    onJournal:ops=>journal=ops,sendBatch:(_batch,options)=>{signal=options.signal;return new Promise(()=>{});}});
+  const saving=q.enqueue({operation_id:'timeout'});const rejected=assert.rejects(saving,/超时/);
+  await assert.rejects(q.flushAndWait(),/超时/);await rejected;
+  assert.equal(signal.aborted,true);assert.equal(q.getState().failed,1);assert.equal(journal[0].operation_id,'timeout');
+  q.destroy();
+});

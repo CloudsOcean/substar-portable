@@ -255,7 +255,10 @@
     const normalized = kind === "audio" ? "audio" : "video";
     const next = normalized === "audio" ? $("#projectAudio") : $("#projectVideo");
     if (!next) return;
-    if (state.mediaElement === next && state.mediaBindingsCleanup) return;
+    if (state.mediaElement === next && state.mediaBindingsCleanup) {
+      initializeTimelineController();
+      return;
+    }
     stopPlaybackUiLoop();
     state.mediaBindingsCleanup?.();
     const previous = state.mediaElement;
@@ -758,6 +761,9 @@
     localProjection = false,
     preserveCueViewport = true
   } = {}) {
+    if (!localProjection && state.documentStore?.pending().length) {
+      throw new Error("仍有本地编辑尚未保存，已保留输入；请先完成保存再同步版本");
+    }
     const previousActiveCue = preserveCueViewport
       ? state.view?.cue_views.find(cue => cue.cue_id === state.activeCueId) || null
       : null;
@@ -922,7 +928,7 @@
       created_at:revision.created_at,
       complete:state.view?.properties?.complete === true,
       is_latest:true,
-      provenance:provenance || {kind:"manual", operation:"editor_commit", metadata:{}}
+      provenance:provenance || revision.provenance || {kind:"manual", operation:"editor_commit", metadata:{}}
     };
   }
 
@@ -942,18 +948,35 @@
   }
 
   function logicalUndoStack(revisionId, metadataById, seen = new Set()) {
-    if (!revisionId || seen.has(revisionId)) return [];
-    seen.add(revisionId);
-    const revision = metadataById.get(revisionId);
-    if (!revision) return [];
-    const metadata = revision.provenance?.metadata || {};
-    if (revision.provenance?.operation === "restore_revision") {
-      return Array.isArray(metadata.undo_revision_ids)
-        ? metadata.undo_revision_ids.map(String) : [];
+    const tail = [];
+    while (revisionId && !seen.has(revisionId) && tail.length < 1000) {
+      seen.add(revisionId);
+      const revision = metadataById.get(revisionId);
+      if (!revision) break;
+      if (revision.provenance?.operation === "restore_revision") {
+        const ids = revision.provenance.metadata?.undo_revision_ids;
+        return [...(Array.isArray(ids) ? ids.map(String) : []), ...tail.reverse()].slice(-1000);
+      }
+      const parentId = revision.parent_revision_id;
+      if (!parentId) break;
+      if (revision.provenance?.operation !== "checkpoint") tail.push(parentId);
+      revisionId = parentId;
     }
-    const parentId = revision.parent_revision_id;
-    if (!parentId) return [];
-    return [...logicalUndoStack(parentId, metadataById, seen), parentId];
+    return tail.reverse();
+  }
+
+  function logicalRedoStack(revisionId, metadataById, seen = new Set()) {
+    while (revisionId && !seen.has(revisionId)) {
+      seen.add(revisionId);
+      const revision = metadataById.get(revisionId);
+      if (revision?.provenance?.operation !== "checkpoint") {
+        const ids = revision?.provenance?.operation === "restore_revision"
+          ? revision.provenance.metadata?.redo_revision_ids : null;
+        return Array.isArray(ids) ? ids.map(String).slice(-1000) : [];
+      }
+      revisionId = revision.parent_revision_id;
+    }
+    return [];
   }
 
   function seedRevisionMetadata(revision) {
@@ -971,6 +994,7 @@
     state.historyNavigationPending = false;
     state.revisionHistoryLoaded = false;
     state.revisionHistoryLoading = false;
+    state.revisionHistoryPromise = null;
     renderRevisionMenu();
     syncRevisionControls();
   }
@@ -987,25 +1011,48 @@
         .filter(item => item.revision_id !== current.revision_id)
         .map(item => ({...item, is_latest:false}))
     ];
-    if (provenance?.operation !== "restore_revision") {
+    if (current.provenance?.operation === "restore_revision") {
+      const navigation = current.provenance.metadata || {};
+      state.undoRevisionIds = (navigation.undo_revision_ids || []).map(String).slice(-1000);
+      state.redoRevisionIds = (navigation.redo_revision_ids || []).map(String).slice(-1000);
+    } else if (previousRevisionId !== current.revision_id && current.provenance?.operation !== "checkpoint") {
       if (previousRevisionId && previousRevisionId !== current.revision_id) {
         state.undoRevisionIds.push(previousRevisionId);
       } else if (!state.undoRevisionIds.length && current.parent_revision_id) {
         state.undoRevisionIds.push(current.parent_revision_id);
       }
       state.redoRevisionIds = [];
+      state.undoRevisionIds = state.undoRevisionIds.slice(-1000);
     }
     renderRevisionMenu();
     syncRevisionControls();
   }
 
   async function loadRevisionHistory({force = false} = {}) {
-    if (!state.projectId || state.revisionHistoryLoading || (!force && state.revisionHistoryLoaded)) return;
+    if (!state.projectId) return false;
+    if (state.revisionHistoryLoading) {
+      const projectId = state.projectId, revisionId = state.revision?.revision_id;
+      const loaded = await state.revisionHistoryPromise;
+      if (state.projectId !== projectId) return false;
+      if (loaded && state.revisionHistoryLoaded) return true;
+      if (revisionId !== state.revision?.revision_id) return loadRevisionHistory({force:true});
+      return false;
+    }
+    if (!force && state.revisionHistoryLoaded) return true;
     const projectId = state.projectId;
+    const revisionId = state.revision?.revision_id;
     state.revisionHistoryLoading = true;
+    let finish;
+    const pending = new Promise(resolve => { finish = resolve; });
+    state.revisionHistoryPromise = pending;
+    let loaded = false;
     try {
       const result = await api(projectPath("/revisions"));
-      if (state.projectId !== projectId) return;
+      if (state.projectId !== projectId || state.revisionHistoryPromise !== pending) return false;
+      if (state.revision?.revision_id !== revisionId) {
+        state.revisionHistoryLoaded = false;
+        return false;
+      }
       state.revisions = result.revisions || [];
       state.revisionHistoryLoaded = true;
       if (state.revision) {
@@ -1019,24 +1066,72 @@
             ? navigation.redo_revision_ids.map(String) : [];
         } else {
           state.undoRevisionIds = logicalUndoStack(state.revision.revision_id, metadataById);
-          state.redoRevisionIds = [];
+          state.redoRevisionIds = logicalRedoStack(state.revision.revision_id, metadataById);
         }
       }
       renderRevisionMenu();
       syncRevisionControls();
+      loaded = true;
+      return true;
     } catch (error) {
+      if (state.projectId !== projectId || state.revisionHistoryPromise !== pending) return false;
+      state.revisionHistoryLoaded = false;
       ordinaryError(`版本历史读取失败：${error.message}`);
+      return false;
     } finally {
-      if (state.projectId === projectId) state.revisionHistoryLoading = false;
+      if (state.revisionHistoryPromise === pending) {
+        state.revisionHistoryLoading = false;
+        state.revisionHistoryPromise = null;
+      }
+      finish(loaded);
     }
   }
 
   async function flushActiveEditorInput() {
     const active = document.activeElement;
     if (active?.closest?.("#cueList") && active.matches?.("input,textarea,[contenteditable]")) active.blur();
+    // Whole-line edits prepare a structural operation asynchronously on blur.
+    // Its queue entry may not exist yet, so draining the queue alone is insufficient.
+    if (active?.editorCommit && await active.editorCommit === null) {
+      throw new Error("当前输入未能保存，请检查编辑内容");
+    }
     await Promise.resolve();
-    await ensureOperationQueue().flushAndWait();
+    return await ensureOperationQueue().flushAndWait();
   }
+
+  async function withSavedDocument(write) {
+    if (state.documentWritePending || state.checkpointPending || state.restorePreparationPending
+      || state.historyNavigationPending) throw new Error("正在保存或恢复文档，请稍候重试");
+    state.documentWritePending = true;
+    const workbench = $("#editorWorkbench"), wasInert = workbench.inert;
+    try {
+      const saving = flushActiveEditorInput();
+      workbench.inert = true;
+      await saving;
+      state.documentWriteLocked = true;
+      return await write();
+    } finally {
+      state.documentWriteLocked = false;
+      state.documentWritePending = false;
+      workbench.inert = wasInert;
+    }
+  }
+
+  function hasUncommittedEditorInput() {
+    return [...document.querySelectorAll("#cueList input,#cueList textarea")].some(field => {
+      if (field.dataset.sourceEdit) return field.value !== field.dataset.originalSource;
+      if (field.dataset.targetEdit) return field.dataset.rawEditing === "true"
+        && field.value.trim() !== (field.dataset.originalTarget || "");
+      return field.dataset.originalEdit !== undefined && field.value.trim() !== field.dataset.originalEdit;
+    });
+  }
+
+  window.addEventListener("beforeunload", event => {
+    if (!hasUncommittedEditorInput() && !state.operationQueue?.getState().hasUnsavedChanges
+      && !state.checkpointPending && !state.restorePreparationPending && !state.documentWritePending) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
 
   let exitingEditor = false;
   async function exitEditor(event) {
@@ -1044,6 +1139,10 @@
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button > 0) return;
     event.preventDefault();
     if (exitingEditor) return;
+    if (state.documentWritePending || state.checkpointPending || state.restorePreparationPending) {
+      ordinaryError("文档正在保存或恢复，请完成后再退出");
+      return;
+    }
     exitingEditor = true;
     const link = event.currentTarget;
     let exitTimer;
@@ -1069,16 +1168,16 @@
   let idleRevisionCheck = false;
   async function syncIdleRevision() {
     if (idleRevisionCheck || !state.revision || state.operationPending || state.historyNavigationPending
-      || state.structuralPreparationPending || state.restorePreparationPending || editorAiTaskLocksEditor()
+      || state.structuralPreparationPending || state.restorePreparationPending || state.documentWritePending || editorAiTaskLocksEditor()
       || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
     idleRevisionCheck = true;
     const project = state.projectId, revision = state.revision.revision_id;
     try {
       const latest = contract.consumeRevision(await api(projectPath()));
       if (project !== state.projectId || revision !== state.revision?.revision_id || state.operationPending
-        || state.historyNavigationPending || state.structuralPreparationPending || state.restorePreparationPending
+        || state.historyNavigationPending || state.structuralPreparationPending || state.restorePreparationPending || state.documentWritePending
         || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
-      if (latest.revision_id !== revision) { setRevision(latest); await loadRevisionHistory(); }
+      if (latest.revision_id !== revision) { setRevision(latest); await loadRevisionHistory({force:true}); }
     } catch (error) { console.warn("Idle revision check failed", error); }
     finally { idleRevisionCheck = false; }
   }
@@ -1088,13 +1187,13 @@
   async function restoreRevision(revisionId, {
     navigation = "direct", undoRevisionIds = null, redoRevisionIds = null
   } = {}) {
-    if (!state.revision || !revisionId || state.restorePreparationPending) return;
+    if (!state.revision || !revisionId || state.restorePreparationPending || state.checkpointPending || state.documentWritePending) return;
     state.restorePreparationPending = true;
     const nextUndoRevisionIds = Array.isArray(undoRevisionIds)
-      ? undoRevisionIds.slice()
-      : [...state.undoRevisionIds, state.revision.revision_id];
+      ? undoRevisionIds.slice(-1000)
+      : [...state.undoRevisionIds, state.revision.revision_id].slice(-1000);
     const nextRedoRevisionIds = Array.isArray(redoRevisionIds)
-      ? redoRevisionIds.slice() : [];
+      ? redoRevisionIds.slice(-1000) : [];
     try {
       const before = state.revision.revision_id;
       await flushActiveEditorInput();
@@ -1103,7 +1202,7 @@
       const latest = contract.consumeRevision(await api(projectPath()));
       if (before !== state.revision.revision_id || latest.revision_id !== state.revision.revision_id) {
         setRevision(latest);
-        await loadRevisionHistory();
+        await loadRevisionHistory({force:true});
         ordinaryError("当前编辑已同步，版本历史已更新；请重新选择撤销或恢复目标");
         return null;
       }
@@ -1134,7 +1233,7 @@
       return revision;
     } catch (error) {
       if (error.status === 409 && !state.operationQueue?.getState().hasUnsavedChanges) {
-        try { setRevision(await api(projectPath())); await loadRevisionHistory(); }
+        try { setRevision(await api(projectPath())); await loadRevisionHistory({force:true}); }
         catch (_) { /* Preserve the original restore failure. */ }
       }
       ordinaryError(`版本恢复失败：${error.message}。输入保留，请核对最新版本历史后重试`);
@@ -1158,14 +1257,20 @@
   }
 
   async function createCheckpoint() {
-    if (!state.revision) return;
-    await flushActiveEditorInput();
-    await loadRevisionHistory();
-    const count = state.revisions.filter(item => item.provenance?.operation === "checkpoint").length;
-    const checkpointNumber = count + 1;
+    if (!state.revision || state.checkpointPending || state.restorePreparationPending || state.documentWritePending
+      || state.historyNavigationPending || editorAiTaskLocksEditor()) return;
     const label = $("#checkpointName").value.trim();
     if (!label) { $("#checkpointName").focus(); return; }
+    state.checkpointPending = true;
+    const workbench = $("#editorWorkbench");
+    const wasInert = workbench.inert;
     try {
+      const saving = flushActiveEditorInput();
+      workbench.inert = true;
+      await saving;
+      if (await loadRevisionHistory() === false) throw new Error("版本历史未能读取，请重试暂存");
+      const count = state.revisions.filter(item => item.provenance?.operation === "checkpoint").length;
+      const checkpointNumber = count + 1;
       const revision = await api(projectPath("/checkpoints"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1182,35 +1287,52 @@
       setCheckpointNaming(false);
     } catch (error) {
       ordinaryError(`暂存失败：${error.message}`);
+    } finally {
+      state.checkpointPending = false;
+      workbench.inert = wasInert;
     }
   }
 
   async function undoLatestRevision() {
     if (editorAiTaskLocksEditor()) return;
-    if (state.historyNavigationPending || !state.revision) return;
-    await loadRevisionHistory();
-    if (!state.undoRevisionIds.length) return;
-    const target = state.undoRevisionIds[state.undoRevisionIds.length - 1];
-    const undoRevisionIds = state.undoRevisionIds.slice(0, -1);
-    const redoRevisionIds = [...state.redoRevisionIds, state.revision.revision_id];
+    if (state.historyNavigationPending || state.checkpointPending || state.documentWritePending || !state.revision) return;
     state.historyNavigationPending = true;
     syncRevisionControls();
-    await restoreRevision(target, {navigation:"undo", undoRevisionIds, redoRevisionIds});
-    state.historyNavigationPending = false;
-    syncRevisionControls();
+    try {
+      await flushActiveEditorInput();
+      if (await loadRevisionHistory() === false) return;
+      if (!state.undoRevisionIds.length) return;
+      const target = state.undoRevisionIds[state.undoRevisionIds.length - 1];
+      const undoRevisionIds = state.undoRevisionIds.slice(0, -1);
+      const redoRevisionIds = [...state.redoRevisionIds, state.revision.revision_id];
+      await restoreRevision(target, {navigation:"undo", undoRevisionIds, redoRevisionIds});
+    } catch (error) {
+      ordinaryError(`撤销前保存未完成：${error.message}`);
+    } finally {
+      state.historyNavigationPending = false;
+      syncRevisionControls();
+    }
   }
 
   async function redoLatestRevision() {
     if (editorAiTaskLocksEditor()) return;
-    if (state.historyNavigationPending || !state.redoRevisionIds.length || !state.revision) return;
-    const target = state.redoRevisionIds[state.redoRevisionIds.length - 1];
-    const redoRevisionIds = state.redoRevisionIds.slice(0, -1);
-    const undoRevisionIds = [...state.undoRevisionIds, state.revision.revision_id];
+    if (state.historyNavigationPending || state.checkpointPending || state.documentWritePending || !state.revision) return;
     state.historyNavigationPending = true;
     syncRevisionControls();
-    await restoreRevision(target, {navigation:"redo", undoRevisionIds, redoRevisionIds});
-    state.historyNavigationPending = false;
-    syncRevisionControls();
+    try {
+      await flushActiveEditorInput();
+      if (await loadRevisionHistory() === false) return;
+      if (!state.redoRevisionIds.length) return;
+      const target = state.redoRevisionIds[state.redoRevisionIds.length - 1];
+      const redoRevisionIds = state.redoRevisionIds.slice(0, -1);
+      const undoRevisionIds = [...state.undoRevisionIds, state.revision.revision_id];
+      await restoreRevision(target, {navigation:"redo", undoRevisionIds, redoRevisionIds});
+    } catch (error) {
+      ordinaryError(`重做前保存未完成：${error.message}`);
+    } finally {
+      state.historyNavigationPending = false;
+      syncRevisionControls();
+    }
   }
 
   async function resetToCheckpoint() {
@@ -1321,7 +1443,7 @@
   async function applyPresentationSettings() {
     if (!state.revision) return;
     try {
-      const revision = await api(projectPath("/presentation"), {
+      const revision = await withSavedDocument(() => api(projectPath("/presentation"), {
         method:"PUT",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
@@ -1332,7 +1454,7 @@
           lower_remove:$("#lowerPunctuationRemove").value,
           lower_space:$("#lowerPunctuationSpace").value
         })
-      });
+      }));
       setRevision(revision);
       recordCommittedRevision(state.revision, {
         kind:"manual", operation:"set_presentation", metadata:{}
@@ -1611,6 +1733,8 @@
     sourceLanguageSelect.disabled = running;
     languageSelect.disabled = running;
     mappingModeSelect.disabled = running;
+    const regroupControl = $("#translationRegroup");
+    if (regroupControl) regroupControl.disabled = running;
     $("#translationLanguageLayout").disabled = running;
     if (running && task?.source_language_selection) {
       sourceLanguageSelect.value = task.source_language_selection;
@@ -1872,6 +1996,10 @@
     const sourceLanguage = $("#translationSourceLanguage").value;
     const targetLanguage = $("#translationTargetLanguage").value;
     const mappingMode = $("#translationMappingMode").value;
+    const regroupControl = $("#translationRegroup");
+    const regroup = Boolean(regroupControl?.checked || (
+      state.translationTask?.state === "failed" && state.translationTask?.regroup
+    ));
     $("#translateDocument").disabled = true;
     $("#translationSourceLanguage").disabled = true;
     $("#translationTargetLanguage").disabled = true;
@@ -1881,7 +2009,7 @@
     try {
       await loadTranslationGlossaries();
       const glossaryIds = Array.from($("#translationGlossaryChoices").querySelectorAll("input:checked"), input => input.value);
-      const task = await api(projectPath("/translation"), {
+      const task = await withSavedDocument(() => api(projectPath("/translation"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
@@ -1890,10 +2018,12 @@
           target_language:targetLanguage,
           translation_layout:window.SubstarTranslationLayout.read("translationLanguageLayout"),
           mapping_mode:mappingMode,
+          regroup,
           glossary_ids:glossaryIds
         })
-      });
+      }));
       followTranslationTask(task);
+      if (regroupControl) regroupControl.checked = false;
     } catch (error) {
       ordinaryError(`翻译启动失败：${error.message}`);
       renderTranslationTask({
@@ -2152,6 +2282,7 @@
       target.className = "translation-track";
       target.dataset.targetEdit = cue.cue_id;
       target.dataset.originalTarget = cue.target?.target_text || "";
+      target.dataset.expectedTarget = cue.target?.canonical_target_text ?? cue.target?.target_text ?? "";
       target.dataset.projectedTarget = projected.target;
       target.dataset.rawEditing = "false";
       target.title = cue.target?.translation_status === "needs_review" ? (cue.target?.issue_code === "source_changed" ? "原文已变更，请复核译文" : "译文质量或行长需要复核") : cue.target?.translation_status === "manual_required" ? "译文需要人工处理" : "直接编辑译文";
@@ -2725,14 +2856,16 @@
           document_hash:revision.document_hash
         };
       },
-      async sendBatch(batch) {
+      async sendBatch(batch, {signal}) {
         try {
           const response = await api(queuePath("/operation-batches"), {
             method:"POST",
+            signal,
             headers:{"Content-Type":"application/json"},
             body:JSON.stringify(batch)
           });
           if (!queueCurrent()) throw new Error("保存会话已变化");
+          if (signal.aborted) throw new Error("保存请求已超时，等待重试确认");
           const acknowledged = state.documentStore?.acknowledged() || state.revision;
           const operationIds = response.acknowledged_operation_ids
             || batch.operations.map(item => item.operation_id);
@@ -2760,9 +2893,10 @@
             // client delta, projection, or render failure using the server's
             // authoritative snapshot, and never leave the committed operation
             // in the retry journal.
-            const latest = contract.consumeRevision(await api(queuePath()));
+            const latest = contract.consumeRevision(await api(queuePath(), {signal}));
             const applied = appliedOperationIds(latest);
-            if (!operationIds.every(id => applied.has(id))) throw clientApplyError;
+            const receipts = new Set(response.acknowledged_operation_ids || []);
+            if (!operationIds.every(id => receipts.has(id) || applied.has(id))) throw clientApplyError;
             revision = latest;
             const projection = state.documentStore?.acknowledge(latest, operationIds) || latest;
             try {
@@ -2779,9 +2913,11 @@
             }
           }
           for (const boundary of response.action_revisions || []) {
-            if (boundary.revision_id !== revision.revision_id) recordCommittedRevision(boundary, boundary.provenance);
+            if (boundary.revision_number > acknowledged.revision_number && boundary.revision_id !== revision.revision_id) {
+              recordCommittedRevision(boundary, boundary.provenance);
+            }
           }
-          recordCommittedRevision(revision, {
+          recordCommittedRevision(revision, revision.provenance || {
             kind:"manual",
             operation:"operation_batch",
             metadata:{
@@ -2790,6 +2926,11 @@
               operation_ids:operationIds
             }
           });
+          if (revision.revision_id !== acknowledged.revision_id
+            && revision.parent_revision_id !== acknowledged.revision_id
+            && !(response.action_revisions || []).some(item => item.parent_revision_id === acknowledged.revision_id)) {
+            await loadRevisionHistory({force:true});
+          }
           observeEditorTutorialOperations(batch.operations);
           return revision;
         } catch (error) {
@@ -2799,7 +2940,7 @@
             throw error;
           }
           if (error.status !== 409) throw error;
-          const latestPayload = await api(queuePath());
+          const latestPayload = await api(queuePath(), {signal});
           const latest = contract.consumeRevision(latestPayload);
           const guarded = batch.operations.every(operation =>
             (operation.type === "replace" && Object.hasOwn(operation.payload, "expected_text"))
@@ -2810,7 +2951,7 @@
           setRevision(projection, {
             localProjection:true
           });
-          recordCommittedRevision(latest, {
+          recordCommittedRevision(latest, latest.provenance || {
             kind:"manual", operation:"conflict_reconcile", metadata:{}
           });
           const applied = appliedOperationIds(latest);
@@ -2852,6 +2993,10 @@
       onFailed(error) {
         if (!queueCurrent()) return;
         ordinaryError(`编辑尚未保存：${error.message}。操作已保留，可刷新前重试。`);
+      },
+      onObserverError(error, name) {
+        console.error(`Editor queue ${name} failed`, error);
+        scheduleAuthoritativeResync("保存状态界面正在自动恢复");
       }
     });
     return state.operationQueue;
@@ -2866,15 +3011,22 @@
       return null;
     }
     if (state.restoreWriting) { ordinaryError("正在恢复版本，请稍候再编辑"); return null; }
+    if (state.documentWriteLocked) { ordinaryError("正在保存文档设置，请稍候再编辑"); return null; }
     const topology = isTopologyOperation(operation);
     if (state.topologyOperationPending || (topology && state.structuralPreparationPending)) {
       ordinaryError("Cue 结构正在更新，请稍候再编辑");
       return null;
     }
-    if (topology) state.structuralPreparationPending = true;
+    let topologyLocked = false;
     try {
       if (topology) {
         await flushActiveEditorInput();
+        if (state.topologyOperationPending || state.structuralPreparationPending) {
+          ordinaryError("Cue 结构正在更新，请稍候再编辑");
+          return null;
+        }
+        topologyLocked = true;
+        state.structuralPreparationPending = true;
         state.topologyOperationPending = true;
       }
       const projection = state.documentStore?.enqueue(operation);
@@ -2892,7 +3044,7 @@
       ordinaryError(`编辑尚未保存：${error.message}`);
       return null;
     } finally {
-      if (topology) { state.topologyOperationPending = false; state.structuralPreparationPending = false; }
+      if (topologyLocked) { state.topologyOperationPending = false; state.structuralPreparationPending = false; }
     }
   }
 
@@ -2935,6 +3087,7 @@
     input.setAttribute("aria-label", "整行编辑原文");
     input.rows = 1;
     input.value = original;
+    input.dataset.originalEdit = original;
     const resize = () => { input.style.height = "auto"; input.style.height = `${Math.max(38,input.scrollHeight)}px`; };
     line.hidden = true;
     line.after(input);
@@ -2955,14 +3108,16 @@
         if (!saved && input.isConnected) {
           finished = false; input.disabled = false; input.focus({preventScroll:true});
         }
+        return saved;
       } catch (error) {
         finished = false; input.disabled = false;
         ordinaryError(`编辑尚未保存：${error.message}`);
         input.focus({preventScroll:true});
+        return null;
       }
     };
     input.addEventListener("input", resize);
-    input.addEventListener("blur", () => finish(true));
+    input.addEventListener("blur", () => { input.editorCommit = finish(true); });
     input.addEventListener("keydown", event => {
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); finish(false); }
@@ -2982,6 +3137,7 @@
     const input = document.createElement("textarea");
     input.className = "inline-token-editor";
     input.value = token.text;
+    input.dataset.originalEdit = token.text;
     input.rows = 1;
     const content = button.closest(".cue-content");
     const oldMaxWidth = button.style.maxWidth;
@@ -3017,7 +3173,7 @@
         return;
       }
       await sendOperation(contract.replaceOperation(
-        state.revision, tokenId, text, manualProvenance("inline_replace")
+        state.revision, tokenId, text, manualProvenance("inline_replace"), {expected_text:token.canonical_text ?? token.text}
       ));
     };
     input.addEventListener("keydown", event => {
@@ -3319,14 +3475,14 @@
     renderHeader();
     renderWorkbenchTask("AI 校准", 2, "AI 校准准备中…");
     try {
-      const result = await api(projectPath("/ai-calibrate"), {
+      const result = await withSavedDocument(() => api(projectPath("/ai-calibrate"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
           instruction
         })
-      });
+      }));
       state.editorAiTask = {...result, kind:"calibration"};
       document.body.classList.add("editor-ai-task-locked");
       renderWorkbenchTask("AI 校准", 0, "等待任务调度…", result.state);
@@ -3349,14 +3505,14 @@
     renderHeader();
     renderWorkbenchTask("繁简转换", 10, "正在切换显示与导出投影", "running");
     try {
-      const revision = await api(projectPath("/convert-script"), {
+      const revision = await withSavedDocument(() => api(projectPath("/convert-script"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
           target
         })
-      });
+      }));
       setRevision(revision);
       recordCommittedRevision(state.revision, {
         kind:"manual", operation:"set_script_projection", metadata:{target}
@@ -3392,7 +3548,10 @@
     form.append("expected_revision_id", state.revision.revision_id);
     form.append("file", file, file.name);
     try {
-      const result = await api(projectPath("/reference-manuscript"), {method:"POST", body:form});
+      const result = await withSavedDocument(() => {
+        form.set("expected_revision_id", state.revision.revision_id);
+        return api(projectPath("/reference-manuscript"), {method:"POST", body:form});
+      });
       if (result.revision?.revision_id !== state.revision.revision_id) {
         setRevision(result.revision);
         recordCommittedRevision(state.revision, {
@@ -3432,6 +3591,7 @@
     try {
       const revision = await sendOperation(contract.setTargetOperation(
         state.revision, cueId, text, manualProvenance("inline_edit_target"), {
+          expected_target_text:field.dataset.expectedTarget ?? current,
           original_text:cue.target?.original_text || current,
           language:cue.target?.language || "zh-CN"
         }
@@ -3548,6 +3708,7 @@
     const canvas = $("#timelineCanvas");
     if (!factory?.createTimelineController || !canvas) return;
     state.timelineController?.destroy?.();
+    state.waveformCache?.clear();
     state.waveformCache = window.EditorWaveformCache?.createWaveformCache?.({limit:16}) || null;
     state.timelineController = factory.createTimelineController({
       getLayout:() => state.timelineLayout,
@@ -3564,6 +3725,8 @@
       },
       canvas,
       media:activeMedia(),
+      thumbnailsUrl:projectPath("/thumbnails"),
+      getThumbnailsUrl:() => projectPath("/thumbnails"),
       keyboardTarget:document,
       hideCueShortcut:() => state.shortcuts.hideCue,
       zoomModifier:() => state.shortcuts.zoomModifier,
@@ -3585,7 +3748,7 @@
       },
       onWaveformError(error) {
         if (error?.name === "AbortError") return;
-        if (error?.status !== 404) ordinaryError(`波形读取失败：${error.message}`);
+        ordinaryError(`波形读取失败：${error.message}`);
       },
       selection:state.cueSelection,
       onSelectCue(cueId, _time, modifiers) {
@@ -3664,6 +3827,7 @@
     const input = document.createElement("input");
     input.className = "inline-token-editor";
     input.value = text;
+    input.dataset.originalEdit = text;
     input.size = Math.max(5, [...text].length + 1);
     label.replaceWith(input);
     let finished = false;
@@ -3674,7 +3838,7 @@
       input.replaceWith(label);
       hidden.forEach(item => { item.hidden = false; });
       if (!commit || !value) return;
-      await sendOperation(contract.mergeOperation(
+      return await sendOperation(contract.mergeOperation(
         state.revision, selected.map(token => token.token_id), value, manualProvenance("merge")
       ));
     };
@@ -3684,12 +3848,13 @@
       if (event.key === "Escape") { event.preventDefault(); finish(false); }
     };
     input.onclick = event => event.stopPropagation();
-    input.onblur = () => finish(true);
+    input.onblur = () => { input.editorCommit = finish(true); };
     input.focus(); input.select();
   }
 
   async function restoreSelectedFields(revisionId, scope) {
-    if (editorAiTaskLocksEditor() || state.historyNavigationPending || state.restorePreparationPending) return;
+    if (editorAiTaskLocksEditor() || state.historyNavigationPending || state.restorePreparationPending
+      || state.checkpointPending || state.documentWritePending) return;
     const hasSelection = state.selectedTokenIds.size > 0;
     const ids = state.view.cue_views.filter(cue => cue.state === "active" &&
       (state.cueSelection.ids.size ? state.cueSelection.ids.has(cue.cue_id) : hasSelection ? cue.display_token_ids.some(id => state.selectedTokenIds.has(id)) : cue.cue_id === state.activeCueId))
@@ -3769,6 +3934,7 @@
 
   async function splitTokenAtPointer(event) {
     event.preventDefault(); event.stopPropagation();
+    if (state.restorePreparationPending || state.checkpointPending || state.documentWritePending) return;
     const point = tokenSplitPoint(event);
     hideTokenSplitCaret();
     if (!point) { ordinaryError("请在词元内部两个字符之间切分"); return; }
@@ -3909,12 +4075,22 @@
 
   async function loadProject(projectId, {restoreTranslation = true, resetTutorial = false, showTutorialIntro = true} = {}) {
     if (!projectId) return;
+    if (state.checkpointPending || state.restorePreparationPending || state.historyNavigationPending || state.documentWritePending) return;
+    if (state.revision) {
+      try { await flushActiveEditorInput(); }
+      catch (error) {
+        ordinaryError(`切换前保存未完成：${error.message}`);
+        renderProjectList();
+        return;
+      }
+    }
     if (state.operationQueue?.getState().hasUnsavedChanges) {
       ordinaryError("当前编辑仍在排队保存，完成前不会切换或刷新项目");
       renderProjectList();
       return;
     }
     const epoch = ++projectEpoch;
+    if ($("#translationRegroup")) $("#translationRegroup").checked = false;
     reviewEnabled = false;
     $("#editorWorkbench").classList.remove("review-mode");
     reviewData = {version:0, notes:[]};
@@ -4031,14 +4207,14 @@
     if (!state.revision) return;
     ordinaryError("");
     try {
-      const revision = await api(projectPath("/complete"), {
+      const revision = await withSavedDocument(() => api(projectPath("/complete"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
           complete:state.view.properties.complete !== true
         })
-      });
+      }));
       setRevision(revision);
       const current = state.projects.find(item => item.project_id === state.projectId);
       if (current) current.complete = state.view.properties.complete === true;
@@ -4735,7 +4911,7 @@
     $("#exportMenu").open = false;
     try {
       const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部校准生成.txt`, description:"外部校准提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
-      const saved = await ensureOperationQueue().flushAndWait();
+      const saved = await flushActiveEditorInput();
       if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
       const query = new URLSearchParams({revision_id:saved.revision_id, instruction:$("#aiCalibrationInstruction").value});
       const built = await api(projectPath(`/exchange/external-calibration?${query}`));
@@ -4756,7 +4932,7 @@
     const epoch = projectEpoch;
     try {
       if (file.size > 20 * 1024 * 1024) throw new Error("校准结果文件不能超过 20 MB");
-      await ensureOperationQueue().flushAndWait();
+      await flushActiveEditorInput();
       if (epoch !== projectEpoch) return;
       const submit = apply => {
         const form = new FormData(); form.append("file",file); form.append("apply",String(apply));
@@ -4779,7 +4955,7 @@
     $("#exportMenu").open = false;
     try {
       const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部翻译生成.txt`, description:"外部翻译提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
-      const saved = await ensureOperationQueue().flushAndWait();
+      const saved = await flushActiveEditorInput();
       if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
       const query = new URLSearchParams({revision_id:saved.revision_id,
         source_language:$("#translationSourceLanguage").value,
@@ -4802,7 +4978,7 @@
         const spec = systemSaveAs.exchangeSpec(
           window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
           exchange.dataset.exchangeExport, sequence.value, async () => {
-            const savedBase = await ensureOperationQueue().flushAndWait();
+            const savedBase = await flushActiveEditorInput();
             if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
             const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
             return projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`);
@@ -4832,7 +5008,7 @@
         button.dataset.exportMode,
         sequence.value,
         async () => {
-          const savedBase = await ensureOperationQueue().flushAndWait();
+          const savedBase = await flushActiveEditorInput();
           if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
           const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
           return projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`);
@@ -5091,7 +5267,7 @@
     $("#srtImportSummary").textContent = "正在匹配…";
     $("#srtImportRows").replaceChildren();
     try {
-      const saved = await ensureOperationQueue().flushAndWait();
+      const saved = await flushActiveEditorInput();
       if (session !== srtImport || sequence !== srtPreviewSequence) return;
       const request = {text:session.text, format:$("#srtImportFormat").value,
         expected_revision_id:saved.revision_id, request_id:crypto.randomUUID()};
@@ -5339,7 +5515,9 @@
     const source = event.target.closest("[data-source-edit]");
     if (source && !source.readOnly && source.value !== source.dataset.originalSource) {
       const text = source.value;
-      sendOperation(contract.createOperation(state.revision, "set_source_text", {cue_id:source.dataset.sourceEdit, text, provenance:manualProvenance("set_source_text")}))
+      sendOperation(contract.createOperation(state.revision, "set_source_text", {
+        cue_id:source.dataset.sourceEdit, text, expected_source_text:source.dataset.originalSource,
+        provenance:manualProvenance("set_source_text")}))
         .then(result => {if (result) source.dataset.originalSource = text;})
         .catch(error => ordinaryError(error.message));
     }
@@ -5714,7 +5892,7 @@
           suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_审阅意见.json`,
           description:"审阅意见", mimeType:"application/json", extension:".json"
         }, async () => {
-          await ensureOperationQueue().flushAndWait();
+          await flushActiveEditorInput();
           if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
           const packageData = await api(projectPath("/review-opinions/export"));
           if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
@@ -5738,7 +5916,7 @@
         let packageData;
         try {packageData = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));}
         catch {throw new Error("审阅意见文件不是有效的 JSON");}
-        await ensureOperationQueue().flushAndWait();
+        await flushActiveEditorInput();
         await refresh();
         if (project !== state.projectId) return;
         reviewData = await api(projectPath("/review-opinions/import"), {method:"POST", body:JSON.stringify({
@@ -5867,7 +6045,7 @@
       const tokenIds = track === "source" ? [...state.selectedTokenIds].filter(id => cue.display_token_ids.includes(id)) : [];
       const range = !fromTokens && reviewSelection?.cueId === cueId && reviewSelection.track === track ? reviewSelection.range : null;
       if (fromTokens && !tokenIds.length) return;
-      await ensureOperationQueue().flushAndWait();
+      await flushActiveEditorInput();
       if (project !== state.projectId) return;
       const revisionId = state.revision?.revision_id;
       await refresh();
@@ -6124,7 +6302,7 @@
         if (!reviewEnabled) {
           if (editorAiTaskLocksEditor()) throw new Error("请等待当前 AI 任务完成");
           const project = state.projectId;
-          await ensureOperationQueue().flushAndWait();
+          await flushActiveEditorInput();
           await refresh();
           if (project !== state.projectId) return;
         }

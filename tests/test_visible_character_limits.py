@@ -40,12 +40,13 @@ class VisibleCharacterLimitTests(unittest.TestCase):
             text,
             source_language="zh-CN",
             chinese_hard_limit=6,
+            mixed_hard_limit=6,
             english_count_spaces=True,
             english_count_punctuation=True,
         )
         self.assertFalse(report.to_dict()["valid"])
         self.assertTrue(
-            any(error["code"] == "chinese_over_6" for error in report.errors)
+            any(error["code"] == "mixed_over_6" for error in report.errors)
         )
 
     def test_language_specific_hard_limits(self) -> None:

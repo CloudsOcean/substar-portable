@@ -53,6 +53,7 @@ def execute_translation(
         repair_planned: int = 0,
         repair_accepted: int = 0,
         problem_count: int = 0,
+        detail: str = "",
     ) -> None:
         tracker["planned"] = max(tracker["planned"], int(planned))
         tracker["completed"] = max(tracker["completed"], int(completed))
@@ -76,6 +77,7 @@ def execute_translation(
             repair_accepted=tracker["repair_accepted"],
             repair_failed=max(0, tracker["repair_completed"] - tracker["repair_accepted"]),
             problem_count=problem_count,
+            detail=detail,
         )
         # Repair work is discovered incrementally.  When a later validation
         # pass adds exact local scopes, the denominator may grow after an

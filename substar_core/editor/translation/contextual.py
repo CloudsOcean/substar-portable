@@ -18,11 +18,11 @@ from substar_core.domain import (
     stable_id,
 )
 from substar_core.editor.translation.grouping import translation_groups
+from substar_core.editor.translation.regroup import review_request_groups, translation_prompt_variant
 from substar_core.glossary import active_glossary, glossary_prompt
 from substar_core.prompt_registry import (
     opposite_language,
     render_prompt, frozen_prompt,
-    translation_variant,
 )
 from substar_core.policy import SubtitlePolicy
 from substar_core.semantic_execution import validate_presentation_plan
@@ -1102,12 +1102,7 @@ def warning_report(translations: dict[str, str], settings: dict[str, Any], langu
     policy = SubtitlePolicy.from_settings(settings)
     for cue_id, value in translations.items():
         count = policy.line_length(value)
-        limit = policy.hard_limit(value)
-        if languages and cue_id in languages:
-            key = {"en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
-                   "ja": "japanese_hard_limit", "ko": "korean_hard_limit"}.get(languages[cue_id])
-            if key:
-                limit = int(settings[key])
+        limit = policy.hard_limit(value, (languages or {}).get(cue_id))
         if count > limit:
             warnings.append({"code": "target_character_limit_warning", "cue_id": cue_id, "count": count, "limit": limit})
     return warnings
@@ -1440,8 +1435,15 @@ def run_contextual_translation(
         raise RuntimeError(
             f"目标语言与已确认的原始语言相同（{target_language}），请选择其他目标语言"
         )
-    variant = "generic" if settings.get("translation_layout") else translation_variant(source_language, target_language)
+    variant = translation_prompt_variant(settings, source_language, target_language, groups)
     mapping_mode = str(settings.get("translation_mapping_mode") or "many_to_many")
+    groups = review_request_groups(
+        groups, settings,
+        progress=(lambda done, total: progress_callback(
+            "planning", completed=0, planned=0,
+            detail=f"增强分组 {done}/{total}",
+        )) if progress_callback is not None else None,
+    )
     prompt = frozen_prompt(settings,
         "contextual_translation", variant=variant, mode=mapping_mode
     )
@@ -1453,7 +1455,7 @@ def run_contextual_translation(
         "# TASK CONFIGURATION\n"
         f"源语言：{language_names.get(source_language, source_language)}\n"
         f"目标语言：{language_names.get(target_language, target_language)}\n"
-        f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'english_hard_limit'), 55))}。"
+        f"目标字幕 hard_limit：{int(settings.get({'en': 'english_hard_limit', 'zh-CN': 'chinese_hard_limit', 'ja': 'japanese_hard_limit', 'ko': 'korean_hard_limit'}.get(target_language, 'other_hard_limit'), 55))}。"
     )
     if settings.get("translation_layout"):
         from substar_core.translation_layout import routing_prompt

@@ -269,6 +269,9 @@
     let waveformEnd = 0;
     let waveformRequestKey = "";
     let waveformRequestSequence = 0;
+    let waveformRetryTimer = null;
+    let waveformFailureKey = "";
+    let waveformFailures = 0;
     let waveformStatsCache = null;
     let lastPlayheadDrawAt = 0;
     let duration = 0.001;
@@ -489,11 +492,16 @@
       const points = Math.round(clamp(width * 2, 512, 4096));
       const key = `${wantedStart.toFixed(3)}:${wantedEnd.toFixed(3)}:${points}`;
       if (key === waveformRequestKey) return;
+      if (waveformRetryTimer) clearTimeout(waveformRetryTimer);
+      waveformRetryTimer = null;
+      if (waveformFailureKey !== key) { waveformFailureKey = key; waveformFailures = 0; }
       waveformRequestKey = key;
       const sequence = ++waveformRequestSequence;
-      Promise.resolve(options.onWaveformWindow({start:wantedStart, end:wantedEnd, points}))
+      Promise.resolve().then(() => options.onWaveformWindow({start:wantedStart, end:wantedEnd, points}))
         .then(payload => {
-          if (destroyed || sequence !== waveformRequestSequence || !payload) return;
+          if (destroyed || sequence !== waveformRequestSequence) return;
+          if (!Array.isArray(payload?.peaks)) throw new Error("波形响应不完整");
+          waveformFailures = 0;
       waveform = Array.from(payload.peaks || [], value => clamp(number(value), -1, 1));
           waveformStatsCache = null;
           waveformStart = number(payload.window_start, wantedStart);
@@ -501,7 +509,17 @@
           duration = Math.max(duration, number(payload.duration));
           draw();
         })
-        .catch(error => options.onWaveformError?.(error));
+        .catch(error => {
+          if (destroyed || sequence !== waveformRequestSequence) return;
+          if (++waveformFailures <= 3) {
+            waveformRetryTimer = setTimeout(() => {
+              waveformRetryTimer = null;
+              if (destroyed || sequence !== waveformRequestSequence) return;
+              waveformRequestKey = "";
+              draw();
+            }, 500 * 2 ** (waveformFailures - 1));
+          } else options.onWaveformError?.(error);
+        });
     }
 
     function drawCues(context, width, height, cueRanges) {
@@ -1116,6 +1134,7 @@
       redraw:draw,
       destroy() {
         destroyed = true;
+        if (waveformRetryTimer) clearTimeout(waveformRetryTimer);
         if (animationFrame) cancelFrame(animationFrame);
         if (playbackFrame) cancelFrame(playbackFrame);
         stopEdgePan();

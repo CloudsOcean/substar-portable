@@ -22,10 +22,10 @@ for (const scenario of ["saved","cancelled","failed","switched"]) {
       nextExportSequence:()=>({value:1}),commitExportSequence:()=>events.push("sequence"),
       ordinaryError:message=>events.push(message),observeEditorTutorialEvent:()=>{},
       projectPath:path=>"/api/projects/p"+path,
-      ensureOperationQueue:()=>({flushAndWait:async()=>{events.push("wait");await ack;
+      flushActiveEditorInput:async()=>{events.push("wait");await ack;
         if(scenario==="failed")throw new Error("save failed");
         if(scenario==="switched")context.projectEpoch=2;
-        return {revision_id:"saved-revision"};}})};
+        return {revision_id:"saved-revision"};}};
     const deps={picker:async()=>{events.push("picker");
       if(scenario==="cancelled")throw Object.assign(new Error("cancel"),{name:"AbortError"});
       return {name:"demo.srt",createWritable:async()=>({write:async()=>events.push("write"),close:async()=>{}})};},

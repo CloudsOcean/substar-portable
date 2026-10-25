@@ -368,6 +368,7 @@
     }
     button.disabled = true;
     button.textContent = "正在填写…";
+    status.setAttribute("aria-busy", "true");
     status.textContent = "AI 正在生成 Qwen Prompt 和多语言临时热词…";
     try {
       const generated = await api("/api/qwen-assist", {
@@ -394,6 +395,7 @@
     } finally {
       button.disabled = false;
       button.textContent = "直接生成";
+      status.setAttribute("aria-busy", "false");
     }
   }
 
@@ -403,6 +405,7 @@
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     return {
+      generate_thumbnails: $("#generateThumbnailsInput").checked,
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
       translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
@@ -420,7 +423,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
-      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
+      other_hard_limit: Number($("#otherLimitInput")?.value || 55),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       qwen_ai_brief: $("#qwenAiBriefInput").value,
@@ -490,13 +493,10 @@
     }
   }
 
-  function syncLanguageRatioThreshold() {
-    $("#languageRatioThresholdValue").value = `${Number($("#languageRatioThresholdInput").value)}%`;
-  }
 
   const TUTORIAL_CONTROL_IDS = [
     "languageInput", "targetLanguageInput", "glossaryInput", "splitWorkflowInput", "referenceBreakSymbolsInput",
-    "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "languageRatioThresholdInput", "japaneseLimitInput", "koreanLimitInput",
+    "englishLimitInput", "chineseLimitInput", "mixedLimitInput", "otherLimitInput", "japaneseLimitInput", "koreanLimitInput",
   ];
 
   const TUTORIAL_STEPS = [
@@ -869,8 +869,7 @@
     $("#englishLimitInput").value = effective.english_hard_limit || 55;
     $("#chineseLimitInput").value = effective.chinese_hard_limit || 20;
     $("#mixedLimitInput").value = effective.mixed_hard_limit || 25;
-    $("#languageRatioThresholdInput").value = effective.language_ratio_threshold_percent ?? 20;
-    syncLanguageRatioThreshold();
+    if ($("#otherLimitInput")) $("#otherLimitInput").value = effective.other_hard_limit ?? 55;
     $("#japaneseLimitInput").value = effective.japanese_hard_limit || 24;
     $("#koreanLimitInput").value = effective.korean_hard_limit || 28;
     $("#qwenAiBriefInput").value = effective.qwen_ai_brief || "";
@@ -888,6 +887,7 @@
     if (state.edition === "slim") {
       $("#recognitionProfileInput").value = "qwen_cloud";
     }
+    $("#generateThumbnailsInput").checked = effective.generate_thumbnails === true;
     $("#chunkSecondsInput").value = settings.segmentation_chunk_seconds || 90;
     $("#workersInput").value = settings.translation_workers || 16;
     $("#retryInput").value = settings.http_retry_attempts ?? 3;
@@ -1122,6 +1122,7 @@
     const workflow = $("#splitWorkflowInput").value;
     const segmentationEnabled = workflow === "one_step";
     const result = {
+      generate_thumbnails: $("#generateThumbnailsInput").checked,
       active_model_provider: current.active_model_provider,
       translation_api_base_url: current.translation_api_base_url,
       translation_api_model: current.translation_api_model,
@@ -1141,7 +1142,7 @@
       english_hard_limit: Number($("#englishLimitInput").value),
       chinese_hard_limit: Number($("#chineseLimitInput").value),
       mixed_hard_limit: Number($("#mixedLimitInput").value),
-      language_ratio_threshold_percent: Number($("#languageRatioThresholdInput").value),
+      other_hard_limit: Number($("#otherLimitInput")?.value || 55),
       japanese_hard_limit: Number($("#japaneseLimitInput").value),
       korean_hard_limit: Number($("#koreanLimitInput").value),
       context: $("#qwenPromptInput").value,
@@ -1768,15 +1769,14 @@
   });
   $("#splitLanguageLayout").addEventListener("change", () => { markSettingsDirty(); syncReferenceBreakPreset(); validateForm(); });
   $("#languageInput").addEventListener("change", syncReferenceBreakPreset);
-  $("#languageRatioThresholdInput").addEventListener("input", syncLanguageRatioThreshold);
   for (const selector of [
     "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
-    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#languageRatioThresholdInput", "#japaneseLimitInput", "#koreanLimitInput",
-    "#chunkSecondsInput", "#workersInput", "#retryInput",
+    "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#otherLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
+    "#chunkSecondsInput", "#workersInput", "#retryInput", "#generateThumbnailsInput",
     "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {
-    $(selector).addEventListener("input", markSettingsDirty);
-    $(selector).addEventListener("change", markSettingsDirty);
+    $(selector)?.addEventListener("input", markSettingsDirty);
+    $(selector)?.addEventListener("change", markSettingsDirty);
   }
   $("#qwenPromptInput").addEventListener("input", syncQwenEnhancementCounts);
   $("#qwenHotwordsInput").addEventListener("input", syncQwenEnhancementCounts);
@@ -1936,11 +1936,12 @@
         throw new Error(issues.slice(0, 5).map(issue => `第 ${issue.entry + 1} 条：${issue.message}`).join("；") || "字幕格式无效，请检查所选格式和文件");
       }
       form.append("confirmation", preview.confirmation);
+      form.append("generate_thumbnails", String($("#generateThumbnailsInput").checked));
       if (media.token) form.append("media_reference_token", media.token);
       else form.append("media", media, media.name);
       form.append("source_language", $("#languageInput").value);
       form.append("target_language", $("#targetLanguageInput").value);
-      const limitFor = language => Number($(({zh:"#chineseLimitInput", "zh-CN":"#chineseLimitInput", en:"#englishLimitInput", ja:"#japaneseLimitInput", ko:"#koreanLimitInput"})[language] || "#mixedLimitInput").value);
+      const limitFor = language => Number($(({zh:"#chineseLimitInput", "zh-CN":"#chineseLimitInput", en:"#englishLimitInput", ja:"#japaneseLimitInput", ko:"#koreanLimitInput"})[language] || "#otherLimitInput").value);
       form.append("source_hard_limit", String(limitFor($("#languageInput").value)));
       form.append("target_hard_limit", String(limitFor($("#targetLanguageInput").value)));
       $("#formMessage").textContent = "正在生成波形并保存字幕工程，不执行 ASR 或 AI…";

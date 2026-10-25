@@ -137,9 +137,7 @@ def semantic_segmentation_arguments(
         "--english-hard-limit", str(constraints["english_hard_limit"]),
         "--chinese-hard-limit", str(constraints["chinese_hard_limit"]),
         "--mixed-hard-limit", str(constraints["mixed_hard_limit"]),
-        "--language-ratio-threshold-percent", str(
-            constraints.get("language_ratio_threshold_percent", 20)
-        ),
+        "--other-hard-limit", str(constraints.get("other_hard_limit", 55)),
         "--japanese-hard-limit", str(constraints["japanese_hard_limit"]),
         "--korean-hard-limit", str(constraints["korean_hard_limit"]),
         "--target-hard-limit", str(constraints["chinese_hard_limit"]),

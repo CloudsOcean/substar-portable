@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded',()=>{const tag=document.createEleme
   <title>Substar · 失败状态预览</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20260907-crisp-2">
+  <link rel="stylesheet" href="/assets/editor.css?v=20261024-regroup-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
@@ -72,6 +72,8 @@ document.addEventListener('DOMContentLoaded',()=>{const tag=document.createEleme
             <option value="many_to_many">多对多翻译</option>
             <option value="one_to_one">逐行翻译</option>
           </select>
+          <label class="translation-regroup-option"><input id="translationRegroup" type="checkbox">本次翻译增强分组</label>
+          <small>根据上下文优化本次翻译的请求分组，不改变原文字幕和时间轴。</small>
           <button id="translateDocument" class="translation-command" type="button" disabled>执行</button>
         </div>
       </details>
@@ -318,6 +320,6 @@ document.addEventListener('DOMContentLoaded',()=>{const tag=document.createEleme
   <script src="/assets/system_save_as.js?v=20260828-export-naming-1"></script>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2"></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
-<script src="/assets/editor.js?v=20260908-task-failure-1"></script>
+<script src="/assets/editor.js?v=20261024-regroup-1"></script>
 </body>
 </html>

@@ -4,13 +4,13 @@ from substar_core.prompt_registry import source_language_analysis, source_langua
 from substar_core.segmentation.contracts import resolve_segmentation_language
 
 
-def test_other_languages_at_threshold_keep_the_primary_language() -> None:
+def test_legacy_ratio_does_not_suppress_inline_mixed_language() -> None:
     text = "a" * 80 + "中" * 20
     analysis = source_language_analysis(text, 20)
 
     assert analysis["primary_language"] == "en"
     assert analysis["other_language_ratio_percent"] == 20.0
-    assert analysis["resolved_language"] == "en"
+    assert analysis["resolved_language"] == "mixed"
 
 
 def test_other_languages_above_threshold_resolve_to_mixed() -> None:
