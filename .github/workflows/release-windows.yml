@@ -59,7 +59,7 @@ jobs:
       - name: Run Node tests
         env:
           SUBSTAR_TEST_PYTHON: python
-        run: node --test tests\*.test.js
+        run: node --test tests\*.test.js tests\*.test.mjs
       - name: Build Substar Windows bundle
         shell: pwsh
         run: .\scripts\build-windows.ps1 -SkipTests

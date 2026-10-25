@@ -99,3 +99,10 @@ def test_ai_must_reference_real_cues_and_never_changes_document():
     assert p["keep"]==[{"start":0,"end":10}]
     assert doc.content_hash()==before
     with pytest.raises(ValueError):ai_plan_from_ids(doc,{"keep_cue_ids":["invented"]},"goal")
+
+def test_marker_anchor_stays_inside_range_and_is_preserved():
+    marker = {"id": "m", "start": 1, "end": 3, "point": 2.123}
+    assert validate_timeline({"markers": [marker]})["markers"][0] == marker
+    for point in (0, 4, float("nan"), True):
+        with pytest.raises(ValueError, match="定位点"):
+            validate_timeline({"markers": [{**marker, "point": point}]})

@@ -1,4 +1,4 @@
 """Substar Qwen ingestion lab core."""
 
-__version__ = "2.3.0-rc.2"
+__version__ = "2.3.1"
 

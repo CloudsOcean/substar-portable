@@ -122,6 +122,7 @@ export function createUtilsModule() {
       note: normalizeMarkerText(raw.note, MARKER_NOTE_MAX_LENGTH),
     };
     if (end !== null && end > start) marker.end = end;
+    if (marker.end != null) marker.point = Math.max(start, Math.min(marker.end, normalizeIntMs(raw.point) ?? start));
     const review = normalizeReviewField(raw.review);
     if (review) marker.review = review;
     const ai = raw.ai;

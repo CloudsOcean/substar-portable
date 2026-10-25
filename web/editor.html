@@ -7,14 +7,14 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20261025-marker-anchor-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
   <link rel="stylesheet" href="/assets/editor_experimental.css?v=20261025-merged-1">
   <link rel="stylesheet" href="/assets/editor_scrollbars.css?v=20261025-merged-1">
   <script src="/assets/editor_tool_layout.js?v=20261025-tools-3"></script>
-  <script src="/assets/editor_experimental.js?v=20261025-tools-3"></script>
+  <script src="/assets/editor_experimental.js?v=2.3.1"></script>
   <link rel="stylesheet" href="/assets/vendor/maw/waveform.css?v=20261025-marker-blank-guard-1">
   <link rel="stylesheet" href="/assets/vendor/maw/editor.css">
   <link rel="stylesheet" href="/assets/vendor/maw/tokens.css">
@@ -23,8 +23,8 @@
   <link rel="stylesheet" href="/assets/editor_neutral.css?v=20261025-merged-1">
   <link rel="stylesheet" href="/assets/editor_maw_ass.css?v=20261025-merged-1">
   <link rel="stylesheet" href="/assets/editor_tool_entries.css?v=20261025-merged-1">
-  <link rel="stylesheet" href="/assets/editor_workspace_actions.css?v=20261025-tools-3">
-  <link rel="stylesheet" href="/assets/editor_waveform_settings.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_workspace_actions.css?v=20261025-settings-fix-1">
+  <link rel="stylesheet" href="/assets/editor_waveform_settings.css?v=20261025-settings-fix-1">
 </head>
 <body class="editor-shell">
   <div class="editor-command-bar">
@@ -128,6 +128,15 @@
           <button type="button" id="externalTranslation">外部翻译生成</button>
           <button type="button" data-exchange-export="subtitle-project" title="包含媒体和当前修订的完整可迁移工程">字幕工程</button>
         </section>
+
+      </div></details>
+      <details id="cutExportMenu" class="editor-command-menu"><summary id="cutExportDocument">剪辑导出</summary><div class="editor-command-popover cut-export-popover">
+        <button type="button" data-cut-export="srt" data-cut-mode="source">上行字幕 · SRT</button>
+        <button type="button" data-cut-export="srt" data-cut-mode="target">下行字幕 · SRT</button>
+        <button type="button" data-cut-export="srt" data-cut-mode="ab-single">上下行单行字幕 · SRT</button>
+        <button type="button" data-cut-export="srt" data-cut-mode="ab-double">上下行双行字幕 · SRT</button>
+        <button type="button" data-cut-export="video">剪辑视频 · MP4</button>
+        <button type="button" data-cut-export="audio">剪辑音频 · WAV</button>
       </div></details>
       <button id="toggleComplete" type="button">标记完成</button>
       <a class="editor-command-link" id="exitEditor" href="/split">退出</a>
@@ -356,6 +365,6 @@
   <script src="/assets/editor_ass_panel.js?v=20261025-merged-1"></script>
   <script src="/assets/translation_layout.js?v=20261025-merged-1"></script>
   <script src="/assets/editor_thumbnails.js?v=20261025-merged-1"></script>
-  <script type="module" src="/assets/editor_maw_boot.js?v=20261025-merged-1"></script>
+  <script type="module" src="/assets/editor_maw_boot.js?v=20261025-settings-fix-1"></script>
 </body>
 </html>

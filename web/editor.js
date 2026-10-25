@@ -1478,6 +1478,8 @@
     $("#toggleComplete").classList.toggle("hidden", tutorial);
     $("#toggleComplete").classList.toggle("complete", complete);
     $("#toggleComplete").title = complete ? "完成只是属性；取消后仍是同一可编辑项目" : "标记后仍可继续编辑";
+    $("#cutExportMenu").classList.toggle("disabled", !revision);
+    $("#cutExportDocument").setAttribute("aria-disabled", String(!revision));
     $("#exportMenu").classList.toggle("disabled", !revision);
     $("#exportDocument").setAttribute("aria-disabled", String(!revision));
     const textProject = state.view?.cue_views.some(cue => cue.source_text != null && cue.subtitle_track !== "overlay");
@@ -3794,14 +3796,7 @@
         }
       },
       onAiPlan:(goal,basePlanId) => api(projectPath("/cut-ai"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision_id:state.revision.revision_id,goal,base_plan_id:basePlanId||null})}),
-      async onCutExport(planId, format, subtitleMode) {
-        const response = await fetch(projectPath("/cut-export"), {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({revision_id:state.revision.revision_id,plan_id:planId,format,subtitle_mode:subtitleMode})});
-        if (!response.ok) {const error=await response.json();throw new Error(typeof error.detail === "string" ? error.detail : "导出失败");}
-        const url=URL.createObjectURL(await response.blob()), link=document.createElement("a");
-        link.href=url;link.download=`substar-cut.${({video:"mp4",audio:"wav"})[format]||format}`;link.click();
-        setTimeout(()=>URL.revokeObjectURL(url),60000);
-      },
+      onCutExport: exportCutPlan,
       getLayout:() => state.timelineLayout,
       getShowTranslations:() => $("#showTranslations").checked,
       getReviewCueIds:() => reviewEnabled ? reviewData.notes.filter(note => note.status === "open").map(note => note.anchor.cue_id) : [],
@@ -4539,6 +4534,31 @@
       if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .srt 文件`, "completed");
     } catch (error) { ordinaryError(`生成外部翻译材料失败：${error.message}`); }
   };
+  async function exportCutPlan(planId, format, subtitleMode = 'ab-double') {
+    const epoch = projectEpoch;
+    if (!state.projectId || !state.revision) return;
+    const current = state.revision.document.properties.timeline;
+    const selectedPlan = planId || current?.active_plan_id;
+    if (!selectedPlan) throw new Error('请先在“剪辑”中创建方案或添加移除区间');
+    const extension = ({video:'mp4',audio:'wav'})[format] || format;
+    const mimeType = ({video:'video/mp4',audio:'audio/wav',srt:'application/x-subrip',ass:'text/plain',xml:'application/xml'})[format];
+    const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_剪辑.${extension}`, description:'按当前剪辑方案导出', mimeType, extension:`.${extension}`}, async () => {
+      const saved = await flushActiveEditorInput();
+      if (epoch !== projectEpoch) throw new Error('项目已切换，请重新导出');
+      ordinaryError('正在生成剪辑文件…', 'running');
+      const response = await fetch(projectPath('/cut-export'), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision_id:saved.revision_id,plan_id:selectedPlan,format,subtitle_mode:subtitleMode})});
+      if (!response.ok) { const error = await response.json(); throw new Error(typeof error.detail === 'string' ? error.detail : '剪辑导出失败'); }
+      return response.blob();
+    });
+    if (!result.cancelled) ordinaryError(`已保存：${result.filename}`, 'completed');
+  }
+  $("#cutExportMenu").addEventListener('click', async event => {
+    const button = event.target.closest('[data-cut-export]');
+    if (!button) return;
+    $("#cutExportMenu").open = false;
+    try { await exportCutPlan(null, button.dataset.cutExport, button.dataset.cutMode || 'ab-double'); }
+    catch (error) { ordinaryError(`剪辑导出失败：${error.message}`); }
+  });
   $("#exportMenu").addEventListener("click", async event => {
     const exportEpoch = projectEpoch;
     const exchange = event.target.closest("[data-exchange-export]");

@@ -235,3 +235,37 @@ html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .editor
 .workspace-tool-dock > .workspace-tool-scroll { flex:0 0 26px; width:26px; height:32px; padding:0; font-size:22px; line-height:1; border:1px solid #444; border-radius:4px; background:#292929; color:#ddd; }
 .workspace-tool-dock > .workspace-tool-scroll[hidden] { display:none; }
 .workspace-tool-dock > .workspace-tool-scroll:disabled { opacity:.3; cursor:default; }
+
+body.editor-shell .cut-export-popover { right:0; left:auto; width:330px; max-width:calc(100vw - 24px); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+body.editor-shell .cut-export-popover button { width:100%; }
+/* A precise flag replaces the small dot-and-tail marker. */
+body.editor-shell .maw-waveform-host .waveform-marker-point-shape { width:10px; height:13px; left:-1px; top:1px; border-radius:2px 2px 0 0; clip-path:polygon(0 0,100% 0,100% 70%,50% 100%,0 70%); box-shadow:none; }
+body.editor-shell .maw-waveform-host .waveform-marker-point-extension::after { height:2px; top:7px; opacity:.35; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.region { background:color-mix(in srgb,var(--marker-color) 20%,transparent); border-top:2px solid var(--marker-color); box-shadow:none; border-radius:3px; }
+
+body.editor-shell .maw-waveform-host .waveform-marker-item.point .waveform-marker-point-extension.left { left:-16px; right:auto; width:16px; }
+body.editor-shell .maw-waveform-host .waveform-marker-item .waveform-marker-anchor { position:absolute; top:-3px; width:16px; height:24px; margin-left:-8px; z-index:4; cursor:ew-resize; }
+body.editor-shell .maw-waveform-host .waveform-marker-anchor .waveform-marker-point-shape { left:3px; top:2px; }
+
+body.editor-shell .maw-waveform-host .waveform-marker-item.region .waveform-marker-anchor { height:16px; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle { top:12px; height:10px; bottom:auto; z-index:5; }
+
+/* Compact boundary dots with separate drag targets. */
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle { width:14px; height:18px; top:-2px; bottom:auto; z-index:5; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle.left { left:-22px; right:auto; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle.right { right:-22px; left:auto; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.left { left:-18px; right:auto; width:14px; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.right { left:12px; right:auto; width:14px; }
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle::after { content:''; width:5px; height:5px; top:6px; left:4px; right:auto; bottom:auto; border-radius:50%; background:#f6f8fc; opacity:1; box-shadow:0 0 0 1px #141a24,0 1px 4px #0008; transition:transform .12s,box-shadow .12s; }
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle:hover::after { transform:scale(1.3); box-shadow:0 0 0 3px #ffffff20,0 1px 4px #0008; }
+
+/* Markers show only their anchor and boundary dots, with an inline name. */
+body.editor-shell .maw-waveform-host .waveform-marker-item.region {background:transparent;border:0;box-shadow:none;}
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-label {
+ inset:auto;left:auto;top:-1.5px;height:16px;padding:0;color:var(--theme-text,#f6f8fc);
+ background:none;font-size:11px;line-height:16px;display:block;text-overflow:ellipsis;
+}
+body.editor-shell .maw-waveform-host .waveform-marker-item.point {min-width:16px;max-width:none;}
+body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-label {position:relative;margin-left:12px;max-width:none;width:max-content;}
+body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.right {left:100%;right:auto;}
+body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-label {position:absolute;left:-4px;right:-4px;max-width:none;}

@@ -1264,6 +1264,10 @@
           "symbols": []
         },
         {
+          "path": "web/editor_maw_selection.js",
+          "symbols": []
+        },
+        {
           "path": "web/editor_maw_shell.js",
           "symbols": []
         },

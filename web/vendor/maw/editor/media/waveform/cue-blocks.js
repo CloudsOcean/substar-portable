@@ -330,14 +330,11 @@ export function createWaveformModule(dependencies) {
             row.appendChild(badgeEl);
           });
         }
-        // 字词时间码模式下整句块退为背景，但选中句仍保留两端手柄，
-        // 让用户能在这个模式下拖动整句边界；未选中句不显示，避免与字词块抢指针。
-        // 等高分层（full）时字幕块保持全功能：手柄常显、拖动行为与常规一致。
-        const sentenceHandles = !this.options.wordTiming?.enabled || wordTimingFullLane || selected.has(index);
-        if (sentenceHandles && segment.start >= startMs) {
+        // Keep sentence boundary handles available in word timing mode too.
+        if (segment.start >= startMs) {
           this.appendCueHandle(block, index, row, 'left');
         }
-        if (sentenceHandles && segment.end <= endMs) {
+        if (segment.end <= endMs) {
           this.appendCueHandle(block, index, row, 'right');
         }
         this.layoutBlock(block, segment, startMs, endMs, row);
@@ -725,22 +722,14 @@ export function createWaveformModule(dependencies) {
       const segments = this.options.getSegments('main');
       const duration = Math.max(1, endMs - startMs);
       const blocks = [.../** @type {NodeListOf<HTMLElement>} */ (row.querySelectorAll('.waveform-cue-block[data-track="main"]'))];
-      const wordTimingEnabled = Boolean(this.options.wordTiming?.enabled);
-      const multiLane = this.options.multiSubtitleVisible?.() === true;
-      // 句块手柄存在性（与 appendCueBlocks 创建条件一致）：非字词模式按
-      // 窗口边界；字词 full lane 常显；紧凑模式仅选中句。平移不改选区。
-      const fullLane = wordTimingEnabled && !multiLane && (this.settings.mode === 'basic'
-        || (this.settings.mode === 'multi' && (Number(this.settings.rowHeight) || 0) >= 96));
-      const selected = this.options.getSelection('main');
       for (const block of blocks) {
         const index = Number(block.dataset.idx);
         const segment = segments[index];
         if (!segment) return false;
         const wantLeft = segment.start >= startMs;
         const wantRight = segment.end <= endMs;
-        const sentenceHandles = !wordTimingEnabled || fullLane || selected.has(index);
-        const expectLeft = sentenceHandles && wantLeft;
-        const expectRight = sentenceHandles && wantRight;
+        const expectLeft = wantLeft;
+        const expectRight = wantRight;
         const hasLeft = Boolean(block.querySelector('.waveform-cue-handle.left'));
         const hasRight = Boolean(block.querySelector('.waveform-cue-handle.right'));
         // 句块手柄是可原位增删的 span（命中经 closest 解析，创建走

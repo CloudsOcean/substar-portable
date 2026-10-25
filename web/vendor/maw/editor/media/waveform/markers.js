@@ -98,7 +98,7 @@ export function createWaveformModule(dependencies) {
     appendMarkerElement(track, row, marker, startMs, endMs) {
       const visible = window.AsrEditorUtils.markerVisibleRange(marker, startMs, endMs);
       if (!visible) return;
-      const isRegion = window.AsrEditorUtils.markerKind(marker) === 'region';
+      const isRegion = marker.end-marker.start>1;
       const element = document.createElement('div');
       element.className = `waveform-marker-item ${isRegion ? 'region' : 'point'}`;
       element.dataset.markerId = marker.id;
@@ -110,19 +110,27 @@ export function createWaveformModule(dependencies) {
         ((visible.end - visible.start) / duration) * 100,
       );
       element.style.left = `${left}%`;
-      element.style.width = isRegion ? `${widthPercent}%` : '30px';
-      if (!isRegion || marker.start >= startMs) {
+      element.style.width = isRegion ? `${widthPercent}%` : 'auto';
+      const anchorTime = marker.point ?? marker.start;
+      if (!isRegion || (anchorTime >= startMs && anchorTime < endMs)) {
+        const anchor = document.createElement('span');
+        anchor.className = 'waveform-marker-anchor';
+        anchor.title = isRegion ? '拖动定位点，范围边界不变' : '拖动移动标记';
+        anchor.style.left = isRegion ? `${((anchorTime - visible.start) / Math.max(1, visible.end - visible.start)) * 100}%` : '4px';
         const shape = document.createElement('span');
         shape.className = 'waveform-marker-point-shape';
         shape.setAttribute('aria-hidden', 'true');
-        element.appendChild(shape);
+        anchor.appendChild(shape);
+        element.appendChild(anchor);
       }
       if (!isRegion) {
-        const extend = document.createElement('span');
-        extend.className = 'waveform-marker-handle right waveform-marker-point-extension';
-        extend.title = '拖动横条展开区间；拖动圆点移动标记';
-        extend.setAttribute('aria-label', '拖动延长为区间标记');
-        element.appendChild(extend);
+        for (const side of ['left','right']) {
+          const extend = document.createElement('span');
+          extend.className = `waveform-marker-handle ${side} waveform-marker-point-extension`;
+          extend.title = side === 'left' ? '向左拖动展开范围' : '向右拖动展开范围';
+          extend.setAttribute('aria-label', extend.title);
+          element.appendChild(extend);
+        }
       }
       const timeLabel = isRegion
         ? `${marker.start} → ${marker.end}`
@@ -137,6 +145,11 @@ export function createWaveformModule(dependencies) {
         const label = document.createElement('span');
         label.className = 'waveform-marker-label';
         label.textContent = marker.name;
+        if(isRegion){
+          const percent=Math.max(0,Math.min(100,(anchorTime-visible.start)/Math.max(1,visible.end-visible.start)*100));
+          if(percent<=50)label.style.left=`calc(${percent}% + 9px)`;
+          else label.style.right=`calc(${100-percent}% + 9px)`;
+        }
         label.dataset.markerProjectContent = 'true';
         element.appendChild(label);
       }
@@ -458,7 +471,7 @@ export function createWaveformModule(dependencies) {
         original: { ...marker },
         pointerStartMs: this.timeFromPointerUnbounded(event, row, geometry),
         pending: { ...marker },
-        pointExtension: mode === 'resize-end' && window.AsrEditorUtils.markerKind(marker) !== 'region',
+        pointExtension: mode !== 'move' && window.AsrEditorUtils.markerKind(marker) !== 'region',
         moved: false,
         frame: 0,
         lastEvent: null,
@@ -531,25 +544,13 @@ export function createWaveformModule(dependencies) {
       }
       const pointerMs = this.timeFromPointerUnbounded(event, drag.row, drag.geometry);
       const duration = Math.max(0, this.durationMs);
-      if (drag.mode === 'move') {
-        const deltaMs = roundMs(pointerMs - drag.pointerStartMs);
-        const length = window.AsrEditorUtils.markerKind(drag.original) === 'region'
-          ? drag.original.end - drag.original.start : 0;
-        const maxStart = length ? duration - length : Math.round(duration) - 1;
-        const start = clamp(drag.original.start + deltaMs, 0, Math.max(0, maxStart));
-        drag.pending = length
-          ? { ...drag.original, start, end: start + length }
-          : { ...drag.original, start };
-      } else {
-        const edge = drag.mode === 'resize-start' ? 'start' : 'end';
-        const anchor = edge === 'start' ? drag.original.end : drag.original.start;
-        const min = edge === 'start' ? 0 : anchor;
-        const max = edge === 'start' ? anchor - 1 : duration;
-        const target = drag.pointExtension
-          ? drag.original.start + pointerMs - drag.pointerStartMs : pointerMs;
-        const value = clamp(roundMs(target), min, Math.max(min, max));
-        drag.pending = { ...drag.original, [edge]: edge === 'end' && value <= anchor ? null : value };
-      }
+      const delta = roundMs(pointerMs - drag.pointerStartMs);
+      const target = drag.mode === 'move'
+        ? (drag.original.point ?? drag.original.start) + delta
+        : (drag.mode==='resize-start'?drag.original.start:(drag.original.end??drag.original.start))+delta;
+      const snapped=this.options?.snapMarkerBoundary?.(target,{event,row:drag.row})??target;
+      drag.pending = window.SubstarMawModel.markerDrag(drag.original, drag.mode, snapped, duration);
+
     }
 
 
@@ -615,7 +616,7 @@ export function createWaveformModule(dependencies) {
       } else {
         const pending = drag.pending;
         if (window.AsrEditorUtils.markerKind(pending) === 'region') {
-          range = { start: pending.start, end: pending.end, region: true };
+          range = { start: pending.start, end: pending.end, point:pending.point ?? pending.start, region: true };
         } else {
           range = { start: pending.start, end: pending.start + 1, region: false };
         }
@@ -641,20 +642,22 @@ export function createWaveformModule(dependencies) {
         preview.style.width = range.region ? `${Math.max(
           window.AsrEditorUtils.MARKER_MIN_VISIBLE_PERCENT,
           ((visibleEnd - visibleStart) / duration) * 100,
-        )}%` : '30px';
-        if (!range.region || range.start >= rowStart) {
+        )}%` : 'auto';
+        const anchorTime = range.point ?? range.start;
+        if (!range.region || (anchorTime >= rowStart && anchorTime < rowEnd)) {
+          const anchor = document.createElement('span');
+          anchor.className = 'waveform-marker-anchor';
+          anchor.style.left = range.region ? `${((anchorTime-visibleStart)/Math.max(1,visibleEnd-visibleStart))*100}%` : '4px';
           const shape = document.createElement('span');
           shape.className = 'waveform-marker-point-shape';
-          shape.setAttribute('aria-hidden', 'true');
-          preview.appendChild(shape);
+          anchor.appendChild(shape);preview.appendChild(anchor);
         }
-        if (!range.region) {
-          const extend = document.createElement('span');
-          extend.className = 'waveform-marker-handle right waveform-marker-point-extension';
-          extend.setAttribute('aria-hidden', 'true');
-          preview.appendChild(extend);
+        for(const side of ['left','right']){
+          const handle=document.createElement('span');
+          handle.className=`waveform-marker-handle ${side}${range.region?'':' waveform-marker-point-extension'}`;
+          preview.appendChild(handle);
         }
-        if (range.region) {
+        if (drag.original?.name || range.region) {
           const label = document.createElement('span');
           label.className = 'waveform-marker-label';
           label.textContent = drag.mode === 'create' ? '新区段' : (drag.original?.name || '');
@@ -693,24 +696,16 @@ export function createWaveformModule(dependencies) {
       }
       if (!drag.moved) {
         // 点击（未拖动）：定位试听。单点跳到标记处，区段跳到起点。
-        this.options.seek(drag.original.start / 1000, { mouseClick: true });
+        this.options.seek((drag.original.point ?? drag.original.start) / 1000, { mouseClick: true });
         this.updatePlayback();
         return;
       }
-      if (drag.mode === 'move') {
-        const deltaMs = roundMs(drag.pending.start - drag.original.start);
-        if (deltaMs) this.options.onMarkerMove?.(drag.markerId, deltaMs);
-        return;
+      if (JSON.stringify(drag.pending) !== JSON.stringify(drag.original)) {
+        this.options.onMarkerQuickEditFields?.(drag.markerId, {
+          start:drag.pending.start, end:drag.pending.end ?? null, point:drag.pending.point ?? null,
+        });
       }
-      const edge = drag.mode === 'resize-start' ? 'start' : 'end';
-      if (edge === 'end' && drag.pending.end == null) {
-        if (drag.original.end != null) this.options.onMarkerResize?.(drag.markerId, 'end', null);
-        return;
-      }
-      const value = roundMs(drag.pending[edge]);
-      if (value !== drag.original[edge]) {
-        this.options.onMarkerResize?.(drag.markerId, edge, value);
-      }
+
     }
 
 
@@ -720,7 +715,7 @@ export function createWaveformModule(dependencies) {
       if (!drag) return;
       this.pointerLineOverrideActive = true;
       const timeMs = drag.mode === 'create' ? roundMs(drag.endMs)
-        : drag.mode === 'resize-end' ? (drag.pending.end ?? drag.pending.start) : drag.pending.start;
+        : drag.mode === 'resize-end' ? (drag.pending.end ?? drag.pending.start) : drag.mode === 'move' ? (drag.pending.point ?? drag.pending.start) : drag.pending.start;
       // 起点落在换行时间时与下一行的标记片段对齐，终点沿用上一行行尾。
       this.showDragPointerLineAtTime(timeMs,
         drag.mode === 'create' ? drag.endMs < drag.startMs : drag.mode !== 'resize-end');

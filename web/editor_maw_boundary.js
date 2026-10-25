@@ -178,6 +178,7 @@ export function installSubstarBoundaries({wave, host, signal, getSelected, refre
     suppressClick = false;
     const t = target(event);
     if (!t || wave.tool === 'razor') return;
+    if(t.kind==='word' && (event.ctrlKey||event.metaKey||event.shiftKey))return;
     stop(event);
     if (badge.contains(event.target)) { toggle(t); return; }
     wave.focusWaveform(); wave.cancelHoverSeekPreview();

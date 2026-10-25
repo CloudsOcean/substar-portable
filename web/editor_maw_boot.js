@@ -1,15 +1,15 @@
 import {createMawAssPanel} from './editor_maw_ass.js';
-import './editor_maw_model.js';
+import './editor_maw_model.js?v=20261025-settings-fix-1';
 import './vendor/maw/shared/gap-remove-core.js';
-import {createUtilsModule as markerUtils} from './vendor/maw/shared/utils/markers.js';
+import {createUtilsModule as markerUtils} from './vendor/maw/shared/utils/markers.js?v=20261025-settings-fix-1';
 import {createWordTiming} from './vendor/maw/shared/utils/word-timing.js';
 import {createUtilsModule as segmentTiming} from './vendor/maw/shared/utils/segment-timing.js';
 import {createUtilsModule as dataUtils} from './vendor/maw/shared/utils/data.js';
 import {createUtilsModule as assStyle} from './vendor/maw/shared/utils/ass-style.js';
 import {createUtilsModule as textProcessing} from './vendor/maw/shared/utils/text-processing.js';
 import {createUtilsModule as timedTextCore} from './vendor/maw/shared/utils/timed-text-core.js';
-import {initWaveform} from './vendor/maw/editor/media/waveform.js?v=20261025-marker-blank-guard-1';
-import {createTimelineController} from './editor_maw_timeline.js?v=20261025-merged-1';
+import {initWaveform} from './vendor/maw/editor/media/waveform.js?v=20261025-settings-fix-1';
+import {createTimelineController} from './editor_maw_timeline.js?v=20261025-settings-fix-1';
 
 const cloneJsonValue=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const data=dataUtils({}),style=assStyle({cloneJsonValue,getNavigator:()=>navigator}),text=textProcessing(style),timed=timedTextCore({cloneJsonValue});

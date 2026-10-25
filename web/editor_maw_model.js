@@ -13,8 +13,26 @@
     })).sort((a,b)=>a.start-b.start||a.end-b.end||a.id.localeCompare(b.id));
   }
   function timeline(value){return clone(value||{markers:[],plans:[],active_plan_id:null});}
-  function markers(value){return (value?.markers||[]).map(m=>({...clone(m),start:ms(m.start),...(m.end==null?{}:{end:ms(m.end)})})).map(m=>{if(m.end==null)delete m.end;return m;});}
-  function storedMarkers(value){return value.map(m=>({...clone(m),start:seconds(m.start),...(m.end==null?{}:{end:seconds(m.end)})}));}
+  function markers(value){return (value?.markers||[]).map(m=>({...clone(m),start:ms(m.start),...(m.point==null?{}:{point:ms(m.point)}),...(m.end==null?{}:{end:ms(m.end)})})).map(m=>{if(m.end==null)delete m.end;return m;});}
+  function storedMarkers(value){return value.map(m=>({...clone(m),start:seconds(m.start),...(m.point==null?{}:{point:seconds(m.point)}),...(m.end==null?{}:{end:seconds(m.end)})}));}
+  function markerDrag(marker, mode, target, duration) {
+    const next=clone(marker), region=marker.end!=null && marker.end-marker.start>1;
+    const point=region?(marker.point??marker.start):marker.start;
+    const limit=(v,a,b)=>Math.max(a,Math.min(b,Math.round(v)));
+    if(mode==='move') {
+      if(region) next.point=limit(target,marker.start,marker.end);
+      else {next.start=limit(target,0,Math.max(0,duration-1));delete next.end;delete next.point;}
+    } else if(mode==='resize-start') {
+      const end=region?marker.end:marker.start;
+      next.start=limit(target,0,Math.min(point,end));
+      next.end=end;next.point=point;
+    } else {
+      const end=limit(target,Math.max(point,marker.start),duration);
+      next.end=end;next.point=point;
+    }
+    if(mode!=='move' && next.end!=null && next.end-next.start<=1) {next.start=point;delete next.end;delete next.point;}
+    return next;
+  }
   function legacyGaps(value){const p=value?.plans?.find(p=>p.id===value.active_plan_id);return (p?.cuts||[]).map(c=>({start:ms(c.start),end:ms(c.end),removed:c.enabled!==false}));}
   function withGapState(value,gapState){
     const next=timeline(value);next.schema='substar.timeline.v2';next.gap_remove=clone(gapState);
@@ -27,5 +45,5 @@
   }
   function timeChanges(before,after){const old=new Map(before.map(s=>[s.id,s]));return after.filter(s=>{const b=old.get(s.id);return b&&(b.start!==s.start||b.end!==s.end);}).map(s=>({cue_id:s.id,start:seconds(s.start),end:seconds(s.end)}));}
   function speakerLanes(items){const ends=[],result=new Map();for(const s of items){let lane=ends.findIndex(end=>end<=s.start);if(lane<0)lane=ends.length;ends[lane]=s.end;result.set(s.id,lane);}return {lanes:result,count:Math.max(1,ends.length)};}
-  return {clone,ms,seconds,segments,timeline,markers,storedMarkers,legacyGaps,withGapState,timeChanges,speakerLanes};
+  return {markerDrag,clone,ms,seconds,segments,timeline,markers,storedMarkers,legacyGaps,withGapState,timeChanges,speakerLanes};
 });

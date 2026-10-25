@@ -46,6 +46,11 @@ def validate_timeline(value):
         return ids
     entities(result["markers"])
     ranges(result["markers"], True)
+    for marker in result["markers"]:
+        if "point" in marker:
+            point = marker["point"]
+            if type(point) not in (int, float) or not math.isfinite(point) or not marker["start"] <= point <= marker.get("end", marker["start"]):
+                raise ValueError("标记定位点必须位于范围内")
     ids = entities(result["plans"])
     for plan in result["plans"]:
         plan.setdefault("cuts", [])

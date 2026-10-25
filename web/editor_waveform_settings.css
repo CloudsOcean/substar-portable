@@ -35,8 +35,3 @@ body.editor-shell #waveform-settings-panel .waveform-scale-fit {height:32px;min-
 body.editor-shell #waveform-settings-panel .settings-panel-hint {flex:none;min-height:0;font-size:12px;line-height:1.6;color:var(--theme-muted);margin:-4px 0 0;}
 body.editor-shell #waveform-settings-panel [hidden] {display:none!important;}
 body.editor-shell .maw-waveform-host #waveform-settings-toggle[aria-expanded=true] {border-color:var(--theme-accent);background:color-mix(in srgb,var(--theme-accent) 18%,var(--theme-panel-2));}
-
-body.editor-shell #waveform-settings-panel .waveform-suppression-controls {display:flex;align-items:center;gap:7px;min-width:0;margin-left:auto;}
-body.editor-shell #waveform-settings-panel #waveform-low-energy {width:88px;min-width:60px;height:24px;margin:0;accent-color:var(--theme-accent);}
-body.editor-shell #waveform-settings-panel .waveform-suppression-controls output {width:34px;text-align:right;font:12px Consolas,monospace;}
-body.editor-shell #waveform-settings-panel .waveform-suppression-controls button {height:28px;min-height:28px;padding:0 6px;font-size:12px;}

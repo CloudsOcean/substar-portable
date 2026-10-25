@@ -1,3 +1,4 @@
+import {selectionRuns} from './editor_maw_selection.js?v=20261025-selection-1';
 /* MAW context menu interaction and labels, with Substar's operation/save boundary. */
 export function createMawMenus(h){
   const {host,signal,run,segments,selection,select,options}=h,doc=host.ownerDocument;
@@ -26,9 +27,16 @@ export function createMawMenus(h){
     if(h.getGapState().gaps.some(g=>g.removed!==false))item('填充区间空隙','',()=>{const gaps=h.getGapState().gaps.filter(g=>g.removed!==false).sort((a,b)=>a.start-b.start);if(gaps.some(g=>g.start<=time&&time<g.end))return;const start=gaps.filter(g=>g.end<=time).at(-1)?.end||0,end=gaps.find(g=>g.start>time)?.start??h.getDuration();return h.manualGap(start,end);}).title='将点击位置两侧已移除区间之间的整段内容也设为移除；缺少一侧时延伸到媒体开头或结尾，导出剪辑时会剪掉该段。';addMarkerItems(time);open(x,y);
   }
   function gap(x,y,index){const state=h.getGapState(),g=globalThis.AsrGapRemoveCore.getGapRemoveDisplayGaps(state.gaps)[index];if(!g)return;reset();item(g.removed===false?'移除区段':'恢复区段','',()=>h.manualGap(g.start,g.end,g.removed===false));sep();item('清理空隙','',()=>{const core=globalThis.AsrGapRemoveCore,provenance=core.removeGapRemoveProvenanceRange(state.provenance,g.start,g.end,state.gaps);return h.commitGaps({...state,provenance,gaps:core.gapRangesFromProvenance(provenance)});},{danger:true});addMarkerItems(g.start,g.end);open(x,y);}
+  function selectionItems(ranges){
+    sep();
+    item('添加点标记','',()=>h.createSelectionItems('point',ranges));
+    item('添加线标记','',()=>h.createSelectionItems('range',ranges));
+    item('添加空隙','',()=>h.createSelectionItems('gap',ranges));
+  }
   function word(x,y,index,itemIndex){
-    const s=segments('main')[index];if(!s)return;if(!selection().has(index)||!h.getWordSelection().has(itemIndex))h.setWordSelection(index,[itemIndex]);
-    reset();close();
+    const s=segments('main')[index];if(!s)return;
+    if(!h.getWordSelection(index).has(itemIndex))h.setWordSelection(index,[itemIndex]);
+    reset();selectionItems(h.getWordRanges());open(x,y);
   }
 
   async function editMany(ids,transform,track){for(const id of ids){const s=segments(track).find(s=>s.id===id);if(s)await options.onTimelineTextEdit({cueId:id,text:transform(s.text),track});}}
@@ -62,7 +70,7 @@ export function createMawMenus(h){
     if(track==='extension')item('删除副字幕','Delete',()=>editMany(ids,()=>'',track),{danger:true});
     else {item(targets.every(s=>s.disabled)?(multi?'显示选中字幕':'显示字幕'):(multi?'隐藏选中字幕':'隐藏字幕'),'Alt+点击',()=>op(targets.every(s=>s.disabled)?'restore':'hide_cues',{cue_ids:ids}));item(multi?`删除 ${ids.length} 条字幕`:'删除字幕','Delete',()=>op('purge_cue',{cue_ids:ids}),{danger:true});}
     if(multi)item('取消选择','Ctrl/Cmd+D',()=>{options.selection?.clear();options.onSelectCue?.(null);});
-    addMarkerItems(time,targets.at(-1)?.end);open(x,y);
+    selectionItems(selectionRuns(segments(track).map((s,i)=>({...s,key:i})),new Set(selected)));open(x,y);
   }
   doc.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))close();},{signal});
   doc.addEventListener('keydown',e=>{if(!menu.classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();close();return;}if(e.ctrlKey||e.metaKey||e.altKey||e.target.matches('input,textarea,[contenteditable=true]'))return;const entry=[...menu.querySelectorAll('button:not(:disabled)')].find(el=>el.querySelector('kbd')?.textContent.toLowerCase()===e.key.toLowerCase());if(entry){e.preventDefault();e.stopPropagation();entry.click();}},{capture:true,signal});

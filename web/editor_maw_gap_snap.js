@@ -26,3 +26,13 @@ export function createGapBoundarySnapper(getSegments,getWordsVisible) {
     return snapGapBoundary(value,boundaries,threshold,Boolean(event?.altKey)&&!altIsGesture);
   };
 }
+
+export function createMarkerBoundarySnapper(getSegments,getWordsVisible){
+  return (value,{event,row}={})=>{
+    const entries=getSegments().filter(s=>!s.disabled).flatMap(s=>getWordsVisible()&&s.items?.length?s.items:[s]);
+    const boundaries=[...new Set(entries.flatMap(s=>[s.start,s.end]).filter(Number.isFinite))].sort((a,b)=>a-b);
+    const span=Number(row?.dataset?.endMs)-Number(row?.dataset?.startMs),width=row?.getBoundingClientRect?.().width;
+    const threshold=span>0&&width>0?Math.min(120,span/width*8):80;
+    return snapGapBoundary(value,boundaries,threshold,Boolean(event?.altKey));
+  };
+}
