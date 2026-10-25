@@ -1,0 +1,226 @@
+@router.post("/projects/{project_id}/tutorial/reset")
+def reset_tutorial_project(project_id: str) -> dict[str, Any]:
+    tutorial = _tutorial_project(project_id)
+    if tutorial is None:
+        raise HTTPException(status_code=409, detail={
+            "code": "not_tutorial_project", "message": "当前项目不是教程案例"
+        })
+    store = open_project_store(project_id)
+    latest = store.load_latest()
+    if latest is None:
+        raise HTTPException(status_code=404, detail={
+            "code": "empty_project", "message": "项目还没有文档版本"
+        })
+    try:
+        baseline = store.load_revision(str(tutorial["baseline_revision_id"]))
+    except KeyError as exc:
+        raise HTTPException(status_code=500, detail={
+            "code": "tutorial_baseline_missing", "message": str(exc)
+        }) from exc
+    for path in (project_job_path(project_id) / "tutorial_progress.json",):
+        path.unlink(missing_ok=True)
+    if latest.document.content_hash() == baseline.document.content_hash() and not latest.document.complete:
+        return revision_payload(latest)
+    document = replace(
+        baseline.document,
+        properties=replace(baseline.document.properties, complete=False),
+    )
+    return _save_document(
+        project_id,
+        expected_revision_id=latest.revision_id,
+        document=document,
+        operation="tutorial_reset",
+        provenance=ChangeProvenance(
+            kind=ChangeKind.MANUAL,
+            operation="tutorial_reset",
+            actor="editor-tutorial",
+            metadata={"case_id": tutorial["case_id"], "baseline_revision_id": baseline.revision_id},
+        ),
+    )
+
+
+@router.post("/examples/tutorials/{case_id}/launch")
+def launch_tutorial_example(case_id: str) -> dict[str, Any]:
+    """Materialize one packaged tutorial as a resettable user-data project."""
+    root, manifest = _tutorial_example(case_id)
+    project_id = {
+        "reference-script-v1": "tutorial_beginner_v1",
+        "advanced-ai-v1": "tutorial_advanced_ai_v1",
+    }[case_id]
+    job_dir = _projects_root() / project_id
+    store_path = job_dir / PROJECT_DIRECTORY
+
+    def register_task_info() -> None:
+        save_task_info(job_dir, project_id, {
+            "display_name": str(manifest["display_name"]),
+            "language": str(manifest["source_language"]),
+            "target_language_mode": str(manifest["target_language"]),
+            "source_hard_limit": int(manifest["source_hard_limit"]),
+            "target_hard_limit": int(manifest["target_hard_limit"]),
+        })
+
+    def register_creation() -> None:
+        """Keep packaged tutorials on the same current project shell as real jobs."""
+        atomic_write_json(job_dir / "project_creation.json", {
+            "schema_version": "substar.project-creation.v2",
+            "input_mode": "packaged_example",
+            "source_file": "audio_16k_mono.wav",
+            "reference_document": "",
+            "settings_overrides": {
+                "language": str(manifest["source_language"]),
+                "target_language_mode": str(manifest["target_language"]),
+                "english_hard_limit": int(manifest["source_hard_limit"]),
+                "chinese_hard_limit": int(manifest["target_hard_limit"]),
+                "segmentation_enabled": True,
+                "reference_script_mode": False,
+            },
+            "profile": {},
+            "recognition_profile": {},
+            "created_at": time.time(),
+            "tutorial_case_id": case_id,
+            "simulated": True,
+        })
+
+    def materialize_media() -> None:
+        media_name = str(manifest["assets"]["media"])
+        media_source = (root / media_name).resolve()
+        expected_media = str(manifest.get("sha256", {}).get(media_name, ""))
+        media_bytes = media_source.read_bytes()
+        media_digest = sha256(media_bytes).hexdigest()
+        if root not in media_source.parents or (
+            expected_media and media_digest != expected_media
+        ):
+            raise ValueError("教程媒体摘要不匹配")
+        targets = (
+            job_dir / "input" / "audio_16k_mono.wav",
+            job_dir / "audio_16k_mono.wav",
+        )
+        for target in targets:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.is_file() or sha256(target.read_bytes()).hexdigest() != media_digest:
+                shutil.copy2(media_source, target)
+
+    if store_path.is_dir():
+        tutorial = _tutorial_project(project_id)
+        if tutorial is None or tutorial.get("case_id") != case_id:
+            raise HTTPException(status_code=409, detail={
+                "code": "tutorial_project_conflict", "message": "教程项目 ID 已被其他项目占用"
+            })
+        revision = reset_tutorial_project(project_id)
+        register_task_info()
+        materialize_media()
+        register_creation()
+        return {
+            "schema_version": "substar.tutorial-launch.v1",
+            "case_id": case_id,
+            "level": manifest.get("level"),
+            "project_id": project_id,
+            "revision": revision,
+            "simulated": True,
+        }
+    if case_id != "advanced-ai-v1":
+        raise HTTPException(status_code=409, detail={
+            "code": "tutorial_creation_required",
+            "message": "初级教程请从引导流程创建案例项目",
+        })
+    job_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        source_document = _load_tutorial_document(root, manifest, "segmentation")
+        store = ProjectStore.create(store_path, project_id=project_id)
+        baseline = store.save(
+            source_document,
+            provenance=ChangeProvenance(
+                kind=ChangeKind.IMPORT,
+                operation="tutorial_snapshot_segmentation",
+                actor="packaged-example-finalizer",
+                metadata={"case_id": case_id, "simulated": True},
+            ),
+        )
+        materialize_media()
+        atomic_write_json(job_dir / "run_manifest.json", {
+            "schema_version": "substar.run-manifest.v1",
+            "source_file": "audio_16k_mono.wav",
+            "media": {"duration_seconds": max((cue.end for cue in source_document.cues), default=0.0)},
+            "tutorial_example": {"case_id": case_id, "simulated": True},
+        })
+        register_task_info()
+        register_creation()
+        atomic_write_json(job_dir / "tutorial_project.json", {
+            "schema_version": "substar.tutorial-project.v2",
+            "case_id": case_id,
+            "level": "advanced",
+            "display_name": "进阶教程",
+            "baseline_revision_id": baseline.revision_id,
+            "baseline_document_hash": baseline.document_hash,
+            "available_stages": ["segmentation", "calibration", "translation"],
+            "simulated": True,
+        })
+    except Exception:
+        if job_dir.is_dir():
+            shutil.rmtree(job_dir)
+        raise
+    return {
+        "schema_version": "substar.tutorial-launch.v1",
+        "case_id": case_id,
+        "level": "advanced",
+        "project_id": project_id,
+        "revision": revision_payload(baseline),
+        "simulated": True,
+    }
+
+
+@router.get("/examples/tutorials/{case_id}/assets/{asset_name}")
+def get_tutorial_example_asset(case_id: str, asset_name: Literal["media", "reference"]) -> FileResponse:
+    root, manifest = _tutorial_example(case_id)
+    filename = str(manifest["assets"].get(asset_name, ""))
+    path = (root / filename).resolve()
+    if not filename or root not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail={
+            "code": "tutorial_asset_not_found", "message": "教程素材不存在"
+        })
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0])
+
+
+@router.post("/projects/{project_id}/tutorial/stages/{stage}")
+def apply_tutorial_stage(
+    project_id: str,
+    stage: Literal["calibration", "translation"],
+    payload: TutorialStageRequest,
+) -> dict[str, Any]:
+    """Validate and commit a packaged stage without contacting a provider."""
+    tutorial = _tutorial_project(project_id)
+    if tutorial is None or tutorial.get("case_id") != "advanced-ai-v1":
+        raise HTTPException(status_code=409, detail={
+            "code": "advanced_tutorial_required", "message": "当前项目不是进阶教程"
+        })
+    root, manifest = _tutorial_example("advanced-ai-v1")
+    store = open_project_store(project_id)
+    latest = store.load_latest()
+    if latest is None:
+        raise HTTPException(status_code=404, detail={"code": "empty_project", "message": "教程项目为空"})
+    if latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(status_code=409, detail={
+            "code": "revision_conflict", "message": "教程阶段所依据的版本已经变化"
+        })
+    document = _load_tutorial_document(root, manifest, stage)
+    if document.document_id != latest.document.document_id:
+        raise HTTPException(status_code=500, detail={
+            "code": "tutorial_example_invalid", "message": "教程阶段文档身份不一致"
+        })
+    revision = store.save(
+        document,
+        expected_revision_id=latest.revision_id,
+        provenance=ChangeProvenance(
+            kind=ChangeKind.AI,
+            operation=f"tutorial_snapshot_{stage}",
+            actor="packaged-example-finalizer",
+            metadata={"case_id": tutorial["case_id"], "simulated": True},
+        ),
+    )
+    atomic_write_json(project_job_path(project_id) / "tutorial_progress.json", {
+        "schema_version": "substar.tutorial-progress.v1", "stage": stage,
+        "revision_id": revision.revision_id,
+    })
+    return {**revision_payload(revision), "simulated": True, "tutorial_stage": stage}
+
+

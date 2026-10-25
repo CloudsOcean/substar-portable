@@ -96,15 +96,15 @@ def _check_expected(cue: DisplayCue, change: CueTimeChange) -> None:
 
 
 def _validate_non_manual_timeline(document: EditorDocument, cues: Iterable[DisplayCue]) -> None:
-    previous_end = -1.0
+    previous_end = {}
     for cue in canonicalize_cue_order(cues):
         if cue.state is EntityState.DELETED or _is_manual_cue(document, cue):
             continue
-        if cue.start < previous_end - 1e-9:
+        if cue.start < previous_end.get(cue.speaker, -1.0) - 1e-9:
             raise CueTimingError(
                 f"final cue timeline overlaps or is out of order at {cue.cue_id}"
             )
-        previous_end = cue.end
+        previous_end[cue.speaker] = cue.end
 
 
 def _validate_changed_ranges(
@@ -117,6 +117,8 @@ def _validate_changed_ranges(
             continue
         for other in active:
             if other.cue_id == cue.cue_id:
+                continue
+            if other.speaker != cue.speaker:
                 continue
             if cue.start < other.end and other.start < cue.end:
                 raise CueTimingError(

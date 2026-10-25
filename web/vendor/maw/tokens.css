@@ -1,0 +1,226 @@
+.maw-waveform-host {
+    /* 原生表单控件（包括 number 输入框的步进器）跟随当前主题绘制。 */
+    color-scheme: dark;
+
+    /* 背景 —— 中性炭灰，与 Launcher（web/launcher/launcher.css）同一套令牌 */
+    --bg-base:    #1c1c20;   /* 页面最底层 */
+    --bg-panel:   #26262b;   /* 面板 / 卡片 */
+    --bg-raised:  #2e2e34;   /* 抬升表面（输入、字幕列表） */
+    --bg-overlay: #323238;   /* 浮层（模态、菜单、下拉） */
+    --bg-input:   #232328;   /* 文本输入框 */
+    --bg-wave:    #18181c;   /* 波形区画布背板（比页面略深，突出波形） */
+    --bg-wave-row:#212126;   /* 波形行抬升面 */
+
+    /* 文字（暗底长时编辑，主文本瞄准 WCAG AA） */
+    --text-primary:   #f3f1ee;
+    --text-secondary: #c9c5bf;
+    --text-muted:     #9a958f;
+    --text-faint:     #6c6863;
+
+    /* 边框 —— 低对比发丝线，不再用 #555 粗边 */
+    --border-subtle: #36363d;
+    --border:        #44444c;
+    --border-strong: #55555e;
+
+    /* 强调色 —— 默认品牌色（暗色橙 / 亮色红，与 Launcher 一致）；界面设置可切换蓝/红/橙/自定义整套 accent 令牌。 */
+    --accent-blue:   #6ca5e8;
+    --accent-custom: var(--accent-blue);
+    --accent:        #f09a50;
+    --accent-active-fg: #1c0f05;
+    --accent-hover:  #f5ad6c;
+    --accent-strong: #e08a40;
+    --accent-tint:        rgba(240, 154, 80, 0.12);
+    --accent-tint-strong: rgba(240, 154, 80, 0.22);
+    --accent-soft:        rgba(240, 154, 80, 0.16);
+    --accent-line:   #f09a50;
+
+    /* 琥珀 —— 编辑/脏数据/警告语义（与蓝色不竞争） */
+    --amber:        #d49a4a;
+    --amber-hover:  #e0a85a;
+    --amber-soft:   rgba(212, 154, 74, 0.16);
+    --amber-tint:   rgba(212, 154, 74, 0.12);
+    --amber-line:   #d49a4a;
+
+    /* 红 —— 危险/删除 */
+    --red:        #e07a7a;
+    --red-hover:  #ea8c8c;
+    --red-soft:   rgba(224, 122, 122, 0.14);
+
+    /* 绿 —— 成功语义（toast / 替换预览后态） */
+    --green:        #6fbf8e;
+    --green-hover:  #82cf9e;
+    --green-soft:   rgba(111, 191, 142, 0.14);
+
+    /* 按钮 —— 安静的默认家族 */
+    --btn-bg:        #2e2e34;
+    --btn-bg-hover:  #38383f;
+    --btn-bg-active: #28282d;
+    --btn-border:    var(--border);
+    --btn-border-hover: var(--border-strong);
+    --btn-text:      #e6e2dd;
+    /* 下拉菜单边框 —— 与按钮边框同色（浅色主题经 --border 自动跟随）。 */
+    --menu-border:   var(--btn-border);
+
+    /* 中性 hover —— 不改变色相的轻微抬升 */
+    --hover-bg: rgba(255, 255, 255, 0.035);
+
+    /* 圆角 */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+
+    /* 阴影 —— 单一柔和语言 */
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.34);
+    --shadow-3: 0 16px 44px rgba(0, 0, 0, 0.52);
+
+    /* 动效 —— 快速 ease-out，不触发布局位移 */
+    --t-fast: 130ms ease-out;
+
+    /* 控件高度 —— 工具栏统一 30px */
+    --control-h: 30px;
+
+    /* 面板顶部工具栏 / 布局拖拽栏高度 */
+    --panel-toolbar-h: 44px;
+    --dock-handle-h: 23px;
+
+    /* 聚焦环 */
+    --focus-ring:       0 0 0 2px var(--accent-soft);
+    --focus-ring-amber: 0 0 0 2px var(--amber-soft);
+
+    /* 滚动条 */
+    --maw-scroll-thumb:        #45454c;
+    --maw-scroll-thumb-hover:  #55555e;
+    --scroll-track:        transparent;
+
+    /* 选中黄 —— 波形字幕块选中描边 / 框选 / 徽章（与字幕列表琥珀语义区分） */
+    --selection-yellow:       #ffd54a;
+    --selection-yellow-line:  rgba(255, 213, 74, 0.95);
+    --selection-yellow-soft:  rgba(255, 213, 74, 0.10);
+    --selection-yellow-glow:  rgba(255, 213, 74, 0.45);
+
+    /* 布局编辑落点提示 —— 金色（落点）/ 绿色（插入位） */
+    --layout-drop-outline: #f0c66e;
+    --layout-drop-bg:      rgba(240, 198, 110, 0.14);
+    --layout-drop-fg:      #ffe0a1;
+    --layout-insert-outline: #80d8ae;
+    --layout-insert-bg:      rgba(128, 216, 174, 0.16);
+    --layout-insert-fg:      #b9f1d2;
+
+    /* 波形画布 —— 供 waveform.js 通过 getComputedStyle 读取以跟随主题 */
+    --wave-row-bg:          #212126;
+    --wave-row-border:      #34343b;
+    --wave-row-grid:        rgba(255, 255, 255, 0.04);
+    --wave-row-tick:        #4a4a52;
+    --wave-peak:            #65b89a;
+    --wave-peak-dim:        #8f8b86;
+    --wave-cue-mix:         rgba(22, 22, 26, 0.82);
+    --wave-cue-text:        #eef6ff;
+    --wave-cue-active-mix:  color-mix(in srgb, var(--accent) 40%, #1c1c20);
+    --wave-cue-handle:      rgba(231, 244, 255, 0.2);
+    --wave-cue-handle-hover: rgba(231, 244, 255, 0.42);
+    --wave-cue-boundary:    color-mix(in srgb, color-mix(in srgb, var(--accent) 55%, #e7f4ff) 45%, transparent);
+    --wave-badge-bg:        rgba(0, 0, 0, 0.65);
+    --wave-badge-sticker:   #b8d9ff;
+    --wave-playhead:        #ff5d67;
+    --wave-playhead-glow:   rgba(255, 70, 82, 0.72);
+    --wave-pointer-line:    rgba(205, 214, 223, 0.78);
+    --wave-split-flash:     #ffd43b;
+    --wave-split-flash-glow: rgba(255, 212, 59, 0.85);
+    --wave-split-preview-bg:     #8d6a02;
+    --wave-split-preview-border: #ffd43b;
+    --wave-split-preview-fg:     #ffffff;
+    --wave-disabled-text:   #89939b;
+    --wave-disabled-border: #66717a;
+    --wave-disabled-a:      rgba(84, 94, 104, 0.68);
+    --wave-disabled-b:      rgba(47, 54, 61, 0.82);
+
+    /* 波形字幕块投影：亮主题下换用亮色系低透明阴影，避免黑色重影 */
+    --wave-cue-shadow:      rgba(0, 0, 0, 0.3);
+
+    /* 静音空隙块斜纹（DOM，随波形内容滚动，允许半透明；亮色主题换深色斜纹） */
+    --gap-stripe-a:           rgba(218, 128, 65, 0.30);
+    --gap-stripe-b:           rgba(82, 51, 35, 0.34);
+    --gap-stripe-border:      rgba(250, 192, 92, 0.9);
+    /* 受保护空隙：青蓝边界表示该空隙不会被批量清理 */
+    --gap-protected-edge:     rgb(122 222 244 / 98%);
+    --gap-protected-inset:    rgb(65 174 207 / 35%);
+    --gap-restored-stripe-a:  rgba(100, 126, 145, 0.13);
+    --gap-restored-stripe-b:  rgba(44, 55, 65, 0.17);
+    --gap-restored-border:    rgba(132, 159, 178, 0.55);
+
+    /* 空状态 / dock 拖拽栏 —— 半透明面板背板 */
+    --empty-overlay-1: rgba(24, 24, 28, 0.72);
+    --empty-overlay-2: rgba(24, 24, 28, 0.92);
+    --empty-raised-1:  rgba(46, 46, 52, 0.72);
+    --empty-raised-2:  rgba(46, 46, 52, 0.92);
+    /* dock 把手是 absolute/sticky 覆盖在滚动内容上的 chrome（字幕列表 sticky、波形顶部 absolute），
+       必须不透明：原 0.94/0.96 alpha 会让下方滚动的字幕/波形隐约透出。取原 alpha 在面板底色上的
+       合成色，视觉与原先一致但完全不透。 */
+    --dock-bg:         #19191d;
+    --dock-bg-hover:   #2e2e34;
+
+    /* 危险态悬停前景（红底上的浅色文字，暗色主题保持原值） */
+    --danger-hover-fg: #ffd6d6;
+
+    /* 活动字幕行前景（蓝软底上的文字，亮色主题需深色） */
+    --active-cue-fg: #ffffff;
+
+    /* 搜索高亮 mark 前景：琥珀底在两个主题下都是中调，统一用深色字 */
+    --mark-fg: #1c1c20;
+
+    /* 禁用字幕行底色（暗色用白提亮、亮色用黑压暗，均极低透明） */
+    --disabled-cue-bg: rgba(255, 255, 255, 0.02);
+
+    /* 面板顶部工具栏背板：不透明（波形工具栏为 absolute 覆盖在滚动内容上，
+       透明会透出波形）。原先用 color-mix(…, black) 混黑，亮色主题下会把浅底
+       压暗，故改为按面板各自基色派生的独立令牌。 */
+    --panel-toolbar-bg:      #29292e;   /* 列表 / 播放器面板（源自 --bg-raised 压暗） */
+    --panel-toolbar-bg-wave: #151518;   /* 波形面板（源自 --bg-wave 压暗） */
+    --panel-toolbar-shadow: rgba(0, 0, 0, 0.22);
+    /* 波形块 hover 提亮系数：暗色提亮深色块；亮色块本身已亮，过高会发白 */
+    --wave-hover-brightness: 1.16;
+    --wave-gap-hover-brightness: 1.35;
+    --wave-drag-brightness: 1.2;
+    /* 字幕行悬停底色：比 --accent-tint 明显一档，避免"看不出 hover" */
+    --cue-hover-bg: rgba(240, 154, 80, 0.20);
+
+    /* 静音空隙工具窗 —— 原先整块硬编码深蓝灰，亮色主题下无法变亮 */
+    --gap-panel-bg-1:     rgba(28, 38, 47, 0.98);
+    --gap-panel-bg-2:     rgba(20, 26, 32, 0.98);
+    --gap-panel-inset:    rgba(124, 161, 187, 0.06);
+    --gap-panel-drag-inset: rgba(217, 158, 91, 0.15);
+    --gap-header-bg-1:    rgba(40, 52, 64, 0.55);
+    --gap-header-bg-2:    rgba(28, 38, 47, 0.35);
+    --gap-close-bg:       rgba(13, 19, 24, 0.32);
+    --gap-close-hover-bg: #50362f;
+    --gap-close-hover-fg: #f4d5c0;
+    --gap-close-hover-border: #755048;
+    --gap-unit-bg:        rgba(61, 79, 92, 0.42);
+
+    /* 空隙相关强调按钮（橙）—— 亮色主题需要更亮更饱和的橙 */
+    --gap-accent-fg:        #fff0df;
+    --gap-accent-bg-1:      #a96535;
+    --gap-accent-bg-2:      #824723;
+    --gap-accent-border:    #c27a42;
+    --gap-accent-hover-fg:  #fff7ef;
+    --gap-accent-hover-1:   #ba7540;
+    --gap-accent-hover-2:   #96542a;
+    --gap-accent-hover-border: #dc965c;
+    --gap-accent-menu-border:  #8d603d;
+    --gap-accent-inset:     rgba(255, 221, 183, 0.12);
+    --gap-scan-fg:          #fff4e7;
+    --gap-scan-bg-1:        #b66f36;
+    --gap-scan-bg-2:        #925128;
+    --gap-scan-border:      #d08a50;
+    --gap-scan-hover-1:     #c27a3e;
+    --gap-scan-hover-2:     #a05b2e;
+    --gap-scan-hover-border:#dfa066;
+    --gap-scan-inset:       rgba(255, 220, 176, 0.2);
+    --gap-scan-shadow:      rgba(77, 39, 17, 0.28);
+
+    /* 字体栈：末尾追加 Linux 系 CJK 字体，避免 Linux 上汉字失控地落到
+       fontconfig 兜底；Windows/macOS 的系统字体在前面先命中，行为不变 */
+    --font-sans: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }

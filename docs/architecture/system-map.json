@@ -289,31 +289,199 @@
       "title": "Project creation UI",
       "layer": "frontend_connector",
       "role": "Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress.",
-      "must_not": ["Infer task completion from upload completion", "Use task_id as project_id", "Invent backend lifecycle state", "Keep cached running state visible after backend polling fails"],
-      "code": [{"path": "web/split.js", "symbols": []}, {"path": "web/subtitle_input.js", "symbols": []}, {"path": "web/asr_assist.js", "symbols": []}, {"path": "web/glossary_injection.js", "symbols": []}, {"path": "web/ai_progress_summary.js", "symbols": ["summarize", "format"]}],
-      "inputs": ["project_creation_projection"],
-      "outputs": ["project_creation_request"],
-      "calls": ["composition_root", "editor_api"],
-      "invariants": ["ASR-based prompt assistance runs a standalone durable transcription task; internal and external generation reuse it, and changed media or settings cannot receive stale results", "Creation controls use readable typography without a hero title; one theme-colored tutorial menu offers basic and advanced tutorials, pulses until first start or persisted dismissal, and hides the dismissal option thereafter.", "Editor link is exposed only when the project read model says awaiting_edit", "One submitted identity survives polling and refresh", "A polling failure immediately marks the runtime disconnected and never presents cached queued/running rows as live work", "Reference upload and break-symbol controls are exposed and submitted only in reference-script mode", "Reference-script mode requires a reference document and at least one literal break symbol", "Untouched reference break symbols follow the selected source-language preset while explicit user symbols remain authoritative", "Completed projects are projected with the configured secondary-color corner"],
-      "failure_modes": ["Lost response", "Network polling failure", "Stale browser projection"],
-      "recovery": {"strategy": "Reload the durable project-creation projection.", "reuses": ["project_id", "task_id"], "restarts": [], "terminal": "Display structured backend error without changing it."},
-      "tests": ["tests/test_project_creation_api.py", "tests/test_creation_projection.py", "tests/split_settings_ui_contract.test.js"],
-      "change_impact": {"modules": ["composition_root", "creation_projection", "editor_ui"], "contracts": ["project_creation_request", "project_creation_projection"]}
+      "must_not": [
+        "Infer task completion from upload completion",
+        "Use task_id as project_id",
+        "Invent backend lifecycle state",
+        "Keep cached running state visible after backend polling fails"
+      ],
+      "code": [
+        {
+          "path": "web/split.js",
+          "symbols": []
+        },
+        {
+          "path": "web/subtitle_input.js",
+          "symbols": []
+        },
+        {
+          "path": "web/asr_assist.js",
+          "symbols": []
+        },
+        {
+          "path": "web/glossary_injection.js",
+          "symbols": []
+        },
+        {
+          "path": "web/ai_progress_summary.js",
+          "symbols": [
+            "summarize",
+            "format"
+          ]
+        },
+        {
+          "path": "web/split-refinements.js",
+          "symbols": []
+        },
+        {
+          "path": "web/split-concepts/concepts.js",
+          "symbols": []
+        },
+        {
+          "path": "web/split-concepts/dark-glass.js",
+          "symbols": []
+        },
+        {
+          "path": "web/split-concepts/paper-dark.js",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "project_creation_projection"
+      ],
+      "outputs": [
+        "project_creation_request"
+      ],
+      "calls": [
+        "composition_root",
+        "editor_api"
+      ],
+      "invariants": [
+        "ASR-based prompt assistance runs a standalone durable transcription task; internal and external generation reuse it, and changed media or settings cannot receive stale results",
+        "Editor link is exposed only when the project read model says awaiting_edit",
+        "One submitted identity survives polling and refresh",
+        "A polling failure immediately marks the runtime disconnected and never presents cached queued/running rows as live work",
+        "Reference upload and break-symbol controls are exposed and submitted only in reference-script mode",
+        "Reference-script mode requires a reference document and at least one literal break symbol",
+        "Untouched reference break symbols follow the selected source-language preset while explicit user symbols remain authoritative",
+        "Completed projects are projected with the configured secondary-color corner",
+        "Tutorial entry points are archived and do not attach live controls.",
+        "Character caps use each displayed track independently; mixed-language text has its own cap, other languages default to 55, and ratio thresholds are retired."
+      ],
+      "failure_modes": [
+        "Lost response",
+        "Network polling failure",
+        "Stale browser projection"
+      ],
+      "recovery": {
+        "strategy": "Reload the durable project-creation projection.",
+        "reuses": [
+          "project_id",
+          "task_id"
+        ],
+        "restarts": [],
+        "terminal": "Display structured backend error without changing it."
+      },
+      "tests": [
+        "tests/test_project_creation_api.py",
+        "tests/test_creation_projection.py",
+        "tests/split_settings_ui_contract.test.js"
+      ],
+      "change_impact": {
+        "modules": [
+          "composition_root",
+          "creation_projection",
+          "editor_ui"
+        ],
+        "contracts": [
+          "project_creation_request",
+          "project_creation_projection"
+        ]
+      }
     },
     "composition_root": {
       "title": "FastAPI composition root and project-creation facade",
       "layer": "api",
       "role": "Own process startup, router composition, uploads, stable project identity, prompt-component HTTP boundaries and the project-creation facade.",
-      "must_not": ["Run provider calls on request threads", "Treat a transcription task as an editable project", "Store plaintext credentials in task input"],
-      "code": [{"path": "app.py", "symbols": ["_application_lifespan", "create_workbench_split_job", "_create_workbench_subtitle_tasks", "list_jobs"]}, {"path": "substar_core/asr_assist.py", "symbols": ["create_assist_task", "assist_status", "generation_material"]}],
-      "inputs": ["project_creation_request", "task_record", "editor_revision", "credential_reference", "production_prompt_component"],
-      "outputs": ["project_creation_projection", "transcription_request", "segmentation_request", "production_prompt_component"],
-      "calls": ["creation_graph", "creation_projection", "runtime_api", "editor_api", "credential_store", "model_stage_scheduler"],
-      "invariants": ["project_id and task_id are distinct", "A project becomes awaiting_edit only after an editor revision is readable", "A completed packaged beginner tutorial is registered against its canonical editable revision and is repaired during startup reconciliation", "Scheduler resource limits are loaded once from the validated settings snapshot at process startup", "The same code path serves development and portable builds"],
-      "failure_modes": ["Invalid upload", "Idempotency conflict", "Runtime unavailable", "Project projection reconciliation failure"],
-      "recovery": {"strategy": "Reconcile project creation from durable canonical tasks and ProjectStore.", "reuses": ["uploaded media", "project_id", "successful parent tasks"], "restarts": ["uncommitted child task"], "terminal": "Expose the canonical structured error."},
-      "tests": ["tests/test_project_creation_api.py", "tests/test_creation_projection.py", "tests/test_runtime_http.py", "tests/test_asr_assist.py"],
-      "change_impact": {"modules": ["split_ui", "creation_graph", "creation_projection", "runtime_api", "editor_api"], "contracts": ["project_creation_request", "project_creation_projection", "task_record"]}
+      "must_not": [
+        "Run provider calls on request threads",
+        "Treat a transcription task as an editable project",
+        "Store plaintext credentials in task input"
+      ],
+      "code": [
+        {
+          "path": "app.py",
+          "symbols": [
+            "_application_lifespan",
+            "create_workbench_split_job",
+            "_create_workbench_subtitle_tasks",
+            "list_jobs"
+          ]
+        },
+        {
+          "path": "substar_core/asr_assist.py",
+          "symbols": [
+            "create_assist_task",
+            "assist_status",
+            "generation_material"
+          ]
+        }
+      ],
+      "inputs": [
+        "project_creation_request",
+        "task_record",
+        "editor_revision",
+        "credential_reference",
+        "production_prompt_component"
+      ],
+      "outputs": [
+        "project_creation_projection",
+        "transcription_request",
+        "segmentation_request",
+        "production_prompt_component"
+      ],
+      "calls": [
+        "creation_graph",
+        "creation_projection",
+        "runtime_api",
+        "editor_api",
+        "credential_store",
+        "model_stage_scheduler"
+      ],
+      "invariants": [
+        "project_id and task_id are distinct",
+        "A project becomes awaiting_edit only after an editor revision is readable",
+        "Scheduler resource limits are loaded once from the validated settings snapshot at process startup",
+        "The same code path serves development and portable builds"
+      ],
+      "failure_modes": [
+        "Invalid upload",
+        "Idempotency conflict",
+        "Runtime unavailable",
+        "Project projection reconciliation failure"
+      ],
+      "recovery": {
+        "strategy": "Reconcile project creation from durable canonical tasks and ProjectStore.",
+        "reuses": [
+          "uploaded media",
+          "project_id",
+          "successful parent tasks"
+        ],
+        "restarts": [
+          "uncommitted child task"
+        ],
+        "terminal": "Expose the canonical structured error."
+      },
+      "tests": [
+        "tests/test_project_creation_api.py",
+        "tests/test_creation_projection.py",
+        "tests/test_runtime_http.py",
+        "tests/test_asr_assist.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "split_ui",
+          "creation_graph",
+          "creation_projection",
+          "runtime_api",
+          "editor_api"
+        ],
+        "contracts": [
+          "project_creation_request",
+          "project_creation_projection",
+          "task_record"
+        ]
+      }
     },
     "creation_graph": {
       "title": "Subtitle creation task graph",
@@ -664,16 +832,155 @@
       "title": "Editor HTTP API",
       "layer": "api",
       "role": "Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands.",
-      "must_not": ["Bypass ProjectStore", "Allow edits while an exclusive AI operation is running", "Use historical v2 names in public routes"],
-      "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["get_project", "save_project_document", "apply_project_operation", "get_project_llm_options", "start_project_translation", "ai_calibrate_project", "get_review_notes", "save_review_note"]}, {"path":"substar_core/editor/subtitle_api.py", "symbols":["preview_import", "create_import", "set_source_text"]}, {"path":"substar_core/editor/application/subtitle_project_import.py", "symbols":["preview_subtitle_project", "build_subtitle_document"]}, {"path":"substar_core/editor/application/review_notes.py", "symbols":["anchor_for", "add_note", "change_note", "project_note"]}, {"path": "substar_core/editor/application/review_exchange.py", "symbols": []}, {"path":"substar_core/editor/application/review_store.py", "symbols":["read_reviews", "update_reviews"]}],
-      "inputs": ["editor_operation", "task_record", "editor_revision", "reference_document", "translation_request", "project_task_info", "external_ai_exchange"],
-      "outputs": ["editor_revision", "translation_result", "calibration_result", "media_info", "media_stream", "project_task_info", "external_ai_exchange"],
-      "calls": ["project_store", "task_info_service", "task_service", "reference_manuscript_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"],
-      "invariants": ["Every document mutation binds expected_revision_id", "Task information changes never rewrite existing ASR, Cue topology, timing or translations", "A project-selected LLM provider freezes its own endpoint, model and credential reference into each new calibration or translation task", "Editor reference matching uses the canonical project source language or explicit Auto detection", "External prooftranslation applies only matching Cue and source hashes", "External segmentation binds the exact revision, document and token sequence and cannot replace existing translations", "Only one exclusive AI operation runs per project", "AI results bind the revision they inspected", "Reference replacements, span merges, hidden insertions and review metadata commit in one expected-revision transaction"],
-      "failure_modes": ["Revision conflict", "AI task conflict", "Invalid operation", "Missing media"],
-      "recovery": {"strategy": "Reload the latest revision and durable AI operation state.", "reuses": ["latest verified revision", "completed AI result"], "restarts": ["failed AI operation when user requests"], "terminal": "Return structured conflict or task error."},
-      "tests": ["tests/test_editor_translation_binding.py", "tests/test_editor_ai_contracts.py", "tests/test_editor_ai_calibration_protocol.py", "tests/test_reference_script_mode.py", "tests/test_project_exchange.py", "tests/test_project_llm_selection.py", "tests/test_reference_unified_matching.py"],
-      "change_impact": {"modules": ["editor_ui", "task_info_service", "project_store", "task_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_operation", "task_record", "editor_revision", "translation_request", "translation_result", "calibration_result", "media_info", "media_stream", "project_task_info"]}
+      "must_not": [
+        "Bypass ProjectStore",
+        "Allow edits while an exclusive AI operation is running",
+        "Use historical v2 names in public routes"
+      ],
+      "code": [
+        {
+          "path": "substar_core/editor/http_api.py",
+          "symbols": [
+            "get_project",
+            "save_project_document",
+            "apply_project_operation",
+            "get_project_llm_options",
+            "start_project_translation",
+            "ai_calibrate_project",
+            "get_review_notes",
+            "save_review_note"
+          ]
+        },
+        {
+          "path": "substar_core/editor/subtitle_api.py",
+          "symbols": [
+            "preview_import",
+            "create_import",
+            "set_source_text"
+          ]
+        },
+        {
+          "path": "substar_core/editor/application/subtitle_project_import.py",
+          "symbols": [
+            "preview_subtitle_project",
+            "build_subtitle_document"
+          ]
+        },
+        {
+          "path": "substar_core/editor/application/review_notes.py",
+          "symbols": [
+            "anchor_for",
+            "add_note",
+            "change_note",
+            "project_note"
+          ]
+        },
+        {
+          "path": "substar_core/editor/application/review_exchange.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/application/review_store.py",
+          "symbols": [
+            "read_reviews",
+            "update_reviews"
+          ]
+        },
+        {
+          "path": "substar_core/editor/cut_api.py",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "editor_operation",
+        "task_record",
+        "editor_revision",
+        "reference_document",
+        "translation_request",
+        "project_task_info",
+        "external_ai_exchange"
+      ],
+      "outputs": [
+        "editor_revision",
+        "translation_result",
+        "calibration_result",
+        "media_info",
+        "media_stream",
+        "project_task_info",
+        "external_ai_exchange"
+      ],
+      "calls": [
+        "project_store",
+        "task_info_service",
+        "task_service",
+        "reference_manuscript_service",
+        "translation_service",
+        "calibration_service",
+        "media_service",
+        "project_exchange_service"
+      ],
+      "invariants": [
+        "Every document mutation binds expected_revision_id",
+        "Task information changes never rewrite existing ASR, Cue topology, timing or translations",
+        "A project-selected LLM provider freezes its own endpoint, model and credential reference into each new calibration or translation task",
+        "Editor reference matching uses the canonical project source language or explicit Auto detection",
+        "External prooftranslation applies only matching Cue and source hashes",
+        "External segmentation binds the exact revision, document and token sequence and cannot replace existing translations",
+        "Only one exclusive AI operation runs per project",
+        "AI results bind the revision they inspected",
+        "Reference replacements, span merges, hidden insertions and review metadata commit in one expected-revision transaction"
+      ],
+      "failure_modes": [
+        "Revision conflict",
+        "AI task conflict",
+        "Invalid operation",
+        "Missing media"
+      ],
+      "recovery": {
+        "strategy": "Reload the latest revision and durable AI operation state.",
+        "reuses": [
+          "latest verified revision",
+          "completed AI result"
+        ],
+        "restarts": [
+          "failed AI operation when user requests"
+        ],
+        "terminal": "Return structured conflict or task error."
+      },
+      "tests": [
+        "tests/test_editor_translation_binding.py",
+        "tests/test_editor_ai_contracts.py",
+        "tests/test_editor_ai_calibration_protocol.py",
+        "tests/test_reference_script_mode.py",
+        "tests/test_project_exchange.py",
+        "tests/test_project_llm_selection.py",
+        "tests/test_reference_unified_matching.py",
+        "tests/test_cut_api.py",
+        "tests/test_ai_cut_plans.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "editor_ui",
+          "task_info_service",
+          "project_store",
+          "task_service",
+          "translation_service",
+          "calibration_service",
+          "media_service",
+          "project_exchange_service"
+        ],
+        "contracts": [
+          "editor_operation",
+          "task_record",
+          "editor_revision",
+          "translation_request",
+          "translation_result",
+          "calibration_result",
+          "media_info",
+          "media_stream",
+          "project_task_info"
+        ]
+      }
     },
     "task_info_service": {
       "title": "Canonical project task information service",
@@ -723,32 +1030,648 @@
     "media_service": {
       "title": "Editor media and waveform service",
       "layer": "domain_service",
-      "role": "Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations.",
-      "must_not": ["Own Cue topology", "Load whole media into API memory", "Return media from another project"],
-      "code": [{"path": "substar_core/editor/http_api.py", "symbols": ["get_project_media_info", "get_project_media", "get_project_waveform"]}, {"path": "substar_core/media/playback_proxy.py", "symbols": []}, {"path": "substar_core/media/waveform_cache.py", "symbols": []}, {"path": "substar_core/media/spectrogram.py", "symbols": []}],
-      "inputs": ["editor_revision"],
-      "outputs": ["media_info", "media_stream"],
+      "role": "Describe project media, serve bounded waveform windows and detail peaks, detect speech onsets, and generate cached thumbnail previews.",
+      "must_not": [
+        "Own Cue topology",
+        "Load whole media into API memory",
+        "Return media from another project"
+      ],
+      "code": [
+        {
+          "path": "substar_core/editor/http_api.py",
+          "symbols": [
+            "get_project_media_info",
+            "get_project_media",
+            "get_project_waveform"
+          ]
+        },
+        {
+          "path": "substar_core/media/playback_proxy.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/media/waveform_cache.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/media/spectrogram.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/maw_detail_peaks.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/maw_timing.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/maw_waveform_api.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/media/thumbnails.py",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "editor_revision"
+      ],
+      "outputs": [
+        "media_info",
+        "media_stream"
+      ],
       "calls": [],
-      "invariants": ["Media path is project-contained", "Media kind prefers frozen stream evidence over filename inference", "Waveform request is bounded", "Smart forward snapping searches only the available preceding gap up to one second, requires a local silence-to-speech transition, preserves a bounded pre-roll, and never crosses the previous Cue", "Launching an advanced packaged tutorial repairs both canonical audio locations from the hash-verified example asset", "HTTP Range semantics remain valid"],
-      "failure_modes": ["Missing media", "Invalid range", "Waveform cache corruption"],
-      "recovery": {"strategy": "Rebuild waveform cache from canonical audio; media relink is explicit.", "reuses": ["canonical audio"], "restarts": ["waveform cache generation"], "terminal": "Return explicit missing-media response."},
-      "tests": ["tests/test_media_info.py", "tests/test_smart_forward_snap.py", "tests/test_project_creation_api.py", "tests/test_editor_translation_binding.py", "tests/test_tutorial_examples.py"],
-      "change_impact": {"modules": ["editor_api", "editor_ui", "project_store"], "contracts": ["editor_revision", "media_info", "media_stream"]}
+      "invariants": [
+        "Media path is project-contained",
+        "Media kind prefers frozen stream evidence over filename inference",
+        "Waveform request is bounded",
+        "Smart forward snapping searches only the available preceding gap up to one second, requires a local silence-to-speech transition, preserves a bounded pre-roll, and never crosses the previous Cue",
+        "HTTP Range semantics remain valid"
+      ],
+      "failure_modes": [
+        "Missing media",
+        "Invalid range",
+        "Waveform cache corruption"
+      ],
+      "recovery": {
+        "strategy": "Rebuild waveform cache from canonical audio; media relink is explicit.",
+        "reuses": [
+          "canonical audio"
+        ],
+        "restarts": [
+          "waveform cache generation"
+        ],
+        "terminal": "Return explicit missing-media response."
+      },
+      "tests": [
+        "tests/test_media_info.py",
+        "tests/test_smart_forward_snap.py",
+        "tests/test_project_creation_api.py",
+        "tests/test_editor_translation_binding.py",
+        "tests/test_maw_waveform.py",
+        "tests/test_maw_detail_peaks.py",
+        "tests/test_thumbnails.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "editor_api",
+          "editor_ui",
+          "project_store"
+        ],
+        "contracts": [
+          "editor_revision",
+          "media_info",
+          "media_stream"
+        ]
+      }
     },
     "editor_ui": {
       "title": "Editor browser application",
       "layer": "frontend",
       "role": "Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements.",
-      "must_not": ["Invent backend revisions", "Edit while exclusive AI operation is running", "Rewrite canonical source tokens outside operations"],
-      "code": [{"path": "web/editor.js", "symbols": []}, {"path": "web/editor_cue_selection.js", "symbols": []}, {"path": "web/editor_ass_panel.js", "symbols": []}, {"path": "web/vendor/libass/subtitles-octopus.js", "symbols": []}, {"path": "web/vendor/libass/subtitles-octopus-worker.js", "symbols": []}, {"path": "web/vendor/libass/subtitles-octopus-worker-legacy.js", "symbols": []}, {"path": "web/editor_document.js", "symbols": []}, {"path": "web/editor_document_store.js", "symbols": []}, {"path": "web/editor_operation_queue.js", "symbols": []}, {"path": "web/editor_timeline.js", "symbols": []}, {"path": "web/editor_cue_list_view.js", "symbols": []}, {"path": "web/editor_external_review.js", "symbols": ["build", "resolveScope"]}, {"path": "web/editor_tutorial.js", "symbols": []}, {"path": "web/system_save_as.js", "symbols": []}, {"path": "web/editor_cue_ordering.js", "symbols": []}, {"path": "web/editor_cue_time_controller.js", "symbols": []}, {"path": "web/editor_waveform_cache.js", "symbols": []}, {"path": "web/translation_layout.js", "symbols": []}, {"path": "web/editor_language.js", "symbols": []}, {"path": "web/editor_experimental.js", "symbols": []}, {"path": "web/editor_multiline_timeline.js", "symbols": []}],
-      "inputs": ["editor_revision", "task_record", "translation_result", "calibration_result", "media_info", "media_stream", "subtitle_export", "project_task_info"],
-      "outputs": ["editor_operation", "translation_request", "project_task_info"],
-      "calls": ["editor_api"],
-      "invariants": ["Cue multiselection is independent of token selection and playback-follow state", "Live ASS uses bundled libass and the same generated track as frame preview and burn-in", "Selected project_id never silently falls back to another project", "The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner", "Large Cue lists are windowed", "Editor chrome uses readable 12-15px type, larger controls and proportional sidebar/timeline space; Cue text defaults to 18px with spacious row padding and spacing; source, translation and inline editing share the adjustable font size", "The Cue list keeps its right scrollbar; the full-width bottom timeline slider maps to the viewport center and synchronizes with timeline panning, zooming and playback following without seeking media", "Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar", "External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state", "External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked", "External review preserves Cue timing, upper/lower subtitle text and translation meaning-unit evidence, and explicitly permits one-to-many, many-to-one and many-to-many translation mappings", "Every user-visible export opens the operating-system Save As picker before requesting or writing bytes", "Space inserts text only in a real text-editing context; without modifiers it toggles media playback everywhere else through one capture-phase shortcut route", "The editor export menu exposes exactly upper subtitle, lower subtitle, upper/lower single-line subtitle, upper/lower double-line subtitle and portable subtitle project", "AI calibration uses a button-anchored compact menu whose project-scoped optional instruction affects one run only", "Running editor AI tasks render their durable backend progress in the same title/progress/message hierarchy as split-page pipeline cards", "Informational copy/export notices use the ordinary theme and only actual failures use the red error treatment", "Document edits use the current revision basis", "The task-information dialog edits exactly name, source language, target language and both track line lengths", "Task information changes do not rewrite existing subtitle content", "Editor import accepts portable subtitle projects only", "Audio and video use the same currentTime authority for Cue, subtitle and timeline following", "Playback UI never depends on the existence of video frames", "Virtual CJK lines have character boundaries without word gaps", "Word-language lines retain virtual gaps", "Right-clicking an auxiliary point or virtual boundary splits after its left token", "Right-clicking the final purple connector merges the next Cue", "Left-clicking remains reserved for token selection", "Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers", "Reference choices appear above the selected token and remain reversible", "Reference review notices appear after matching only; loading or refreshing a saved revision never replays historical review notices", "Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract", "Conflicting edits stay unsaved until explicitly resolved.", "Exports drain all pending edits and pin the saved revision.", "Project requests and queue callbacks must belong to the current session.", "Cue DOM is bounded to three pages plus a focused row."],
-      "failure_modes": ["Stale response race", "Revision conflict", "Media unavailable", "AI task lock"],
-      "recovery": {"strategy": "Reload the current project revision and operation state; retain no speculative backend truth.", "reuses": ["project_id", "viewport selection"], "restarts": [], "terminal": "Show the exact structured API error."},
-      "tests": ["tests/editor_cue_selection.test.js", "tests/test_ass_profiles.py", "tests/editor_document_contract.test.js", "tests/editor_auto_snap.test.js", "tests/editor_cue_list_view.test.js", "tests/editor_external_review.test.js", "tests/editor_review_popover_contract.test.js", "tests/editor_calibration_prompt.test.js", "tests/editor_empty_replace_contract.test.js", "tests/editor_space_shortcut.test.js", "tests/system_save_as.test.js", "tests/editor_language.test.js", "tests/editor_media_routing.test.js", "tests/editor_reference_boundary_ui.test.js", "tests/editor_tools_hotfix_ui_contract.test.js", "tests/test_editor_translation_binding.py", "tests/test_project_exchange.py", "tests/test_project_llm_selection.py", "tests/editor_audit_regressions.test.js"],
-      "change_impact": {"modules": ["editor_api_client", "editor_api", "task_info_service", "project_store", "task_service", "translation_service", "calibration_service", "media_service", "project_exchange_service"], "contracts": ["editor_document", "editor_revision", "editor_operation", "task_record", "translation_request", "media_info", "media_stream", "project_task_info"]}
+      "must_not": [
+        "Invent backend revisions",
+        "Edit while exclusive AI operation is running",
+        "Rewrite canonical source tokens outside operations"
+      ],
+      "code": [
+        {
+          "path": "web/editor.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cue_selection.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_ass_panel.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/libass/subtitles-octopus.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/libass/subtitles-octopus-worker.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/libass/subtitles-octopus-worker-legacy.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_document.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_document_store.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_operation_queue.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_timeline.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cue_list_view.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_external_review.js",
+          "symbols": [
+            "build",
+            "resolveScope"
+          ]
+        },
+        {
+          "path": "web/system_save_as.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cue_ordering.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cue_time_controller.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_waveform_cache.js",
+          "symbols": []
+        },
+        {
+          "path": "web/translation_layout.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_language.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_experimental.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_multiline_timeline.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cut_plan_panel.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cut_timeline.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_ass.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_boot.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_boundary.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_gap_snap.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_menus.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_model.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_native_style.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_paint.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_pcm_paint.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_shell.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_timeline.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_maw_waveform_loader.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_speakers.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_thumbnails.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_timeline_tools.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_tool_layout.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/markers/editor-markers-panel.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/editor-thumbnails.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/canvas.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/colors.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/constants.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/controls.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/cue-blocks.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/cue-commands.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/cue-drag-update.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/cue-drag.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/gap-drag.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/input.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/labels.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/layout.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/markers.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/media.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/payload.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/playback.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/pointer.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/render.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/scale-controls.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/scale.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/settings.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/thumbnails.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/timing.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/visibility.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/word-blocks.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/editor/media/waveform/workspace.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/gap-remove-core.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/ass-animation.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/ass-canvas-layout.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/ass-export.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/ass-style.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/data.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/export-plan.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/export-workflow.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/fcp7.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/fonts.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/gap-remove.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/history.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/lottie.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/lrc.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/markers.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/media-metadata.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/multi-subtitle.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/navigation.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/ograf.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/platform.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/preview-geometry.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/segment-timing.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/settings.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/speakers.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/split-alignment.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/split-trim.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/srt.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/sticker-placement.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/text-metrics.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/text-processing.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/timed-text-core.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/timed-text-edit.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/timed-text-plans.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/timeline.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/word-split.js",
+          "symbols": []
+        },
+        {
+          "path": "web/vendor/maw/shared/utils/word-timing.js",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "editor_revision",
+        "task_record",
+        "translation_result",
+        "calibration_result",
+        "media_info",
+        "media_stream",
+        "subtitle_export",
+        "project_task_info"
+      ],
+      "outputs": [
+        "editor_operation",
+        "translation_request",
+        "project_task_info"
+      ],
+      "calls": [
+        "editor_api"
+      ],
+      "invariants": [
+        "Cue multiselection is independent of token selection and playback-follow state",
+        "Live ASS uses bundled libass and the same generated track as frame preview and burn-in",
+        "Selected project_id never silently falls back to another project",
+        "The project picker lists every project in a bounded scroll region and marks completed projects with the secondary-color corner",
+        "Large Cue lists are windowed",
+        "Editor chrome uses readable 12-15px type, larger controls and proportional sidebar/timeline space; Cue text defaults to 18px with spacious row padding and spacing; source, translation and inline editing share the adjustable font size",
+        "The Cue list keeps its right scrollbar; the full-width bottom timeline slider maps to the viewport center and synchronizes with timeline panning, zooming and playback following without seeking media",
+        "Cue redraws use keyed incremental reconciliation: unchanged Cue DOM remains in place, changed/new rows alone are patched, duplicate nodes are removed by final node identity, and reconciliation never reads or writes the scrollbar",
+        "External review uses the same button-anchored ordinary command-popover component as task information and never owns draggable or viewport-position state",
+        "External review is a read-only text projection: current and selected scopes include exactly five surrounding active Cues on each side where available, full scope includes all active Cues, and no provider or editor mutation is invoked",
+        "External review preserves Cue timing, upper/lower subtitle text and translation meaning-unit evidence, and explicitly permits one-to-many, many-to-one and many-to-many translation mappings",
+        "Every user-visible export opens the operating-system Save As picker before requesting or writing bytes",
+        "Space inserts text only in a real text-editing context; without modifiers it toggles media playback everywhere else through one capture-phase shortcut route",
+        "The editor export menu exposes exactly upper subtitle, lower subtitle, upper/lower single-line subtitle, upper/lower double-line subtitle and portable subtitle project",
+        "AI calibration uses a button-anchored compact menu whose project-scoped optional instruction affects one run only",
+        "Running editor AI tasks render their durable backend progress in the same title/progress/message hierarchy as split-page pipeline cards",
+        "Informational copy/export notices use the ordinary theme and only actual failures use the red error treatment",
+        "Document edits use the current revision basis",
+        "The task-information dialog edits exactly name, source language, target language and both track line lengths",
+        "Task information changes do not rewrite existing subtitle content",
+        "Editor import accepts portable subtitle projects only",
+        "Audio and video use the same currentTime authority for Cue, subtitle and timeline following",
+        "Playback UI never depends on the existence of video frames",
+        "Virtual CJK lines have character boundaries without word gaps",
+        "Word-language lines retain virtual gaps",
+        "Right-clicking an auxiliary point or virtual boundary splits after its left token",
+        "Right-clicking the final purple connector merges the next Cue",
+        "Left-clicking remains reserved for token selection",
+        "Applied corrections, active insertions, deleted reference insertions, advisory suggestions and retained ASR have distinct reference markers",
+        "Reference choices appear above the selected token and remain reversible",
+        "Reference review notices appear after matching only; loading or refreshing a saved revision never replays historical review notices",
+        "Search supports contiguous token sequences; combined auto snap computes every smart forward start first, moves touching non-manual Cue pairs as one shared boundary, then evaluates bounded backward filling against the remaining gaps; and every editor control including speaker setup shares the operation lock contract",
+        "Conflicting edits stay unsaved until explicitly resolved.",
+        "Exports drain all pending edits and pin the saved revision.",
+        "Project requests and queue callbacks must belong to the current session.",
+        "Cue DOM is bounded to three pages plus a focused row."
+      ],
+      "failure_modes": [
+        "Stale response race",
+        "Revision conflict",
+        "Media unavailable",
+        "AI task lock"
+      ],
+      "recovery": {
+        "strategy": "Reload the current project revision and operation state; retain no speculative backend truth.",
+        "reuses": [
+          "project_id",
+          "viewport selection"
+        ],
+        "restarts": [],
+        "terminal": "Show the exact structured API error."
+      },
+      "tests": [
+        "tests/editor_cue_selection.test.js",
+        "tests/test_ass_profiles.py",
+        "tests/editor_document_contract.test.js",
+        "tests/editor_auto_snap.test.js",
+        "tests/editor_cue_list_view.test.js",
+        "tests/editor_external_review.test.js",
+        "tests/editor_review_popover_contract.test.js",
+        "tests/editor_calibration_prompt.test.js",
+        "tests/editor_empty_replace_contract.test.js",
+        "tests/editor_space_shortcut.test.js",
+        "tests/system_save_as.test.js",
+        "tests/editor_language.test.js",
+        "tests/editor_media_routing.test.js",
+        "tests/editor_reference_boundary_ui.test.js",
+        "tests/editor_tools_hotfix_ui_contract.test.js",
+        "tests/test_editor_translation_binding.py",
+        "tests/test_project_exchange.py",
+        "tests/test_project_llm_selection.py",
+        "tests/editor_audit_regressions.test.js",
+        "tests/editor_maw_gap_snap.test.js",
+        "tests/editor_maw_word_boundary.test.mjs",
+        "tests/editor_save_safety.test.js",
+        "tests/editor_history_model.test.js",
+        "tests/editor_thumbnails.test.js"
+      ],
+      "change_impact": {
+        "modules": [
+          "editor_api_client",
+          "editor_api",
+          "task_info_service",
+          "project_store",
+          "task_service",
+          "translation_service",
+          "calibration_service",
+          "media_service",
+          "project_exchange_service"
+        ],
+        "contracts": [
+          "editor_document",
+          "editor_revision",
+          "editor_operation",
+          "task_record",
+          "translation_request",
+          "media_info",
+          "media_stream",
+          "project_task_info"
+        ]
+      }
     },
     "editor_api_client": {
       "title": "Editor browser API caller",
@@ -769,16 +1692,102 @@
       "title": "Editor document domain and operation engine",
       "layer": "domain",
       "role": "Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations.",
-      "must_not": ["Perform HTTP or provider calls", "Persist revisions directly", "Conflate user operations with AI operation state"],
-      "code": [{"path": "substar_core/domain/editor_document.py", "symbols": ["EditorDocument"]}, {"path": "substar_core/contracts/editor_document.py", "symbols": []}, {"path": "substar_core/document_operations.py", "symbols": ["apply_document_operation"]}, {"path": "substar_core/editor/domain/cue_ordering.py", "symbols": []}, {"path": "substar_core/editor/domain/cue_timing.py", "symbols": []}, {"path": "substar_core/editor/domain/groups.py", "symbols": []}, {"path": "substar_core/validation.py", "symbols": []}],
-      "inputs": ["editor_operation", "segmentation_candidate"],
-      "outputs": ["editor_document"],
+      "must_not": [
+        "Perform HTTP or provider calls",
+        "Persist revisions directly",
+        "Conflate user operations with AI operation state"
+      ],
+      "code": [
+        {
+          "path": "substar_core/domain/editor_document.py",
+          "symbols": [
+            "EditorDocument"
+          ]
+        },
+        {
+          "path": "substar_core/contracts/editor_document.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/document_operations.py",
+          "symbols": [
+            "apply_document_operation"
+          ]
+        },
+        {
+          "path": "substar_core/editor/domain/cue_ordering.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/domain/cue_timing.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/domain/groups.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/validation.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/cut_timeline.py",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "editor_operation",
+        "segmentation_candidate"
+      ],
+      "outputs": [
+        "editor_document"
+      ],
       "calls": [],
-      "invariants": ["Source-token lineage is immutable", "Cue ordering and timing are valid", "Active Cue intervals are half-open and a manual insert or boundary mutation cannot introduce overlap", "Manual Cue insertion is not subject to the configured minimum duration", "Reference-script source length is advisory while normal-mode hard limits remain hard", "Operations are deterministic and revision-independent pure transformations"],
-      "failure_modes": ["Invalid lineage", "Overlapping Cue timing", "Unknown operation", "Entity state conflict"],
-      "recovery": {"strategy": "Reject the operation and retain the prior immutable revision.", "reuses": ["prior editor revision"], "restarts": [], "terminal": "DocumentOperationError or validation error."},
-      "tests": ["tests/editor_document_contract.test.js", "tests/editor_timeline_manual_cue.test.js", "tests/test_project_exchange.py", "tests/test_reference_script_mode.py", "tests/test_editor_ai_contracts.py"],
-      "change_impact": {"modules": ["project_store", "editor_application", "editor_api", "editor_ui", "segmentation_finalizer"], "contracts": ["editor_document", "editor_operation", "editor_revision"]}
+      "invariants": [
+        "Source-token lineage is immutable",
+        "Cue ordering and timing are valid",
+        "Active Cue intervals are half-open and a manual insert or boundary mutation cannot introduce overlap",
+        "Manual Cue insertion is not subject to the configured minimum duration",
+        "Reference-script source length is advisory while normal-mode hard limits remain hard",
+        "Operations are deterministic and revision-independent pure transformations"
+      ],
+      "failure_modes": [
+        "Invalid lineage",
+        "Overlapping Cue timing",
+        "Unknown operation",
+        "Entity state conflict"
+      ],
+      "recovery": {
+        "strategy": "Reject the operation and retain the prior immutable revision.",
+        "reuses": [
+          "prior editor revision"
+        ],
+        "restarts": [],
+        "terminal": "DocumentOperationError or validation error."
+      },
+      "tests": [
+        "tests/editor_document_contract.test.js",
+        "tests/editor_timeline_manual_cue.test.js",
+        "tests/test_project_exchange.py",
+        "tests/test_reference_script_mode.py",
+        "tests/test_editor_ai_contracts.py",
+        "tests/test_cut_timeline.py",
+        "tests/test_dynamic_speakers.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "project_store",
+          "editor_application",
+          "editor_api",
+          "editor_ui",
+          "segmentation_finalizer"
+        ],
+        "contracts": [
+          "editor_document",
+          "editor_operation",
+          "editor_revision"
+        ]
+      }
     },
     "editor_application": {
       "title": "Editor application and repository ports",
@@ -1009,31 +2018,202 @@
       "title": "Segmentation domain helpers and validators",
       "layer": "domain",
       "role": "Define chunks, hierarchy, candidate materialization, hard-limit validation and semantic grouping contracts used by the production algorithm.",
-      "must_not": ["Own provider credentials", "Commit ProjectStore revisions", "Introduce an alternative source-token projection"],
-      "code": [{"path": "substar_core/segmentation/adaptive_chunking.py", "symbols": []}, {"path": "substar_core/segmentation/chunking.py", "symbols": []}, {"path": "substar_core/segmentation/contracts.py", "symbols": []}, {"path": "substar_core/segmentation/document_builder.py", "symbols": []}, {"path": "substar_core/segmentation/hierarchy.py", "symbols": []}, {"path": "substar_core/segmentation/material.py", "symbols": []}, {"path": "substar_core/segmentation/materializer.py", "symbols": []}, {"path": "substar_core/segmentation/optimizer.py", "symbols": []}, {"path": "substar_core/segmentation/semantic_grouping_contract.py", "symbols": []}, {"path": "substar_core/segmentation/validation.py", "symbols": []}],
-      "inputs": ["segmentation_material", "semantic_grouping_result"],
-      "outputs": ["segmentation_candidate", "editor_document"],
-      "calls": ["editor_domain", "reference_manuscript_service"],
-      "invariants": ["One canonical source projection", "Coverage and order are exact", "Reference-script request defaults resolve break symbols from the frozen source language", "Reference-only insertions enter the editor document as deleted display tokens with no source lineage", "Hard-limit failures identify precise rejected ranges"],
-      "failure_modes": ["Coverage gap", "Over-limit Cue", "Invalid hierarchy", "Lineage mismatch"],
-      "recovery": {"strategy": "Return exact rejected ranges to model repair without altering accepted ranges.", "reuses": ["valid groups"], "restarts": ["invalid ranges"], "terminal": "Create explicit problem-subtitle metadata."},
-      "tests": ["tests/test_semantic_grouping_contract.py", "tests/test_segmentation_runtime.py", "tests/test_reference_script_mode.py", "tests/test_visible_character_limits.py", "tests/test_reference_unified_matching.py"],
-      "change_impact": {"modules": ["segmentation_input_contract", "execution_planner", "semantic_segmentation_algorithm", "segmentation_worker", "segmentation_finalizer", "editor_domain"], "contracts": ["segmentation_material", "semantic_grouping_result", "segmentation_candidate", "editor_document"]}
+      "must_not": [
+        "Own provider credentials",
+        "Commit ProjectStore revisions",
+        "Introduce an alternative source-token projection"
+      ],
+      "code": [
+        {
+          "path": "substar_core/segmentation/adaptive_chunking.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/chunking.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/contracts.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/document_builder.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/hierarchy.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/material.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/materializer.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/optimizer.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/semantic_grouping_contract.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/segmentation/validation.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/cue_limits.py",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "segmentation_material",
+        "semantic_grouping_result"
+      ],
+      "outputs": [
+        "segmentation_candidate",
+        "editor_document"
+      ],
+      "calls": [
+        "editor_domain",
+        "reference_manuscript_service"
+      ],
+      "invariants": [
+        "One canonical source projection",
+        "Coverage and order are exact",
+        "Reference-script request defaults resolve break symbols from the frozen source language",
+        "Reference-only insertions enter the editor document as deleted display tokens with no source lineage",
+        "Hard-limit failures identify precise rejected ranges"
+      ],
+      "failure_modes": [
+        "Coverage gap",
+        "Over-limit Cue",
+        "Invalid hierarchy",
+        "Lineage mismatch"
+      ],
+      "recovery": {
+        "strategy": "Return exact rejected ranges to model repair without altering accepted ranges.",
+        "reuses": [
+          "valid groups"
+        ],
+        "restarts": [
+          "invalid ranges"
+        ],
+        "terminal": "Create explicit problem-subtitle metadata."
+      },
+      "tests": [
+        "tests/test_semantic_grouping_contract.py",
+        "tests/test_segmentation_runtime.py",
+        "tests/test_reference_script_mode.py",
+        "tests/test_visible_character_limits.py",
+        "tests/test_reference_unified_matching.py",
+        "tests/test_cue_language_limits.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "segmentation_input_contract",
+          "execution_planner",
+          "semantic_segmentation_algorithm",
+          "segmentation_worker",
+          "segmentation_finalizer",
+          "editor_domain"
+        ],
+        "contracts": [
+          "segmentation_material",
+          "semantic_grouping_result",
+          "segmentation_candidate",
+          "editor_document"
+        ]
+      }
     },
     "translation_domain": {
       "title": "Translation domain contracts and grouping",
       "layer": "domain",
       "role": "Build meaning-unit groups, validate model output and persist translation artifacts used by the translation service.",
-      "must_not": ["Generate fallback translation text", "Change source Cue topology", "Accept duplicate final ownership for a Cue"],
-      "code": [{"path": "substar_core/editor/translation/artifacts.py", "symbols": []}, {"path": "substar_core/editor/translation/contracts.py", "symbols": []}, {"path": "substar_core/editor/translation/grouping.py", "symbols": []}, {"path": "substar_core/semantic_execution.py", "symbols": ["validate_presentation_plan"]}, {"path": "substar_core/translation_atoms.py", "symbols": []}, {"path": "substar_core/translation_context.py", "symbols": []}],
-      "inputs": ["editor_revision"],
-      "outputs": ["translation_result"],
+      "must_not": [
+        "Generate fallback translation text",
+        "Change source Cue topology",
+        "Accept duplicate final ownership for a Cue"
+      ],
+      "code": [
+        {
+          "path": "substar_core/editor/translation/artifacts.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/translation/contracts.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/translation/grouping.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/semantic_execution.py",
+          "symbols": [
+            "validate_presentation_plan"
+          ]
+        },
+        {
+          "path": "substar_core/translation_atoms.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/translation_context.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/editor/translation/regroup.py",
+          "symbols": []
+        }
+      ],
+      "inputs": [
+        "editor_revision"
+      ],
+      "outputs": [
+        "translation_result"
+      ],
       "calls": [],
-      "invariants": ["Meaning groups preserve source order", "Every final Cue text has unique ownership", "Program validation does not rewrite model wording"],
-      "failure_modes": ["Missing Cue", "Duplicate Cue", "Invalid meaning-unit assignment"],
-      "recovery": {"strategy": "Collect structural errors within the original execution block and request at most one complete block rewrite. Punctuation and length quality warnings do not trigger repair.", "reuses": ["valid translation results", "valid repaired blocks"], "restarts": ["one structurally invalid block once"], "terminal": "Keep unresolved Cues explicit; never synthesize fallback translation text."},
-      "tests": ["tests/test_translation_runner_contract.py", "tests/test_editor_translation_binding.py"],
-      "change_impact": {"modules": ["translation_service", "editor_domain", "project_store"], "contracts": ["editor_revision", "translation_result"]}
+      "invariants": [
+        "Meaning groups preserve source order",
+        "Every final Cue text has unique ownership",
+        "Program validation does not rewrite model wording"
+      ],
+      "failure_modes": [
+        "Missing Cue",
+        "Duplicate Cue",
+        "Invalid meaning-unit assignment"
+      ],
+      "recovery": {
+        "strategy": "Collect structural errors within the original execution block and request at most one complete block rewrite. Punctuation and length quality warnings do not trigger repair.",
+        "reuses": [
+          "valid translation results",
+          "valid repaired blocks"
+        ],
+        "restarts": [
+          "one structurally invalid block once"
+        ],
+        "terminal": "Keep unresolved Cues explicit; never synthesize fallback translation text."
+      },
+      "tests": [
+        "tests/test_translation_runner_contract.py",
+        "tests/test_editor_translation_binding.py",
+        "tests/test_translation_regroup.py"
+      ],
+      "change_impact": {
+        "modules": [
+          "translation_service",
+          "editor_domain",
+          "project_store"
+        ],
+        "contracts": [
+          "editor_revision",
+          "translation_result"
+        ]
+      }
     },
     "shared_security_utilities": {
       "title": "Shared filesystem, security and canonicalization utilities",

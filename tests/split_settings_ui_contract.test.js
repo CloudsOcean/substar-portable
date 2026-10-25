@@ -56,13 +56,13 @@ test("recent-task export menus open upward without card clipping", () => {
   assert.match(splitCss, /\.export-menu-panel \{[^}]*bottom: calc\(100% \+ 7px\);[^}]*z-index: 30;/s);
 });
 
-test("language ratio threshold is a persisted 0-100 slider defaulting to twenty percent", () => {
-  assert.match(splitHtml, /id="languageRatioThresholdInput" type="range" min="0" max="100" step="1" value="20"/);
-  assert.match(splitHtml, /id="languageRatioThresholdValue"[^>]*>20%<\/output>/);
-  assert.match(splitJs, /language_ratio_threshold_percent: Number\(\$\("#languageRatioThresholdInput"\)\.value\)/);
-  assert.match(splitJs, /effective\.language_ratio_threshold_percent \?\? 20/);
-  assert.match(splitJs, /#languageRatioThresholdInput"\)\.addEventListener\("input", syncLanguageRatioThreshold\)/);
-  assert.doesNotMatch(splitHtml, /中英混合/);
+test("other language limit persists with default 55 and replaces the retired ratio control", () => {
+  assert.doesNotMatch(splitHtml, /languageRatioThresholdInput|languageRatioThresholdValue/);
+  assert.doesNotMatch(splitJs, /language_ratio_threshold_percent|syncLanguageRatioThreshold/);
+  assert.match(splitHtml, /id="otherLimitInput"[^>]*value="55"/);
+  assert.match(splitJs, /other_hard_limit: Number/);
+  assert.match(splitJs, /effective\.other_hard_limit \?\? 55/);
+  assert.match(splitHtml, /行内多语言使用混合上限/);
 });
 
 test("terminal editor task cards can be deleted without deleting their projects", () => {

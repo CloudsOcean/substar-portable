@@ -1,0 +1,232 @@
+// pointer: waveform class methods with explicit dependencies.
+export function createWaveformModule(dependencies) {
+  'use strict';
+  const { clamp, resolveTiming, snapPointerTimeToTimingGrid } = dependencies;
+
+  class WaveformMethods {
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    pointerTimeMs(event, row, geometry = null, allowCrossRow = false) {
+      const requestedMs = allowCrossRow
+        ? this.timeFromPointerUnbounded(event, row, geometry)
+        : this.timeFromPointer(event, row, geometry);
+      return snapPointerTimeToTimingGrid(
+        requestedMs,
+        this.cueTiming(),
+        this.options.getSnapToFrame?.() === true,
+      );
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    refreshPointerLine(geometry = null) {
+      if (this.pointerLineOverrideActive) {
+        if (this.markerDrag || this.markerCreateDrag) this.refreshMarkerDragPointerLine();
+        else this.refreshBoundaryDragPointerLine();
+        return;
+      }
+      if (!this.pointerLineEvent || !this.pointerLineRow || !this.pointerLineMarker) return;
+      if (!this.pointerLineRow.isConnected) return;
+      this.showPointerLine(this.pointerLineEvent, this.pointerLineRow, this.pointerLineMarker, geometry);
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    showPointerLine(event, row, marker, geometry = null) {
+      if (!row || !marker) return;
+      const contentLeft = geometry ? geometry.left : row.getBoundingClientRect().left + row.clientLeft;
+      const contentWidth = Math.max(1, geometry ? geometry.width : row.clientWidth);
+      const rawLeft = clamp(event.clientX - contentLeft, 0, contentWidth);
+      const startMs = Number(row.dataset.startMs);
+      const endMs = Number(row.dataset.endMs);
+      const timeMs = this.pointerTimeMs(event, row, geometry);
+      const left = Number.isFinite(timeMs) && Number.isFinite(startMs) && Number.isFinite(endMs)
+        ? clamp(((timeMs - startMs) / Math.max(1, endMs - startMs)) * contentWidth, 0, contentWidth)
+        : rawLeft;
+      marker.style.left = `${left}px`;
+      marker.classList.remove('boundary-snapped');
+      marker.hidden = false;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    hidePointerLine(marker) {
+      if (marker) marker.hidden = true;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    isCueBoundaryDrag(drag = this.drag) {
+      return Boolean(drag && [
+        'resize-left', 'resize-right', 'resize-boundary', 'resize-boundary-independent',
+      ].includes(drag.kind));
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    findVisibleWaveformRowAtPoint(clientX, clientY) {
+      const viewport = this.scroll.getBoundingClientRect();
+      const viewportLeft = viewport.left + this.scroll.clientLeft;
+      const viewportTop = viewport.top + this.scroll.clientTop;
+      const viewportRight = viewportLeft + this.scroll.clientWidth;
+      const viewportBottom = viewportTop + this.scroll.clientHeight;
+      if (clientX < viewportLeft || clientX > viewportRight
+          || clientY < viewportTop || clientY > viewportBottom) return null;
+      return this.findVisibleWaveformRowAtY(clientY);
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    findVisibleWaveformRowAtY(clientY) {
+      const viewport = this.scroll.getBoundingClientRect();
+      const viewportTop = viewport.top + this.scroll.clientTop;
+      const viewportBottom = viewportTop + this.scroll.clientHeight;
+      if (clientY < viewportTop || clientY > viewportBottom) return null;
+      return [...(/** @type {NodeListOf<import('./waveform-types.js').WaveformRow>} */ (this.content.querySelectorAll('.waveform-row')))].find((row) => {
+        const rect = row.getBoundingClientRect();
+        return clientY >= rect.top && clientY <= rect.bottom;
+      }) || null;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    findVisibleWaveformRowForTime(timeMs) {
+      const rows = [...(/** @type {NodeListOf<import('./waveform-types.js').WaveformRow>} */ (this.content.querySelectorAll('.waveform-row')))];
+      // 行末时间由前一行持有，和中缝覆盖层的归属规则一致。
+      const endingRow = rows.find((row) => Math.abs(Number(row.dataset.endMs) - timeMs) < 1);
+      if (endingRow) return endingRow;
+      return rows.find((row) => timeMs >= Number(row.dataset.startMs)
+        && timeMs < Number(row.dataset.endMs))
+        || rows.find((row) => timeMs >= Number(row.dataset.startMs)
+          && timeMs <= Number(row.dataset.endMs))
+        || null;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    cueBoundaryDragTimeMs(drag = this.drag) {
+      if (!this.isCueBoundaryDrag(drag)) return NaN;
+      const segment = this.options.getSegments(drag.track || 'main')[drag.index];
+      if (!segment) return NaN;
+      const timing = resolveTiming(drag.timing || this.cueTiming());
+      const edge = drag.kind === 'resize-left'
+        ? 'start'
+        : drag.kind === 'resize-boundary-independent'
+          ? drag.edge
+          : 'end';
+      return timing.toMs(edge === 'start' ? timing.getStart(segment) : timing.getEnd(segment));
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    refreshBoundaryDragPointerLine(force = false) {
+      const drag = this.drag;
+      if (!this.isCueBoundaryDrag(drag) || (!drag.started && !force)) return;
+      this.pointerLineOverrideActive = true;
+      const timeMs = this.cueBoundaryDragTimeMs(drag);
+      this.showDragPointerLineAtTime(timeMs);
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    showDragPointerLineAtTime(timeMs, preferRowStart = false) {
+      const startingRow = preferRowStart
+        ? [...(/** @type {NodeListOf<import('./waveform-types.js').WaveformRow>} */ (this.content.querySelectorAll('.waveform-row')))]
+          .find((row) => Math.abs(Number(row.dataset.startMs) - timeMs) < 1) : null;
+      const row = Number.isFinite(timeMs) ? startingRow || this.findVisibleWaveformRowForTime(timeMs) : null;
+      (/** @type {NodeListOf<import('./waveform-types.js').WaveformPointerMarker>} */ (this.content.querySelectorAll('.waveform-pointer-line'))).forEach((marker) => {
+        marker.classList.remove('boundary-snapped');
+        marker.hidden = true;
+      });
+      if (!row) return;
+      const marker = (/** @type {import('./waveform-types.js').WaveformPointerMarker} */ (row.querySelector('.waveform-pointer-line')));
+      if (!marker) return;
+      const contentWidth = Math.max(1, row.clientWidth);
+      const startMs = Number(row.dataset.startMs);
+      const endMs = Number(row.dataset.endMs);
+      const left = clamp(
+        ((timeMs - startMs) / Math.max(1, endMs - startMs)) * contentWidth,
+        0,
+        contentWidth,
+      );
+      marker.style.left = `${left}px`;
+      marker.classList.add('boundary-snapped');
+      marker.hidden = false;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    restorePointerLineAfterBoundaryDrag(position = null) {
+      this.pointerLineOverrideActive = false;
+      (/** @type {NodeListOf<import('./waveform-types.js').WaveformPointerMarker>} */ (this.content.querySelectorAll('.waveform-pointer-line'))).forEach((marker) => {
+        marker.classList.remove('boundary-snapped');
+        marker.hidden = true;
+      });
+      if (!position || !Number.isFinite(position.clientX) || !Number.isFinite(position.clientY)) {
+        this.pointerLineEvent = null;
+        this.pointerLineRow = null;
+        this.pointerLineMarker = null;
+        return;
+      }
+      const row = this.findVisibleWaveformRowAtPoint(position.clientX, position.clientY);
+      const marker = (/** @type {import('./waveform-types.js').WaveformPointerMarker} */ (row?.querySelector('.waveform-pointer-line')));
+      if (!row || !marker) {
+        this.pointerLineEvent = null;
+        this.pointerLineRow = null;
+        this.pointerLineMarker = null;
+        return;
+      }
+      const pointerEvent = { clientX: position.clientX };
+      this.pointerLineEvent = pointerEvent;
+      this.pointerLineRow = row;
+      this.pointerLineMarker = marker;
+      this.showPointerLine(pointerEvent, row, marker);
+    }
+
+
+    // 暂停时指针在波形上移动即把画面预览到指针时间。与拖动播放头一样按
+    // 最新事件合并到每帧最多一次；真正 seek 前重新检查开关与播放状态，
+    // 避免调度之后状态已变化（开始播放、关闭开关、行被虚拟化重建）仍执行。
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    scheduleHoverSeekPreview(event, row) {
+      if (this.playheadDragActive || this.wordDrag || this.isCueBoundaryDrag()
+          || this.options.getHoverSeekPreview?.() !== true) return;
+      this.hoverSeekPreviewLastEvent = event;
+      this.hoverSeekPreviewRow = row;
+      if (this.hoverSeekPreviewFrame) return;
+      this.hoverSeekPreviewFrame = requestAnimationFrame(() => this.flushHoverSeekPreview());
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    cancelHoverSeekPreview() {
+      if (this.hoverSeekPreviewFrame) {
+        cancelAnimationFrame(this.hoverSeekPreviewFrame);
+        this.hoverSeekPreviewFrame = 0;
+      }
+      this.hoverSeekPreviewLastEvent = null;
+      this.hoverSeekPreviewRow = null;
+    }
+
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    flushHoverSeekPreview() {
+      this.hoverSeekPreviewFrame = 0;
+      const event = this.hoverSeekPreviewLastEvent;
+      const row = this.hoverSeekPreviewRow;
+      this.hoverSeekPreviewLastEvent = null;
+      this.hoverSeekPreviewRow = null;
+      if (!event || !row) return;
+      if (this.options.getHoverSeekPreview?.() !== true) return;
+      if (!this.player || !this.mediaAvailable) return;
+      if (!this.player.paused) return;
+      if (event.buttons !== 0) return;
+      if (!row.isConnected) return;
+      this.seekFromPointer(event, row, false);
+    }
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(WaveformMethods.prototype);
+  delete descriptors.constructor;
+  return descriptors;
+}

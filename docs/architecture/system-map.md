@@ -209,7 +209,7 @@ flowchart LR
 
 | Module | Layer | Responsibility | Code | Inputs | Outputs | Calls |
 |---|---|---|---|---|---|---|
-| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/subtitle_input.js`<br>`web/asr_assist.js`<br>`web/glossary_injection.js`<br>`web/ai_progress_summary.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
+| `split_ui` | `frontend_connector` | Collect media, source-language-aware normal/reference-script segmentation settings and frozen break symbols, create projects, and project durable task progress. | `web/split.js`<br>`web/subtitle_input.js`<br>`web/asr_assist.js`<br>`web/glossary_injection.js`<br>`web/ai_progress_summary.js`<br>`web/split-refinements.js`<br>`web/split-concepts/concepts.js`<br>`web/split-concepts/dark-glass.js`<br>`web/split-concepts/paper-dark.js` | `project_creation_projection` | `project_creation_request` | `composition_root`<br>`editor_api` |
 | `composition_root` | `api` | Own process startup, router composition, uploads, stable project identity, prompt-component HTTP boundaries and the project-creation facade. | `app.py`<br>`substar_core/asr_assist.py` | `project_creation_request`<br>`task_record`<br>`editor_revision`<br>`credential_reference`<br>`production_prompt_component` | `project_creation_projection`<br>`transcription_request`<br>`segmentation_request`<br>`production_prompt_component` | `creation_graph`<br>`creation_projection`<br>`runtime_api`<br>`editor_api`<br>`credential_store`<br>`model_stage_scheduler` |
 | `creation_graph` | `application` | Freeze prompt/reference snapshots and create transcription then segmentation tasks with an explicit dependency. | `substar_core/creation/graph.py` | `transcription_request`<br>`segmentation_request` | `task_record` | `task_service` |
 | `creation_projection` | `application` | Combine transcription, segmentation and ProjectStore facts into one UI-safe creation status. | `substar_core/creation/projection.py` | `task_record`<br>`editor_revision` | `project_creation_projection` | — |
@@ -234,14 +234,14 @@ flowchart LR
 | `segmentation_model_connector` | `provider_connector` | Render the frozen task/language prompt, append one authoritative Cue Script grammar, apply stage-specific model scheduling and call the active cloud OpenAI-compatible text endpoint. | `substar_core/model_gateway/gateway.py`<br>`substar_core/openai_compat.py`<br>`substar_core/cue_script.py`<br>`prompts/production/segmentation/common/semantic_grouping.md`<br>`prompts/production/segmentation/common/semantic_grouping_repair.md` | `segmentation_material`<br>`segmentation_request`<br>`credential_reference` | `semantic_grouping_result`<br>`model_text_exchange` | — |
 | `segmentation_finalizer` | `finalizer` | Revalidate registered segmentation artifacts against the same canonical projection, commit Revision 1 and publish the project atomically. | `substar_core/segmentation/handler.py` | `segmentation_request`<br>`segmentation_result`<br>`segmentation_candidate`<br>`recognition_evidence`<br>`editor_document`<br>`worker_completion` | `editor_revision`<br>`task_record` | `segmentation_input_contract`<br>`reference_manuscript_service`<br>`project_store` |
 | `project_store` | `persistence` | Validate and atomically persist immutable editor revisions with optimistic concurrency and integrity checks. | `substar_core/storage/project_store.py` | `editor_document`<br>`editor_operation` | `editor_revision` | — |
-| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py`<br>`substar_core/editor/subtitle_api.py`<br>`substar_core/editor/application/subtitle_project_import.py`<br>`substar_core/editor/application/review_notes.py`<br>`substar_core/editor/application/review_exchange.py`<br>`substar_core/editor/application/review_store.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
+| `editor_api` | `api` | Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands. | `substar_core/editor/http_api.py`<br>`substar_core/editor/subtitle_api.py`<br>`substar_core/editor/application/subtitle_project_import.py`<br>`substar_core/editor/application/review_notes.py`<br>`substar_core/editor/application/review_exchange.py`<br>`substar_core/editor/application/review_store.py`<br>`substar_core/editor/cut_api.py` | `editor_operation`<br>`task_record`<br>`editor_revision`<br>`reference_document`<br>`translation_request`<br>`project_task_info`<br>`external_ai_exchange` | `editor_revision`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`project_task_info`<br>`external_ai_exchange` | `project_store`<br>`task_info_service`<br>`task_service`<br>`reference_manuscript_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service` |
 | `task_info_service` | `application_service` | Load, validate and atomically save the required v2 project task-information fields, including the optional project-scoped LLM provider. | `substar_core/task_info.py` | `project_task_info`<br>`settings_snapshot`<br>`project_creation_projection` | `project_task_info` | `settings_service` |
 | `translation_service` | `model_orchestration` | Translate original execution blocks using N|source input and N[-M]|target output (v16-numeric-pipe); both modes share the standard task container. Expand shared translations into original timed slots. Historical Cue syntax is read-compatible only; segmentation uses N|W####[-W####] and calibration uses N|corrected source; their binding and validation semantics remain unchanged. | `substar_core/editor/translation/handler.py`<br>`substar_core/editor/translation/worker.py`<br>`substar_core/editor/translation/runner.py`<br>`substar_core/editor/translation/contextual.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/translation/result_policy.py`<br>`substar_core/ai_block_cache.py`<br>`scripts/run_translation_worker.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`translation_request`<br>`model_text_exchange` | `task_record`<br>`translation_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
 | `calibration_service` | `model_orchestration` | Ask for number|corrected-source rows (numeric-pipe v2), deterministically align request-local numbers to the immutable token ledger and apply only validated punctuation, casing, terminology, proper-name and ASR corrections. Historical C aliases remain readable. | `substar_core/editor/calibration/handler.py`<br>`substar_core/editor/calibration/worker.py`<br>`substar_core/editor/calibration/service.py`<br>`substar_core/editor/calibration/exchange.py`<br>`substar_core/cue_script.py`<br>`substar_core/editor/calibration/contracts.py`<br>`prompts/production/calibration/en.md`<br>`prompts/production/calibration/zh.md`<br>`prompts/production/calibration/ja.md`<br>`prompts/production/calibration/ko.md`<br>`prompts/production/calibration/mixed.md`<br>`scripts/run_calibration_worker.py`<br>`substar_core/editor/http_api.py` | `task_record`<br>`editor_revision`<br>`credential_reference`<br>`model_text_exchange` | `task_record`<br>`calibration_result`<br>`editor_revision`<br>`model_text_exchange`<br>`editor_candidate` | `task_service`<br>`scheduler`<br>`worker_supervisor`<br>`model_stage_scheduler`<br>`project_store` |
-| `media_service` | `domain_service` | Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py`<br>`substar_core/media/spectrogram.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
-| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_cue_selection.js`<br>`web/editor_ass_panel.js`<br>`web/vendor/libass/subtitles-octopus.js`<br>`web/vendor/libass/subtitles-octopus-worker.js`<br>`web/vendor/libass/subtitles-octopus-worker-legacy.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/editor_tutorial.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/translation_layout.js`<br>`web/editor_language.js`<br>`web/editor_experimental.js`<br>`web/editor_multiline_timeline.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
+| `media_service` | `domain_service` | Describe project media, serve bounded waveform windows and detail peaks, detect speech onsets, and generate cached thumbnail previews. | `substar_core/editor/http_api.py`<br>`substar_core/media/playback_proxy.py`<br>`substar_core/media/waveform_cache.py`<br>`substar_core/media/spectrogram.py`<br>`substar_core/editor/maw_detail_peaks.py`<br>`substar_core/editor/maw_timing.py`<br>`substar_core/editor/maw_waveform_api.py`<br>`substar_core/media/thumbnails.py` | `editor_revision` | `media_info`<br>`media_stream` | — |
+| `editor_ui` | `frontend` | Render bounded Cue windows and the scrollable project picker, route audio/video elements through one currentTime playback clock, synchronize Cue/subtitle/waveform state, expose project model selection and failed-task recovery, and submit revision-bound operations including reversible blank replacements. | `web/editor.js`<br>`web/editor_cue_selection.js`<br>`web/editor_ass_panel.js`<br>`web/vendor/libass/subtitles-octopus.js`<br>`web/vendor/libass/subtitles-octopus-worker.js`<br>`web/vendor/libass/subtitles-octopus-worker-legacy.js`<br>`web/editor_document.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js`<br>`web/editor_timeline.js`<br>`web/editor_cue_list_view.js`<br>`web/editor_external_review.js`<br>`web/system_save_as.js`<br>`web/editor_cue_ordering.js`<br>`web/editor_cue_time_controller.js`<br>`web/editor_waveform_cache.js`<br>`web/translation_layout.js`<br>`web/editor_language.js`<br>`web/editor_experimental.js`<br>`web/editor_multiline_timeline.js`<br>`web/editor_cut_plan_panel.js`<br>`web/editor_cut_timeline.js`<br>`web/editor_maw_ass.js`<br>`web/editor_maw_boot.js`<br>`web/editor_maw_boundary.js`<br>`web/editor_maw_gap_snap.js`<br>`web/editor_maw_menus.js`<br>`web/editor_maw_model.js`<br>`web/editor_maw_native_style.js`<br>`web/editor_maw_paint.js`<br>`web/editor_maw_pcm_paint.js`<br>`web/editor_maw_shell.js`<br>`web/editor_maw_timeline.js`<br>`web/editor_maw_waveform_loader.js`<br>`web/editor_speakers.js`<br>`web/editor_thumbnails.js`<br>`web/editor_timeline_tools.js`<br>`web/editor_tool_layout.js`<br>`web/vendor/maw/editor/markers/editor-markers-panel.js`<br>`web/vendor/maw/editor/media/editor-thumbnails.js`<br>`web/vendor/maw/editor/media/waveform.js`<br>`web/vendor/maw/editor/media/waveform/canvas.js`<br>`web/vendor/maw/editor/media/waveform/colors.js`<br>`web/vendor/maw/editor/media/waveform/constants.js`<br>`web/vendor/maw/editor/media/waveform/controls.js`<br>`web/vendor/maw/editor/media/waveform/cue-blocks.js`<br>`web/vendor/maw/editor/media/waveform/cue-commands.js`<br>`web/vendor/maw/editor/media/waveform/cue-drag-update.js`<br>`web/vendor/maw/editor/media/waveform/cue-drag.js`<br>`web/vendor/maw/editor/media/waveform/gap-drag.js`<br>`web/vendor/maw/editor/media/waveform/input.js`<br>`web/vendor/maw/editor/media/waveform/labels.js`<br>`web/vendor/maw/editor/media/waveform/layout.js`<br>`web/vendor/maw/editor/media/waveform/markers.js`<br>`web/vendor/maw/editor/media/waveform/media.js`<br>`web/vendor/maw/editor/media/waveform/payload.js`<br>`web/vendor/maw/editor/media/waveform/playback.js`<br>`web/vendor/maw/editor/media/waveform/pointer.js`<br>`web/vendor/maw/editor/media/waveform/render.js`<br>`web/vendor/maw/editor/media/waveform/scale-controls.js`<br>`web/vendor/maw/editor/media/waveform/scale.js`<br>`web/vendor/maw/editor/media/waveform/settings.js`<br>`web/vendor/maw/editor/media/waveform/thumbnails.js`<br>`web/vendor/maw/editor/media/waveform/timing.js`<br>`web/vendor/maw/editor/media/waveform/visibility.js`<br>`web/vendor/maw/editor/media/waveform/word-blocks.js`<br>`web/vendor/maw/editor/media/waveform/workspace.js`<br>`web/vendor/maw/shared/gap-remove-core.js`<br>`web/vendor/maw/shared/utils/ass-animation.js`<br>`web/vendor/maw/shared/utils/ass-canvas-layout.js`<br>`web/vendor/maw/shared/utils/ass-export.js`<br>`web/vendor/maw/shared/utils/ass-style.js`<br>`web/vendor/maw/shared/utils/data.js`<br>`web/vendor/maw/shared/utils/export-plan.js`<br>`web/vendor/maw/shared/utils/export-workflow.js`<br>`web/vendor/maw/shared/utils/fcp7.js`<br>`web/vendor/maw/shared/utils/fonts.js`<br>`web/vendor/maw/shared/utils/gap-remove.js`<br>`web/vendor/maw/shared/utils/history.js`<br>`web/vendor/maw/shared/utils/lottie.js`<br>`web/vendor/maw/shared/utils/lrc.js`<br>`web/vendor/maw/shared/utils/markers.js`<br>`web/vendor/maw/shared/utils/media-metadata.js`<br>`web/vendor/maw/shared/utils/multi-subtitle.js`<br>`web/vendor/maw/shared/utils/navigation.js`<br>`web/vendor/maw/shared/utils/ograf.js`<br>`web/vendor/maw/shared/utils/platform.js`<br>`web/vendor/maw/shared/utils/preview-geometry.js`<br>`web/vendor/maw/shared/utils/segment-timing.js`<br>`web/vendor/maw/shared/utils/settings.js`<br>`web/vendor/maw/shared/utils/speakers.js`<br>`web/vendor/maw/shared/utils/split-alignment.js`<br>`web/vendor/maw/shared/utils/split-trim.js`<br>`web/vendor/maw/shared/utils/srt.js`<br>`web/vendor/maw/shared/utils/sticker-placement.js`<br>`web/vendor/maw/shared/utils/text-metrics.js`<br>`web/vendor/maw/shared/utils/text-processing.js`<br>`web/vendor/maw/shared/utils/timed-text-core.js`<br>`web/vendor/maw/shared/utils/timed-text-edit.js`<br>`web/vendor/maw/shared/utils/timed-text-plans.js`<br>`web/vendor/maw/shared/utils/timeline.js`<br>`web/vendor/maw/shared/utils/word-split.js`<br>`web/vendor/maw/shared/utils/word-timing.js` | `editor_revision`<br>`task_record`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream`<br>`subtitle_export`<br>`project_task_info` | `editor_operation`<br>`translation_request`<br>`project_task_info` | `editor_api` |
 | `editor_api_client` | `frontend_connector` | Own editor HTTP request construction, error decoding, project identity and response-to-store handoff. | `web/editor.js`<br>`web/editor_ass_panel.js`<br>`web/editor_document_store.js`<br>`web/editor_operation_queue.js` | `editor_operation`<br>`project_creation_projection` | `editor_revision`<br>`task_record`<br>`translation_request`<br>`translation_result`<br>`calibration_result`<br>`media_info`<br>`media_stream` | `editor_api`<br>`composition_root` |
-| `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
+| `editor_domain` | `domain` | Define tokens, Cues, groups, timing/order invariants, mode-aware non-mutating validation and pure document operations. | `substar_core/domain/editor_document.py`<br>`substar_core/contracts/editor_document.py`<br>`substar_core/document_operations.py`<br>`substar_core/editor/domain/cue_ordering.py`<br>`substar_core/editor/domain/cue_timing.py`<br>`substar_core/editor/domain/groups.py`<br>`substar_core/validation.py`<br>`substar_core/cut_timeline.py` | `editor_operation`<br>`segmentation_candidate` | `editor_document` | — |
 | `editor_application` | `application` | Apply revision-bound operations through a repository abstraction and translate domain conflicts into API-safe conflicts. | `substar_core/editor/application/revision_service.py`<br>`substar_core/editor/application/editing_service.py`<br>`substar_core/editor/application/reference_annotations.py`<br>`substar_core/editor/application/text_retiming.py`<br>`substar_core/editor/api/editing_endpoints.py`<br>`substar_core/editor/ports/project_repository.py`<br>`substar_core/editor/infrastructure/sqlite_project_repository.py`<br>`substar_core/editor/application/publication.py`<br>`substar_core/editor/application/reference.py`<br>`substar_core/editor/application/srt_import.py`<br>`scripts/run_reference_match.py`<br>`substar_core/editor/application/selective_restore.py` | `editor_operation`<br>`editor_revision`<br>`editor_candidate` | `editor_revision` | `editor_domain`<br>`project_store` |
 | `reference_manuscript_service` | `domain_service` | Use one local reference matcher for creation and editor rematching. Aligned manuscript wording replaces ASR; ASR-only words remain visible and reference-only or ambiguous words are reversible, hidden insertions. | `substar_core/manuscript_matching.py`<br>`substar_core/reference_phonetics.py`<br>`substar_core/filenames.py` | `reference_document`<br>`recognition_evidence`<br>`editor_revision`<br>`segmentation_request` | `reference_document`<br>`segmentation_material`<br>`editor_operation` | `editor_domain` |
 | `presentation_service` | `domain_service` | Project stored text into source/translation display lines and perform explicit generic, Taiwan-vocabulary or Hong-Kong-vocabulary Chinese script conversion. | `substar_core/translation_layout.py`<br>`substar_core/presentation.py`<br>`substar_core/punctuation.py`<br>`substar_core/chinese_script.py`<br>`substar_core/language_layout.py` | `editor_revision`<br>`editor_operation` | `editor_document` | `editor_domain` |
@@ -257,8 +257,8 @@ flowchart LR
 | `local_environment_service` | `optional_capability` | Diagnose source-install local runtimes and manage optional local model paths/assets outside the cloud-only beta path. | `substar_core/environment_doctor.py`<br>`substar_core/model_assets.py`<br>`substar_core/model_paths.py`<br>`substar_core/asr_longform.py` | `settings_snapshot`<br>`release_manifest` | `settings_snapshot` | — |
 | `web_shell` | `frontend` | Serve the four application pages and maintain shared visual personalization without owning business state. | `substar_core/web_routes.py`<br>`web/theme/personalization.js`<br>`web/theme/tokens.css`<br>`web/project_label.js`<br>`web/design-directions.html` | `settings_snapshot` | — | `split_ui`<br>`editor_ui`<br>`settings_ui`<br>`glossary_ui` |
 | `recognition_contracts` | `contract` | Register supported recognition profiles and validate provider-independent transcription artifacts. | `substar_core/recognition/registry.py`<br>`substar_core/recognition/contracts.py`<br>`substar_core/transcription/contracts.py`<br>`substar_core/transcription/artifacts.py`<br>`substar_core/artifacts.py` | `transcription_request`<br>`recognition_evidence` | `recognition_evidence`<br>`transcription_result` | — |
-| `segmentation_domain` | `domain` | Define chunks, hierarchy, candidate materialization, hard-limit validation and semantic grouping contracts used by the production algorithm. | `substar_core/segmentation/adaptive_chunking.py`<br>`substar_core/segmentation/chunking.py`<br>`substar_core/segmentation/contracts.py`<br>`substar_core/segmentation/document_builder.py`<br>`substar_core/segmentation/hierarchy.py`<br>`substar_core/segmentation/material.py`<br>`substar_core/segmentation/materializer.py`<br>`substar_core/segmentation/optimizer.py`<br>`substar_core/segmentation/semantic_grouping_contract.py`<br>`substar_core/segmentation/validation.py` | `segmentation_material`<br>`semantic_grouping_result` | `segmentation_candidate`<br>`editor_document` | `editor_domain`<br>`reference_manuscript_service` |
-| `translation_domain` | `domain` | Build meaning-unit groups, validate model output and persist translation artifacts used by the translation service. | `substar_core/editor/translation/artifacts.py`<br>`substar_core/editor/translation/contracts.py`<br>`substar_core/editor/translation/grouping.py`<br>`substar_core/semantic_execution.py`<br>`substar_core/translation_atoms.py`<br>`substar_core/translation_context.py` | `editor_revision` | `translation_result` | — |
+| `segmentation_domain` | `domain` | Define chunks, hierarchy, candidate materialization, hard-limit validation and semantic grouping contracts used by the production algorithm. | `substar_core/segmentation/adaptive_chunking.py`<br>`substar_core/segmentation/chunking.py`<br>`substar_core/segmentation/contracts.py`<br>`substar_core/segmentation/document_builder.py`<br>`substar_core/segmentation/hierarchy.py`<br>`substar_core/segmentation/material.py`<br>`substar_core/segmentation/materializer.py`<br>`substar_core/segmentation/optimizer.py`<br>`substar_core/segmentation/semantic_grouping_contract.py`<br>`substar_core/segmentation/validation.py`<br>`substar_core/cue_limits.py` | `segmentation_material`<br>`semantic_grouping_result` | `segmentation_candidate`<br>`editor_document` | `editor_domain`<br>`reference_manuscript_service` |
+| `translation_domain` | `domain` | Build meaning-unit groups, validate model output and persist translation artifacts used by the translation service. | `substar_core/editor/translation/artifacts.py`<br>`substar_core/editor/translation/contracts.py`<br>`substar_core/editor/translation/grouping.py`<br>`substar_core/semantic_execution.py`<br>`substar_core/translation_atoms.py`<br>`substar_core/translation_context.py`<br>`substar_core/editor/translation/regroup.py` | `editor_revision` | `translation_result` | — |
 | `shared_security_utilities` | `infrastructure` | Provide contained paths, atomic writes, stable normalization and safe command construction for production modules. | `substar_core/security.py`<br>`substar_core/canonicalization.py`<br>`substar_core/checkpoint.py` | — | — | — |
 | `packaging` | `delivery` | Copy the same visible application code, explicit Worker entrypoints, web/prompts/schemas and a fixed Python/FFmpeg runtime into the transparent portable directory. | `scripts/build-windows.ps1`<br>`.github/workflows/preview-windows.yml`<br>`.github/workflows/release-windows.yml`<br>`portable_manifest.json`<br>`requirements-release.txt`<br>`requirements-test.txt`<br>`启动_Substar.cmd`<br>`停止_Substar.cmd` | `release_manifest`<br>`runtime_identity` | `release_manifest` | `launcher_runtime`<br>`composition_root`<br>`transcription_worker`<br>`segmentation_worker`<br>`translation_service` |
 
@@ -403,6 +403,10 @@ Code:
 - `web/asr_assist.js`
 - `web/glossary_injection.js`
 - `web/ai_progress_summary.js` — `summarize`, `format`
+- `web/split-refinements.js`
+- `web/split-concepts/concepts.js`
+- `web/split-concepts/dark-glass.js`
+- `web/split-concepts/paper-dark.js`
 
 Must not:
 
@@ -414,7 +418,6 @@ Must not:
 Invariants:
 
 - ASR-based prompt assistance runs a standalone durable transcription task; internal and external generation reuse it, and changed media or settings cannot receive stale results
-- Creation controls use readable typography without a hero title; one theme-colored tutorial menu offers basic and advanced tutorials, pulses until first start or persisted dismissal, and hides the dismissal option thereafter.
 - Editor link is exposed only when the project read model says awaiting_edit
 - One submitted identity survives polling and refresh
 - A polling failure immediately marks the runtime disconnected and never presents cached queued/running rows as live work
@@ -422,6 +425,8 @@ Invariants:
 - Reference-script mode requires a reference document and at least one literal break symbol
 - Untouched reference break symbols follow the selected source-language preset while explicit user symbols remain authoritative
 - Completed projects are projected with the configured secondary-color corner
+- Tutorial entry points are archived and do not attach live controls.
+- Character caps use each displayed track independently; mixed-language text has its own cap, other languages default to 55, and ratio thresholds are retired.
 
 Failure modes:
 
@@ -460,7 +465,6 @@ Invariants:
 
 - project_id and task_id are distinct
 - A project becomes awaiting_edit only after an editor revision is readable
-- A completed packaged beginner tutorial is registered against its canonical editable revision and is repaired during startup reconciliation
 - Scheduler resource limits are loaded once from the validated settings snapshot at process startup
 - The same code path serves development and portable builds
 
@@ -1411,6 +1415,7 @@ Code:
 - `substar_core/editor/application/review_notes.py` — `anchor_for`, `add_note`, `change_note`, `project_note`
 - `substar_core/editor/application/review_exchange.py`
 - `substar_core/editor/application/review_store.py` — `read_reviews`, `update_reviews`
+- `substar_core/editor/cut_api.py`
 
 Must not:
 
@@ -1441,7 +1446,7 @@ Recovery: Reload the latest revision and durable AI operation state.
 
 Reuses: `latest verified revision`<br>`completed AI result`; restarts: `failed AI operation when user requests`; terminal behavior: Return structured conflict or task error.
 
-Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/test_reference_unified_matching.py`
+Tests: `tests/test_editor_translation_binding.py`, `tests/test_editor_ai_contracts.py`, `tests/test_editor_ai_calibration_protocol.py`, `tests/test_reference_script_mode.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/test_reference_unified_matching.py`, `tests/test_cut_api.py`, `tests/test_ai_cut_plans.py`
 
 Change impact modules: `editor_ui`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1608,7 +1613,7 @@ Change impact contracts: `task_record`<br>`editor_revision`<br>`calibration_resu
 
 Layer: `domain_service`
 
-Describe project audio/video kind, serve project media with Range support, provide bounded cached waveform windows, detect adaptive local speech onsets for smart Cue snapping, and materialize verified packaged tutorial media into the canonical project locations.
+Describe project media, serve bounded waveform windows and detail peaks, detect speech onsets, and generate cached thumbnail previews.
 
 Code:
 
@@ -1616,6 +1621,10 @@ Code:
 - `substar_core/media/playback_proxy.py`
 - `substar_core/media/waveform_cache.py`
 - `substar_core/media/spectrogram.py`
+- `substar_core/editor/maw_detail_peaks.py`
+- `substar_core/editor/maw_timing.py`
+- `substar_core/editor/maw_waveform_api.py`
+- `substar_core/media/thumbnails.py`
 
 Must not:
 
@@ -1629,7 +1638,6 @@ Invariants:
 - Media kind prefers frozen stream evidence over filename inference
 - Waveform request is bounded
 - Smart forward snapping searches only the available preceding gap up to one second, requires a local silence-to-speech transition, preserves a bounded pre-roll, and never crosses the previous Cue
-- Launching an advanced packaged tutorial repairs both canonical audio locations from the hash-verified example asset
 - HTTP Range semantics remain valid
 
 Failure modes:
@@ -1642,7 +1650,7 @@ Recovery: Rebuild waveform cache from canonical audio; media relink is explicit.
 
 Reuses: `canonical audio`; restarts: `waveform cache generation`; terminal behavior: Return explicit missing-media response.
 
-Tests: `tests/test_media_info.py`, `tests/test_smart_forward_snap.py`, `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`, `tests/test_tutorial_examples.py`
+Tests: `tests/test_media_info.py`, `tests/test_smart_forward_snap.py`, `tests/test_project_creation_api.py`, `tests/test_editor_translation_binding.py`, `tests/test_maw_waveform.py`, `tests/test_maw_detail_peaks.py`, `tests/test_thumbnails.py`
 
 Change impact modules: `editor_api`<br>`editor_ui`<br>`project_store`
 
@@ -1668,7 +1676,6 @@ Code:
 - `web/editor_timeline.js`
 - `web/editor_cue_list_view.js`
 - `web/editor_external_review.js` — `build`, `resolveScope`
-- `web/editor_tutorial.js`
 - `web/system_save_as.js`
 - `web/editor_cue_ordering.js`
 - `web/editor_cue_time_controller.js`
@@ -1677,6 +1684,89 @@ Code:
 - `web/editor_language.js`
 - `web/editor_experimental.js`
 - `web/editor_multiline_timeline.js`
+- `web/editor_cut_plan_panel.js`
+- `web/editor_cut_timeline.js`
+- `web/editor_maw_ass.js`
+- `web/editor_maw_boot.js`
+- `web/editor_maw_boundary.js`
+- `web/editor_maw_gap_snap.js`
+- `web/editor_maw_menus.js`
+- `web/editor_maw_model.js`
+- `web/editor_maw_native_style.js`
+- `web/editor_maw_paint.js`
+- `web/editor_maw_pcm_paint.js`
+- `web/editor_maw_shell.js`
+- `web/editor_maw_timeline.js`
+- `web/editor_maw_waveform_loader.js`
+- `web/editor_speakers.js`
+- `web/editor_thumbnails.js`
+- `web/editor_timeline_tools.js`
+- `web/editor_tool_layout.js`
+- `web/vendor/maw/editor/markers/editor-markers-panel.js`
+- `web/vendor/maw/editor/media/editor-thumbnails.js`
+- `web/vendor/maw/editor/media/waveform.js`
+- `web/vendor/maw/editor/media/waveform/canvas.js`
+- `web/vendor/maw/editor/media/waveform/colors.js`
+- `web/vendor/maw/editor/media/waveform/constants.js`
+- `web/vendor/maw/editor/media/waveform/controls.js`
+- `web/vendor/maw/editor/media/waveform/cue-blocks.js`
+- `web/vendor/maw/editor/media/waveform/cue-commands.js`
+- `web/vendor/maw/editor/media/waveform/cue-drag-update.js`
+- `web/vendor/maw/editor/media/waveform/cue-drag.js`
+- `web/vendor/maw/editor/media/waveform/gap-drag.js`
+- `web/vendor/maw/editor/media/waveform/input.js`
+- `web/vendor/maw/editor/media/waveform/labels.js`
+- `web/vendor/maw/editor/media/waveform/layout.js`
+- `web/vendor/maw/editor/media/waveform/markers.js`
+- `web/vendor/maw/editor/media/waveform/media.js`
+- `web/vendor/maw/editor/media/waveform/payload.js`
+- `web/vendor/maw/editor/media/waveform/playback.js`
+- `web/vendor/maw/editor/media/waveform/pointer.js`
+- `web/vendor/maw/editor/media/waveform/render.js`
+- `web/vendor/maw/editor/media/waveform/scale-controls.js`
+- `web/vendor/maw/editor/media/waveform/scale.js`
+- `web/vendor/maw/editor/media/waveform/settings.js`
+- `web/vendor/maw/editor/media/waveform/thumbnails.js`
+- `web/vendor/maw/editor/media/waveform/timing.js`
+- `web/vendor/maw/editor/media/waveform/visibility.js`
+- `web/vendor/maw/editor/media/waveform/word-blocks.js`
+- `web/vendor/maw/editor/media/waveform/workspace.js`
+- `web/vendor/maw/shared/gap-remove-core.js`
+- `web/vendor/maw/shared/utils/ass-animation.js`
+- `web/vendor/maw/shared/utils/ass-canvas-layout.js`
+- `web/vendor/maw/shared/utils/ass-export.js`
+- `web/vendor/maw/shared/utils/ass-style.js`
+- `web/vendor/maw/shared/utils/data.js`
+- `web/vendor/maw/shared/utils/export-plan.js`
+- `web/vendor/maw/shared/utils/export-workflow.js`
+- `web/vendor/maw/shared/utils/fcp7.js`
+- `web/vendor/maw/shared/utils/fonts.js`
+- `web/vendor/maw/shared/utils/gap-remove.js`
+- `web/vendor/maw/shared/utils/history.js`
+- `web/vendor/maw/shared/utils/lottie.js`
+- `web/vendor/maw/shared/utils/lrc.js`
+- `web/vendor/maw/shared/utils/markers.js`
+- `web/vendor/maw/shared/utils/media-metadata.js`
+- `web/vendor/maw/shared/utils/multi-subtitle.js`
+- `web/vendor/maw/shared/utils/navigation.js`
+- `web/vendor/maw/shared/utils/ograf.js`
+- `web/vendor/maw/shared/utils/platform.js`
+- `web/vendor/maw/shared/utils/preview-geometry.js`
+- `web/vendor/maw/shared/utils/segment-timing.js`
+- `web/vendor/maw/shared/utils/settings.js`
+- `web/vendor/maw/shared/utils/speakers.js`
+- `web/vendor/maw/shared/utils/split-alignment.js`
+- `web/vendor/maw/shared/utils/split-trim.js`
+- `web/vendor/maw/shared/utils/srt.js`
+- `web/vendor/maw/shared/utils/sticker-placement.js`
+- `web/vendor/maw/shared/utils/text-metrics.js`
+- `web/vendor/maw/shared/utils/text-processing.js`
+- `web/vendor/maw/shared/utils/timed-text-core.js`
+- `web/vendor/maw/shared/utils/timed-text-edit.js`
+- `web/vendor/maw/shared/utils/timed-text-plans.js`
+- `web/vendor/maw/shared/utils/timeline.js`
+- `web/vendor/maw/shared/utils/word-split.js`
+- `web/vendor/maw/shared/utils/word-timing.js`
 
 Must not:
 
@@ -1734,7 +1824,7 @@ Recovery: Reload the current project revision and operation state; retain no spe
 
 Reuses: `project_id`<br>`viewport selection`; restarts: —; terminal behavior: Show the exact structured API error.
 
-Tests: `tests/editor_cue_selection.test.js`, `tests/test_ass_profiles.py`, `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_audit_regressions.test.js`
+Tests: `tests/editor_cue_selection.test.js`, `tests/test_ass_profiles.py`, `tests/editor_document_contract.test.js`, `tests/editor_auto_snap.test.js`, `tests/editor_cue_list_view.test.js`, `tests/editor_external_review.test.js`, `tests/editor_review_popover_contract.test.js`, `tests/editor_calibration_prompt.test.js`, `tests/editor_empty_replace_contract.test.js`, `tests/editor_space_shortcut.test.js`, `tests/system_save_as.test.js`, `tests/editor_language.test.js`, `tests/editor_media_routing.test.js`, `tests/editor_reference_boundary_ui.test.js`, `tests/editor_tools_hotfix_ui_contract.test.js`, `tests/test_editor_translation_binding.py`, `tests/test_project_exchange.py`, `tests/test_project_llm_selection.py`, `tests/editor_audit_regressions.test.js`, `tests/editor_maw_gap_snap.test.js`, `tests/editor_maw_word_boundary.test.mjs`, `tests/editor_save_safety.test.js`, `tests/editor_history_model.test.js`, `tests/editor_thumbnails.test.js`
 
 Change impact modules: `editor_api_client`<br>`editor_api`<br>`task_info_service`<br>`project_store`<br>`task_service`<br>`translation_service`<br>`calibration_service`<br>`media_service`<br>`project_exchange_service`
 
@@ -1797,6 +1887,7 @@ Code:
 - `substar_core/editor/domain/cue_timing.py`
 - `substar_core/editor/domain/groups.py`
 - `substar_core/validation.py`
+- `substar_core/cut_timeline.py`
 
 Must not:
 
@@ -1824,7 +1915,7 @@ Recovery: Reject the operation and retain the prior immutable revision.
 
 Reuses: `prior editor revision`; restarts: —; terminal behavior: DocumentOperationError or validation error.
 
-Tests: `tests/editor_document_contract.test.js`, `tests/editor_timeline_manual_cue.test.js`, `tests/test_project_exchange.py`, `tests/test_reference_script_mode.py`, `tests/test_editor_ai_contracts.py`
+Tests: `tests/editor_document_contract.test.js`, `tests/editor_timeline_manual_cue.test.js`, `tests/test_project_exchange.py`, `tests/test_reference_script_mode.py`, `tests/test_editor_ai_contracts.py`, `tests/test_cut_timeline.py`, `tests/test_dynamic_speakers.py`
 
 Change impact modules: `project_store`<br>`editor_application`<br>`editor_api`<br>`editor_ui`<br>`segmentation_finalizer`
 
@@ -2552,6 +2643,7 @@ Code:
 - `substar_core/segmentation/optimizer.py`
 - `substar_core/segmentation/semantic_grouping_contract.py`
 - `substar_core/segmentation/validation.py`
+- `substar_core/cue_limits.py`
 
 Must not:
 
@@ -2578,7 +2670,7 @@ Recovery: Return exact rejected ranges to model repair without altering accepted
 
 Reuses: `valid groups`; restarts: `invalid ranges`; terminal behavior: Create explicit problem-subtitle metadata.
 
-Tests: `tests/test_semantic_grouping_contract.py`, `tests/test_segmentation_runtime.py`, `tests/test_reference_script_mode.py`, `tests/test_visible_character_limits.py`, `tests/test_reference_unified_matching.py`
+Tests: `tests/test_semantic_grouping_contract.py`, `tests/test_segmentation_runtime.py`, `tests/test_reference_script_mode.py`, `tests/test_visible_character_limits.py`, `tests/test_reference_unified_matching.py`, `tests/test_cue_language_limits.py`
 
 Change impact modules: `segmentation_input_contract`<br>`execution_planner`<br>`semantic_segmentation_algorithm`<br>`segmentation_worker`<br>`segmentation_finalizer`<br>`editor_domain`
 
@@ -2598,6 +2690,7 @@ Code:
 - `substar_core/semantic_execution.py` — `validate_presentation_plan`
 - `substar_core/translation_atoms.py`
 - `substar_core/translation_context.py`
+- `substar_core/editor/translation/regroup.py`
 
 Must not:
 
@@ -2621,7 +2714,7 @@ Recovery: Collect structural errors within the original execution block and requ
 
 Reuses: `valid translation results`<br>`valid repaired blocks`; restarts: `one structurally invalid block once`; terminal behavior: Keep unresolved Cues explicit; never synthesize fallback translation text.
 
-Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translation_binding.py`
+Tests: `tests/test_translation_runner_contract.py`, `tests/test_editor_translation_binding.py`, `tests/test_translation_regroup.py`
 
 Change impact modules: `translation_service`<br>`editor_domain`<br>`project_store`
 

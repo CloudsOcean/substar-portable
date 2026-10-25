@@ -187,3 +187,16 @@ def test_extended_languages_and_dialect_option():
     assert cue_language("مرحبا") == "ar"
     assert cue_language("สวัสดี") == "th"
     assert cue_language("你好 hello مرحبا") == "mixed"
+
+
+@pytest.mark.parametrize("sources,auto", [([], True), (["zh-CN", "en", "ja", "ko"], False), (["en"], False)])
+def test_reverse_translation_uses_actual_language_not_source_selection(sources, auto):
+    policy = {**LAYOUT, "source_languages": sources, "auto_detect": auto, "bidirectional": True}
+    texts = ["今天很好", "Good morning", "おはようございます", "안녕하세요"]
+    routes = [route_text(text, policy) for text in texts]
+    assert [r["target_language"] for r in routes] == ["en", "zh-CN", "zh-CN", "zh-CN"]
+    assert [r["source_upper"] for r in routes] == [False, True, True, True]
+    # Turning reverse translation off keeps Chinese on the lower row unchanged.
+    chinese = route_text(texts[0], {**policy, "bidirectional": False})
+    assert chinese["target_language"] == "zh-CN"
+    assert chinese["source_upper"] is False

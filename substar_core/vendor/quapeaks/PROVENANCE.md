@@ -1,0 +1,1 @@
+Native binary copied from the user-supplied MAW Windows x64 v1.10.0-beta.2 distribution, _internal/quapeaks/_native.pyd. Python 3.11 x64 compatibility verified. Original distribution license and notices accompany this binary. Wrapper and cache integration are Substar code.

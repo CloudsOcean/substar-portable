@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1">
   <title>切分 · Substar</title>
-  <link rel="stylesheet" href="/assets/split.css?v=20261025-thumbnails-1">
+  <link rel="stylesheet" href="/assets/split.css?v=20261025-merged-1">
   <link rel="stylesheet" href="/assets/shell.css?v=20260908-nav-alignment-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
-<link rel="stylesheet" href="/assets/split-refinements.css?v=20261025-1">
+<link rel="stylesheet" href="/assets/split-refinements.css?v=20261025-merged-1">
 </head>
 <body>
   <header class="app-bar app-header">
@@ -34,14 +34,6 @@
       <section class="creation-card" aria-labelledby="createTitle">
         <div class="section-heading">
           <div><span class="step-number">01</span><h2 id="createTitle">任务配置</h2></div>
-          <details id="creationTutorialActions" class="creation-tutorial-actions">
-            <summary class="creation-tutorial-button">启动教程</summary>
-            <div class="creation-tutorial-menu">
-              <button id="creationTutorialButton" type="button">基础教程</button>
-              <button id="advancedTutorialButton" type="button">进阶教程</button>
-              <button id="dismissTutorialPulse" type="button">关闭闪烁</button>
-            </div>
-          </details>
         </div>
 
         <div class="drop-zone" id="videoDropZone" tabindex="0" role="button" aria-label="选择视频或音频">
@@ -157,8 +149,6 @@
           <div class="quick-start-intro">
             <span class="quick-start-mark">✦</span>
             <div><strong>先连接完成字幕所需的两项服务</strong><p>密钥只保存在本机。测试通过后自动保存，不需要离开当前页面。</p></div>
-            <button id="quickStartTutorial" type="button"><span><b>启动初级教程</b><small>跟随内置案例完成配置并创建第一个项目</small></span><strong aria-hidden="true">→</strong></button>
-            <button id="quickStartAdvancedTutorial" class="quick-advanced-tutorial" type="button"><span><b>启动进阶教程</b><small>载入固定案例，体验 AI 切分、校准、翻译与审阅</small></span><strong aria-hidden="true">→</strong></button>
           </div>
           <article id="qwenQuickCard" class="quick-provider-card" data-provider="qwen">
             <div class="quick-provider-heading">
@@ -204,14 +194,6 @@
       <div class="recent-list" id="recentJobs"><p class="recent-empty">正在读取任务…</p></div>
     </section>
   </main>
-  <div id="splitTutorialLayer" class="split-tutorial-layer hidden" aria-hidden="true">
-    <div id="splitTutorialSpotlight" class="split-tutorial-spotlight" aria-hidden="true"></div>
-    <section id="splitTutorialCard" class="split-tutorial-card" role="dialog" aria-modal="false" aria-labelledby="splitTutorialTitle" tabindex="-1">
-      <header><span id="splitTutorialProgress">初级教程 · 1 / 10</span><button id="skipSplitTutorial" type="button">退出教程</button></header>
-      <div class="split-tutorial-copy"><h2 id="splitTutorialTitle">连接 QWEN 听写服务</h2><p id="splitTutorialDescription"></p><a id="splitTutorialLink" class="split-tutorial-link hidden" href="#" target="_blank" rel="noopener noreferrer"></a></div>
-      <div class="split-tutorial-actions"><button id="splitTutorialSecondary" class="tutorial-secondary hidden" type="button"></button><button id="splitTutorialPrimary" class="tutorial-primary hidden" type="button"></button></div>
-    </section>
-  </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <dialog id="asrAssistExternal" class="asr-assist-external">
     <header><strong>提交外部模型生成</strong><button id="asrAssistClose" class="text-button" type="button" aria-label="关闭">×</button></header>
@@ -231,11 +213,11 @@
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2" defer></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
 <script src="/assets/glossary_injection.js?v=20260911-glossary-weight-5" defer></script>
-<script src="/assets/asr_assist.js?v=20261012-media-selection-1" defer></script>
+<script src="/assets/asr_assist.js?v=20261025-merged-1" defer></script>
   <script src="/assets/system_save_as.js?v=20260911-export-track-major-1" defer></script>
   <script src="/assets/subtitle_input.js?v=20260911-single-project-1"></script>
-<script src="/assets/split.js?v=cue-limits-1-20261025-thumbnails-1" defer></script>
-<script src="/assets/translation_layout.js?v=20261024-languages-1"></script>
-<script src="/assets/split-refinements.js?v=20261025-1" defer></script>
+<script src="/assets/split.js?v=20261025-merged-1" defer></script>
+<script src="/assets/translation_layout.js?v=20261025-merged-1"></script>
+<script src="/assets/split-refinements.js?v=20261025-merged-1" defer></script>
 </body>
 </html>

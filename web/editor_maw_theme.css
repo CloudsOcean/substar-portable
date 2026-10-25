@@ -1,0 +1,77 @@
+/* Bridge the imported MAW UI to the editor's theme, including light/custom accents. */
+.maw-waveform-host {
+  color-scheme: inherit;
+  --bg-base: var(--theme-bg);
+  --bg-panel: var(--theme-panel);
+  --bg-raised: var(--theme-panel-2);
+  --bg-overlay: var(--theme-panel-2);
+  --bg-input: var(--theme-field);
+  --bg-wave: var(--theme-bg);
+  --bg-wave-row: var(--theme-panel);
+  --text-primary: var(--theme-text);
+  --text-secondary: var(--theme-text);
+  --text-muted: var(--theme-muted);
+  --text-faint: var(--theme-muted);
+  --border-subtle: var(--theme-line);
+  --border: var(--theme-line-strong);
+  --border-strong: var(--theme-accent-soft);
+  --accent: var(--theme-accent);
+  --accent-hover: var(--theme-accent-soft);
+  --accent-strong: var(--theme-accent);
+  --accent-active-fg: var(--theme-text);
+  --accent-line: var(--theme-accent);
+  --accent-tint: color-mix(in srgb, var(--theme-accent) 12%, transparent);
+  --accent-tint-strong: color-mix(in srgb, var(--theme-accent) 22%, transparent);
+  --accent-soft: color-mix(in srgb, var(--theme-accent) 16%, transparent);
+  --btn-bg: var(--theme-panel-2);
+  --btn-bg-hover: color-mix(in srgb, var(--theme-accent) 12%, var(--theme-panel-2));
+  --btn-bg-active: var(--theme-panel);
+  --btn-text: var(--theme-text);
+  --panel-toolbar-bg: var(--theme-panel);
+  --panel-toolbar-bg-wave: var(--theme-panel);
+  --wave-row-bg: var(--theme-panel);
+  --wave-row-border: var(--theme-line);
+  --wave-row-grid: color-mix(in srgb, var(--theme-muted) 10%, transparent);
+  --wave-row-tick: var(--theme-line-strong);
+  --wave-cue-mix: var(--theme-panel);
+  --wave-cue-text: var(--theme-text);
+  --wave-cue-active-mix: color-mix(in srgb, var(--theme-accent) 24%, var(--theme-panel));
+  --wave-badge-bg: var(--theme-field);
+  --wave-pointer-line: var(--theme-muted);
+  --selection-yellow: var(--theme-accent-soft);
+  --selection-yellow-line: var(--theme-accent-soft);
+  --selection-yellow-soft: var(--accent-tint);
+  --selection-yellow-glow: var(--accent-soft);
+  --maw-scroll-thumb: var(--scroll-thumb-color);
+  --maw-scroll-thumb-hover: var(--theme-accent-soft);
+}
+/* Selected words and sentences use the same accent; speaker colors remain identity cues. */
+.maw-waveform-host :is(.waveform-cue-block,.waveform-word-block).selected {
+  outline: 2px solid var(--theme-accent-soft);
+  background: color-mix(in srgb, var(--theme-accent) 24%, var(--theme-panel));
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+.maw-waveform-host .waveform-row-time { color: var(--theme-muted); }
+.maw-waveform-host .toolbar :is(#gap-remove-manage,#gap-removed-export-btn) {
+  color: var(--theme-text); background: var(--theme-panel-2);
+  border-color: var(--theme-line-strong); box-shadow: none;
+}
+.maw-waveform-host .toolbar :is(#gap-remove-manage,#gap-removed-export-btn):hover {
+  color: var(--theme-text); background: var(--btn-bg-hover); border-color: var(--theme-accent);
+}
+/* Use the editor's 14px gutter / 8px rounded thumb, with no color/length token collision. */
+body.editor-shell .maw-waveform-host .waveform-scroll {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+  scrollbar-gutter: stable;
+}
+body.editor-shell .maw-waveform-host .waveform-scroll::-webkit-scrollbar { width: var(--scroll-control); }
+body.editor-shell .maw-waveform-host .waveform-scroll::-webkit-scrollbar-track { background: transparent; }
+body.editor-shell .maw-waveform-host .waveform-scroll::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb-color);
+  border: 3px solid transparent;
+  border-radius: 7px;
+  background-clip: padding-box;
+  min-height: var(--scroll-grip);
+}
+body.editor-shell .maw-waveform-host .waveform-scroll::-webkit-scrollbar-thumb:hover { background-color: var(--theme-accent-soft); }

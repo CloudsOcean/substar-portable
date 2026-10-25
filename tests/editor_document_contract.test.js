@@ -3,6 +3,35 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {validateDocument} = require("../web/editor_document.js");
+const contract = require("../web/editor_document.js");
+const store = require("../web/editor_document_store.js");
+
+test("timeline overlays survive optimistic projection without editing cues or tokens", () => {
+  const revision={revision_id:"r1",revision_number:1,document_hash:"hash",document:documentWithGroupOrigin("segmentation")};
+  const timeline={markers:[],plans:[{id:"p",name:"剪辑",keep:null,cuts:[{id:"cut",start:.2,end:.4,enabled:true}]}],active_plan_id:"p"};
+  const operation=contract.createOperation(revision,"set_timeline",{timeline,expected_timeline:null});
+  const changed=store.applyLocalOperation(revision,operation);
+  assert.deepEqual(contract.buildEditorView(changed).properties.timeline,timeline);
+  assert.deepEqual(changed.document.cues,revision.document.cues);
+  assert.deepEqual(changed.document.display_tokens,revision.document.display_tokens);
+  assert.equal(revision.document.properties.timeline,undefined);
+});
+
+test("dynamic speaker assignment and names survive optimistic editor projection", () => {
+  const revision = {revision_id:"r1", revision_number:1, document_hash:"hash", document:documentWithGroupOrigin("segmentation")};
+  const names = {speaker_99:"第 100 位", "guest-A":"嘉宾"};
+  const rename = contract.setSpeakerNamesOperation(revision, names);
+  assert.deepEqual({...rename.payload.speaker_names}, names);
+  const named = store.applyLocalOperation(revision, rename);
+  const assign = contract.setCueSpeakerOperation(named, "cue_1", "speaker_99");
+  const assigned = store.applyLocalOperation(named, assign);
+  const view = contract.buildEditorView(assigned);
+  assert.equal(view.cue_views[0].speaker, "speaker_99");
+  assert.equal(view.properties.speaker_names["guest-A"], "嘉宾");
+  assert.deepEqual(assigned.document.source_tokens, revision.document.source_tokens);
+  assert.deepEqual(assigned.document.display_tokens, revision.document.display_tokens);
+  assert.throws(() => contract.setCueSpeakerOperation(revision, "cue_1", "bad\nvalue"));
+});
 
 function provenance() {
   return {

@@ -155,8 +155,8 @@
     }
     async function action(work) {
       if (busy) return;
-      if (!form.reportValidity()) return;
-      readLayer(); busy=true;
+      if (!menu.hidden && !form.reportValidity()) return;
+      if (!menu.hidden) readLayer(); busy=true;
       const controls=[...form.querySelectorAll('input,select,button:not(#assClose)')];
       controls.forEach(x=>x.disabled=true);
       try { await work(); } catch(error) {message(error.message);}
@@ -251,7 +251,15 @@
       media.addEventListener('loadedmetadata',schedule);
     });
     window.addEventListener('pagehide',()=>{renderer?.dispose();renderer=null;ready=false;});
-    return {sync,selectionChanged};
+    return {sync,selectionChanged,
+      async openDraft() { await sync(); if (!config) throw new Error('字幕配置尚未加载'); menu.open=true; loadEffective(); return clone(draft); },
+      setDraft(value,scope='project') { if(busy) return; draft=clone(value); layerId=draft.layers[0].id; $('#assScope').value=scope; dirty=true; wholeProfile=true; fillLayer(); schedule(); },
+      cancelDraft() {menu.open=false;dirty=false;closeFrame();schedule();},
+      async applyDraft() {if(busy) return;busy=true;try {await apply();} finally {busy=false;}},
+      exportDraft() {$('#assExport').click();},
+      getLibrary:()=>api('/api/ass/profiles'),
+      saveLibrary:value=>api('/api/ass/profiles/'+encodeURIComponent('MAW 样式库'),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})
+    };
   }
   root.EditorAssPanel={create};
 })(window);

@@ -73,7 +73,7 @@
         wave.dispatchEvent(new CustomEvent("workspace-waveform-mode", {detail:{mode:waveformMode}}));
       }
       const size = config(), width = workbench.clientWidth - 24;
-      const maxUpper = 100 - 240 / Math.max(1, workbench.clientHeight - 24) * 100;
+      const maxUpper = 100 - 260 / Math.max(1, workbench.clientHeight - 24) * 100;
       if (preset === "cinema") size.second = Math.min(size.second, Math.max(28, maxUpper - size.first));
       else size.first = Math.min(size.first, Math.max(preset === "classic" ? 50 : 30, maxUpper));
       const toolsWidth = Math.max(180, Math.min(size.tools || 250, Math.max(180, width-660)));
@@ -131,12 +131,12 @@
         if (preset === "waveform") size.left = clamp(origin.left+dx/width*100, 460/width*100, (width-400)/width*100);
         else if (preset === "cinema") size.left = clamp(origin.left+dx/width*100, 380/width*100, (width-540)/width*100);
         else size.cue = clamp(origin.cue+(preset === "standard" || swaps[preset] ? -dx : dx), 320, width-(size.tools || 250)-300);
-      } else if (preset === "standard" || preset === "aligned-left" || preset === "waveform") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-240/height*100));
-      else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-240/height*100));
+      } else if (preset === "standard" || preset === "aligned-left" || preset === "waveform") size.first = clamp(origin.first+dy/height*100, 30, Math.max(30, 100-260/height*100));
+      else if (preset === "classic") size.first = clamp(origin.first+dy/height*100, 50, Math.max(50, 100-260/height*100));
       else {
         const delta = dy/height*100;
         if (kind === "first") { size.first = clamp(origin.first+delta, 12, origin.first+origin.second-28); size.second = origin.second+origin.first-size.first; }
-        else size.second = clamp(origin.first+origin.second+delta, Math.max(50,origin.first+28),Math.max(50,100-240/height*100))-origin.first;
+        else size.second = clamp(origin.first+origin.second+delta, Math.max(50,origin.first+28),Math.max(50,100-260/height*100))-origin.first;
       }
       apply();
     }
@@ -257,7 +257,8 @@
     }
     label.replaceWith(group);
     document.querySelector(".editor-document-pane .pane-heading > div:first-child").append(group);
-    group.before(document.querySelector("#reviewModeToggle"));
+    const reviewToggle = document.querySelector("#reviewModeToggle");
+    if (reviewToggle) group.before(reviewToggle);
     const fontGroup = document.createElement("div"); fontGroup.className = "cue-font-control";
     fontGroup.setAttribute("role", "group"); fontGroup.setAttribute("aria-label", "字幕字号");
     const decrease = document.querySelector("#fontDecrease"), value = document.querySelector("#fontValue"), increase = document.querySelector("#fontIncrease");
@@ -269,7 +270,8 @@
     [...bilingual.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
       .forEach(node => { node.textContent = "双语字幕"; });
     const displayMenu = document.createElement("details"); displayMenu.className = "cue-display-settings multiline-waveform-settings";
-    const displayToggle = document.createElement("summary"); displayToggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.2-2 .9-2-.9-2.5 4.3 1.8 1.5v2l-1.8 1.5 2.5 4.3 2-.9 2 .9.6 2.2h5l.6-2.2 2-.9 2 .9 2.5-4.3-1.8-1.5v-2l1.8-1.5-2.5-4.3-2 .9-2-.9L14.5 3Z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const displayToggle = document.createElement("summary");
+    displayToggle.textContent = '⚙️'; displayToggle.classList.add('workspace-settings-gear');
     displayToggle.setAttribute("aria-label", "字幕显示设置"); displayToggle.title = "字幕显示设置";
     const displayContent = document.createElement("div"); displayContent.className = "cue-display-settings-content multiline-waveform-settings-panel";
     const fontLabel = document.createElement("span"); fontLabel.textContent = "字号";
@@ -292,14 +294,10 @@
     document.querySelector(".pane-live-controls").append(displayMenu);
   }
   function installSpeakerMenu() {
-    const button = document.querySelector("#detectSpeakers");
-    const menu = document.createElement("details"); menu.id = "speakerMenu"; menu.className = "editor-command-menu speaker-command-menu";
-    const summary = document.createElement("summary"); summary.id = button.id; summary.textContent = "说话人设置";
-    summary.disabled = button.disabled; summary.setAttribute("aria-disabled", String(button.disabled));
-    const form = document.querySelector("#speakerDialogForm");
-    form.classList.remove("text-dialog", "speaker-dialog"); form.classList.add("editor-command-popover", "speaker-popover");
-    form.querySelector("p").textContent = "设置显示名称；点击字幕右侧人形按钮切换说话人。";
-    menu.append(summary, form); button.replaceWith(menu);
+    document.querySelector('#detectSpeakers').hidden=true;
+    const form=document.querySelector('#speakerDialogForm');
+    form.classList.remove('text-dialog','speaker-dialog');form.classList.add('speaker-tool-form');
+    form.querySelector('p').textContent='管理当前工程中的说话人名称；点击字幕右侧人形按钮分配说话人。';
   }
   document.addEventListener("DOMContentLoaded", () => {
     if (experimental) {
@@ -316,6 +314,25 @@
       installTaskIsland();
       installSpeakerMenu();
       installCueViewSwitch();
+      const cueSwitch=document.querySelector('.cue-view-switch');
+      cueSwitch.after(...['translationMenu','aiCalibrationMenu','aiReviewMenu','scriptProjectionMenu','referenceManuscript'].map(id=>document.getElementById(id)));
+      for(const id of ['translationMenu','aiCalibrationMenu','aiReviewMenu']) {
+        const menu=document.getElementById(id);
+        const position=()=>{
+          if(!menu.open)return;
+          const popup=menu.querySelector('.editor-command-popover'),anchor=menu.querySelector('summary').getBoundingClientRect();
+          popup.style.position='fixed';popup.style.transform='none';
+          popup.style.left=Math.max(8,Math.min(anchor.left,innerWidth-popup.offsetWidth-8))+'px';
+          popup.style.top=Math.max(8,Math.min(anchor.bottom+6,innerHeight-popup.offsetHeight-8))+'px';
+        };
+        menu.addEventListener('toggle',position);
+        window.addEventListener('resize',position);
+      }
+      const projection=document.querySelector('#scriptProjectionMenu');
+      projection.addEventListener('toggle',()=>{
+        if(!projection.open)return;const popup=projection.querySelector('.editor-command-popover'),r=projection.querySelector('summary').getBoundingClientRect();
+        popup.style.position='fixed';popup.style.left=Math.min(r.left,innerWidth-popup.offsetWidth-8)+'px';popup.style.top=r.bottom+6+'px';
+      });
       const overlayPreview=document.createElement("div"); overlayPreview.id="previewOverlay";
       overlayPreview.className="preview-overlay-subtitle";
       document.querySelector("#mediaViewport").append(overlayPreview);
@@ -336,6 +353,16 @@
       combined.append(search, locatorGroup);
       locator.append(combined);
       locator.querySelector('summary').textContent = '查找与定位';
+      for (const [key,title] of [['cut','剪辑'],['gaps','空隙'],['markers','标记'],['dubbing','配音']]) {
+        const section=document.createElement('details');section.className='tool-accordion';section.dataset.toolPanel=key;
+        const heading=document.createElement('summary');heading.textContent=title;
+        const content=document.createElement('div');content.className='tool-panel';content.id='editor-'+key+'-tool-content';
+        section.append(heading,content);tools.append(section);
+      }
+      tools.querySelector('#editor-dubbing-tool-content').append(document.querySelector('#speakerDialogForm'));
+      const styleMenu=document.querySelector('#assMenu');
+      styleMenu.hidden=true;
+
       const panels = Array.from(tools.querySelectorAll(":scope > .tool-accordion"));
       const toolsScroll = document.createElement("input");
       toolsScroll.type = "range";
@@ -346,6 +373,9 @@
       toolsScroll.value = "0";
       toolsScroll.hidden = true;
       let activePanel = panels[0];
+      const toolDock=document.createElement('div');toolDock.className='workspace-tool-dock';
+      document.querySelector('#editorWorkbench').append(toolDock);
+      const floatingPositions={};let panelDrag=null;
       const workbench = document.querySelector("#editorWorkbench");
       const isCinema = () => ["cinema", "waveform"].includes(workbench.dataset.workspaceLayout);
       let scrollFrame = 0;
@@ -357,19 +387,20 @@
       function syncToolsScroll() {
         scrollFrame = 0;
         if (isCinema()) {
-          const preview = document.querySelector(".editor-preview-pane").getBoundingClientRect();
-          const anchor = document.querySelector("#assMenu > summary").getBoundingClientRect();
-          const width = Math.min(340, preview.width - 24);
-          tools.style.left = `${preview.right - width - 12}px`;
-          tools.style.top = `${anchor.bottom + 8}px`;
-          tools.style.width = `${width}px`;
-          tools.style.setProperty("--cinema-window-height", `${Math.max(120, Math.min(560, preview.bottom - anchor.bottom - 60))}px`);
-          activePanel.style.left = "0px";
-          toolsScroll.style.left = `${width - 16}px`;
+          const preview=document.querySelector('.editor-preview-pane').getBoundingClientRect();
+          const cue=document.querySelector('.editor-document-pane').getBoundingClientRect();
+          const wave=document.querySelector('.cue-timeline-panel').getBoundingClientRect();
+          const dock=window.EditorToolLayout.dockBounds(workbench.dataset.workspaceLayout,preview,cue,wave);
+          Object.assign(toolDock.style,{left:dock.left+'px',top:dock.top+'px',width:dock.width+'px'});
+          const width=Math.min(360,innerWidth-24),bodyHeight=Math.min(520,innerHeight-100);
+          const requested=floatingPositions[workbench.dataset.workspaceLayout]||{left:dock.left+8,top:dock.top+42};
+          const position=window.EditorToolLayout.clampPanel(requested,{width:innerWidth,height:innerHeight},{width,height:bodyHeight+36});
+          Object.assign(tools.style,{left:position.left+'px',top:position.top+'px',width:width+'px'});
+          tools.style.setProperty('--cinema-window-height',bodyHeight+'px');
+          activePanel.style.left='0px';toolsScroll.style.left=(width-16)+'px';
         } else {
-          ["left", "top", "width"].forEach(key => tools.style.removeProperty(key));
-          panels.forEach(panel => panel.style.removeProperty("left"));
-          toolsScroll.style.removeProperty("left");
+          ['left','top','width'].forEach(key=>tools.style.removeProperty(key));
+          panels.forEach(panel=>panel.style.removeProperty('left'));toolsScroll.style.removeProperty('left');
         }
         const maximum = Math.max(0, activePanel.scrollHeight - activePanel.clientHeight);
         toolsScroll.hidden = maximum <= 1 || (isCinema() && !tools.classList.contains("cinema-tools-open"));
@@ -394,7 +425,7 @@
         toolsResize.observe(panel.querySelector(".tool-panel"));
       });
       new MutationObserver(scheduleToolsScroll).observe(tools, {subtree:true, childList:true, characterData:true});
-      const tabLabels = ["查找", "标点", "吸附", "合并", "帮助"];
+      const tabLabels = ["查找", "标点", "吸附", "合并", "帮助", "剪辑", "空隙", "标记", "配音"];
       const tabIcons = [
         '<circle cx="6.5" cy="6.5" r="4.5"/><path d="m10 10 4 4"/>',
         '<path d="M4 4h3v4H4zm6 0h3v4h-3zM7 8l-2 4m8-4-2 4"/>',
@@ -407,7 +438,7 @@
         const button = document.createElement("button");
         button.type = "button";
         const name = index === 4 ? "帮助" : panel.querySelector("summary").textContent;
-        button.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${tabIcons[index]}</svg><span>${tabLabels[index]}</span>`;
+        button.innerHTML = `<svg viewBox="0 0 16 16" aria-hidden="true">${(index===8?'<rect x="5" y="1" width="6" height="9" rx="3"/><path d="M2 7a6 6 0 0 0 12 0M8 13v2M5 15h6"/>':index===6?'<path d="M2 4v8m12-8v8M5 8h6"/>':index===7?'<path d="M4 14V2h8l-2 3 2 3H4"/>':tabIcons[index]) || (index===5 ? '<path d="M3 3l10 10M3 13L13 3"/><circle cx="3" cy="3" r="2"/><circle cx="3" cy="13" r="2"/>' : '<path d="M2 3h12M8 3v11M5 14h6"/>')}</svg><span>${tabLabels[index]}</span>`;
         button.setAttribute("aria-label", name);
         button.title = name;
         button.id = `experimental-tool-tab-${index}`;
@@ -432,11 +463,30 @@
         tabs.append(button);
         return button;
       });
+      const subtitleButton = document.createElement('button');
+      subtitleButton.type = 'button';
+      subtitleButton.id = 'experimental-subtitle-panel-open';
+      subtitleButton.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="13" height="10" rx="2"/><path d="M4 7h3m2 0h3M4 10h8"/></svg><span>字幕</span>';
+      subtitleButton.setAttribute('aria-label', '字幕面板');
+      subtitleButton.setAttribute('aria-haspopup', 'dialog');
+      subtitleButton.setAttribute('aria-controls', 'ass-style-window');
+      subtitleButton.title = '打开 ASS 字幕面板';
+      subtitleButton.onclick = () => window.SubstarMawAssPanel?.open();
+      tabs.append(subtitleButton);
+      for(let slot=tabs.children.length;slot<10;slot++){const empty=document.createElement('span');empty.className='tool-slot-placeholder';empty.setAttribute('aria-hidden','true');tabs.append(empty);}
+      document.addEventListener('substar:activate-tool',event=>{
+        const index=panels.findIndex(panel=>panel.dataset.toolPanel===event.detail);
+        if(index>=0)activate(index);else if(event.detail==='locator')activate(0);
+      });
       function activate(index) {
+        const changed=activePanel!==panels[index];
         activePanel = panels[index];
+        if(changed)activePanel.scrollTop=0;
+        document.dispatchEvent(new CustomEvent("substar:tool-activated",{detail:activePanel.dataset.toolPanel}));
+
         floatingTitle.textContent = tabLabels[index];
         if (isCinema()) {
-          document.querySelector("#assMenu").open = false;
+          if(index!==6) document.querySelector("#assMenu").open = false;
           tools.classList.add("cinema-tools-open");
         }
         panels.forEach((panel, i) => {
@@ -456,9 +506,9 @@
       function syncToolMode() {
         closeTools();
         if (isCinema()) {
-          document.querySelector(".cue-view-switch").after(tabs);
+          toolDock.append(tabs);toolDock.hidden=false;
           if (document.body.classList.contains("review-mode")) document.querySelector("#reviewModeToggle")?.click();
-        } else tools.prepend(tabs);
+        } else {tools.prepend(tabs);toolDock.hidden=true;}
         tabs.setAttribute("role", isCinema() ? "toolbar" : "tablist");
         buttons.forEach((button, index) => {
           button.setAttribute("role", isCinema() ? "button" : "tab");
@@ -469,13 +519,23 @@
         });
       }
       new MutationObserver(syncToolMode).observe(workbench, {attributes:true, attributeFilter:["data-workspace-layout"]});
-      document.querySelector("#assMenu").addEventListener("toggle", event => {
-        if (isCinema() && event.currentTarget.open) closeTools();
-      });
+
       document.addEventListener("keydown", event => {
         if (isCinema() && event.key === "Escape") { closeTools(); buttons[panels.indexOf(activePanel)].focus(); event.stopPropagation(); }
       });
+      floatingHeading.addEventListener('pointerdown',event=>{
+        if(!isCinema()||event.button!==0||event.target.closest('button'))return;
+        const box=tools.getBoundingClientRect();panelDrag={id:event.pointerId,x:event.clientX,y:event.clientY,left:box.left,top:box.top};
+        floatingHeading.setPointerCapture(event.pointerId);event.preventDefault();
+      });
+      floatingHeading.addEventListener('pointermove',event=>{
+        if(!panelDrag||panelDrag.id!==event.pointerId)return;
+        floatingPositions[workbench.dataset.workspaceLayout]={left:panelDrag.left+event.clientX-panelDrag.x,top:panelDrag.top+event.clientY-panelDrag.y};scheduleToolsScroll();
+      });
+      for(const name of ['pointerup','pointercancel','lostpointercapture'])floatingHeading.addEventListener(name,()=>{panelDrag=null;});
       window.addEventListener("resize", scheduleToolsScroll);
+      toolsResize.observe(document.querySelector('.editor-document-pane'));
+      toolsResize.observe(document.querySelector('.cue-timeline-panel'));
       toolsResize.observe(document.querySelector(".editor-preview-pane"));
       const help = panels[4].querySelector(".tool-panel");
       const legend = help.cloneNode(true);
@@ -544,6 +604,7 @@
           button.textContent = index ? "›" : "‹";
         });
       });
+      document.addEventListener("substar:open-style-tool",()=>window.SubstarMawAssPanel?.open());
       activate(0);
       syncToolMode();
       // Review mode uses the locator panel for its review controls.

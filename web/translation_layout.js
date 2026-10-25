@@ -27,7 +27,7 @@
       const selected = !state.auto_detect && state.source_languages.includes(code);
       button.type = "button";
       button.className = "language-block";
-      button.textContent = name + (selected && state.bidirectional && state.upper_target === code ? " ★" : "");
+      button.textContent = name;
       button.disabled = false;
       button.setAttribute("aria-label", `${name}原始语言`);
       button.setAttribute("aria-pressed", String(selected));
@@ -63,11 +63,11 @@
     const supported = (models.get(host) || "").startsWith("qwen-audio-3.1-asr-flash-filetrans");
     dialect.disabled = !supported;
     dialect.checked = supported && state.keep_dialect;
-    host.querySelector("[data-dialect-help]").textContent = supported ? "保留粤语等方言的原有表达。" : "仅 Qwen Audio 3.1 文件听写支持，可在设置中切换模型。";
+    host.querySelector("[data-dialect-help]").textContent = "勾选后保留方言原文";
     const reverse = host.querySelector("[data-reverse-target]");
-    reverse.replaceChildren(...(state.auto_detect ? visible : state.source_languages).filter(code => code !== state.lower_target).map(code => {
+    reverse.replaceChildren(...languages.map(([code]) => code).filter(code => code !== state.lower_target).map(code => {
       const option = document.createElement("option"); option.value = code;
-      option.textContent = languages.find(([id]) => id === code)[1] + " ★"; return option;
+      option.textContent = nameOf(code); return option;
     }));
     if (![...reverse.options].some(option => option.value === state.upper_target)) state.upper_target = reverse.options[0]?.value || languages.find(([code]) => code !== state.lower_target)[0];
     if (!reverse.options.length) {
@@ -75,6 +75,8 @@
       option.textContent = languages.find(([code]) => code === state.upper_target)[1]; reverse.append(option);
     }
     reverse.value = state.upper_target;
+    host.querySelector("[data-reverse-field]").firstChild.textContent = `${nameOf(state.lower_target)}原文译为`;
+    host.querySelector("[data-auto-detect]").title = "无需预选原文语言；根据每条字幕的实际语言确定翻译方向";
     host.querySelector("[data-auto-detect]").checked = state.auto_detect;
     sync(host);
     host.querySelector("[data-reverse-field]").hidden = !state.bidirectional;
@@ -84,15 +86,38 @@
     const host = document.getElementById(id);
     if (!host || instances.has(host)) return;
     host.innerHTML = `<div data-layout-fields>
-        <section class="language-slot"><strong>原始语言（多选）</strong><label><input type="checkbox" data-auto-detect> 自动识别</label><div data-source-languages role="group" aria-label="原始语言多选"></div></section>
+        <section class="language-slot"><strong>原文语言（上行多选）</strong><label><input type="checkbox" data-auto-detect> 自动识别</label><div data-source-languages role="group" aria-label="原文语言上行多选"></div></section>
         <div data-add-language hidden><select data-extra-language aria-label="其他语言"></select><button type="button" data-add-confirm>添加</button></div>
-        <label>目标语言（下行）<select data-single-target aria-label="下行目标语言">${languages.map(([code,name]) => `<option value="${code}">${name}</option>`).join("")}</select></label>
-        <label class="language-bidirectional"><input type="checkbox" data-keep-dialect> 保留方言表达</label><small data-dialect-help></small>
-        <label class="language-bidirectional"><input type="checkbox" data-bidirectional> 双向翻译</label>
-        <label data-reverse-field hidden>反向译入 ★<select data-reverse-target aria-label="反向译入语言"></select></label>
-        <small>原始语言译入唯一目标语言。勾选双向后，目标语言原文译入 ★ 语言；否则保留在下行，不反向翻译。混合原文默认上行。</small>
+        <label class="language-target">译文语言（下行）<select data-single-target aria-label="下行译文语言">${languages.map(([code,name]) => `<option value="${code}">${name}</option>`).join("")}</select></label>
+        <label class="language-bidirectional language-dialect"><input type="checkbox" data-keep-dialect> 保留方言<small data-dialect-help></small></label>
+        <label class="language-bidirectional language-direction"><input type="checkbox" data-bidirectional> 双向翻译<small class="language-direction-help">原译同语种时反向翻译</small></label>
+        <label data-reverse-field hidden>反向译入语言<select data-reverse-target aria-label="反向译入语言"></select></label>
         <small data-layout-status role="status"></small>
       </div>`;
+    if (id === "splitLanguageLayout") {
+      const target = host.querySelector(".language-target");
+      const workflow = document.getElementById("splitWorkflowInput")?.closest("label");
+      if (workflow) {
+        workflow.classList.add("split-workflow-field");
+        target.after(workflow);
+      }
+      const options = document.createElement("div");
+      options.className = "language-options";
+      const direction = document.createElement("div");
+      direction.className = "language-direction-option";
+      direction.append(host.querySelector(".language-direction"), host.querySelector("[data-reverse-field]"));
+      options.append(host.querySelector(".language-dialect"), direction);
+      host.querySelector("[data-layout-status]").before(options);
+    }
+    // The per-run translation option lives with the language routing controls.
+    if (id === "translationLanguageLayout") {
+      const regroup = document.getElementById("translationRegroup")?.closest("label");
+      if (regroup) {
+        const help = regroup.nextElementSibling;
+        regroup.append(help);
+        host.querySelector("[data-layout-status]").before(regroup);
+      }
+    }
     instances.set(host, {});
     host.querySelector("[data-add-confirm]").addEventListener("click", () => {
       const code = host.querySelector("[data-extra-language]").value;

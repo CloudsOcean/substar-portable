@@ -628,9 +628,11 @@ def _set_cue_times(
                 "cue time change must contain numeric start/end"
             ) from exc
     try:
-        return apply_cue_times(
+        updated = apply_cue_times(
             document, changes, _provenance(operation, "set_cue_times")
         )
+        from substar_core.editor.maw_timing import apply_word_timing_patch
+        return apply_word_timing_patch(document, updated, operation["payload"].get("word_timings"))
     except CueTimingError as exc:
         raise DocumentOperationError(str(exc)) from exc
 
@@ -648,6 +650,8 @@ def _insert_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     overlay = payload.get("overlay") is True
     for existing in document.cues:
         if overlay or existing.mapping.get("subtitle_track") == "overlay" or existing.state is EntityState.DELETED:
+            continue
+        if payload.get("speaker") != existing.speaker:
             continue
         if start < existing.end and existing.start < end:
             raise DocumentOperationError(
@@ -1235,26 +1239,31 @@ def _auto_merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> 
 
 def _set_cue_speaker(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
     payload = operation["payload"]
-    cue_id = str(payload.get("cue_id", ""))
-    cue = _find_cue(document, cue_id)
+    raw_ids = payload.get("cue_ids", [payload.get("cue_id", "")])
+    if not isinstance(raw_ids, list) or not raw_ids or any(not isinstance(value, str) or not value for value in raw_ids):
+        raise DocumentOperationError("speaker assignment needs at least one cue")
+    cue_ids = set(raw_ids)
+    existing_ids = {cue.cue_id for cue in document.cues}
+    if not cue_ids <= existing_ids:
+        raise DocumentOperationError("set speaker cue does not exist")
     raw_speaker = payload.get("speaker")
     speaker = None if raw_speaker is None else str(raw_speaker).strip() or None
-    if speaker is not None and speaker not in {f"speaker_{index}" for index in range(4)}:
-        raise DocumentOperationError("speaker must be one of speaker_0..speaker_3 or null")
+    if speaker is not None and (len(speaker) > 120 or any(ord(c) < 32 for c in speaker)):
+        raise DocumentOperationError("speaker must be a nonempty identifier of at most 120 characters")
     provenance = _provenance(operation, "set_cue_speaker")
     return replace(
         document,
-        cues=_replace_cue(document.cues, cue_id, replace(cue, speaker=speaker)),
+        cues=tuple(replace(cue, speaker=speaker) if cue.cue_id in cue_ids else cue for cue in document.cues),
         changes=(*document.changes, provenance),
     )
 
 
 def _set_speaker_names(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
     raw = dict(operation["payload"].get("speaker_names", {}))
-    allowed = {f"speaker_{index}" for index in range(4)}
-    if set(raw) - allowed:
-        raise DocumentOperationError("speaker name keys must be speaker_0..speaker_3")
-    names = tuple((key, str(raw.get(key, "")).strip()) for key in sorted(allowed))
+    if any(not isinstance(key, str) or not key.strip() or len(key) > 120
+           or any(ord(c) < 32 for c in key) for key in raw):
+        raise DocumentOperationError("speaker name keys must be nonempty identifiers")
+    names = tuple((key, str(value).strip()) for key, value in sorted(raw.items()))
     provenance = _provenance(operation, "set_speaker_names")
     return replace(
         document,
@@ -1263,7 +1272,23 @@ def _set_speaker_names(document: EditorDocument, operation: Mapping[str, Any]) -
     )
 
 
+def _set_timeline(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:
+    import json
+    from substar_core.cut_timeline import validate_timeline
+    payload = operation["payload"]
+    before = json.loads(document.properties.timeline_json) if document.properties.timeline_json else None
+    if payload.get("expected_timeline") != before:
+        raise DocumentOperationError("剪辑方案已变更，请刷新后重试")
+    try:
+        value = validate_timeline(payload["timeline"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise DocumentOperationError(str(exc)) from exc
+    return replace(document, properties=replace(document.properties, timeline_json=json.dumps(value, ensure_ascii=False)),
+                   changes=(*document.changes, _provenance(operation, "set_timeline")))
+
+
 _APPLIERS = {
+    "set_timeline": _set_timeline,
     "replace": _replace,
     "retime_text": _retime_text,
     "batch_replace": _batch_replace,
@@ -1347,7 +1372,7 @@ def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
     operation_type = str(operation.get("type", ""))
-    if any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times", "auto_merge_cues"}:
+    if not document.source_tokens and any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times", "auto_merge_cues", "set_timeline", "set_speaker_names", "set_cue_speaker"}:
         raise DocumentOperationError("字幕导入项目仅支持文本和时间编辑，不支持词元操作")
     if operation_type not in _APPLIERS:
         raise DocumentOperationError(f"unsupported operation: {operation_type}")

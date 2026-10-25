@@ -7,13 +7,24 @@
   <title>Substar · 字幕编辑器</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/shell.css?v=20260806-icons-1">
-  <link rel="stylesheet" href="/assets/editor.css?v=20261024-regroup-1">
+  <link rel="stylesheet" href="/assets/editor.css?v=20261025-merged-1">
   <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1">
   <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-calibration-highlight-1">
   <script src="/assets/theme/personalization.js?v=20260907-fixed-scale-1"></script>
-  <link rel="stylesheet" href="/assets/editor_experimental.css?v=20261025-thumbnails-1">
-  <link rel="stylesheet" href="/assets/editor_scrollbars.css?v=20261009-tool-polish-1">
-  <script src="/assets/editor_experimental.js?v=20261009-layout-defaults-8"></script>
+  <link rel="stylesheet" href="/assets/editor_experimental.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_scrollbars.css?v=20261025-merged-1">
+  <script src="/assets/editor_tool_layout.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_experimental.js?v=20261025-merged-1"></script>
+  <link rel="stylesheet" href="/assets/vendor/maw/waveform.css?v=20261025-marker-blank-guard-1">
+  <link rel="stylesheet" href="/assets/vendor/maw/editor.css">
+  <link rel="stylesheet" href="/assets/vendor/maw/tokens.css">
+  <link rel="stylesheet" href="/assets/editor_maw.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_maw_theme.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_neutral.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_maw_ass.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_tool_entries.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_workspace_actions.css?v=20261025-merged-1">
+  <link rel="stylesheet" href="/assets/editor_waveform_settings.css?v=20261025-merged-1">
 </head>
 <body class="editor-shell">
   <div class="editor-command-bar">
@@ -62,8 +73,8 @@
             <option value="many_to_many">多对多翻译</option>
             <option value="one_to_one">逐行翻译</option>
           </select>
-          <label class="translation-regroup-option"><input id="translationRegroup" type="checkbox">本次翻译增强分组</label>
-          <small>根据上下文优化本次翻译的请求分组，不改变原文字幕和时间轴。</small>
+          <label class="translation-regroup-option"><input id="translationRegroup" type="checkbox">调整意义组</label>
+          <small>优化翻译效果</small>
           <fieldset class="translation-glossary">
             <legend>词库注入</legend>
             <div id="translationGlossaryChoices">打开菜单后载入词库…</div>
@@ -82,9 +93,9 @@
         </div>
       </details>
       <details id="aiReviewMenu" class="editor-command-menu external-review-menu disabled">
-        <summary id="aiReview" aria-disabled="true">外部 AI 审阅</summary>
+        <summary id="aiReview" aria-disabled="true">AI审阅</summary>
         <div class="editor-command-popover external-review-popover" aria-labelledby="externalReviewTitle">
-          <strong id="externalReviewTitle">外部 AI 审阅</strong>
+          <strong id="externalReviewTitle">AI审阅</strong>
           <p>生成可粘贴到任意 Web AI 的审阅文本；当前与指定范围固定附带前后各 5 条 Cue。</p>
           <fieldset class="external-review-scope">
             <legend>审阅范围</legend>
@@ -107,7 +118,6 @@
       <button id="detectSpeakers" type="button" disabled>说话人设置</button>
     </div>
     <div class="command-actions command-right-zone">
-      <button id="startEditorTutorial" class="hidden" type="button">启动教程</button>
       <details id="exportMenu" class="editor-command-menu export-menu"><summary id="exportDocument">导出</summary><div class="editor-command-popover export-popover">
         <section aria-label="导出内容">
           <button type="button" data-export-mode="source">上行字幕</button>
@@ -213,8 +223,8 @@
     </section>
 
     <aside class="editor-preview-pane">
-      <div class="preview-heading"><span id="mediaPreviewLabel">预览</span><details id="assMenu" class="editor-command-menu">
-          <summary>字幕样式</summary>
+      <div class="preview-heading"><span id="mediaPreviewLabel">预览</span><details id="assMenu" class="editor-command-menu" hidden>
+          <summary aria-hidden="true" tabindex="-1">ASS 内部渲染</summary>
           <form id="assForm" class="editor-command-popover task-info-popover ass-popover" aria-labelledby="assPanelTitle">
             <div id="assPanelHandle" class="ass-panel-heading"><strong id="assPanelTitle">字幕样式</strong><button id="assClose" type="button" aria-label="关闭字幕样式面板" title="关闭">×</button></div>
             <div class="ass-profile-bar">
@@ -262,7 +272,7 @@
           <button id="mediaPlayToggle" type="button" aria-label="播放">▶</button>
           <span id="mediaTime">0:00 / 0:00</span>
           <input id="mediaSeek" type="range" min="0" max="0" step="0.01" value="0" aria-label="播放进度">
-          <label class="media-speed-control" for="mediaSpeed"><span class="media-control-label">倍速</span><input id="mediaSpeed" type="range" min="0.25" max="3" step="0.05" value="1" aria-label="播放速度"><output id="mediaSpeedValue">1.00x</output></label>
+          <label class="media-speed-control" for="mediaSpeed"><span class="media-control-label">倍速</span><select id="mediaSpeed" aria-label="播放速度"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option></select></label>
           <div class="media-volume-control"><span class="media-control-label">音量</span><button id="mediaMute" type="button" aria-label="静音">🔊</button><input id="mediaVolume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" title="音量 100%"><output id="mediaVolumeValue">100%</output></div>
           <button id="mediaFullscreen" type="button" aria-label="全屏">⛶</button>
         </div>
@@ -276,27 +286,6 @@
       <div class="timeline-scrollbar"><input id="timelineScrollSlider" type="range" min="0" max="0" step="0.001" value="0" aria-label="时间轴中心位置" aria-controls="timelineTrack" disabled></div>
     </section>
   </main>
-
-  <div id="editorTutorialIntro" class="editor-tutorial-intro hidden" role="status" aria-live="polite" aria-labelledby="editorTutorialIntroTitle">
-    <section>
-      <span>案例教程</span>
-      <h2 id="editorTutorialIntroTitle">从这里启动编辑教程</h2>
-      <p>点击右上方的教程按钮开始。以后也可以随时从这里重新启动。</p>
-      <button id="dismissEditorTutorialIntro" type="button">稍后</button>
-    </section>
-  </div>
-
-  <div id="editorTutorialLayer" class="editor-tutorial-layer hidden" aria-hidden="true">
-    <div id="editorTutorialShadeTop" class="editor-tutorial-shade"></div><div id="editorTutorialShadeLeft" class="editor-tutorial-shade"></div><div id="editorTutorialShadeRight" class="editor-tutorial-shade"></div><div id="editorTutorialShadeBottom" class="editor-tutorial-shade"></div>
-    <div id="editorTutorialSpotlight" class="editor-tutorial-spotlight" aria-hidden="true"></div>
-    <div id="editorTutorialTimelineTarget" class="editor-tutorial-timeline-target hidden" aria-hidden="true"><span id="editorTutorialTimelineTargetLabel"></span></div>
-    <div id="editorTutorialGhostMouse" class="editor-tutorial-ghost-mouse hidden" aria-hidden="true"><i></i><span id="editorTutorialGhostBadge"></span></div>
-    <section id="editorTutorialCard" class="editor-tutorial-card" role="dialog" aria-modal="true" aria-labelledby="editorTutorialTitle">
-      <header><span id="editorTutorialProgress">案例教程 · 1 / 19</span><button id="exitEditorTutorial" type="button">退出教程</button></header>
-      <div class="editor-tutorial-copy"><h2 id="editorTutorialTitle"></h2><p id="editorTutorialDescription"></p></div>
-      <footer id="editorTutorialFooter"><button id="editorTutorialNext" type="button">继续</button></footer>
-    </section>
-  </div>
 
   <div id="srtImportDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="srtImportTitle">
     <section class="text-dialog srt-import-panel">
@@ -338,37 +327,35 @@
   <div id="speakerDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="speakerDialogTitle">
     <form id="speakerDialogForm" class="text-dialog speaker-dialog">
       <strong id="speakerDialogTitle">说话人名称</strong>
-      <p>四色对应 Qwen 返回的说话人；点击 Cue 右侧人形按钮可立即切换颜色。</p>
+      <p>自动列出工程中的说话人，也可以手动添加。点击字幕右侧的人形按钮选择说话人。</p>
       <div class="speaker-name-grid">
-        <label><i class="speaker-swatch speaker-0" title="蓝色说话人"></i><input data-speaker-name="speaker_0" maxlength="60" placeholder="说话人 1" aria-label="蓝色说话人名称"></label>
-        <label><i class="speaker-swatch speaker-1" title="玫红色说话人"></i><input data-speaker-name="speaker_1" maxlength="60" placeholder="说话人 2" aria-label="玫红色说话人名称"></label>
-        <label><i class="speaker-swatch speaker-2" title="青绿色说话人"></i><input data-speaker-name="speaker_2" maxlength="60" placeholder="说话人 3" aria-label="青绿色说话人名称"></label>
-        <label><i class="speaker-swatch speaker-3" title="橙色说话人"></i><input data-speaker-name="speaker_3" maxlength="60" placeholder="说话人 4" aria-label="橙色说话人名称"></label>
       </div>
-      <div><button id="cancelSpeakerDialog" type="button">取消</button><button class="primary" type="submit">保存名称</button></div>
+      <div><button id="addSpeaker" type="button">添加说话人</button><button id="cancelSpeakerDialog" type="button">取消</button><button class="primary" type="submit">保存名称</button></div>
     </form>
   </div>
 
-  <script src="/assets/editor_cue_ordering.js?v=20260809-cue-order-1"></script>
-  <script src="/assets/editor_language.js?v=20261024-languages-1"></script>
-  <script src="/assets/editor_document.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/editor_document_store.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/editor_operation_queue.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/editor_waveform_cache.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/editor_timeline.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/editor_thumbnails.js?v=20261025-1"></script>
-  <script src="/assets/editor_multiline_timeline.js?v=20261025-thumbnails-1"></script>
-  <script src="/assets/editor_cue_time_controller.js?v=20260809-cue-order-1"></script>
-  <script src="/assets/editor_cue_list_view.js?v=20261024-save-safety-1"></script>
-  <script src="/assets/editor_external_review.js?v=20260828-review-scope-1"></script>
-  <script src="/assets/editor_tutorial.js?v=20260831-v2-contract-1"></script>
+  <script src="/assets/editor_speakers.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_cut_timeline.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_timeline_tools.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_cue_ordering.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_language.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_document.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_document_store.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_operation_queue.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_waveform_cache.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_timeline.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_multiline_timeline.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_cue_time_controller.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_cue_list_view.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_external_review.js?v=20261025-merged-1"></script>
   <script src="/assets/system_save_as.js?v=20260916-deferred-save-1"></script>
   <script src="/assets/ai_progress_summary.js?v=20260903-counts-2"></script>
   <script src="/assets/project_label.js?v=20260907-crisp-2"></script>
   <script src="/assets/vendor/libass/subtitles-octopus.js"></script>
-  <script src="/assets/editor_cue_selection.js?v=20261012-media-selection-1"></script>
-  <script src="/assets/editor_ass_panel.js?v=20261024-save-safety-2"></script>
-  <script src="/assets/translation_layout.js?v=20261024-languages-1"></script>
-  <script src="/assets/editor.js?v=20261025-thumbnails-1"></script>
+  <script src="/assets/editor_cue_selection.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_ass_panel.js?v=20261025-merged-1"></script>
+  <script src="/assets/translation_layout.js?v=20261025-merged-1"></script>
+  <script src="/assets/editor_thumbnails.js?v=20261025-merged-1"></script>
+  <script type="module" src="/assets/editor_maw_boot.js?v=20261025-merged-1"></script>
 </body>
 </html>

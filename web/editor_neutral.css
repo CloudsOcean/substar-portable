@@ -1,0 +1,137 @@
+/* Neutral editor surfaces. Media pixels and semantic colors are not filtered. */
+html:not([data-theme="light"]) body.editor-shell {
+  --theme-bg: #101011;
+  --theme-panel: #19191b;
+  --theme-panel-2: #28282b;
+  --theme-field: #141416;
+  --theme-text: #f0eff2;
+  --theme-muted: #a2a0a8;
+  --theme-line: #333237;
+  --theme-line-strong: #48464e;
+  --theme-accent: #a58bd6;
+  --theme-accent-soft: #c7b3ef;
+  --editor-bg: var(--theme-bg);
+  --editor-panel: var(--theme-panel);
+  --editor-panel-2: var(--theme-panel-2);
+  --editor-panel-3: #2b2b2b;
+  --editor-line: var(--theme-line);
+  --editor-line-strong: var(--theme-line-strong);
+  --editor-text: var(--theme-text);
+  --editor-muted: var(--theme-muted);
+  --editor-purple: var(--theme-accent);
+  --editor-purple-soft: var(--theme-accent-soft);
+  --scroll-track-color: #343434;
+  --scroll-thumb-color: #777777;
+  background: var(--theme-bg) !important;
+  color: var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,.editor-document-pane,.editor-preview-pane,.cue-timeline-panel,#editorTools) {
+  background: var(--theme-panel) !important;
+  border-color: var(--theme-line) !important;
+}
+html:not([data-theme="light"]) body.editor-shell :is(.cue-row,.tool-locator-row,.tool-section,.tool-search-panel,.translation-track,.cue-task-island) {
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line) !important;
+}
+html:not([data-theme="light"]) body.editor-shell :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),select,textarea) {
+  background-color: var(--theme-field) !important;
+  border-color: var(--theme-line-strong) !important;
+  color: var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button,summary) {
+  background-color: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important;
+  color: var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell .cue-row:is(.current,.cue-selected) {
+  background: color-mix(in srgb,var(--theme-accent) 14%,var(--theme-panel-2)) !important;
+  border-color: var(--theme-accent-soft) !important;
+  outline-color: var(--theme-accent-soft);
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools :is(input[type="search"],input[type="text"],input:not([type]),textarea),
+html:not([data-theme="light"]) body.editor-shell .cue-row button:has(svg) {
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important;
+}
+html:not([data-theme="light"]) body.editor-shell :is(.pane-live-controls,.tool-search-scopes) label:has(input:checked) {
+  background: color-mix(in srgb,var(--theme-accent) 16%,var(--theme-panel-2)) !important;
+}
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host {
+  --wave-peak: #76bca6;
+  --wave-peak-dim: #929292;
+}
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host :is(.waveform-cue-block,.waveform-word-block):not(.selected) {
+  background: color-mix(in srgb,var(--cue-color) 28%,#2c2c30);
+  outline-color: color-mix(in srgb,var(--cue-color) 45%,#69676f);
+}
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host :is(.waveform-cue-block,.waveform-word-block).selected {
+  background: color-mix(in srgb,var(--theme-accent) 30%,#2c2933);
+  outline-color: var(--theme-accent-soft);
+}
+
+/* Small interaction accents keep the neutral surfaces lively. */
+html:not([data-theme="light"]) body.editor-shell .cue-row:hover:not(.current):not(.cue-selected) {
+  background: #303034 !important;
+  border-color: #49464f !important;
+}
+html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button,summary):hover:not(:disabled) {
+  background-color: color-mix(in srgb,var(--theme-accent) 12%,var(--theme-panel-2)) !important;
+  border-color: var(--theme-accent) !important;
+}
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host {
+  --wave-row-bg: #191b1c;
+  --bg-wave-row: #191b1c;
+}
+/* Keep technical waveform counts out of the toolbar, retaining load/error feedback. */
+body.editor-shell .maw-waveform-host #waveform-status:not(.error):not(.busy) { display:none; }
+
+/* A continuous neutral surface behind the subtitle heading and list. */
+html:not([data-theme="light"]) body.editor-shell .editor-document-pane {
+  background: #1d1d20 !important;
+  border-color: #323236 !important;
+}
+html:not([data-theme="light"]) body.editor-shell .editor-document-pane > .pane-heading {
+  background: transparent !important;
+  box-shadow: none;
+}
+html:not([data-theme="light"]) body.editor-shell .editor-document-pane .cue-list {
+  background: transparent !important;
+}
+html:not([data-theme="light"]) body.editor-shell .editor-document-pane .cue-row:not(.current):not(.cue-selected):not(:hover) {
+  background: #27272a !important;
+  border-color: #303034 !important;
+}
+html:not([data-theme="light"]) body.editor-shell .editor-document-pane .cue-row {
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-theme="light"]) body.editor-shell .editor-document-pane .cue-row { transition: none; }
+}
+
+/* Compact tool tiles: icon and label share one line. */
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs {
+  display:grid !important; grid-template-columns:repeat(auto-fit,minmax(76px,1fr));
+  grid-template-rows:none; grid-auto-rows:34px; gap:6px; padding:4px 0 10px; margin:0;
+  border-bottom:0;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs button {
+  height:34px; min-width:0; width:auto; padding:0 8px; flex-direction:row !important;
+  gap:6px; font-size:12px; border:1px solid var(--theme-line) !important;
+  border-radius:5px !important; background:var(--theme-panel-2) !important;
+  color:var(--theme-muted) !important; white-space:nowrap;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs button[aria-selected=true],
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs button:hover {
+  color:var(--theme-text) !important;
+  background:color-mix(in srgb,var(--theme-accent) 15%,var(--theme-panel)) !important;
+  border-color:var(--theme-accent-soft) !important;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs button::after {display:none;}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .experimental-tool-tabs svg {width:14px;height:14px;flex:none;}
+body.editor-shell .maw-waveform-host :is(#markers-manage,#auto-merge-manage,#subtitle-extend-manage)[hidden] { display:none !important; }
+html:not([data-theme="light"]) body.editor-shell .maw-waveform-host { --wave-peak:#bbc0d0; }
+
+body.editor-shell #editor-cut-tool-content { display:flex; flex-direction:column; gap:12px; }
+body.editor-shell #editor-cut-tool-content label { display:flex; flex-direction:column; gap:6px; }
+body.editor-shell #editor-cut-tool-content :is(select,button) { width:100%; box-sizing:border-box; }
+body.editor-shell #editor-cut-tool-content p { color:var(--theme-muted); font-size:12px; line-height:1.6; }

@@ -92,8 +92,8 @@ def test_external_ai_prooftranslation_uses_one_routed_two_stage_prompt(tmp_path:
     assert "校准稿未经用户明确接受，不得翻译" in prompt
     assert "编号|译文" in prompt
     assert "C###[-C###]" not in prompt
-    assert "显示编号始终递增" in prompt
-    assert "局部反序" in prompt
+    assert "默认每个编号各写一行" in prompt
+    assert "允许最小必要的局部重排" in prompt
     assert "English to Simplified Chinese" in prompt
 
 

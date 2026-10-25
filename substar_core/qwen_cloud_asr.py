@@ -558,6 +558,11 @@ def _parse_result(
                 units.append(unit)
     if not units:
         raise QwenCloudAsrError("Qwen 云端转写没有返回词级时间戳；请确认模型支持词级时间并已开启该选项")
+    # Interleaved speakers may be returned sentence-by-sentence. Preserve each
+    # word's speaker and sentence evidence while giving the document a time order.
+    units.sort(key=lambda unit: (float(unit["start"]), int(unit["index"])))
+    for index, unit in enumerate(units):
+        unit["index"] = index
     text = " ".join(text_parts).strip()
     if not text:
         text = " ".join(str(item["text"]) for item in units).strip()

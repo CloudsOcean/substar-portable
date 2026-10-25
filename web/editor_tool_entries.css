@@ -1,0 +1,138 @@
+/* Tool entry relocation and a quiet task dismiss control. */
+body.editor-shell .maw-waveform-host :is(#gap-remove-manage,#markers-quick-toggle)[hidden] { display:none !important; }
+html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss {
+  width:20px !important; min-width:20px !important; height:20px !important; min-height:20px !important;
+  padding:0 !important; border:0 !important; box-shadow:none !important;
+  background:transparent !important; color:var(--theme-muted) !important;
+  font-size:15px !important; line-height:20px; border-radius:4px; opacity:.55;
+}
+html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss:hover:not(:disabled),
+html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss:focus-visible {
+  opacity:1; color:var(--theme-text) !important; background:var(--theme-panel-2) !important;
+}
+
+html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs {
+  grid-template-columns:repeat(5,minmax(0,1fr)) !important;
+  grid-template-rows:repeat(2,auto) !important;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs > button {
+  min-width:0 !important; width:100% !important;
+}
+
+/* A single visual system for sidebar tools, including the docked MAW controls. */
+body.editor-shell #editorTools {
+  --bg-panel:var(--theme-panel); --bg-base:var(--theme-bg); --bg-raised:var(--theme-panel-2);
+  --bg-overlay:var(--theme-panel-2); --text-primary:var(--theme-text); --text-secondary:var(--theme-muted);
+  --text-muted:var(--theme-muted); --border:var(--theme-line); --accent:var(--theme-accent);
+  --btn-bg:var(--theme-panel-2); --btn-bg-hover:#333237; --radius-sm:5px;
+}
+body.editor-shell #editorTools > .tool-accordion { padding:12px 8px; box-sizing:border-box; }
+body.editor-shell #editorTools .tool-panel { padding:0; font-size:12px; line-height:1.5; }
+body.editor-shell #editorTools :is(h3,h4) { margin:0 0 10px; color:var(--theme-text); font-size:13px; font-weight:600; }
+body.editor-shell #editorTools :is(.tool-section,fieldset,.cut-ai-section,.cut-plan-review) {
+  padding:10px; margin:0 0 12px; border:1px solid var(--theme-line); border-radius:6px;
+  background:var(--theme-panel) !important; box-shadow:none;
+}
+body.editor-shell #editorTools :is(label,legend) { font-size:12px; color:var(--theme-muted); }
+body.editor-shell #editorTools :is(button,input,select,textarea) { font:inherit; border-radius:5px; box-sizing:border-box; }
+body.editor-shell #editorTools :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),select,textarea) {
+  min-width:0; max-width:100%; background:var(--theme-field) !important;
+  border:1px solid var(--theme-line-strong) !important; color:var(--theme-text); padding:6px 8px;
+}
+body.editor-shell #editorTools :is(button,select,input:not([type="checkbox"]):not([type="radio"]):not([type="range"])) { min-height:30px; }
+body.editor-shell #editorTools button { background:var(--theme-panel-2); border:1px solid var(--theme-line-strong); color:var(--theme-text); }
+body.editor-shell #editorTools button:disabled { opacity:.4; cursor:default; }
+body.editor-shell #editorTools button.tool-primary {
+  background:color-mix(in srgb,var(--theme-accent) 24%,var(--theme-panel-2)) !important;
+  border-color:color-mix(in srgb,var(--theme-accent) 65%,var(--theme-line)) !important;
+}
+body.editor-shell #editorTools .docked-wave-tool { display:block; min-height:0; }
+body.editor-shell #editorTools .docked-tool-panel {
+  display:block !important; position:static !important; inset:auto !important; transform:none !important;
+  width:100% !important; min-width:0 !important; max-width:none !important; max-height:none !important;
+  margin:0 !important; padding:0 !important; border:0 !important; border-radius:0 !important;
+  background:transparent !important; box-shadow:none !important; overflow:visible !important; z-index:auto !important;
+}
+body.editor-shell #editorTools .docked-tool-panel > header {
+  padding:0 0 10px; margin:0; border:0; background:transparent; cursor:default; min-height:0;
+}
+body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-eyebrow,.gap-remove-close,.gap-remove-help-button,.gap-remove-panel-footer,#markers-help) { display:none !important; }
+body.editor-shell #editorTools .docked-tool-panel .gap-remove-panel-body { display:flex; flex-direction:column; gap:12px; padding:0; overflow:visible; }
+body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-fields,.markers-filters) { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
+body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-field,.gap-remove-advanced,.gap-remove-disable-section) {
+  padding:10px; border:1px solid var(--theme-line); border-radius:6px; background:var(--theme-panel);
+}
+body.editor-shell #editorTools .docked-tool-panel :is(.markers-actions-primary,.markers-actions,.markers-summary-row,.markers-batch-actions) { display:flex; flex-wrap:wrap; gap:8px; }
+body.editor-shell #editorTools .docked-tool-panel .markers-search-input { width:100%; }
+body.editor-shell #editorTools .docked-tool-panel .markers-list { max-height:none; overflow:visible; }
+body.editor-shell #editorTools .docked-tool-panel :is(.markers-item,.markers-card) { box-shadow:none; border-color:var(--theme-line); }
+body.editor-shell #editorTools .docked-tool-panel .gap-remove-scan { background:var(--theme-panel-2); color:var(--theme-text); box-shadow:none; }
+body.editor-shell #editorTools .tool-feedback { margin:0; font-size:12px; color:var(--theme-muted); overflow-wrap:anywhere; }
+body.editor-shell #editorTools .cut-ai-section { display:flex; flex-direction:column; gap:10px; }
+body.editor-shell #editorTools .cut-ai-section textarea { width:100%; resize:vertical; min-height:95px; }
+body.editor-shell #editorTools .cut-ai-section .tool-check { display:flex; flex-direction:row; align-items:center; }
+body.editor-shell #editorTools .cut-change-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; padding:10px 0; border-top:1px solid var(--theme-line); }
+body.editor-shell #editorTools .cut-change-row p { grid-column:1 / -1; margin:0; }
+body.editor-shell #editorTools .cut-plan-review p { margin:0 0 8px; }
+body.editor-shell #editorTools .cut-change-row button { width:auto; padding:4px 7px; }
+
+body.editor-shell #editorTools input[type="checkbox"] {
+  appearance:auto !important; width:14px !important; height:14px !important;
+  min-width:14px !important; min-height:14px !important; padding:0 !important; margin:0;
+  accent-color:var(--theme-accent);
+}
+body.editor-shell #editorTools .markers-show-notes { flex-direction:row; align-items:center; gap:6px; }
+body.editor-shell #editorTools .docked-tool-panel .markers-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+body.editor-shell #editorTools .docked-tool-panel .markers-filter-item { min-width:0; align-items:stretch; }
+body.editor-shell #editorTools .docked-tool-panel .markers-filter-item select { width:100%; }
+
+html[data-editor-layout="experimental"] body.editor-shell #editorTools button.tool-primary {
+  background-color:color-mix(in srgb,var(--theme-accent) 24%,var(--theme-panel-2)) !important;
+  border-color:var(--theme-accent) !important;
+}
+
+/* Remove legacy blue fills from merge/snap groups and search scope states. */
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools :is(.merge-options > label,.auto-snap-option,.sidebar-legend span) {
+  background:#252527 !important;
+  border-color:#3b3b3e !important;
+  color:var(--theme-muted) !important;
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools :is(.merge-options > label,.auto-snap-option):hover {
+  background:#2b2b2e !important; border-color:#4b4b4f !important;
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle {
+  background:#171719 !important; border-color:#3b3b3e !important;
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button {
+  background:transparent !important; color:var(--theme-muted) !important; box-shadow:none !important;
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button[aria-pressed="true"] {
+  background:#3b3b3f !important; color:var(--theme-text) !important;
+  border-color:#59595f !important; box-shadow:inset 0 0 0 1px #59595f !important;
+}
+html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button:hover:not([aria-pressed="true"]) {
+  background:#29292c !important; color:var(--theme-text) !important;
+}
+
+html:not([data-theme="light"]) body.editor-shell .translation-language-layout .language-slot {
+  background:var(--theme-panel); border-color:var(--theme-line); color:var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell .translation-language-layout button.language-block {
+  background:var(--theme-panel-2); border-color:var(--theme-line-strong); color:var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell .translation-language-layout button.language-block[aria-pressed="true"] {
+  background:color-mix(in srgb,var(--theme-accent) 20%,var(--theme-panel-2)); border-color:var(--theme-accent); color:var(--theme-text);
+}
+html:not([data-theme="light"]) body.editor-shell .translation-language-layout button.language-block[aria-pressed="false"]:not(:disabled) {
+  background:var(--theme-field); border-color:var(--theme-line-strong); color:var(--theme-muted);
+}
+
+/* Language selection must remain visible against the command bar's button overrides. */
+html:not([data-theme="light"]) body.editor-shell :is(#translationLanguageLayout,#taskInfoLanguageLayout) button.language-block {
+  background:var(--theme-field) !important; border-color:var(--theme-line-strong) !important;
+  color:var(--theme-muted) !important;
+}
+html:not([data-theme="light"]) body.editor-shell :is(#translationLanguageLayout,#taskInfoLanguageLayout) button.language-block[aria-pressed="true"] {
+  background:color-mix(in srgb,var(--theme-accent) 22%,var(--theme-panel-2)) !important;
+  border-color:var(--theme-accent) !important; color:var(--theme-text) !important;
+}

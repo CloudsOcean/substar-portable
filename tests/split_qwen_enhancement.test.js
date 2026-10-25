@@ -86,10 +86,13 @@ test("Quick Start switches every LLM Stage atomically and preserves the reasonin
   assert.match(source, /state\.settings = await api\("\/api\/settings"\);[\s\S]*?quickSettingsPayload\(kind, key\)/);
 });
 
-test("provider registration links appear in tutorials instead of quick cards", () => {
+test("retired tutorials do not attach registration flows to the split page", () => {
   assert.doesNotMatch(html, /智谱 API Key · <a/);
   assert.doesNotMatch(source, /百炼平台注册点此/);
-  assert.equal((source.match(/label: "点击注册并获取 API Key"/g) || []).length, 2);
+  assert.doesNotMatch(source, /label: "点击注册并获取 API Key"|const TUTORIAL_STEPS/);
+  assert.doesNotMatch(html, /id="creationTutorialActions"/);
+  assert.match(html, /id="qwenQuickTest"/);
+  assert.match(html, /id="glmQuickTest"/);
 });
 
 test("temporary hotword parser rejects unsupported numeric weights", () => {

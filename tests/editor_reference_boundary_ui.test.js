@@ -74,7 +74,7 @@ test("regional Chinese conversion choices remain explicit", () => {
 test("AI and manuscript commands follow the requested editor order", () => {
   assert.match(
     editorHtml,
-    /AI 翻译[\s\S]*AI 校准[\s\S]*AI 审阅[\s\S]*参考文稿[\s\S]*繁简转换[\s\S]*说话人设置/,
+    /AI 翻译[\s\S]*AI 校准[\s\S]*AI\s*审阅[\s\S]*参考文稿[\s\S]*繁简转换[\s\S]*说话人设置/,
   );
   assert.match(editorJs, /translationMenuSummary"\)\.textContent = running \? "AI 翻译中…" : "AI 翻译"/);
 });
