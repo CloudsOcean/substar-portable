@@ -1,12 +1,12 @@
 /* Workspace actions and draggable tool windows. */
 #detectSpeakers[hidden], .workspace-tool-dock[hidden] { display:none !important; }
-.workspace-tool-dock { position:fixed; height:34px; box-sizing:border-box; padding:2px 6px; z-index:60; border:1px solid #383838; border-radius:6px; background:#202020; }
-html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs { display:flex; align-items:center; flex-wrap:nowrap; gap:3px; height:28px; margin:0; padding:0; border:0; overflow-x:auto; }
-html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs button { display:flex; flex-direction:row!important; align-items:center; justify-content:center; flex:0 0 auto; gap:4px; min-width:0; width:auto; height:27px; padding:0 6px; font-size:11px; white-space:nowrap; border-radius:4px; }
+.workspace-tool-dock { position:fixed; display:flex; align-items:center; gap:4px; height:54px; box-sizing:border-box; padding:4px 6px; z-index:60; border:1px solid #383838; border-radius:6px; background:#202020; }
+html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs { display:flex; align-items:center; flex-wrap:nowrap; gap:3px; height:44px; min-height:44px; margin:0; padding:0; border:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; flex:1; min-width:0; }
+html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs button { display:flex; flex-direction:row!important; align-items:center; justify-content:center; flex:0 0 auto; gap:4px; min-width:0; width:auto; height:30px; min-height:30px; padding:0 8px; font-size:12px; white-space:nowrap; border-radius:4px; }
 .workspace-tool-dock .experimental-tool-tabs svg { width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.5; }
 .workspace-tool-dock .experimental-tool-tabs button::after { display:none!important; }
-html[data-editor-layout="experimental"] [data-workspace-layout="waveform"] .editor-document-pane { margin-top:42px; }
-html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .cue-timeline-panel { margin-top:42px; }
+html[data-editor-layout="experimental"] [data-workspace-layout="waveform"] .editor-document-pane { margin-top:62px; }
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .cue-timeline-panel { margin-top:62px; }
 html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools { height:auto!important; max-height:calc(100vh - 16px); border:1px solid #444; border-radius:8px; background:#202020; box-shadow:0 12px 36px #0008; }
 html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools.cinema-tools-open { display:flex!important; flex-direction:column; }
 html[data-editor-layout="experimental"] :is([data-workspace-layout="cinema"], [data-workspace-layout="waveform"]) #editorTools .cinema-tool-heading { flex:none; cursor:move; touch-action:none; border:0; border-bottom:1px solid #3a3a3a; background:#292929; }
@@ -219,3 +219,19 @@ body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {
 body.editor-shell .maw-waveform-host .waveform-row .waveform-word-block {padding-left:11px;padding-right:11px;}
 body.editor-shell .maw-waveform-host .waveform-word-block .waveform-cue-handle,
 body.editor-shell .maw-waveform-host .waveform-word-boundary {display:none!important;}
+
+/* Keep marker actions aligned even in the narrow review sidebar. */
+body.editor-shell #editorTools .markers-item:not(.batch-mode) { grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:4px; padding:4px; }
+body.editor-shell #editorTools .markers-item-main { min-width:0; height:auto; margin:0; padding:5px; display:flex; flex-wrap:wrap; gap:4px 6px; align-self:stretch; }
+body.editor-shell #editorTools .markers-item-title { flex:1; }
+body.editor-shell #editorTools .markers-item-time { width:100%; padding-left:20px; box-sizing:border-box; }
+body.editor-shell #editorTools .markers-item > .markers-item-edit { margin:0; padding:0 7px; height:30px; align-self:center; white-space:nowrap; }
+body.editor-shell #editorTools .markers-item-delete { color:#e69a9f; }
+body.editor-shell #editorTools .markers-item-editor, body.editor-shell #editorTools .markers-item-note { grid-column:1 / -1; }
+
+/* The subtitle column uses the space beside the preview-only tool dock. */
+html[data-editor-layout="experimental"] [data-workspace-layout="cinema"] .editor-document-pane { margin-bottom:-62px; }
+.workspace-tool-dock .experimental-tool-tabs::-webkit-scrollbar { display:none; }
+.workspace-tool-dock > .workspace-tool-scroll { flex:0 0 26px; width:26px; height:32px; padding:0; font-size:22px; line-height:1; border:1px solid #444; border-radius:4px; background:#292929; color:#ddd; }
+.workspace-tool-dock > .workspace-tool-scroll[hidden] { display:none; }
+.workspace-tool-dock > .workspace-tool-scroll:disabled { opacity:.3; cursor:default; }

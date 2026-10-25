@@ -634,7 +634,16 @@ export function initSubstarMarkersPanel(global) {
       editingMarkerId = editingMarkerId === marker.id ? null : marker.id;
       render();
     });
-    if (!batchMode) item.appendChild(editButton);
+    if (!batchMode) {
+      item.appendChild(editButton);
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'markers-item-edit markers-item-delete';
+      deleteButton.textContent = '删除';
+      deleteButton.setAttribute('aria-label', `删除 ${marker.name || (isRegion ? '区段' : '标记')}`);
+      deleteButton.addEventListener('click', () => MaweMarkerEditing.deleteMarker(marker.id));
+      item.appendChild(deleteButton);
+    }
 
     // 勾选「显示备注」只为有备注的标记追加内容；空备注不留「-」占位。
     const noteText = marker.note?.trim();

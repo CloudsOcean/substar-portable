@@ -4464,7 +4464,7 @@
 }
 .markers-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   overflow: hidden; color: var(--text-primary);
   background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
 }

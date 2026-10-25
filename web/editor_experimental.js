@@ -375,6 +375,29 @@
       let activePanel = panels[0];
       const toolDock=document.createElement('div');toolDock.className='workspace-tool-dock';
       document.querySelector('#editorWorkbench').append(toolDock);
+      const dockPrevious = document.createElement('button');
+      const dockNext = document.createElement('button');
+      for (const [button, label, glyph, direction] of [
+        [dockPrevious, '向左查看更多工具', '‹', -1],
+        [dockNext, '向右查看更多工具', '›', 1],
+      ]) {
+        button.type = 'button';
+        button.className = 'workspace-tool-scroll';
+        button.setAttribute('aria-label', label);
+        button.textContent = glyph;
+        button.hidden = true;
+        button.addEventListener('click', () => tabs.scrollBy({left:direction * Math.max(120, tabs.clientWidth * .7), behavior:'smooth'}));
+      }
+      toolDock.append(dockPrevious, dockNext);
+      function syncDockArrows() {
+        if (toolDock.hidden || tabs.parentElement !== toolDock) return;
+        const overflow = tabs.scrollWidth > toolDock.clientWidth - 12 + 1;
+        dockPrevious.hidden = dockNext.hidden = !overflow;
+        dockPrevious.disabled = tabs.scrollLeft <= 1;
+        dockNext.disabled = tabs.scrollLeft + tabs.clientWidth >= tabs.scrollWidth - 1;
+      }
+      tabs.addEventListener('scroll', syncDockArrows, {passive:true});
+      new ResizeObserver(syncDockArrows).observe(toolDock);
       const floatingPositions={};let panelDrag=null;
       const workbench = document.querySelector("#editorWorkbench");
       const isCinema = () => ["cinema", "waveform"].includes(workbench.dataset.workspaceLayout);
@@ -392,8 +415,9 @@
           const wave=document.querySelector('.cue-timeline-panel').getBoundingClientRect();
           const dock=window.EditorToolLayout.dockBounds(workbench.dataset.workspaceLayout,preview,cue,wave);
           Object.assign(toolDock.style,{left:dock.left+'px',top:dock.top+'px',width:dock.width+'px'});
+          syncDockArrows();
           const width=Math.min(360,innerWidth-24),bodyHeight=Math.min(520,innerHeight-100);
-          const requested=floatingPositions[workbench.dataset.workspaceLayout]||{left:dock.left+8,top:dock.top+42};
+          const requested=floatingPositions[workbench.dataset.workspaceLayout]||{left:dock.left+8,top:dock.top+62};
           const position=window.EditorToolLayout.clampPanel(requested,{width:innerWidth,height:innerHeight},{width,height:bodyHeight+36});
           Object.assign(tools.style,{left:position.left+'px',top:position.top+'px',width:width+'px'});
           tools.style.setProperty('--cinema-window-height',bodyHeight+'px');
@@ -506,7 +530,7 @@
       function syncToolMode() {
         closeTools();
         if (isCinema()) {
-          toolDock.append(tabs);toolDock.hidden=false;
+          toolDock.insertBefore(tabs,dockNext);toolDock.hidden=false;
           if (document.body.classList.contains("review-mode")) document.querySelector("#reviewModeToggle")?.click();
         } else {tools.prepend(tabs);toolDock.hidden=true;}
         tabs.setAttribute("role", isCinema() ? "toolbar" : "tablist");

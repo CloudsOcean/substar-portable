@@ -6,8 +6,8 @@ import {createGapBoundarySnapper} from './editor_maw_gap_snap.js?v=20261024-visi
 /* MAW waveform host adapter. All persistent edits use Substar document operations. */
 import {createMawMenus} from './editor_maw_menus.js?v=20261024-word-menu-removed-1';
 import {createCutPlanPanel} from './editor_cut_plan_panel.js?v=2';
-import {shell} from './editor_maw_shell.js?v=20261024-no-test-menu-1';
-import {initSubstarMarkersPanel} from './vendor/maw/editor/markers/editor-markers-panel.js';
+import {shell} from './editor_maw_shell.js?v=20261025-tools-2';
+import {initSubstarMarkersPanel} from './vendor/maw/editor/markers/editor-markers-panel.js?v=20261025-tools-2';
 const M=globalThis.SubstarMawModel;
 const C=globalThis.AsrGapRemoveCore;
 const U=()=>globalThis.AsrEditorUtils;
