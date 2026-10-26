@@ -65,7 +65,7 @@
       closeMenu(); busy = true; cancelled = false; activeTask = null;
       selectedFile = getFiles()[0]; selectedConfig = config();
       const inputBefore = [$("#qwenPromptInput").value, $("#qwenHotwordsInput").value];
-      const brief = $("#qwenAiBriefInput").value.trim() || "根据初次听写提取节目主题与可信专名。";
+      const brief = $("#qwenAiBriefInput").value.trim() || "根据初次听写提取节目主题、专名和专业术语，并结合上下文修正明显的同音字和拼写错误。";
       const language = $("#languageInput").value;
       $("#qwenAssistButton").disabled = true; cancel.hidden = false; cancel.disabled = false;
       status.className = ""; status.setAttribute("aria-busy", "true"); sync();

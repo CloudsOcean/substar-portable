@@ -94,33 +94,16 @@ class AsrAssistTests(unittest.TestCase):
         self.assertIn("hotwords", material["instructions"])
         self.assertIn("未经核对", material["instructions"])
 
-    def test_external_package_python_validator_executes_final_json_rules(self):
-        import json
+    def test_external_package_works_without_code_tools(self):
         instructions = generation_material("ASR", "zh", "", True)["instructions"]
-        code = instructions.split("```python\n", 1)[1].split("```", 1)[0]
-        namespace = {}
-        exec(compile(code, "external-validator", "exec"), namespace)
-        validate = namespace["validate_final_json"]
-        def payload(prompt="领域", words=None):
-            return json.dumps({"prompt": prompt, "hotwords": words or []}, ensure_ascii=False)
-        validate(payload("😀" * 400, [{"text":"one two three four five six seven", "weight":5}]))
-        validate(payload(words=[{"text":"ABC", "weight":50}]), ["ABC"])
-        invalid = [payload(""), payload("x" * 401),
-            payload(words=[{"text":"中" * 16,"weight":5}]),
-            payload(words=[{"text":"a b c d e f g h","weight":5}]),
-            payload(words=[{"text":"a\nb","weight":5}]),
-            payload(words=[{"text":"a\rb","weight":5}]),
-            payload(words=[{"text":" ","weight":5}]),
-            payload(words=[{"text":"ABC","weight":50}]),
-            payload(words=[{"text":"ABC","weight":4}]),
-            payload(words=[{"text":"ABC","weight":True}]),
-            payload(words=[{"text":"ABC","weight":5},{"text":" abc ","weight":5}]),
-            payload(words=[{"text":str(i),"weight":5} for i in range(101)])]
-        for raw in invalid:
-            with self.subTest(raw=raw), self.assertRaises(AssertionError):
-                validate(raw)
-        with self.assertRaises(AssertionError):
-            validate(payload(words=[{"text":"ABC","weight":5}]), supports_hotwords=False)
+        self.assertNotIn("```python", instructions)
+        self.assertNotIn("validate_final_json", instructions)
+        self.assertNotIn("启用代码工具", instructions)
+        self.assertIn("300 字符", instructions)
+        self.assertIn("直接截断", instructions)
+        self.assertIn("同音字", instructions)
+        self.assertIn("使用 2–3", instructions)
+        self.assertIn("hotwords 输出空数组", generation_material("ASR", "zh", "", False)["instructions"])
 
     def test_cannot_read_other_project_transcript(self):
         with patch.object(self.service, "get_task", return_value={"task_type":"transcription", "project_id":"../other"}):

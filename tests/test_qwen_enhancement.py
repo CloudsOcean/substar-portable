@@ -57,9 +57,14 @@ class QwenEnhancementTests(unittest.TestCase):
             ),
             [
                 {"text": "CUDA", "weight": 50},
-                {"text": "Tensor Core", "weight": 5},
+                {"text": "Tensor Core", "weight": 4},
             ],
         )
+
+    def test_inferred_candidate_weights_are_preserved(self):
+        self.assertEqual([r["weight"] for r in prioritize_generated_qwen_hotwords(
+            [{"text":"A", "weight":2}, {"text":"B", "weight":3}, {"text":"C", "weight":50}], user_prompt=""
+        )], [2, 3, 4])
 
     def test_ai_super_hotwords_never_exceed_official_limit(self) -> None:
         terms = [f"term{i}" for i in range(51)]
@@ -68,7 +73,7 @@ class QwenEnhancementTests(unittest.TestCase):
             user_prompt=" ".join(terms),
         )
         self.assertEqual(sum(item["weight"] == 50 for item in result), 50)
-        self.assertEqual(result[-1]["weight"], 5)
+        self.assertEqual(result[-1]["weight"], 4)
 
 
 if __name__ == "__main__":

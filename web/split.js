@@ -1425,7 +1425,7 @@
   asrAssist = window.SubstarAsrAssist.init({
     api, getFiles:() => state.videos, getSettings:() => state.settings, getGlossaryIds:()=>glossaryInjection.ids(),
     apply(generated, origin = "ai_asr") {
-      if (typeof generated.prompt !== "string" || !generated.prompt.trim() || generated.prompt.length > 400) throw new Error("Prompt 必须为 1–400 字符。");
+      if (typeof generated.prompt !== "string" || !generated.prompt.trim()) throw new Error("Prompt 不能为空。");
       if (!Array.isArray(generated.hotwords)) throw new Error("hotwords 必须是数组。");
       for (const word of generated.hotwords) {
         if (!word || typeof word !== "object") throw new Error("每个热词必须包含 text 和 weight。");
@@ -1439,7 +1439,7 @@
       for (const item of rows) if (!merged.has(item.text.toLocaleLowerCase())) merged.set(item.text.toLocaleLowerCase(), item);
       const text = formatTemporaryHotwords([...merged.values()]);
       parseTemporaryHotwords(text);
-      $("#qwenPromptInput").value = generated.prompt.trim();
+      $("#qwenPromptInput").value = [...generated.prompt.trim()].slice(0, 400).join("");
       $("#qwenHotwordsInput").value = $("#qwenHotwordsInput").disabled ? "" : text;
       syncQwenEnhancementCounts();
       markSettingsDirty();

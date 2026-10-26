@@ -68,7 +68,7 @@ def prioritize_generated_qwen_hotwords(
     *,
     user_prompt: str,
 ) -> list[dict[str, Any]]:
-    """Give directly named terms super weight and inferred terms strong weight."""
+    """Give user-named terms super weight and retain ordinary candidate weights."""
 
     rows = normalize_qwen_hotwords(value)
     source = str(user_prompt or "").casefold()
@@ -80,6 +80,6 @@ def prioritize_generated_qwen_hotwords(
             weight = 50
             super_count += 1
         else:
-            weight = 5
+            weight = min(item["weight"], 4)
         prioritized.append({"text": item["text"], "weight": weight})
     return prioritized
