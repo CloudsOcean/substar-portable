@@ -88,6 +88,7 @@ def translation_groups(
                 {
                     **row["route"],
                     "cue_id": cue.cue_id,
+                    "speaker": cue.speaker,
                     "start": cue.start,
                     "end": cue.end,
                     "source_text": source_text,

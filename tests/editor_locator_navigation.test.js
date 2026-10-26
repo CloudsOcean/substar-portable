@@ -13,7 +13,7 @@ assert.match(
 );
 assert.match(
   source,
-  /function selectCue\(cueId, seek = false, scroll = false\)[\s\S]*?activateCue\(cueId, \{seek, scroll,/,
+  /function selectCue\(cueId, seek = false, scroll = false(?:, preserveCueSelection = false)?\)[\s\S]*?activateCue\(cueId, \{seek, scroll,/,
   "selectCue must forward explicit list scrolling to activateCue"
 );
 assert.match(

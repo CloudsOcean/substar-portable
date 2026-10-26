@@ -252,7 +252,8 @@ def _effective_material(
             build_segmentation_material_with_reference_projection(master, alignment)
         )
         return material, alignment, audit, display_projection, reference_suggestions
-    return build_segmentation_material(master, alignment), alignment, audit, [], []
+    material, projection, _ = build_segmentation_material_with_reference_projection(master, alignment)
+    return material, alignment, audit, projection, []
 
 
 def _semantic_candidate(
@@ -272,8 +273,10 @@ def _semantic_candidate(
         scratch / "editor_document_candidate.json", "algorithm editor candidate"
     )
     document = validate_editor_document(EditorDocument.from_dict(raw_document))
+    document = apply_semantic_display_projection(
+        document, display_projection, reference=bool(reference_audit.get("applied"))
+    )
     if bool(reference_audit.get("applied")):
-        document = apply_semantic_display_projection(document, display_projection)
         report = reference_audit.get("report")
         if isinstance(report, Mapping):
             document = attach_semantic_reference_audit(
@@ -299,6 +302,17 @@ def _semantic_candidate(
                 "detail": str(row.get("detail") or "该字幕范围需要人工审阅。"),
             }
         )
+    # The analysis ledger may fit while restored punctuation exceeds the cap.
+    # Keep the real text and report the actual display, never strip it to pass.
+    from substar_core.language_layout import layout_tokens
+    from substar_core.policy import SubtitlePolicy
+    policy = SubtitlePolicy.from_settings(dict(request.get("constraints") or {}))
+    displays = {t.token_id: t for t in document.display_tokens}
+    for cue in document.cues:
+        text = layout_tokens(displays[i].text for i in cue.display_token_ids if displays[i].state.value == "active")
+        if policy.exceeds_hard_limit(text):
+            notices.append({"code":"display_punctuation_over_limit", "block_id":cue.cue_id,
+                            "detail":"恢复原标点后字幕超过字符上限，请调整断句。"})
     validation = {
         "schema_version": SEGMENTATION_VALIDATION_SCHEMA,
         "status": "accepted_with_review" if notices else "accepted",

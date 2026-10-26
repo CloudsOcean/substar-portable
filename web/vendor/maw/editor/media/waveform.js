@@ -18,7 +18,7 @@ import { createWaveformModule as createWaveformScaleControls } from './waveform/
 import { createWaveformModule as createWaveformCueDrag } from './waveform/cue-drag.js';
 import { createWaveformModule as createWaveformCueCommands } from './waveform/cue-commands.js';
 import { createWaveformModule as createWaveformGapDrag } from './waveform/gap-drag.js?v=20261024-boundary-snap-1';
-import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261025-marker-label-align-1';
+import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261026-marker-geometry-2';
 import { createWaveformModule as createWaveformCueDragUpdate } from './waveform/cue-drag-update.js';
 import { createWaveformModule as createWaveformPlayback } from './waveform/playback.js';
 import { createThumbnailModule as createEditorThumbnails } from './editor-thumbnails.js';

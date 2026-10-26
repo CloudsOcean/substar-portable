@@ -7,8 +7,12 @@ const html = fs.readFileSync(path.join(root, "web", "editor.html"), "utf8");
 const js = fs.readFileSync(path.join(root, "web", "editor.js"), "utf8");
 const css = fs.readFileSync(path.join(root, "web", "editor.css"), "utf8");
 
-assert.match(html, /id="aiCalibrationMenu"[\s\S]*?id="aiCalibrationInstruction"[\s\S]*?maxlength="4000"/);
-assert.match(html, /id="runAiCalibration"[\s\S]*?>执行校准</);
+assert.match(html, /id="aiCalibrationMenu"[\s\S]*?AI标点[\s\S]*?id="aiCalibrationInstruction" hidden/);
+assert.match(html, /id="runAiCalibration"[\s\S]*?>执行标点</);
+assert.match(html, /id="organizeOptimizeBoundaries" type="checkbox">优化请求边界/);
+assert.doesNotMatch(html, /id="organizeOptimizeBoundaries"[^>]*checked/);
+assert.match(js, /runSubtitleTextTask\("punctuation"\)/);
+assert.match(js, /runSubtitleTextTask\("organize"\)/);
 assert.match(html, /id="exportDocument">导出</);
 assert.match(js, /instruction\s*\n\s*}\)\s*\n\s*}/);
 assert.match(js, /ai-calibration-instruction:\$\{state\.projectId/);

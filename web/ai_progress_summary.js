@@ -39,10 +39,14 @@
       semantic_group:"个意义组",
       translation_block:"块",
       calibration_block:"块",
+      organize_block:"块",
+      punctuation_block:"块",
       segmentation_block:"块",
     })[String(progress.unit_kind || "")] || ({
       translation:"块",
       calibration:"块",
+      organize:"块",
+      punctuation:"块",
       segmentation:"块",
     })[String(progress.kind || "")] || String(progress.unit_label || options.unitLabel || "").trim();
     const unit = unitLabel ? ` ${unitLabel}` : "";

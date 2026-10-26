@@ -47,6 +47,8 @@ TASK_TYPES = frozenset(
         "segmentation",
         "translation",
         "calibration",
+        "organize",
+        "punctuation",
         "model_download",
         "export",
     }

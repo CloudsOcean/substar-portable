@@ -22,6 +22,7 @@
       "scripts/run_semantic_segmentation.py",
       "scripts/run_translation_worker.py",
       "scripts/run_calibration_worker.py",
+      "scripts/run_text_task_worker.py",
       "substar_core/model_gateway/**/*.py"
     ],
     "ignored_globs": [
@@ -828,6 +829,25 @@
       "tests": ["tests/test_segmentation_runtime.py", "tests/test_editor_translation_binding.py", "tests/test_editor_completion_lifecycle.py", "tests/test_architecture_audit.py"],
       "change_impact": {"modules": ["segmentation_finalizer", "editor_api", "editor_ui", "translation_service", "calibration_service"], "contracts": ["editor_document", "editor_revision", "editor_operation"]}
     },
+    "text_task_service": {
+      "title": "Revision-bound subtitle organization and punctuation",
+      "layer": "application_service",
+      "role": "Run organization and punctuation proposals in a worker, validate immutable content and revision identity, and publish accepted candidates through ProjectStore.",
+      "must_not": ["Accept model-authored timestamps or operations", "Publish against a stale revision", "Rewrite lexical content in punctuation tasks"],
+      "code": [
+        {"path": "substar_core/editor/text_tasks.py", "symbols": []},
+        {"path": "substar_core/editor/text_task_runtime.py", "symbols": ["build_text_task_handler"]},
+        {"path": "scripts/run_text_task_worker.py", "symbols": []}
+      ],
+      "inputs": ["editor_revision", "task_record", "settings_snapshot"],
+      "outputs": ["editor_revision", "task_record", "editor_candidate"],
+      "calls": ["project_store", "task_service", "model_stage_scheduler"],
+      "invariants": ["Task input binds the exact revision", "Models propose IDs or punctuation-only text", "Publication validates the candidate before a single revision commit"],
+      "failure_modes": ["Invalid model proposal", "Revision conflict", "Cancellation", "Provider failure"],
+      "recovery": {"strategy": "Reuse validated block caches and publication receipts; retry unresolved work.", "reuses": ["validated blocks", "publication receipts"], "restarts": ["unresolved blocks"], "terminal": "Keep the original revision on validation failure."},
+      "tests": ["tests/test_subtitle_text_tasks.py"],
+      "change_impact": {"modules": ["editor_api", "editor_ui", "task_service", "project_store"], "contracts": ["editor_revision", "task_record", "editor_candidate"]}
+    },
     "editor_api": {
       "title": "Editor HTTP API",
       "layer": "api",
@@ -874,6 +894,10 @@
             "change_note",
             "project_note"
           ]
+        },
+        {
+          "path": "substar_core/editor/application/review_chat.py",
+          "symbols": []
         },
         {
           "path": "substar_core/editor/application/review_exchange.py",
@@ -1178,6 +1202,10 @@
         },
         {
           "path": "web/editor_cue_list_view.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_review_chat.js",
           "symbols": []
         },
         {

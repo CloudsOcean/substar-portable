@@ -289,7 +289,13 @@
     fontGroup.hidden = true;
     const sliderControls = document.createElement("span"); sliderControls.className = "waveform-gain-controls"; sliderControls.append(fontSlider, fontOutput);
     const settingsTitle = document.createElement("strong"); settingsTitle.textContent = "字幕显示设置";
-    fontRow.append(fontLabel, sliderControls); displayContent.append(settingsTitle, fontRow, bilingual, fontGroup);
+    const settingsHeader = document.createElement("div"); settingsHeader.className = "cue-settings-header";
+    const settingsClose = document.createElement("button"); settingsClose.type = "button"; settingsClose.textContent = "×";
+    settingsClose.setAttribute("aria-label", "关闭字幕显示设置"); settingsClose.onclick = () => { displayMenu.open = false; };
+    settingsHeader.append(settingsTitle, settingsClose);
+    const settingsBody = document.createElement("div"); settingsBody.className = "cue-settings-body";
+    fontRow.append(fontLabel, sliderControls); settingsBody.append(fontRow, bilingual, fontGroup);
+    displayContent.append(settingsHeader, settingsBody);
     displayMenu.append(displayToggle, displayContent);
     document.querySelector(".pane-live-controls").append(displayMenu);
   }
@@ -315,8 +321,8 @@
       installSpeakerMenu();
       installCueViewSwitch();
       const cueSwitch=document.querySelector('.cue-view-switch');
-      cueSwitch.after(...['translationMenu','aiCalibrationMenu','aiReviewMenu','scriptProjectionMenu','referenceManuscript'].map(id=>document.getElementById(id)));
-      for(const id of ['translationMenu','aiCalibrationMenu','aiReviewMenu']) {
+      cueSwitch.after(...['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu','scriptProjectionMenu','referenceManuscript'].map(id=>document.getElementById(id)));
+      for(const id of ['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu']) {
         const menu=document.getElementById(id);
         const position=()=>{
           if(!menu.open)return;

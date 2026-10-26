@@ -103,6 +103,7 @@
     lines.push("", "请按 Cue 编号列出确有依据的问题、理由和建议；没有问题时明确说明。", "");
     return {
       text:lines.join("\n"),
+      focusNumbers:resolved.cues.filter(c=>resolved.focusIds.has(c.cue_id)).map(c=>Number(c.index)+1),
       cueCount:resolved.cues.length,
       focusCount:resolved.focusIds.size,
       contextCount:resolved.cues.length - resolved.focusIds.size

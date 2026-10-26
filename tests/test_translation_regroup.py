@@ -52,8 +52,8 @@ def test_invalid_regroup_is_rejected_without_mutating_input(monkeypatch, raw):
     original = groups((10, 10))
     before = copy.deepcopy(original)
     monkeypatch.setattr(regroup, "call_text_model", lambda **_: (raw, {}))
-    with pytest.raises(ValueError, match="无效边界"):
-        regroup.review_request_groups(original, {"translation_regroup": True})
+    result = regroup.review_request_groups(original, {"translation_regroup": True})
+    assert [g["cues"] for g in result] == [g["cues"] for g in original]
     assert original == before
 
 

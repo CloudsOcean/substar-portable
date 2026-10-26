@@ -296,6 +296,49 @@ def project_job_path(project_id: str) -> Path:
     return project_store_path(project_id).parent
 
 
+class ReviewRequestStart(BaseModel):
+    revision_id: str
+    material: str = Field(min_length=1, max_length=500000)
+
+
+def _review_request_route():
+    settings = load_settings(include_secret=True)
+    route = resolve_stage_request(settings, "calibration")
+    if not route.get("api_key"):
+        raise HTTPException(400, detail={"message":"请先配置审校模型连接"})
+    return {**route, "timeout": min(600, int(settings.get("translation_api_timeout_seconds",300))),
+            "request_attempts": int(settings.get("http_retry_attempts",2))}
+
+
+@router.post("/projects/{project_id}/review-requests")
+def start_review_request(project_id: str, payload: ReviewRequestStart):
+    from .application.review_chat import start_request
+    store = open_project_store(project_id)
+    try:
+        store.load_revision(payload.revision_id)
+        return start_request(project_id, material=payload.material, route=_review_request_route())
+    except (ValueError, ProjectStoreError) as exc:
+        raise HTTPException(400, detail={"message":str(exc)}) from exc
+
+
+@router.get("/projects/{project_id}/review-requests/{request_id}")
+def get_review_request(project_id: str, request_id: str):
+    from .application.review_chat import get_request
+    open_project_store(project_id)
+    try:
+        return get_request(project_id, request_id)
+    except ValueError as exc:
+        raise HTTPException(404, detail={"message":str(exc)}) from exc
+
+
+@router.delete("/projects/{project_id}/review-requests/{request_id}")
+def discard_review_request(project_id: str, request_id: str):
+    from .application.review_chat import discard_request
+    open_project_store(project_id)
+    discard_request(project_id, request_id)
+    return {"cleared":True}
+
+
 class ReviewNoteRequest(BaseModel):
     expected_version: int = Field(ge=0)
     expected_revision_id: str
@@ -721,7 +764,7 @@ def list_projects() -> dict[str, Any]:
 def list_editor_tasks(request: Request) -> dict[str, Any]:
     tasks: list[dict[str, Any]] = []
     for task in request.app.state.task_service.list_tasks(limit=500):
-        if task["task_type"] not in {"calibration", "translation"}:
+        if task["task_type"] not in {"calibration", "translation", "organize", "punctuation"}:
             continue
         project_id = str(task.get("project_id") or "")
         display_name = project_id
@@ -753,7 +796,7 @@ def get_project(project_id: str) -> dict[str, Any]:
 @router.get("/projects/{project_id}/ai-task")
 def get_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any] | None:
     tasks = request.app.state.task_service.list_tasks(project_id=project_id, limit=20)
-    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation"}]
+    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation", "organize", "punctuation"}]
     if not tasks:
         return None
     task = tasks[0]
@@ -807,11 +850,11 @@ def _runtime_ai_task_projection(
         ),
     }
     task_kind = str(task.get("task_type") or "")
-    if task_kind in {"translation", "calibration"}:
+    if task_kind in {"translation", "calibration", "organize", "punctuation"}:
         projected_progress["kind"] = task_kind
         projected_progress.setdefault(
             "unit_kind",
-            "translation_block" if task_kind == "translation" else "calibration_block",
+            f"{task_kind}_block",
         )
         projected_progress.setdefault(
             "unit_label", "块"
@@ -836,7 +879,7 @@ def _runtime_ai_task_projection(
         "source_language": frozen.get("source_language"),
         "target_language": frozen.get("target_language"),
         "mapping_mode": result.get("mapping_mode") or frozen.get("mapping_mode"),
-        "regroup": bool(frozen.get("settings", {}).get("translation_regroup")),
+        "regroup": bool(frozen.get("optimize_boundaries", frozen.get("settings", {}).get("translation_regroup"))),
         "problem_cue_ids": list(result.get("problem_cue_ids") or []),
         "problem_block_ids": list(result.get("problem_block_ids") or []),
         "ai_progress": projected_progress,
@@ -854,7 +897,7 @@ def _retry_exact_failed_editor_task(
     service: Any,
     *,
     project_id: str,
-    task_type: Literal["calibration", "translation"],
+    task_type: Literal["calibration", "translation", "organize", "punctuation"],
     task_input: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     failed = service.list_tasks(
@@ -876,7 +919,7 @@ def cancel_project_editor_ai_task(project_id: str, request: Request) -> dict[str
         states=["queued", "running", "cancelling"],
         limit=20,
     )
-    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation"}]
+    tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation", "organize", "punctuation"}]
     if not tasks:
         raise HTTPException(status_code=409, detail={
             "code": "editor_ai_task_cancel_rejected", "message": "当前没有可取消的 AI 任务"
@@ -1975,6 +2018,55 @@ def _editor_ai_group_blocks(
 
 
 
+class SubtitleTextTaskRequest(BaseModel):
+    expected_revision_id: str = Field(min_length=1)
+    optimize_boundaries: bool = False
+
+
+def _start_subtitle_text_task(kind: str, project_id: str, payload: SubtitleTextTaskRequest, request: Request):
+    from substar_core.editor.text_tasks import INPUT_SCHEMA, PROMPTS
+    from substar_core.editor.translation.regroup import BOUNDARY_PROMPT
+    latest = open_project_store(project_id).load_latest()
+    if latest is None or latest.revision_id != payload.expected_revision_id:
+        raise HTTPException(409, detail={"code":"revision_conflict","message":"文稿版本已变化，请刷新后重试"})
+    if any(c.source_text is not None and c.mapping.get("subtitle_track") != "overlay" for c in latest.document.cues):
+        raise HTTPException(422, detail={"message":"此功能需要带词元溯源的听写项目"})
+    service = request.app.state.task_service
+    if any(t["task_type"] in {"translation","calibration","organize","punctuation"} for t in service.list_tasks(project_id=project_id,states=["queued","running","cancelling"],limit=20)):
+        raise HTTPException(423,detail={"code":"editor_ai_task_locked","message":"当前项目已有AI任务正在运行"})
+    try:
+        settings = _project_llm_settings(project_id,include_secret=False)
+    except ValueError as exc:
+        raise HTTPException(422,detail={"code":"project_llm_unavailable","message":str(exc)}) from exc
+    settings.update(task_info_settings(load_task_info(project_job_path(project_id),project_id)))
+    settings = {k:v for k,v in settings.items() if not k.startswith("_") and not any(x in k.lower() for x in ("api_key","secret","password","authorization","access_token","refresh_token","bearer_token"))}
+    settings["text_task_prompt"] = render_prompt(f"subtitle_{kind}", variant="default").text
+    settings["boundary_prompt"] = BOUNDARY_PROMPT
+    provider_id = str(settings.get("active_model_provider") or "")
+    task_input = {"schema_version":INPUT_SCHEMA,"expected_revision_id":latest.revision_id,
+                  "provider_id":provider_id,"credential_ref":model_provider_credential_ref(provider_id),
+                  "settings":settings,"optimize_boundaries":payload.optimize_boundaries if kind == "organize" else False}
+    try:
+        prior = _retry_exact_failed_editor_task(service,project_id=project_id,task_type=kind,task_input=task_input)
+        if prior is not None:
+            return prior
+        task = service.create_task(kind,INPUT_SCHEMA,task_input,project_id=project_id,
+                                  expected_revision_id=latest.revision_id,idempotency_key=_editor_ai_idempotency_key(kind,task_input))
+        return _runtime_ai_task_projection(task,task_input)
+    except Exception as exc:
+        raise HTTPException(409,detail={"code":f"{kind}_start_rejected","message":str(exc)}) from exc
+
+
+@router.post("/projects/{project_id}/ai-organize")
+def start_ai_organize(project_id: str, payload: SubtitleTextTaskRequest, request: Request):
+    return _start_subtitle_text_task("organize",project_id,payload,request)
+
+
+@router.post("/projects/{project_id}/ai-punctuation")
+def start_ai_punctuation(project_id: str, payload: SubtitleTextTaskRequest, request: Request):
+    return _start_subtitle_text_task("punctuation",project_id,payload,request)
+
+
 _CALIBRATION_PUNCTUATION = ".,?!;:，。？！；：、…-—–"
 
 
@@ -2037,7 +2129,7 @@ def ai_calibrate_project(
         states=["queued", "running", "cancelling"],
         limit=20,
     )
-    if any(task["task_type"] in {"translation", "calibration"} for task in active):
+    if any(task["task_type"] in {"translation", "calibration", "organize", "punctuation"} for task in active):
         raise HTTPException(status_code=423, detail={
             "code": "editor_ai_task_locked", "message": "当前项目已有 AI 任务正在运行"
         })
@@ -2222,7 +2314,7 @@ async def import_external_calibration(project_id: str, request: Request, file: U
     from substar_core.editor.calibration.exchange import inspect_calibration
     active = request.app.state.task_service.list_tasks(
         project_id=project_id, states=["queued", "running", "cancelling"], limit=20)
-    if any(task["task_type"] in {"translation", "calibration"} for task in active):
+    if any(task["task_type"] in {"translation", "calibration", "organize", "punctuation"} for task in active):
         raise HTTPException(status_code=423, detail="当前项目已有 AI 任务正在运行，请等待完成后导入")
     revision = open_project_store(project_id).load_latest()
     if revision is None:
@@ -2599,6 +2691,8 @@ def start_project_translation(
     settings["target_language_mode"] = payload.target_language
     settings["translation_mapping_mode"] = payload.mapping_mode
     settings["translation_regroup"] = payload.regroup
+    from substar_core.editor.translation.regroup import BOUNDARY_PROMPT
+    settings["boundary_prompt"] = BOUNDARY_PROMPT
     latest = open_project_store(project_id).load_latest()
     if latest is not None:
         source_text = " ".join(
@@ -2638,7 +2732,7 @@ def start_project_translation(
         states=["queued", "running", "cancelling"],
         limit=20,
     )
-    if any(task["task_type"] in {"translation", "calibration"} for task in active):
+    if any(task["task_type"] in {"translation", "calibration", "organize", "punctuation"} for task in active):
         raise HTTPException(status_code=423, detail={
             "code": "editor_ai_task_locked", "message": "当前项目已有 AI 任务正在运行"
         })

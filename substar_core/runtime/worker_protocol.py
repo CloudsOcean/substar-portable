@@ -27,6 +27,8 @@ class WorkerTaskType(str, Enum):
     SEGMENTATION = "segmentation"
     TRANSLATION = "translation"
     CALIBRATION = "calibration"
+    ORGANIZE = "organize"
+    PUNCTUATION = "punctuation"
     MODEL_DOWNLOAD = "model_download"
     EXPORT = "export"
 

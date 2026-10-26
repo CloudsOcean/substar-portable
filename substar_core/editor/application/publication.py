@@ -21,7 +21,7 @@ def recover_publications(task_service: Any, projects_root: Path) -> None:
 
 def recover_publication(task_service: Any, projects_root: Path, task_id: str) -> bool:
     task = task_service.get_task(task_id)
-    if task["task_type"] not in {"translation", "calibration"}:
+    if task["task_type"] not in {"translation", "calibration", "organize", "punctuation"}:
         return False
     project = (projects_root / str(task.get("project_id") or "")).resolve()
     if projects_root.resolve() not in project.parents or not (project / "project" / "manifest.json").exists():

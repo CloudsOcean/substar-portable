@@ -842,3 +842,12 @@ body.editor-shell .timeline-text-editor { position:fixed; z-index:13000; box-siz
 /* Short, inline option hints shared with the split page. */
 .translation-language-layout label:has([data-keep-dialect]) {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;flex-wrap:wrap;gap:6px;}
 .translation-language-layout label [data-dialect-help] {display:inline;margin-left:4px;font-size:12px;font-weight:400;line-height:1.5;}
+
+/* Organization uses the same optional boundary control as translation. */
+#aiOrganizeMenu .translation-regroup-option { display:flex; flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; }
+#aiOrganizeMenu .translation-regroup-option input { width:16px; height:16px; margin:0; flex:none; }
+
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading > div:first-child { flex:1 1 0; min-width:0; }
+
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane:has(#aiOrganizeMenu) { grid-template-rows:auto minmax(0,1fr) !important; }
+html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading:has(#aiOrganizeMenu) { height:auto !important; align-items:flex-start; }

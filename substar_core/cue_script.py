@@ -416,6 +416,26 @@ def render_translation_request(
             aliases = [wire_alias(by_id[str(value)]) for value in ids if str(value) in by_id]
             detail = str(issue.get("detail") or "").replace("\n", " ")
             simple.append(f"{','.join(aliases) or 'BLOCK'}: {issue.get('code', 'invalid_output')} {detail}")
+    # Context has no output alias and never joins the writable coverage ledger.
+    # Keep original OWN numbering stable for old tasks and translation modes.
+    group_rows = list(groups)
+    def context_lines(key: str) -> list[str]:
+        seen = set()
+        lines = []
+        for group in group_rows:
+            for cue in group.get(key, []):
+                identity = str(cue.get("cue_id") or "")
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                text = str(cue.get("source_text", "")).replace("\n", " ").replace("\t", " ")
+                lines.append("CONTEXT " + text)
+        return lines
+    before_context, after_context = context_lines("context_before"), context_lines("context_after")
+    if before_context:
+        simple = ["READ-ONLY CONTEXT BEFORE (do not output):", *before_context, "OWN (translate numbered rows only):", *simple]
+    if after_context:
+        simple.extend(["READ-ONLY CONTEXT AFTER (do not output):", *after_context])
     return "\n".join(simple), CueLedger(by_alias, by_id, editable)
 
 

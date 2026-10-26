@@ -284,6 +284,7 @@ def attach_semantic_reference_audit(
 def apply_semantic_display_projection(
     document: EditorDocument,
     projection: list[Mapping[str, Any]],
+    *, reference: bool = True,
 ) -> EditorDocument:
     """Restore reference punctuation after AI has selected cue boundaries."""
 
@@ -314,10 +315,10 @@ def apply_semantic_display_projection(
         return document
     audit = ChangeProvenance(
         kind=ChangeKind.IMPORT,
-        operation="reference_manuscript_display_projection",
-        actor="reference-manuscript",
+        operation="reference_manuscript_display_projection" if reference else "asr_display_projection",
+        actor="reference-manuscript" if reference else "asr",
         metadata={
-            "reference": True,
+            "reference": reference,
             "mode": "semantic",
             "projected_token_count": changed_count,
             "cue_boundaries_changed": False,

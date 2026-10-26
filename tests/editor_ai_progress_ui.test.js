@@ -12,7 +12,7 @@ test("editor renders the shared AI task count summary instead of lifecycle stage
   assert.match(html, /id="translationTaskSteps"/);
   assert.match(html, /ai_progress_summary\.js/);
   assert.match(js, /renderAiProgress\(\s*task\?\.state === "failed" \? null : task\?\.ai_progress/);
-  assert.match(js, /state\.editorAiTask\?\.kind === "calibration"/);
+  assert.match(js, /\["calibration", "punctuation", "organize"\]\.includes\(state\.editorAiTask\?\.kind\)/);
   assert.match(js, /SubstarAiProgressSummary\?\.summarize/);
   assert.match(js, /counter\.textContent = `\$\{Math\.round\(percent\)\}%`/);
   assert.match(js, /message\.classList\.add\("hidden"\)/);

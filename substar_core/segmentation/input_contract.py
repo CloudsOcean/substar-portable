@@ -61,6 +61,7 @@ def build_segmentation_material_with_reference_projection(
     units: list[dict[str, Any]] = []
     display_projection: list[dict[str, Any]] = []
     reference_suggestions: list[dict[str, Any]] = []
+    pending_punctuation = ""
     evidence_hash = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     for evidence_index, item in enumerate(evidence.get("units", [])):
         raw_text = str(item.get("text", item.get("word", "")) or "").strip()
@@ -77,9 +78,19 @@ def build_segmentation_material_with_reference_projection(
             continue
         text = _unpunctuated_word(raw_text)
         if not text:
+            # Independent ASR punctuation must not vanish when the analysis
+            # ledger drops it. Attach it to the neighboring display projection.
+            if raw_text:
+                if display_projection:
+                    display_projection[-1]["text"] += raw_text
+                else:
+                    pending_punctuation += raw_text
             continue
         fragments = editor_token_fragments(text) or [text]
         projected_fragments = _display_fragments(raw_text, fragments)
+        if pending_punctuation:
+            projected_fragments[0] = pending_punctuation + projected_fragments[0]
+            pending_punctuation = ""
         start = float(item["start"])
         end = max(start, float(item["end"]))
         width = (end - start) / len(fragments)

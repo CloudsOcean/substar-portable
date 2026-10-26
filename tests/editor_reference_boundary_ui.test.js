@@ -74,7 +74,7 @@ test("regional Chinese conversion choices remain explicit", () => {
 test("AI and manuscript commands follow the requested editor order", () => {
   assert.match(
     editorHtml,
-    /AI 翻译[\s\S]*AI 校准[\s\S]*AI\s*审阅[\s\S]*参考文稿[\s\S]*繁简转换[\s\S]*说话人设置/,
+    /AI 翻译[\s\S]*AI整理[\s\S]*AI\s*审阅[\s\S]*AI标点[\s\S]*参考文稿[\s\S]*繁简转换[\s\S]*说话人设置/,
   );
   assert.match(editorJs, /translationMenuSummary"\)\.textContent = running \? "AI 翻译中…" : "AI 翻译"/);
 });
@@ -82,8 +82,13 @@ test("AI and manuscript commands follow the requested editor order", () => {
 test("external AI review is read-only and the retired generation exchange is absent", () => {
   assert.match(editorHtml, /id="aiReviewMenu"/);
   assert.match(editorHtml, /id="copyExternalReview"/);
-  assert.match(editorHtml, /id="downloadExternalReview"/);
+  assert.doesNotMatch(editorHtml, /id="downloadExternalReview"/);
+  assert.match(editorHtml, /id="sendAiReview"/);
+  assert.match(editorHtml, /id="reviewChatPanel"/);
   assert.match(editorJs, /externalReview\.build/);
   assert.doesNotMatch(editorHtml, /data-exchange-export="external-ai-generation"/);
   assert.doesNotMatch(editorJs, /external-ai-generation-checkpoint|\/external-ai-generation/);
 });
+
+const experimentalScript = fs.readFileSync(path.join(__dirname, "..", "web", "editor_experimental.js"), "utf8");
+assert.match(experimentalScript, /\['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu','scriptProjectionMenu','referenceManuscript'\]/);

@@ -213,7 +213,7 @@ const stageDefinitions = {
     ["translation_repair", "修复 · 翻译坏块", "只对未返回或验收失败的意义组修复一次；模型允许时关闭思考"],
   ],
   audit: [
-    ["calibration", "AI 校准", "自动应用大小写、标点与确定性文本修复；默认思考 Low"],
+    ["calibration", "AI整理 / AI标点", "两个独立功能共用此调用配置；整理只删词和断句，标点只改标点与大小写"],
   ],
 };
 

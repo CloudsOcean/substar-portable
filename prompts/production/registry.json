@@ -7,6 +7,28 @@
     {"id": "exchange", "title": "外部 AI", "description": "导出给 Web LLM 的分阶段工作流"}
   ],
   "prompts": {
+    "subtitle_organize": {
+      "title": "AI整理",
+      "category": "editor",
+      "description": "删除冗余词并调整字幕断句；不改保留词元文字。",
+      "version": "2026-10-26.1",
+      "variants": {
+        "default": [
+          "text/organize.md"
+        ]
+      }
+    },
+    "subtitle_punctuation": {
+      "title": "AI标点",
+      "category": "editor",
+      "description": "只修改标点与大小写；不改词汇、数字或字幕结构。",
+      "version": "2026-10-26.1",
+      "variants": {
+        "default": [
+          "text/punctuation.md"
+        ]
+      }
+    },
     "semantic_grouping": {
       "title": "Cue 边界规划",
       "category": "segmentation",

@@ -271,6 +271,9 @@ def _claim_backend_instance() -> None:
         task_registry.register(
             build_calibration_handler(PROJECTS_ROOT, PROJECT_ROOT)
         )
+        from substar_core.editor.text_task_runtime import build_text_task_handler
+        for kind in ("organize", "punctuation"):
+            task_registry.register(build_text_task_handler(kind, PROJECTS_ROOT, PROJECT_ROOT))
         runtime_settings = load_settings()
         task_scheduler = TaskScheduler(
             task_service,

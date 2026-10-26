@@ -19,6 +19,29 @@ def project(tmp_path, monkeypatch):
     return store, initial
 
 
+def test_storage_failure_mid_sequence_rolls_back_all_user_action_revisions(project,monkeypatch):
+    from substar_core.storage import ProjectStoreError
+    store, initial = project
+    first = replace(initial.document,cues=(replace(initial.document.cues[0],source_text="first edit"),))
+    second = replace(initial.document,cues=(replace(initial.document.cues[0],source_text="second edit"),))
+    original_save = store.save
+    calls = []
+    def failing_save(*args,**kwargs):
+        calls.append(1)
+        if len(calls)==2:
+            raise ProjectStoreError("injected storage failure")
+        return original_save(*args,**kwargs)
+    monkeypatch.setattr(store,"save",failing_save)
+    provenance = ChangeProvenance(kind="manual",operation="operation_batch")
+    with pytest.raises(ProjectStoreError,match="injected"):
+        store.save_sequence([(first,provenance),(second,provenance)],expected_revision_id=initial.revision_id)
+    ProjectStore.clear_memory_cache(store.root)
+    reloaded = ProjectStore.open(store.root)
+    assert reloaded.load_latest().revision_id==initial.revision_id
+    assert reloaded.load_latest().document==initial.document
+    assert len(reloaded.list_revision_metadata())==1
+
+
 def batch(revision, operation, batch_id):
     return DocumentOperationBatchRequest(
         batch_id=batch_id, preserve_user_actions=True,

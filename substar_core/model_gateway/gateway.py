@@ -93,6 +93,7 @@ def call_text_model(
     max_tokens: int = 32768,
     temperature: float = 0.0,
     conversation_tail: Sequence[Mapping[str, Any]] | None = None,
+    cancel_event: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """The production transport for raw text-model responses.
 
@@ -156,9 +157,12 @@ def call_text_model(
     last_error: Exception | None = None
     used_attempts = 0
     for attempt in range(1, attempts + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("模型请求已取消")
         used_attempts = attempt
         try:
-            with model_slot(base_url, model, api_key):
+            slot_args = {"cancelled": cancel_event.is_set} if cancel_event is not None else {}
+            with model_slot(base_url, model, api_key, **slot_args):
                 response = requests.post(
                     endpoint_url(base_url, "/chat/completions"),
                     headers={
@@ -189,7 +193,10 @@ def call_text_model(
                 status=status,
             )
             if wrapped.retryable and attempt < attempts:
-                time.sleep(retry_after_seconds(exc.response, attempt) if status==429 else min(3.0, attempt * 0.75))
+                delay = retry_after_seconds(exc.response, attempt) if status==429 else min(3.0, attempt * 0.75)
+                if cancel_event is not None:
+                    if cancel_event.wait(delay): raise InterruptedError("模型请求已取消")
+                else: time.sleep(delay)
                 continue
             raise wrapped from exc
         except ValueError as exc:
@@ -249,6 +256,7 @@ def call_json_model(
     max_tokens: int = 32768,
     temperature: float = 0.0,
     conversation_tail: Sequence[Mapping[str, Any]] | None = None,
+    cancel_event: Any = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Compatibility wrapper for stages that still use a JSON model contract."""
     text, telemetry = call_text_model(

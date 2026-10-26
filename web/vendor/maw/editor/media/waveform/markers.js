@@ -15,6 +15,16 @@ export function createWaveformModule(dependencies) {
   // 拖出距离低于该毫秒数时视为点击添加单点 Marker，而不是 Region。
   const MARKER_REGION_MIN_SPAN_MS = 150;
 
+  // Use the same label placement during dragging and after committing the range.
+  function positionRegionLabel(label, anchorTime, visibleStart, visibleEnd) {
+    const percent = clamp((anchorTime - visibleStart) / Math.max(1, visibleEnd - visibleStart) * 100, 0, 100);
+    if (percent <= 50) label.style.left = `calc(${percent}% + 8px)`;
+    else {
+      label.style.right = `calc(${100 - percent}% + 8px)`;
+      label.style.textAlign = 'right';
+    }
+  }
+
   function markerEditingEnabled() {
     return window.MaweMarkerEditing?.isEditingEnabled?.()
       ?? (MaweSettings.EDITOR_SETTINGS.markerEditingEnabled === true);
@@ -145,11 +155,7 @@ export function createWaveformModule(dependencies) {
         const label = document.createElement('span');
         label.className = 'waveform-marker-label';
         label.textContent = marker.name;
-        if(isRegion){
-          const percent=Math.max(0,Math.min(100,(anchorTime-visible.start)/Math.max(1,visible.end-visible.start)*100));
-          if(percent<=50)label.style.left=`calc(${percent}% + 9px)`;
-          else label.style.right=`calc(${100-percent}% + 9px)`;
-        }
+        if (isRegion) positionRegionLabel(label, anchorTime, visible.start, visible.end);
         label.dataset.markerProjectContent = 'true';
         element.appendChild(label);
       }
@@ -661,6 +667,7 @@ export function createWaveformModule(dependencies) {
           const label = document.createElement('span');
           label.className = 'waveform-marker-label';
           label.textContent = drag.mode === 'create' ? '新区段' : (drag.original?.name || '');
+          if (range.region) positionRegionLabel(label, anchorTime, visibleStart, visibleEnd);
           if (drag.mode !== 'create') label.dataset.markerProjectContent = 'true';
           preview.appendChild(label);
         }

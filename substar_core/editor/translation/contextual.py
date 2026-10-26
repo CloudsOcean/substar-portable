@@ -63,6 +63,7 @@ def clean_groups(document: Any, settings: dict[str, Any]) -> list[dict[str, Any]
                 {
                     "cue_id": cue["cue_id"],
                     "source_text": cue["source_text"],
+                    "speaker": cue.get("speaker"),
                     "start": cue.get("start"),
                     "end": cue.get("end"),
                     "hard_limit": cue.get("hard_limit"),
@@ -1439,9 +1440,10 @@ def run_contextual_translation(
     mapping_mode = str(settings.get("translation_mapping_mode") or "many_to_many")
     groups = review_request_groups(
         groups, settings,
+        cache_directory=audit_dir / "boundary-cache",
         progress=(lambda done, total: progress_callback(
             "planning", completed=0, planned=0,
-            detail=f"增强分组 {done}/{total}",
+            detail=f"优化请求边界 {done}/{total}",
         )) if progress_callback is not None else None,
     )
     prompt = frozen_prompt(settings,
@@ -1471,6 +1473,14 @@ def run_contextual_translation(
     batches = execution_block_batches(
         revision.document, groups, mapping_mode=mapping_mode
     )
+    all_cues = [cue for group in groups for cue in group["cues"]]
+    positions = {str(cue["cue_id"]): i for i,cue in enumerate(all_cues)}
+    for batch in batches:
+        owned = [cue for group in batch["groups"] for cue in group["cues"]]
+        if owned:
+            begin, end = positions[str(owned[0]["cue_id"])], positions[str(owned[-1]["cue_id"])]+1
+            batch["groups"][0]["context_before"] = all_cues[max(0,begin-5):begin]
+            batch["groups"][-1]["context_after"] = all_cues[end:end+5]
     if progress_callback is not None:
         progress_callback("executing", completed=0, planned=len(batches))
     response, telemetry = call_block_batches(

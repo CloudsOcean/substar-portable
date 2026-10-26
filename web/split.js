@@ -564,7 +564,7 @@
   function routeLabel(job) {
     if (job.tutorial_case_id) return "内置教程";
     if (job.workflow_mode === "editor_task") {
-      return ({translation:"翻译", calibration:"AI 校准", review:"AI 审阅"})[job.task_kind] || "编辑器任务";
+      return ({translation:"翻译", calibration:"AI 校准", organize:"AI整理", punctuation:"AI标点", review:"AI 审阅"})[job.task_kind] || "编辑器任务";
     }
     if (job.subtitle_basis === "sentence") return "基于句级字幕";
     if (job.workflow_mode === "subtitle_creation") return "基于词级字幕";

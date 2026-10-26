@@ -14,6 +14,7 @@ flowchart LR
   subgraph layer_application_service["application_service"]
     project_exchange_service["Portable subtitle project exchange"]
     task_info_service["Canonical project task information service"]
+    text_task_service["Revision-bound subtitle organization and punctuation"]
   end
   subgraph layer_contract["contract"]
     recognition_contracts["Recognition profile and artifact contracts"]
@@ -129,6 +130,9 @@ flowchart LR
   segmentation_finalizer --> segmentation_input_contract
   segmentation_finalizer --> reference_manuscript_service
   segmentation_finalizer --> project_store
+  text_task_service --> project_store
+  text_task_service --> task_service
+  text_task_service --> model_stage_scheduler
   editor_api --> project_store
   editor_api --> task_info_service
   editor_api --> task_service

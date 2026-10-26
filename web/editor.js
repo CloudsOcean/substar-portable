@@ -174,50 +174,71 @@
   async function refreshEditorAiTask() {
     if (!state.projectId) return null;
     const refreshEpoch = projectEpoch;
-    const previousLocked = editorAiTaskLocksEditor();
-    const previousTaskId = state.editorAiTask?.task_id || "";
-    const nextTask = await api(projectPath("/ai-task")).catch(() => null);
-    if (refreshEpoch !== projectEpoch) return null;
-    state.editorAiTask = nextTask;
-    const locked = editorAiTaskLocksEditor();
-    document.body.classList.toggle("editor-ai-task-locked", locked);
-    renderHeader();
-    const genericTaskOwnsPanel = state.editorAiTask?.kind !== "translation";
-    const terminalSuccess = ["succeeded", "succeeded_with_issues"].includes(
-      state.editorAiTask?.state
-    );
-    if ((locked || terminalSuccess || state.editorAiTask?.state === "failed") && state.editorAiTask && genericTaskOwnsPanel) {
-      const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
-        state.editorAiTask.kind
-      ] || "AI 任务";
-      const baseMessage = state.editorAiTask.display_error || state.editorAiTask.message
-        || state.editorAiTask.error?.message || "任务运行中";
-      const elapsedSeconds = Math.max(0, Number(state.editorAiTask.elapsed_seconds || 0));
-      const taskMessage = locked && elapsedSeconds >= 1
-        ? `${baseMessage} · 已等待 ${Math.round(elapsedSeconds)} 秒`
-        : baseMessage;
-      renderWorkbenchTask(
-        title,
-        Math.max(0, Math.min(100, Number(state.editorAiTask.progress || 0) * 100)),
-        taskMessage,
-        state.editorAiTask.state
+    const refreshProjectId = state.projectId;
+    const inFlight = state.editorAiTaskRefresh;
+    if (inFlight?.epoch === refreshEpoch && inFlight.projectId === refreshProjectId) return await inFlight.promise;
+    const basePath = projectPath();
+    const pending = (async () => {
+      const previousLocked = editorAiTaskLocksEditor();
+      const previousTaskId = state.editorAiTask?.task_id || "";
+      const nextTask = await api(`${basePath}/ai-task`);
+      if (refreshEpoch !== projectEpoch || refreshProjectId !== state.projectId
+        || (state.editorAiTask?.task_id || "") !== previousTaskId) return null;
+      if (previousLocked && nextTask?.task_id === previousTaskId
+        && ["succeeded", "succeeded_with_issues"].includes(nextTask?.state)) {
+        const revision = contract.consumeRevision(await api(basePath));
+        if (refreshEpoch !== projectEpoch || refreshProjectId !== state.projectId
+        || (state.editorAiTask?.task_id || "") !== previousTaskId) return null;
+        if (hasUncommittedEditorInput() || state.operationQueue?.getState().hasUnsavedChanges
+          || state.documentStore?.pending().length) {
+          ordinaryError("AI任务已完成，当前输入已保留；请先完成保存再同步版本");
+        } else {
+          // Adopt the committed document before controls become editable again.
+          setRevision(revision);
+          recordCommittedRevision(revision, revision.provenance);
+          state.revisionHistoryLoaded = false;
+        }
+      }
+      state.editorAiTask = nextTask;
+      const locked = editorAiTaskLocksEditor();
+      document.body.classList.toggle("editor-ai-task-locked", locked);
+      renderHeader();
+      const genericTaskOwnsPanel = state.editorAiTask?.kind !== "translation";
+      const terminalSuccess = ["succeeded", "succeeded_with_issues"].includes(
+        state.editorAiTask?.state
       );
+      if ((locked || terminalSuccess || state.editorAiTask?.state === "failed") && state.editorAiTask && genericTaskOwnsPanel) {
+        const title = ({calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
+          state.editorAiTask.kind
+        ] || "AI 任务";
+        const baseMessage = state.editorAiTask.display_error || state.editorAiTask.message
+          || state.editorAiTask.error?.message || "任务运行中";
+        const elapsedSeconds = Math.max(0, Number(state.editorAiTask.elapsed_seconds || 0));
+        const taskMessage = locked && elapsedSeconds >= 1
+          ? `${baseMessage} · 已等待 ${Math.round(elapsedSeconds)} 秒`
+          : baseMessage;
+        renderWorkbenchTask(
+          title,
+          Math.max(0, Math.min(100, Number(state.editorAiTask.progress || 0) * 100)),
+          taskMessage,
+          state.editorAiTask.state
+        );
+      }
+      if (state.editorAiTask?.state === "cancelled" && genericTaskOwnsPanel) {
+        const title = ({calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
+          state.editorAiTask.kind
+        ] || "AI 任务";
+        renderWorkbenchTask(title, 0, "任务已取消", "cancelled");
+      }
+      return state.editorAiTask;
+    })();
+    const refresh = {epoch:refreshEpoch,projectId:refreshProjectId,promise:pending};
+    state.editorAiTaskRefresh = refresh;
+    try {
+      return await pending;
+    } finally {
+      if (state.editorAiTaskRefresh === refresh) state.editorAiTaskRefresh = null;
     }
-    if (state.editorAiTask?.state === "cancelled" && genericTaskOwnsPanel) {
-      const title = ({calibration:"AI 校准", translation:"字幕翻译"})[
-        state.editorAiTask.kind
-      ] || "AI 任务";
-      renderWorkbenchTask(title, 0, "任务已取消", "cancelled");
-    }
-    if (
-      previousLocked && !locked && previousTaskId
-      && state.editorAiTask?.task_id === previousTaskId
-      && ["succeeded", "succeeded_with_issues"].includes(state.editorAiTask?.state)
-    ) {
-      const revision = contract.consumeRevision(await api(projectPath()));
-      setRevision(revision);
-    }
-    return state.editorAiTask;
   }
 
   function startEditorAiTaskPoll() {
@@ -679,27 +700,13 @@
   function projectedCueLines(cue) {
     const presentation = state.view?.presentation || {};
     const sourceUpper = languageLayout.routedSourceUpper(cueSourceText(cue), presentation);
-    const source = projectPunctuation(
-      cueSourceText(cue),
-      sourceUpper ? presentation.upper_remove : presentation.lower_remove,
-      sourceUpper ? presentation.upper_space : presentation.lower_space
-    );
-    const target = projectPunctuation(
-      languageLayout.formatText(cue.target?.target_text || "", cue.target?.language || state.trackLanguages?.target),
-      sourceUpper ? presentation.lower_remove : presentation.upper_remove,
-      sourceUpper ? presentation.lower_space : presentation.upper_space
-    );
+    const source = cueSourceText(cue);
+    const target = languageLayout.formatText(cue.target?.target_text || "", cue.target?.language || state.trackLanguages?.target);
     return {source, target, sourceUpper};
   }
 
   function projectedSourceTokenText(text, cue = null) {
-    const presentation = state.view?.presentation || {};
-    const sourceUpper = languageLayout.routedSourceUpper(cue ? cueSourceText(cue) : text, presentation);
-    return projectPunctuation(
-      text,
-      sourceUpper ? presentation.upper_remove : presentation.lower_remove,
-      sourceUpper ? presentation.upper_space : presentation.lower_space
-    );
+    return String(text || "");
   }
 
   function timeLabel(seconds) {
@@ -1490,6 +1497,7 @@
     [
       ["#translationMenu", "#translationMenuSummary"],
       ["#aiCalibrationMenu", "#aiCalibrate"],
+      ["#aiOrganizeMenu", "#aiOrganize"],
       ["#scriptProjectionMenu", "#scriptProjectionSummary"],
     ].forEach(([menuSelector, summarySelector]) => {
       const menu = $(menuSelector);
@@ -1501,7 +1509,7 @@
       "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace",
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",
       "#lowerPunctuationRemove", "#lowerPunctuationSpace", "#applyPunctuation",
-      "#runAiCalibration", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
+      "#runAiCalibration", "#runAiOrganize", "#organizeOptimizeBoundaries", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
     ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked || textProject; });
     ["#toolReplaceCurrent", "#toolReplaceAll"].forEach(selector => {
       const node = $(selector);
@@ -1557,7 +1565,7 @@
     reviewMenu?.classList.toggle("disabled", reviewDisabled);
     if (reviewDisabled && reviewMenu?.open) reviewMenu.open = false;
     $("#aiReview")?.setAttribute("aria-disabled", String(reviewDisabled));
-    ["#copyExternalReview", "#downloadExternalReview"].forEach(selector => {
+    ["#copyExternalReview", "#sendAiReview"].forEach(selector => {
       const control = $(selector);
       if (control) control.disabled = !revision || locked || textProject;
     });
@@ -1674,7 +1682,7 @@
     state.selectedTokenIds.clear();
     state.selectionAnchorTokenId = null;
     const status = $("#toolSearchStatus");
-    if (status) status.textContent = `查找范围：${state.searchScope === "target" ? "译文" : "源语词元与短语"}`;
+    if (status) status.textContent = "";
     renderHeader();
     refreshTokenSelectionUi();
   }
@@ -1767,7 +1775,7 @@
     $("#translationTaskTitle").textContent = title;
     $("#translationProgressBar").style.width = `${Math.max(0, Math.min(100, progress))}%`;
     const aiProgress = ["running", "cancelling", "succeeded", "succeeded_with_issues"].includes(status)
-      && state.editorAiTask?.kind === "calibration"
+      && ["calibration", "punctuation", "organize"].includes(state.editorAiTask?.kind)
       ? state.editorAiTask?.ai_progress : null;
     renderAiProgress(aiProgress, progress, message, state.editorAiTask?.problem_cue_ids || []);
   }
@@ -1777,7 +1785,7 @@
     if (!row) return;
     row.classList.toggle("hidden", !failed);
     if (!failed) return;
-    state.failedTaskKind = kind === "translation" ? "translation" : "calibration";
+    state.failedTaskKind = ["translation", "organize", "punctuation"].includes(kind) ? kind : "calibration";
     const options = state.llmOptions?.options || [];
     const select = $("#failedTaskModel");
     // Polling must preserve the model choice and an in-flight retry's disabled button.
@@ -1824,6 +1832,8 @@
       await saveProjectModelProvider(providerId);
       state.taskPanelDismissed = false;
       if (state.failedTaskKind === "translation") await startTranslation();
+      else if (state.failedTaskKind === "organize") await runSubtitleTextTask("organize");
+      else if (state.failedTaskKind === "punctuation") await runSubtitleTextTask("punctuation");
       else await runAiCalibration();
     } catch (error) {
       ordinaryError(`重试失败：${error.message}`);
@@ -2690,8 +2700,14 @@
     scroll = false,
     revealTimeline = false,
     centerTimeline = false,
-    explicitNavigation = false
+    explicitNavigation = false,
+    preserveCueSelection = false
   } = {}) {
+    if (!preserveCueSelection && state.cueSelection.ids.size &&
+        (explicitNavigation || (cueId !== state.activeCueId && state.cueSelection.ids.size === 1))) {
+      state.cueSelection.clear();
+      refreshCueSelection();
+    }
     state.activeCueId = cueId || null;
     const cue = currentCue();
     const video = activeMedia();
@@ -2710,10 +2726,10 @@
     if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) centerCueInList(cue);
   }
 
-  function selectCue(cueId, seek = false, scroll = false) {
+  function selectCue(cueId, seek = false, scroll = false, preserveCueSelection = false) {
     if (seek) syncPlaybackFollowAfterSeek();
     else suspendPlaybackFollow();
-    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek, explicitNavigation:seek});
+    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek, explicitNavigation:seek, preserveCueSelection});
   }
 
   function orderedSelectableTokenIds() {
@@ -3028,7 +3044,7 @@
     ordinaryError("");
     suspendPlaybackFollow();
     if (editorAiTaskLocksEditor()) {
-      const kind = {translation:"翻译", calibration:"校准"}[state.editorAiTask?.kind] || "AI";
+      const kind = {translation:"翻译", calibration:"校准", organize:"整理", punctuation:"标点"}[state.editorAiTask?.kind] || "AI";
       ordinaryError(`${kind}任务正在排队或执行中，完成前编辑器为只读`);
       return null;
     }
@@ -3474,20 +3490,39 @@
     }
   }
 
-  async function downloadExternalReviewContent() {
+  const reviewChat = window.SubstarReviewChat.init({api,project:()=>state.projectId,context:()=>JSON.stringify([state.projectId,state.activeCueId,selectedReviewCueIds()]),prepare:async()=>{
+    const epoch=projectEpoch;
+    const saved=await flushActiveEditorInput();
+    if(epoch!==projectEpoch)throw new Error("项目已切换，请重新发送审阅");
+    const built=buildExternalReviewContent();
+    return {revision_id:saved.revision_id,material:built.text};
+  }});
+
+  async function runSubtitleTextTask(kind) {
+    if (!state.revision || state.operationPending) return;
+    const title = kind === "organize" ? "AI整理" : "AI标点";
+    const menu = $(kind === "organize" ? "#aiOrganizeMenu" : "#aiCalibrationMenu");
+    const optimize = kind === "organize" && Boolean($("#organizeOptimizeBoundaries")?.checked);
+    if (menu) menu.open = false;
+    state.operationPending = true;
+    state.taskPanelDismissed = false;
+    renderHeader();
+    renderWorkbenchTask(title, 0, "准备任务…");
     try {
-      const built = buildExternalReviewContent();
-      const safeProjectId = systemSaveAs.safeFilename(state.projectId || "substar");
-      const result = await systemSaveAs.saveBlob({
-        suggestedName:`${safeProjectId}_外部AI审阅.txt`,
-        description:"TXT 文本文档",
-        mimeType:"text/plain",
-        extension:".txt"
-      }, new Blob([built.text], {type:"text/plain;charset=utf-8"}));
-      if (result.cancelled) return;
-      ordinaryError(`已保存：${result.filename}`, "completed");
+      const result = await withSavedDocument(() => api(projectPath(`/ai-${kind}`), {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({expected_revision_id:state.revision.revision_id,optimize_boundaries:optimize})
+      }));
+      state.editorAiTask = {...result,kind};
+      if (kind === "organize") $("#organizeOptimizeBoundaries").checked = false;
+      document.body.classList.add("editor-ai-task-locked");
+      renderWorkbenchTask(title, 0, "等待任务调度…", result.state);
+      startEditorAiTaskPoll();
     } catch (error) {
-      ordinaryError(`下载失败：${error.message}`);
+      renderWorkbenchTask(title, 100, error.message, "failed");
+    } finally {
+      state.operationPending = false;
+      renderHeader();
     }
   }
 
@@ -3844,7 +3879,7 @@
         }
         syncPlaybackFollowAfterSeek();
         state.timelineSelectedCueId = cueId || null;
-        if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false, explicitNavigation:true});
+        if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false, explicitNavigation:true, preserveCueSelection:!!modifiers});
         else activateCue(null);
       },
       onSeek(time) {
@@ -4674,7 +4709,7 @@
   $("#toolSearch").addEventListener("input", () => {
     state.searchIndex = -1;
     const status = $("#toolSearchStatus");
-    if (status) status.textContent = `查找范围：${state.searchScope === "target" ? "译文" : "源语词元与短语"}`;
+    if (status) status.textContent = "";
   });
   $("#toolSearch").addEventListener("keydown", event => {
     if (event.key === "Enter") {
@@ -4822,7 +4857,8 @@
   $("#aiCalibrationInstruction").addEventListener("input", event => {
     localStorage.setItem(calibrationInstructionKey(), event.target.value);
   });
-  $("#runAiCalibration").onclick = () => { state.taskPanelDismissed = false; runAiCalibration(); };
+  $("#runAiCalibration").onclick = () => runSubtitleTextTask("punctuation");
+  $("#runAiOrganize").onclick = () => runSubtitleTextTask("organize");
   $("#retryFailedTask").onclick = retryFailedTask;
   $("#openModelSettings").onclick = () => { window.location.href = "/settings#api"; };
   ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"].forEach(selector => {
@@ -4946,13 +4982,15 @@
     }
   };
   $("#aiReviewMenu").addEventListener("toggle", () => {
-    if (!$("#aiReviewMenu").open) return;
+    if (!$("#aiReviewMenu").open) { reviewChat.clear(); return; }
+    reviewChat.open();
     if (isAdvancedTutorial() && state.tutorial.active && state.tutorial.step === 5) advanceEditorTutorial(5);
   });
   $(".external-review-scope-tabs").onclick = event => {
     const button = event.target.closest("[data-review-scope]");
     if (!button) return;
     const scope = button.dataset.reviewScope;
+    if (button.getAttribute("aria-pressed") !== "true") reviewChat.clear();
     document.querySelectorAll("[data-review-scope]").forEach(control => {
       const active = control === button;
       control.classList.toggle("active", active);
@@ -4961,8 +4999,9 @@
     $("#externalReviewRangeField").classList.toggle("hidden", scope !== "range");
     if (scope === "range") $("#externalReviewRange").focus();
   };
+  $("#externalReviewRange").addEventListener("input", () => reviewChat.clear());
   $("#copyExternalReview").onclick = copyExternalReviewContent;
-  $("#downloadExternalReview").onclick = downloadExternalReviewContent;
+  $("#sendAiReview").onclick = () => reviewChat.start();
   $("#referenceManuscript").onclick = () => { state.taskPanelDismissed = false; runReferenceManuscript(); };
   $("#referenceKeepAsr").onclick = () => chooseReferenceVersion(false);
   $("#referenceApply").onclick = () => chooseReferenceVersion(true);
@@ -5141,7 +5180,7 @@
     refreshTokenSelectionUi();
     state.cueSelection.select(id, cueOrder(), {range:event.shiftKey,toggle:event.ctrlKey || event.metaKey});
     refreshCueSelection();
-    selectCue(id, !event.shiftKey && !event.ctrlKey && !event.metaKey);
+    selectCue(id, !event.shiftKey && !event.ctrlKey && !event.metaKey, false, true);
   }
   // A gesture keeps the target chosen on pointerdown, even when crossing other regions.
   document.body.append($("#tokenMarquee"));

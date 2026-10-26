@@ -90,7 +90,8 @@ try {
     foreach ($worker in @(
         'run_transcription_worker.py', 'run_segmentation_worker.py',
         'run_semantic_segmentation.py',
-        'run_translation_worker.py', 'run_calibration_worker.py', 'run_reference_match.py'
+        'run_translation_worker.py', 'run_calibration_worker.py', 'run_reference_match.py',
+        'run_text_task_worker.py'
     )) { Copy-RequiredFile "scripts\$worker" }
 
     Copy-RequiredFile 'scripts\verify_runtime_entries.py'

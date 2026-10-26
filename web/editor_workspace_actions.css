@@ -253,19 +253,72 @@ body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-ma
 /* Compact boundary dots with separate drag targets. */
 body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle { width:14px; height:18px; top:-2px; bottom:auto; z-index:5; }
 body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle.left { left:-22px; right:auto; }
-body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle.right { right:-22px; left:auto; }
+body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-handle.right { right:-23px; left:auto; }
 body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.left { left:-18px; right:auto; width:14px; }
 body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.right { left:12px; right:auto; width:14px; }
-body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle::after { content:''; width:5px; height:5px; top:6px; left:4px; right:auto; bottom:auto; border-radius:50%; background:#f6f8fc; opacity:1; box-shadow:0 0 0 1px #141a24,0 1px 4px #0008; transition:transform .12s,box-shadow .12s; }
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle::after { content:''; width:5px; height:5px; top:5px; left:4px; right:auto; bottom:auto; border-radius:50%; background:#f6f8fc; opacity:1; box-shadow:0 0 0 1px #141a24,0 1px 4px #0008; transition:transform .12s,box-shadow .12s; }
 body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-handle:hover::after { transform:scale(1.3); box-shadow:0 0 0 3px #ffffff20,0 1px 4px #0008; }
 
 /* Markers show only their anchor and boundary dots, with an inline name. */
+/* Point, range and drag preview share the same flag baseline and appearance. */
+body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) {top:0;height:16px;opacity:1;}
+body.editor-shell .maw-waveform-host .waveform-marker-item.review-confirmed {opacity:.5;}
 body.editor-shell .maw-waveform-host .waveform-marker-item.region {background:transparent;border:0;box-shadow:none;}
 body.editor-shell .maw-waveform-host .waveform-marker-item:is(.point,.region) > .waveform-marker-label {
  inset:auto;left:auto;top:-1.5px;height:16px;padding:0;color:var(--theme-text,#f6f8fc);
  background:none;font-size:11px;line-height:16px;display:block;text-overflow:ellipsis;
 }
-body.editor-shell .maw-waveform-host .waveform-marker-item.point {min-width:16px;max-width:none;}
+/* Flag spans -1..9px; dots leave 8px on either side of the flag/name. */
+body.editor-shell .maw-waveform-host .waveform-marker-item.point {min-width:9px;max-width:none;}
 body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-label {position:relative;margin-left:12px;max-width:none;width:max-content;}
-body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.right {left:100%;right:auto;}
+body.editor-shell .maw-waveform-host .waveform-marker-item.point > .waveform-marker-point-extension.right {left:calc(100% + 4px);right:auto;}
 body.editor-shell .maw-waveform-host .waveform-marker-item.region > .waveform-marker-label {position:absolute;left:-4px;right:-4px;max-width:none;}
+
+/* Single review feedback, kept only while the request panel stays open. */
+body.editor-shell .external-review-popover {width:min(520px,calc(100vw - 28px));max-height:calc(100vh - 130px);overflow:auto;box-sizing:border-box;}
+body.editor-shell .external-review-actions {display:flex;justify-content:flex-end;align-items:center;gap:8px;}
+body.editor-shell .external-review-actions :is(.review-copy-icon,.review-send-icon) {width:36px;min-width:36px;height:34px;padding:7px;display:grid;place-items:center;}
+body.editor-shell .external-review-actions .ui-icon {width:20px;height:20px;}
+.review-chat-panel {display:grid;gap:10px;border-top:1px solid var(--theme-line,#393c43);padding-top:12px;}
+.review-chat-panel[hidden] {display:none;}
+.review-chat-status {font-size:12px;line-height:1.5;color:var(--theme-muted,#aeb4c1);}
+.review-chat-text {white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7;max-height:320px;overflow:auto;overscroll-behavior:contain;}
+.review-chat-actions {display:flex;gap:6px;justify-content:flex-end;}
+
+body.editor-shell .review-instruction-composer {border:1px solid var(--theme-line,#303541);border-radius:7px;background:var(--theme-field,#0d1016);overflow:hidden;}
+body.editor-shell .review-instruction-composer:focus-within {border-color:var(--theme-accent,#8c66df);}
+body.editor-shell .review-instruction-composer #externalReviewInstruction {display:block;box-sizing:border-box;height:76px;min-height:66px;margin:0;border:0;border-radius:0;background:transparent;box-shadow:none;outline:none;}
+body.editor-shell .review-instruction-composer .external-review-actions {padding:0 8px 8px;}
+
+/* The composer owns focus and background; the textarea must not draw an inner ring. */
+html[data-theme] body.editor-shell .review-instruction-composer #externalReviewInstruction {border:0 !important;border-radius:0 !important;background:transparent !important;box-shadow:none !important;outline:none !important;resize:none;}
+
+/* Match subtitle display settings to the waveform settings shell and rows. */
+html[data-editor-layout="experimental"] body.editor-shell .cue-display-settings-content {
+ box-sizing:border-box;display:block;width:min(372px,calc(100vw - 24px));padding:0;overflow:hidden;
+ background:var(--theme-panel) !important;color:var(--theme-text);border:1px solid var(--theme-line-strong);
+ border-radius:10px;box-shadow:0 12px 38px #0007;font:13px/1.5 "Microsoft YaHei","Segoe UI",sans-serif;
+}
+body.editor-shell .cue-settings-header {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--theme-line);}
+body.editor-shell .cue-settings-header strong {margin:0;padding:0;border:0;font-size:15px;line-height:24px;}
+body.editor-shell .cue-settings-header button {width:28px;min-width:28px;height:28px;min-height:28px;padding:0;font-size:22px;line-height:1;}
+body.editor-shell .cue-settings-body {display:grid;gap:12px;padding:16px;}
+html[data-editor-layout="experimental"] body.editor-shell .cue-settings-body :is(.cue-settings-font-row,.bilingual-toggle) {display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;min-height:32px;margin:0;padding:0;border:0;background:transparent !important;color:var(--theme-text);font-size:13px;}
+body.editor-shell .cue-settings-body .waveform-gain-controls {display:flex;align-items:center;gap:12px;width:164px;}
+body.editor-shell .cue-settings-body .waveform-gain-controls input {min-width:0;width:100%;flex:1;}
+body.editor-shell .cue-settings-body .waveform-gain-controls output {min-width:24px;text-align:right;font:12px Consolas,monospace;}
+body.editor-shell .cue-settings-body .bilingual-toggle input {order:2;flex:none;width:16px;height:16px;margin:0 0 0 auto;accent-color:var(--theme-accent);}
+/* More comfortable search controls and navigator rows. */
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel {gap:12px;padding-top:14px;padding-bottom:14px;}
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel fieldset {padding:12px;gap:10px;}
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel :is(input,.search-scope-toggle button,.replace-actions button) {height:38px;min-height:38px;font-size:13px;line-height:1.5;}
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel input {padding:7px 10px;}
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel .replace-actions {gap:8px;}
+html[data-editor-layout="experimental"] #editorTools .tool-navigator {padding-top:14px;padding-bottom:14px;}
+html[data-editor-layout="experimental"] #editorTools .tool-navigator button {min-width:32px;height:32px;min-height:32px;}
+
+html[data-editor-layout="experimental"] body.editor-shell #editorWorkbench .cue-display-settings-content .cue-settings-body label.bilingual-toggle:has(input:checked) {background:transparent !important;box-shadow:none !important;border:0 !important;}
+body.editor-shell .cue-settings-body .cue-settings-font-row > span:first-child {color:var(--theme-text);font:inherit;}
+
+html[data-editor-layout="experimental"] #editorTools #experimental-search-panel {padding-top:4px;}
+body.editor-shell #toolSearchStatus:empty {display:none;}
