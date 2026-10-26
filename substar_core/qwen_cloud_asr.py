@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import requests
+from contextlib import nullcontext
+from .model_concurrency import model_slot, retry_after_seconds
 
 from .artifacts import atomic_write_json
 from .config import INSTALL_ROOT
@@ -78,8 +80,13 @@ def _request(
 ) -> requests.Response:
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
+        response = None
         try:
-            response = requests.request(method, url, timeout=timeout, **kwargs)
+            model = (kwargs.get('json') or {}).get('model') if isinstance(kwargs.get('json'), dict) else None
+            base = url.split('/services/',1)[0]
+            credential = str((kwargs.get('headers') or {}).get('Authorization',''))
+            with model_slot(base,model,credential) if model else nullcontext():
+                response = requests.request(method, url, timeout=timeout, **kwargs)
             if response.status_code < 400:
                 return response
             if response.status_code not in {408, 409, 425, 429} and response.status_code < 500:
@@ -94,7 +101,7 @@ def _request(
         except requests.RequestException as exc:
             last_error = exc
         if attempt < attempts:
-            time.sleep(min(8.0, 0.8 * (2 ** (attempt - 1))))
+            time.sleep(retry_after_seconds(response,attempt) if response is not None and response.status_code==429 else min(8.0, 0.8 * (2 ** (attempt - 1))))
     raise QwenCloudAsrError(str(last_error or "Qwen 云端请求失败"))
 
 

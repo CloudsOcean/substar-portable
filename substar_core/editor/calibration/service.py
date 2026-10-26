@@ -413,7 +413,7 @@ def _run_editor_ai_blocks(
     if not blocks:
         return []
     primary_results: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
-    workers = min(len(blocks), max(1, int(settings.get("translation_workers", 8))))
+    workers = min(len(blocks), 256)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(run, item, stage_name, 1) for item in blocks.items()]
         for future in concurrent.futures.as_completed(futures):

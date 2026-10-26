@@ -21,8 +21,8 @@ test("general settings retain editor shortcuts without obsolete export or dubbin
 });
 
 test("hotfix fingerprints the changed settings stylesheet", () => {
-  assert.match(html, /settings\.css\?v=20260909-unsaved-1/);
-  assert.match(html, /settings\.js\?v=20261004-asr-model-select-1/);
+  assert.match(html, /settings\.css\?v=20261026-api-select-1/);
+  assert.match(html, /settings\.js\?v=20261026-api-select-3/);
 });
 
 test("unsaved settings navigation offers save discard and stay actions", () => {

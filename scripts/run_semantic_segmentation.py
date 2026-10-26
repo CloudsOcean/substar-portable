@@ -1706,7 +1706,7 @@ def main(
     parser.add_argument("--checkpoint-dir", type=Path)
     parser.add_argument("--checkpoint-scope", default="")
     parser.add_argument("--checkpoint-attempt", type=int, default=0)
-    parser.add_argument("--block-concurrency", type=int, default=2)
+    parser.add_argument("--block-concurrency", type=int, default=256, help="Local dispatch capacity; shared model API slots enforce the request limit")
     parser.add_argument("--target-seconds", type=int, default=180)
     parser.add_argument("--english-hard-limit", type=int, default=55)
     parser.add_argument("--chinese-hard-limit", type=int, default=28)

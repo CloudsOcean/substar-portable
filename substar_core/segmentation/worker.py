@@ -685,6 +685,8 @@ def run(command: WorkerCommand) -> int:
     artifact_directory.mkdir(parents=True, exist_ok=True)
     work_directory.mkdir(parents=True, exist_ok=True)
     cancelled = threading.Event()
+    from substar_core.model_concurrency import set_cancel_event
+    set_cancel_event(cancelled)
     protocol_stdout = sys.stdout
     emit_lock = threading.Lock()
     sequence = 0

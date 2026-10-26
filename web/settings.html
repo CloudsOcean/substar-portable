@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20260909-unsaved-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20261026-api-select-1" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260909-unsaved-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1" />
@@ -107,9 +107,19 @@
               </section>
               <section class="settings-subsection" aria-labelledby="generalRuntimeTitle">
                 <div class="subsection-heading"><h3 id="generalRuntimeTitle">高级</h3></div>
+                <div class="card" id="modelApiConcurrencySettings">
+                  <h3>模型 API 并发</h3>
+                  <label class="field"><span>默认最大并发请求数</span><input name="model_api_concurrency" type="number" min="1" max="256" value="50"><small>每个服务连接、账号及模型默认最多同时发送 50 个请求，超出排队。切分、意义组重新分配、翻译、校准与修复，以及不同项目共享额度。</small></label>
+                  <p class="hint">保存后对后续请求立即生效；调低上限不会中断已发出的请求。遇到限流会等待重试；此设置不替代服务商的每分钟请求数和 Token 配额。</p>
+                  <h4>按连接与模型覆盖</h4>
+                  <div id="modelConcurrencyRows"></div>
+                  <button type="button" id="addModelConcurrency" class="secondary">添加模型上限</button>
+                  <small>选择已配置的服务商和模型，再填写并发上限。服务地址自动带入，同一连接中同一模型的所有阶段共享上限；未覆盖的模型使用默认值。</small>
+                </div>
+                <h4>本机后台资源</h4>
                 <div class="card advanced-grid">
-                  <label class="field"><span>Worker 并发</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台 Worker 总数。</small></label>
-                  <label class="field"><span>云端任务并发</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>Qwen、AI 切分等云端调用共享，默认 4。</small></label>
+                  <label class="field"><span>后台任务数</span><input name="runtime_worker_concurrency" type="number" min="1" max="16"><small>同时运行的后台任务总数；一个任务内部可发送多个 API 请求。重启后生效。</small></label>
+                  <label class="field"><span>云端后台任务数</span><input name="runtime_cloud_concurrency" type="number" min="1" max="16"><small>同时运行的云端后台任务数，默认 4；不是 API 请求数。重启后生效。</small></label>
                   <label class="field"><span>媒体处理并发</span><input name="runtime_media_concurrency" type="number" min="1" max="8"><small>转码、抽取音轨与波形准备。</small></label>
                   <label class="field"><span>本地 GPU 并发</span><input name="runtime_gpu_concurrency" type="number" min="1" max="4"><small>只约束本地模型；Qwen 云端不占用。</small></label>
                   <label class="field"><span>下载并发</span><input name="runtime_download_concurrency" type="number" min="1" max="8"><small>模型与远端结果下载资源。</small></label>
@@ -393,7 +403,7 @@
             <div class="card">
               <div class="field wide">
                 <label>基本设置</label>
-                <small>配置双语字幕的显示顺序与翻译任务并发数。</small>
+                <small>配置双语字幕的显示顺序。</small>
               </div>
               <div class="field">
                 <label>双语顺序</label
@@ -402,16 +412,7 @@
                   <option value="target_source">译文在上 · 原文在下</option>
                 </select>
               </div>
-              <div class="field">
-                <label>并发任务数</label
-                ><input
-                  name="translation_workers"
-                  type="number"
-                  min="1"
-                  max="256"
-                  value="64"
-                />
-              </div>
+              <p>API 请求并发统一在「通用 → 高级 → 模型 API 并发」设置，翻译与意义组重新分配共享所用模型的额度。</p>
             </div>
             <div class="stage-settings" id="translationStageSettings"></div>
             <details class="advanced card">
@@ -579,7 +580,7 @@
       </div>
       <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
     </dialog>
-  <script src="/assets/settings.js?v=20261004-asr-model-select-1"></script>
+  <script src="/assets/settings.js?v=20261026-api-select-3"></script>
   <script src="/assets/settings_updates.js?v=20261009-delta-updates-1"></script>
   </body>
 </html>

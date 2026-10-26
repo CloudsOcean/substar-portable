@@ -1196,3 +1196,12 @@ html { scrollbar-gutter:stable; }
 @media(max-width:1150px) { .prompt-workspace { grid-template-columns:1fr; } .prompt-family-list { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); } .prompt-inspector { position:static; } }
 
 .settings-sidebar.asset-sidebar .category-list.asset-sidebar-list .category.asset-sidebar-item { min-height:44px; padding:10px 12px; }
+
+#modelApiConcurrencySettings {display:grid;grid-template-columns:minmax(0,1fr);gap:14px;}
+#modelApiConcurrencySettings h3,#modelApiConcurrencySettings h4 {margin:0;}
+#modelApiConcurrencySettings small,#modelApiConcurrencySettings .hint {color:var(--theme-muted);font-size:12px;line-height:1.6;}
+#modelConcurrencyRows {display:grid;gap:12px;}
+.model-concurrency-row {display:grid;grid-template-columns:minmax(180px,2fr) minmax(140px,1.5fr) 90px auto;gap:10px;align-items:end;}
+.model-concurrency-row label {display:grid;gap:5px;min-width:0;font-size:12px;}
+.model-concurrency-row input,.model-concurrency-row select {width:100%;box-sizing:border-box;min-width:0;}
+@media(max-width:800px){.model-concurrency-row{grid-template-columns:1fr 1fr;}}

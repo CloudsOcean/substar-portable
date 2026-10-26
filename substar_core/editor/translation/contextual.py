@@ -290,7 +290,7 @@ def call_block_batches(*, settings: dict[str, Any], system_prompt: str,
         except Exception as exc:
             return block_id, {"response": {}, "error": str(exc)}
 
-    workers = min(len(batches), max(1, int(settings.get("translation_workers", 8))))
+    workers = min(len(batches), 256)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(run, batch) for batch in batches]
         for future in concurrent.futures.as_completed(futures):
@@ -864,7 +864,7 @@ def complete_results(*, settings: dict[str, Any], repair_prompt: str,
     repair_results: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
     if repair_blocks:
         workers = min(
-            len(repair_blocks), max(1, int(settings.get("translation_workers", 8)))
+            len(repair_blocks), 256
         )
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
@@ -1054,7 +1054,7 @@ def _repair_over_limit_plans_blockwise(
 
     results: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
     workers = min(
-        len(issues_by_block), max(1, int(settings.get("translation_workers", 8)))
+        len(issues_by_block), 256
     )
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {

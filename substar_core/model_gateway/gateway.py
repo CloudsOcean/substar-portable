@@ -7,6 +7,7 @@ import time
 from typing import Any, Mapping, Sequence
 
 import requests
+from substar_core.model_concurrency import model_slot, retry_after_seconds
 
 from substar_core.openai_compat import auth_headers, endpoint_url
 from substar_core.reasoning_capabilities import (
@@ -157,16 +158,17 @@ def call_text_model(
     for attempt in range(1, attempts + 1):
         used_attempts = attempt
         try:
-            response = requests.post(
-                endpoint_url(base_url, "/chat/completions"),
-                headers={
-                    **auth_headers(api_key, auth_mode),
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": idempotency_key,
-                },
-                json=payload,
-                timeout=timeout,
-            )
+            with model_slot(base_url, model, api_key):
+                response = requests.post(
+                    endpoint_url(base_url, "/chat/completions"),
+                    headers={
+                        **auth_headers(api_key, auth_mode),
+                        "Content-Type": "application/json",
+                        "Idempotency-Key": idempotency_key,
+                    },
+                    json=payload,
+                    timeout=timeout,
+                )
             response.raise_for_status()
             parsed_body = _response_json_utf8(response)
             if not isinstance(parsed_body, dict):
@@ -187,7 +189,7 @@ def call_text_model(
                 status=status,
             )
             if wrapped.retryable and attempt < attempts:
-                time.sleep(min(3.0, attempt * 0.75))
+                time.sleep(retry_after_seconds(exc.response, attempt) if status==429 else min(3.0, attempt * 0.75))
                 continue
             raise wrapped from exc
         except ValueError as exc:

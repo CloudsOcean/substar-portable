@@ -418,7 +418,7 @@ const numericFields = new Set([
   "segmentation_batch_groups",
   "http_retry_attempts",
   "stage_timeout_seconds",
-  "translation_workers",
+  "model_api_concurrency",
   "runtime_worker_concurrency",
   "runtime_cloud_concurrency",
   "runtime_media_concurrency",
@@ -739,6 +739,8 @@ function populate(value) {
     if (input.type === "checkbox") input.checked = Boolean(current);
     else input.value = current ?? "";
   }
+  $('#modelConcurrencyRows').replaceChildren();
+  for(const row of value.model_api_concurrency_overrides||[])addModelConcurrencyRow(row);
   connectionModelValue = String(form.elements.translation_api_model?.value || "").trim();
   inheritedModelStages.clear();
   explicitlyConfiguredThinkingStages.clear();
@@ -777,6 +779,57 @@ function populate(value) {
   setHeader("配置已载入", "saved");
 }
 
+function addModelConcurrencyRow(value={}) {
+  const row=document.createElement('div');row.className='model-concurrency-row';
+  const providers=modelProviderCatalog.filter(p=>modelProviderDrafts[p.id]?.base_url && modelProviderDrafts[p.id]?.model && (settings?.model_provider_key_set?.[p.id] || (p.id===selectedModelProvider&&form.elements.translation_api_key.value.trim()))).map(p=>({
+    id:p.id,label:p.label,base_url:modelProviderDrafts[p.id].base_url,model:modelProviderDrafts[p.id].model,
+  }));
+  const sameUrl=(a,b)=>String(a||'').trim().replace(/\/+$/,'')===String(b||'').trim().replace(/\/+$/,'');
+  if(value.base_url&&!providers.some(p=>sameUrl(p.base_url,value.base_url)))providers.push({id:'saved',label:'已保存连接',base_url:value.base_url,model:value.model});
+  const provider=document.createElement('select'),model=document.createElement('select'),limit=document.createElement('input'),address=document.createElement('input');
+  provider.setAttribute('aria-label','服务商');model.setAttribute('aria-label','模型');limit.setAttribute('aria-label','最大并发');
+  model.dataset.modelConcurrency='model';limit.dataset.modelConcurrency='limit';address.dataset.modelConcurrency='base_url';address.type='hidden';
+  limit.type='number';limit.min='1';limit.max='256';limit.required=true;limit.value=value.limit??50;
+  model.required=true;provider.required=true;
+  const option=(value,text)=>{const o=document.createElement('option');o.value=value;o.textContent=text;return o;};
+  provider.append(...providers.map(p=>option(p.id,p.label)));
+  if(!providers.length){provider.append(option('','请先配置模型服务商'));provider.disabled=true;}
+  provider.value=providers.find(p=>sameUrl(p.base_url,value.base_url))?.id || providers.find(p=>p.id===selectedModelProvider)?.id || providers[0]?.id || '';
+  for(const [title,input] of [['服务商',provider],['模型',model],['最大并发',limit]]){
+    const field=document.createElement('label'),label=document.createElement('span');label.textContent=title;field.append(label,input);row.append(field);
+  }
+  row.append(address);
+  let revision=0;
+  function fillModels(preferred){
+    const connection=providers.find(p=>p.id===provider.value);address.value=connection?.base_url||'';
+    const selected=preferred||model.value;
+    const stageModels=connection?.id===selectedModelProvider?Object.keys(settings||{}).filter(k=>/^stage_.+_model$/.test(k)).map(k=>form.elements[k]?.value||settings[k]):[];
+    const cached=(providerModelCatalogs.get(connection?.id)||[]).map(m=>typeof m==='string'?m:m.id);
+    const saved=(settings?.model_api_concurrency_overrides||[]).filter(r=>sameUrl(r.base_url,address.value)).map(r=>r.model);
+    const values=[...new Set([connection?.model,...stageModels,...cached,...saved,preferred].filter(Boolean))];
+    model.replaceChildren(...values.map(m=>option(m,m)));model.value=values.includes(selected)?selected:values[0]||'';
+  }
+  row.refreshModels=()=>fillModels();
+  provider.addEventListener('change',async()=>{
+    const stamp=++revision;fillModels(providers.find(p=>p.id===provider.value)?.model);
+    const connection=providers.find(p=>p.id===provider.value);if(!connection||providerModelCatalogs.has(connection.id))return;
+    const profile=modelProviderDrafts[connection.id]||{};
+    try{
+      const result=await api('/api/models/discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:connection.id,base_url:connection.base_url,auth_mode:profile.auth_mode||'bearer',api_key:''})});
+      providerModelCatalogs.set(connection.id,result.models||result.data||[]);
+      if(stamp===revision&&row.isConnected)fillModels();
+    }catch(_){/* Saved models remain selectable when discovery is unavailable. */}
+  });
+  fillModels(value.model);
+  const remove=document.createElement('button');remove.type='button';remove.className='secondary';remove.textContent='移除';
+  remove.onclick=()=>{row.remove();form.dispatchEvent(new Event('input',{bubbles:true}));};row.append(remove);
+  $('#modelConcurrencyRows').append(row);
+}
+$('#addModelConcurrency').addEventListener('click',()=>{
+  addModelConcurrencyRow({base_url:form.elements.translation_api_base_url.value,model:form.elements.translation_api_model.value});
+  form.dispatchEvent(new Event('input',{bubbles:true}));
+});
+
 function buildPayload() {
   captureModelProviderDraft();
   const payload = { ...settings };
@@ -794,6 +847,7 @@ function buildPayload() {
       payload[element.name] = Number(element.value);
     else payload[element.name] = element.value;
   }
+  payload.model_api_concurrency_overrides=[...$('#modelConcurrencyRows').children].map(row=>Object.fromEntries([...row.querySelectorAll('[data-model-concurrency]')].map(input=>[input.dataset.modelConcurrency,input.dataset.modelConcurrency==='limit'?Number(input.value):input.value.trim()])));
   payload.active_model_provider = selectedModelProvider;
   payload.model_provider_profiles = { ...modelProviderDrafts };
   // Every LLM stage follows the active OpenAI-compatible model service.
@@ -875,6 +929,7 @@ async function discoverModels() {
     });
     const models = catalog.models || catalog.data || [];
     providerModelCatalogs.set(selectedModelProvider, models);
+    for(const row of $('#modelConcurrencyRows').children)row.refreshModels?.();
     renderModelCatalogOptions(models);
     status.textContent = models.length
       ? `已载入 ${models.length} 个可用模型；连接测试与所有 Stage 共用此列表。`

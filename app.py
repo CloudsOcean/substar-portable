@@ -431,6 +431,8 @@ class SettingsPayload(BaseModel):
     segmentation_batch_groups: int = 4
     segmentation_candidates: int = 1
     translation_workers: int = 64
+    model_api_concurrency: int = Field(default=50, ge=1, le=256)
+    model_api_concurrency_overrides: list[dict[str, Any]] = Field(default_factory=list)
     http_retry_attempts: int = 2
     stage_timeout_seconds: int = 3600
     shortcut_undo: str = "Ctrl+Z"
@@ -1717,7 +1719,15 @@ def recognition_profiles() -> dict[str, Any]:
 
 @app.post("/api/settings")
 def put_settings(payload: SettingsPayload) -> dict[str, Any]:
-    return save_settings(payload.model_dump())
+    values = payload.model_dump()
+    # A settings page opened before the new controls existed must preserve them.
+    for key in ('model_api_concurrency', 'model_api_concurrency_overrides'):
+        if key not in payload.model_fields_set:
+            values.pop(key, None)
+    try:
+        return save_settings(values)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 class GlossaryCandidatePayload(BaseModel):

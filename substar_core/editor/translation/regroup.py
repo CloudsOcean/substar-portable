@@ -120,7 +120,7 @@ def review_request_groups(
 
     if requests:
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(len(requests), max(1, int(settings.get("translation_workers", 8))))
+            max_workers=min(len(requests), 256)
         ) as pool:
             futures = [pool.submit(review, item) for item in requests]
             for done, future in enumerate(concurrent.futures.as_completed(futures), 1):

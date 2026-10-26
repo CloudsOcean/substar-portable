@@ -188,7 +188,9 @@ DEFAULTS: dict[str, Any] = {
     "segmentation_overlap_seconds": 40,
     "segmentation_batch_groups": 4,
     "segmentation_candidates": 1,
-    "translation_workers": 64,
+    "translation_workers": 64,  # Legacy compatibility only.
+    "model_api_concurrency": 50,
+    "model_api_concurrency_overrides": [],
     "runtime_worker_concurrency": 4,
     "runtime_cloud_concurrency": 4,
     "runtime_media_concurrency": 2,
@@ -682,6 +684,9 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     merged["segmentation_candidates"] = max(
         1, min(2, int(merged["segmentation_candidates"]))
     )
+    from .model_concurrency import normalize_limits
+    merged['model_api_concurrency'], merged['model_api_concurrency_overrides'] = normalize_limits(
+        merged['model_api_concurrency'], merged['model_api_concurrency_overrides'])
     merged["translation_workers"] = max(
         1, min(256, int(merged["translation_workers"]))
     )
