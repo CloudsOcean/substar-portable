@@ -97,8 +97,9 @@ def _check_expected(cue: DisplayCue, change: CueTimeChange) -> None:
 
 def _validate_non_manual_timeline(document: EditorDocument, cues: Iterable[DisplayCue]) -> None:
     previous_end = {}
+    tokens = _token_map(document)
     for cue in canonicalize_cue_order(cues):
-        if cue.state is EntityState.DELETED or _is_manual_cue(document, cue):
+        if cue.state is EntityState.DELETED or all(not tokens[token_id].source_token_ids for token_id in cue.display_token_ids):
             continue
         if cue.start < previous_end.get(cue.speaker, -1.0) - 1e-9:
             raise CueTimingError(

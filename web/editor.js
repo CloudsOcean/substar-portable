@@ -2664,35 +2664,7 @@
 
   let cueCenterGeneration = 0;
   function centerCueInList(cue) {
-    const generation = ++cueCenterGeneration;
-    if (!cue) return;
-    if (!document.querySelector(`.cue-row[data-cue-id="${CSS.escape(cue.cue_id)}"]`)) {
-      const index = state.view?.cue_views.findIndex(item => item.cue_id === cue.cue_id) ?? -1;
-      if (index >= 0) {
-        state.cuePageStart = Math.max(0, index - Math.floor(CUE_PAGE_SIZE / 3));
-        renderCues();
-      }
-    }
-    const row = document.querySelector(`.cue-row[data-cue-id="${CSS.escape(cue.cue_id)}"]`);
-    const list = $("#cueList");
-    if (!row || !list) return;
-    const rowRect = row.getBoundingClientRect();
-    const listRect = list.getBoundingClientRect();
-    // Centering is invoked only on a cue transition or a completed seek.
-    const centerOffset = (listRect.height - rowRect.height) / 2;
-    list.scrollTop += rowRect.top - listRect.top - centerOffset;
-    // Offscreen rows use content-visibility estimates. Re-measure after layout
-    // reveals their real heights, without overriding a newer seek or user scroll.
-    let expectedScroll = list.scrollTop;
-    const settle = remaining => requestAnimationFrame(() => {
-      if (generation !== cueCenterGeneration || state.activeCueId !== cue.cue_id
-          || Math.abs(list.scrollTop - expectedScroll) > 1 || !row.isConnected) return;
-      const rect = row.getBoundingClientRect(), bounds = list.getBoundingClientRect();
-      list.scrollTop += rect.top - bounds.top - (bounds.height - rect.height) / 2;
-      expectedScroll = list.scrollTop;
-      if (remaining > 1) settle(remaining - 1);
-    });
-    settle(3);
+    if (cue) state.cueListView?.revealCue(cue.cue_id, {align:"center"});
   }
 
   function activateCue(cueId, {
@@ -3920,12 +3892,13 @@
   function initializeCueListView() {
     const factory = window.EditorCueListView;
     if (!factory?.createCueListView) return;
+    state.cueListView?.destroy();
     state.cueListView = factory.createCueListView({
       container:$("#cueList"),
       positionSlider:$("#cueScrollSlider"),
       pageSize:CUE_PAGE_SIZE,
       renderCue:cueElement,
-      onWindowChange:page => { state.cuePageStart = page.start; }
+      onWindowChange:page => { state.cuePageStart = page.start; refreshCueSelection(false); }
     });
   }
 
@@ -5164,9 +5137,9 @@
   });
   let cueDrag = null, suppressCueClick = false;
   function cueOrder() { return (state.view?.cue_views || []).filter(c => c.state === "active").map(c => c.cue_id); }
-  function refreshCueSelection() {
+  function refreshCueSelection(redrawTimeline = true) {
     const ids=state.cueSelection.ids;
-    state.timelineController?.redraw();
+    if (redrawTimeline) state.timelineController?.redraw();
     $("#cueList").querySelectorAll(".cue-row[data-cue-id]").forEach(row => {
       row.classList.toggle("cue-selected", ids.has(row.dataset.cueId));
       row.setAttribute("aria-selected", String(ids.has(row.dataset.cueId)));

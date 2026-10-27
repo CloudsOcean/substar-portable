@@ -851,3 +851,6 @@ html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane 
 
 html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane:has(#aiOrganizeMenu) { grid-template-rows:auto minmax(0,1fr) !important; }
 html[data-editor-layout="experimental"] body.editor-shell .editor-document-pane > .pane-heading:has(#aiOrganizeMenu) { height:auto !important; align-items:flex-start; }
+
+/* Virtual rows are already bounded; measure real heights, never intrinsic estimates. */
+.cue-virtual-content > .cue-row { content-visibility: visible; contain-intrinsic-block-size: none; box-sizing: border-box; }

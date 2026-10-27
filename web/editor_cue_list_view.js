@@ -1,85 +1,80 @@
-(function (root, factory) {
-  const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
-  if (root) root.EditorCueListView = api;
-})(typeof globalThis === "object" ? globalThis : this, function () {
-  "use strict";
-
-  function pageWindow(cueCount, requestedStart, activeIndex, pageSize, preservePage) {
-    const size = Math.max(1, Number(pageSize) || 1);
-    const count = Math.max(0, Number(cueCount) || 0);
-    if (!count) return {start:0, end:0};
-    let start = Math.max(0, Number(requestedStart) || 0);
-    if (!preservePage && (activeIndex < start || activeIndex >= start + size)) {
-      start = Math.max(0, Math.min(count - size, activeIndex - Math.floor(size / 3)));
-    }
-    start = Math.max(0, Math.min(start, Math.max(0, count - 1)));
-    return {start, end:Math.min(count, start + size)};
-  }
-
-  function preservedWindow(cueCount, start, end) {
-    const count = Math.max(0, Number(cueCount) || 0);
-    if (!count) return {start:0, end:0};
-    const safeStart = Math.max(0, Math.min(Number(start) || 0, count - 1));
-    const safeEnd = Math.max(safeStart, Math.min(Number(end) || 0, count));
-    return {start:safeStart, end:safeEnd};
-  }
-
-  function createCueListView({container, pageSize = 160, renderCue, onWindowChange = null, positionSlider = null}) {
-    if (!container || typeof renderCue !== "function") {
-      throw new Error("Cue list view requires a container and cue renderer");
-    }
-
-    let context = null;
-    let windowStart = 0;
-    let windowEnd = 0;
-    let windowLoading = false;
-    let topGap = 0;
-    let bottomGap = 0;
-    let sliderDragging = false;
-    const maxRows = pageSize * 3;
-    const baseStyle = typeof getComputedStyle === "function" ? getComputedStyle(container) : {};
-    const baseTop = parseFloat(baseStyle.paddingTop) || 0;
-    const baseBottom = parseFloat(baseStyle.paddingBottom) || 0;
-    const measuredHeights = new Map();
-    const rangeHeight = (start, end) => context.cues.slice(start, end).reduce((sum, cue) => sum + (measuredHeights.get(cue.cue_id) || 80), 0);
-    const gapStyle = () => {
-      if (!container.style) return;
-      container.style.paddingTop = `${baseTop + topGap}px`;
-      container.style.paddingBottom = `${baseBottom + bottomGap}px`;
+(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;if(root)root.EditorCueListView=api;})(typeof globalThis==='object'?globalThis:this,function(){
+  'use strict';
+  // Fenwick sums: scroll lookup and measured-height changes are logarithmic.
+  function createHeightIndex(values){
+    const heights=[...values],tree=new Float64Array(values.length+1);
+    const add=(i,delta)=>{for(let n=i+1;n<tree.length;n+=n&-n)tree[n]+=delta;};
+    heights.forEach((h,i)=>add(i,h));
+    const offset=end=>{let sum=0;for(let i=Math.min(end,heights.length);i>0;i-=i&-i)sum+=tree[i];return sum;};
+    return {offset,total:()=>offset(heights.length),height:i=>heights[i]||0,
+      update(i,height){const delta=height-heights[i];heights[i]=height;add(i,delta);},
+      at(y){let i=0,sum=0,step=1;while(step*2<tree.length)step*=2;for(;step;step=Math.floor(step/2)){const next=i+step;if(next<tree.length&&sum+tree[next]<=y){i=next;sum+=tree[next];}}return Math.min(i,Math.max(0,heights.length-1));}
     };
-    const rowHeight = node => Number(node.getBoundingClientRect?.().height || node.offsetHeight || 80)
-      + (typeof getComputedStyle === "function" ? parseFloat(getComputedStyle(node).marginBottom) || 0 : 0);
-    const trimWindow = direction => {
-      const focus = document.activeElement;
-      while (windowEnd - windowStart > maxRows) {
-        const index = direction === "forward" ? windowStart++ : --windowEnd;
-        const id = context.cues[index]?.cue_id;
-        const node = [...container.children].find(row => row.dataset?.cueId === id);
-        if (!node) continue;
-        // One focused row may remain outside the window until blur.
-        if (node.contains?.(focus)) continue;
-        measuredHeights.set(id, rowHeight(node));
-        if (direction === "forward") topGap += rowHeight(node);
-        else bottomGap += rowHeight(node);
-        node.remove();
+  }
+  function pageWindow(count,start,active,size,preserve){start=Math.max(0,start||0);if(!preserve&&(active<start||active>=start+size))start=Math.max(0,active-Math.floor(size/3));return {start:Math.min(start,Math.max(0,count-1)),end:Math.min(count,start+size)};}
+  function preservedWindow(count,start,end){return {start:Math.max(0,Math.min(start,count-1)),end:Math.min(count,end)};}
+  function createCueListView({container,renderCue,onWindowChange=null,positionSlider=null}){
+    if(!container||typeof renderCue!=='function')throw Error('Cue list view requires a container and cue renderer');
+    const doc=container.ownerDocument||document;
+    const content=doc.createElement('div');content.className='cue-virtual-content';
+    content.style.position='relative';content.style.width='100%';
+    container.replaceChildren(content);
+    // Padding belongs to the viewport, never to offscreen row compensation.
+    const css=typeof getComputedStyle==='function'?getComputedStyle(container):{};
+    const baseTop=parseFloat(css.paddingTop)||0,baseBottom=parseFloat(css.paddingBottom)||0;
+    let context=null,indexById=new Map(),heights=createHeightIndex([]),frame=0,generation=0,dead=false,active=null;
+    let range={start:0,end:0},lastWidth=container.clientWidth,sliderDragging=false;
+    const measured=new Map(),nodes=new Map();
+    const request=fn=>requestAnimationFrame(fn);
+    const viewport=()=>Math.max(1,container.clientHeight-baseTop-baseBottom);
+    const localTop=()=>Math.max(0,container.scrollTop-baseTop);
+    const anchor=()=>{
+      if(!context?.cues.length)return null;
+      const i=heights.at(localTop());
+      return {id:context.cues[i].cue_id,index:i,offset:heights.offset(i)-localTop()};
+    };
+    function restoreAnchor(a){
+      if(!a||!context.cues.length)return;
+      const i=indexById.get(a.id)??Math.min(a.index,context.cues.length-1);
+      const next=Math.max(0,heights.offset(i)-a.offset+baseTop);
+      if(Math.abs(container.scrollTop-next)>.5)container.scrollTop=next;
+    }
+    function syncPosition(){
+      if(!positionSlider||sliderDragging)return;
+      const count=context?.cues.length||0;positionSlider.disabled=count<2;
+      const i=count?heights.at(localTop()):0;
+      let percent=count>1?100*(i+Math.max(0,(localTop()-heights.offset(i))/Math.max(1,heights.height(i))))/(count-1):0;
+      if(container.scrollTop<=baseTop)percent=0;
+      else if(container.scrollTop+container.clientHeight>=heights.total()+baseTop+baseBottom-2)percent=100;
+      positionSlider.value=String(Math.max(0,Math.min(100,percent)));positionSlider.setAttribute('aria-valuetext',`${Math.round(Number(positionSlider.value))}%`);
+    }
+    function positionRows(){
+      content.style.height=`${heights.total()}px`;
+      for(const [id,node] of nodes){const i=indexById.get(id);if(i!==undefined){node.style.position='absolute';node.style.top=`${heights.offset(i)}px`;node.style.left='0';node.style.right='0';}}
+    }
+    function measure(){
+      const a=anchor();let changed=false;
+      for(const [id,node] of nodes){
+        const i=indexById.get(id);if(i===undefined)continue;
+        const rect=node.getBoundingClientRect();
+        const margin=typeof getComputedStyle==='function'?parseFloat(getComputedStyle(node).marginBottom)||0:0;
+        const height=rect.height+margin;if(height<=0)continue;
+        measured.set(id,height);
+        if(Math.abs(height-heights.height(i))>.5){heights.update(i,height);changed=true;}
       }
-      const allowed = new Set(context.cues.slice(windowStart, windowEnd).map(cue => cue.cue_id));
-      [...container.children].forEach(node => {
-        if (!allowed.has(node.dataset?.cueId) && !node.contains?.(focus)) {
-          const index = context.cues.findIndex(cue => cue.cue_id === node.dataset?.cueId);
-          const height = rowHeight(node);
-          measuredHeights.set(node.dataset?.cueId, height);
-          if (index >= 0 && index < windowStart) topGap += height;
-          else if (index >= windowEnd) bottomGap += height;
-          node.remove();
-        }
-      });
-      gapStyle();
-    };
-
+      if(changed){positionRows();restoreAnchor(a);}
+      return changed;
+    }
+    const observer=typeof ResizeObserver==='function'?new ResizeObserver(()=>schedule()):null;
+    observer?.observe(container);
+    function pinned(node){
+      if(node.contains(doc.activeElement))return true;
+      const selection=doc.getSelection?.();
+      return !!selection&&!selection.isCollapsed&&(node.contains(selection.anchorNode)||node.contains(selection.focusNode));
+    }
     const reuseOrPatchRow = (existing, next) => {
       if (!existing || existing.dataset.cueId !== next.dataset.cueId) return next;
+      next.style.cssText = existing.style.cssText;
       // Selection is applied after rendering, not by the cue renderer. Ignore
       // that presentation-only difference or every save replaces every row.
       next.classList.toggle("cue-selected", existing.classList.contains("cue-selected"));
@@ -116,204 +111,90 @@
       return existing;
     };
 
-    const reconcileRows = desiredRows => {
-      // One existing node may be reused for each authoritative Cue ID. Any
-      // historical duplicate is intentionally left out of `kept` and removed.
-      const existingById = new Map();
-      [...container.children].forEach(node => {
-        const cueId = node?.dataset?.cueId;
-        if (cueId && !existingById.has(cueId)) existingById.set(cueId, node);
-      });
-      const finalRows = desiredRows.map(next =>
-        reuseOrPatchRow(existingById.get(next.dataset.cueId), next)
-      );
-      finalRows.forEach((node, index) => {
-        const current = container.children[index] || null;
-        if (current === node) return;
-        if (current?.dataset?.cueId === node.dataset.cueId) {
-          container.replaceChild(node, current);
-          return;
-        }
-        container.insertBefore(node, current);
-      });
-      const kept = new Set(finalRows);
-      [...container.children].forEach(node => {
-        if (!kept.has(node)) node.remove();
-      });
-    };
-
-    const syncPosition = () => {
-      if (!positionSlider || sliderDragging) return;
-      const count = context?.cues.length || 0;
-      positionSlider.disabled = count < 2;
-      let percentage = 0;
-      if (count > 1) {
-        const top = container.getBoundingClientRect().top;
-        const first = [...container.children].find(node => node.dataset?.cueId && node.getBoundingClientRect().bottom > top);
-        if (first) {
-          const index = context.cues.findIndex(cue => cue.cue_id === first.dataset.cueId);
-          const rect = first.getBoundingClientRect();
-          const fraction = Math.max(0, Math.min(1, (top - rect.top) / Math.max(1, rect.height)));
-          percentage = 100 * (index + fraction) / (count - 1);
-        }
-        if (windowEnd === count && container.scrollTop + container.clientHeight >= container.scrollHeight - 2) percentage = 100;
-        if (windowStart === 0 && container.scrollTop <= baseTop) percentage = 0;
+    function update(force=false){
+      if(dead||!context)return;
+      const width=container.clientWidth;
+      if(width!==lastWidth){lastWidth=width;const a=anchor();measured.clear();heights=createHeightIndex(context.cues.map(()=>104));restoreAnchor(a);}
+      const overscan=Math.max(240,viewport());
+      range={start:context.cues.length?heights.at(Math.max(0,localTop()-overscan)):0,end:context.cues.length?Math.min(context.cues.length,heights.at(localTop()+viewport()+overscan)+1):0};
+      const wanted=new Set(context.cues.slice(range.start,range.end).map(c=>c.cue_id));
+      for(const [id,node] of nodes){if(!indexById.has(id)||(!wanted.has(id)&&!pinned(node))){observer?.unobserve(node);node.remove();nodes.delete(id);}}
+      for(let i=range.start;i<range.end;i++){
+        const cue=context.cues[i],old=nodes.get(cue.cue_id);
+        if(old&&!force)continue;
+        const next=renderCue(cue,i,context.tokenById),node=reuseOrPatchRow(old,next);
+        if(node!==old){if(old){observer?.unobserve(old);old.replaceWith(node);}else content.append(node);nodes.set(cue.cue_id,node);observer?.observe(node);}
       }
-      positionSlider.value = String(Math.max(0, Math.min(100, percentage)));
-      positionSlider.setAttribute("aria-valuetext", `${Math.round(percentage)}%`);
-    };
-
-    const notify = () => {
-      if (typeof onWindowChange === "function") onWindowChange({start:windowStart, end:windowEnd});
-      syncPosition();
-    };
-
-    function jumpToPercent(value) {
-      if (!context?.cues.length) return;
-      const percent = Math.max(0, Math.min(100, Number(value) || 0));
-      const count = context.cues.length;
-      const index = Math.round(percent / 100 * (count - 1));
-      windowStart = Math.max(0, Math.min(count - pageSize, index - Math.floor(pageSize / 3)));
-      windowEnd = Math.min(count, windowStart + pageSize);
-      topGap = 0; bottomGap = 0; gapStyle();
-      reconcileRows(context.cues.slice(windowStart, windowEnd).map((cue, offset) => renderCue(cue, windowStart + offset, context.tokenById)));
-      const row = [...container.children].find(node => node.dataset?.cueId === context.cues[index].cue_id);
-      if (percent === 100) container.scrollTop = container.scrollHeight;
-      else if (row) container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top - baseTop;
-      if (percent === 0) container.scrollTop = 0;
-      notify();
+      // Keep DOM reading order without removing/reinserting a focused editor.
+      const ordered=[...nodes].sort((a,b)=>indexById.get(a[0])-indexById.get(b[0]));
+      let before=null;
+      for(let i=ordered.length-1;i>=0;i--){const node=ordered[i][1];if(node.nextSibling!==before)content.insertBefore(node,before);before=node;}
+      for(const [id,node] of nodes)node.classList.toggle('current',id===active);
+      positionRows();const changed=measure();
+      onWindowChange?.(range);syncPosition();
+      if(changed)schedule();
     }
-
-    if (positionSlider) {
-      positionSlider.addEventListener("pointerdown", () => {
-        // Commit the current editor field before replacing its rendered window.
-        if (container.contains(document.activeElement)) document.activeElement.blur();
-        sliderDragging = true;
+    function schedule(){if(!frame&&!dead)frame=request(()=>{frame=0;update();});}
+    function revealCue(id,{align='center'}={}){
+      const i=indexById.get(id);if(i===undefined)return false;
+      const ticket=++generation;
+      function locate(){
+        const height=heights.height(i),offset=align==='start'?0:Math.max(0,(viewport()-height)/2);
+        container.scrollTop=Math.max(0,heights.offset(i)-offset+baseTop);
+        update();
+      }
+      locate();let expected=container.scrollTop;
+      const settle=remaining=>request(()=>{
+        if(dead||ticket!==generation||Math.abs(container.scrollTop-expected)>1)return;
+        const node=nodes.get(id);if(!node)return;
+        measure();locate();expected=container.scrollTop;
+        if(remaining>1)settle(remaining-1);
       });
-      positionSlider.addEventListener("input", () => jumpToPercent(positionSlider.value));
-      positionSlider.addEventListener("keydown", event => {
-        const last = (context?.cues.length || 0) - 1;
-        if (last <= 0 || !["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const index = Math.round(Number(positionSlider.value) / 100 * last);
-        const next = event.key === "Home" ? 0 : event.key === "End" ? last : index + (event.key === "ArrowDown" ? 1 : -1);
-        jumpToPercent(100 * next / last);
+      settle(2);return true;
+    }
+    function jumpToPercent(value){
+      if(!context?.cues.length)return;
+      const percent=Math.max(0,Math.min(100,Number(value)||0));
+      revealCue(context.cues[Math.round(percent/100*(context.cues.length-1))].cue_id,{align:'start'});
+      if(percent===0)container.scrollTop=0;
+      if(percent===100)container.scrollTop=heights.total();
+      update();
+    }
+    const userScroll=()=>{generation++;};
+    container.addEventListener('wheel',userScroll,{passive:true});
+    container.addEventListener('pointerdown',userScroll);
+    container.addEventListener('keydown',userScroll);
+    container.addEventListener('scroll',schedule,{passive:true});
+    container.addEventListener('focusout',schedule);
+    doc.addEventListener?.('selectionchange',schedule);
+    if(positionSlider){
+      positionSlider.addEventListener('pointerdown',()=>{sliderDragging=true;generation++;});
+      positionSlider.addEventListener('input',()=>jumpToPercent(positionSlider.value));
+      positionSlider.addEventListener('keydown',event=>{
+        const last=(context?.cues.length||0)-1;if(last<=0||!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
+        event.preventDefault();const i=Math.round(Number(positionSlider.value)/100*last);
+        jumpToPercent(100*(event.key==='Home'?0:event.key==='End'?last:i+(event.key==='ArrowDown'?1:-1))/last);
       });
-      const finishDrag = () => { sliderDragging = false; syncPosition(); };
-      positionSlider.addEventListener("change", finishDrag);
-      positionSlider.addEventListener("pointerup", finishDrag);
-      positionSlider.addEventListener("pointercancel", finishDrag);
+      for(const name of ['change','pointerup','pointercancel'])positionSlider.addEventListener(name,()=>{sliderDragging=false;syncPosition();});
     }
-
-    const appendRange = (start, end) => {
-      if (!context || start >= end) return;
-      const safeStart = Math.max(0, Math.min(start, context.cues.length));
-      const safeEnd = Math.max(safeStart, Math.min(end, context.cues.length));
-      const fragment = document.createDocumentFragment();
-      const existing = new Set([...container.children].map(node => node.dataset?.cueId));
-      for (let index = safeStart; index < safeEnd; index += 1) {
-        const cue = context.cues[index];
-        if (cue && !existing.has(cue.cue_id)) fragment.append(renderCue(cue, index, context.tokenById));
-      }
-      container.append(fragment);
-    };
-
-    const prependRange = (start, end, preserveGap = false) => {
-      if (!context || start >= end) return;
-      const safeStart = Math.max(0, Math.min(start, context.cues.length));
-      const safeEnd = Math.max(safeStart, Math.min(end, context.cues.length));
-      const previousHeight = container.scrollHeight;
-      const fragment = document.createDocumentFragment();
-      const existing = new Set([...container.children].map(node => node.dataset?.cueId));
-      for (let index = safeStart; index < safeEnd; index += 1) {
-        const cue = context.cues[index];
-        if (cue && !existing.has(cue.cue_id)) fragment.append(renderCue(cue, index, context.tokenById));
-      }
-      container.prepend(fragment);
-      if (!preserveGap) container.scrollTop += container.scrollHeight - previousHeight;
-    };
-
-    container.addEventListener("scroll", () => {
-      if (!context || windowLoading) return;
-      windowLoading = true;
-      requestAnimationFrame(() => {
-        if (container.scrollTop + container.clientHeight >= container.scrollHeight - bottomGap - 480 && windowEnd < context.cues.length) {
-          const nextEnd = Math.min(context.cues.length, windowEnd + pageSize);
-          bottomGap = Math.max(0, bottomGap - rangeHeight(windowEnd, nextEnd));
-          appendRange(windowEnd, nextEnd);
-          windowEnd = nextEnd;
-          trimWindow("forward");
-          notify();
-        }
-        if (container.scrollTop <= topGap + 320 && windowStart > 0) {
-          const nextStart = Math.max(0, windowStart - pageSize);
-          const preserveGap = topGap > 0;
-          topGap = Math.max(0, topGap - rangeHeight(nextStart, windowStart));
-          gapStyle();
-          prependRange(nextStart, windowStart, preserveGap);
-          windowStart = nextStart;
-          trimWindow("backward");
-          notify();
-        }
-        windowLoading = false;
-        syncPosition();
-      });
-    }, {passive:true});
-
-    function render({cues, tokenById, activeCueId, pageStart = 0, preservePage = false}) {
-      const listTop = container.getBoundingClientRect().top;
-      const viewportRows = preservePage ? [...container.children]
-        .filter(node => node.dataset?.cueId)
-        .map(node => ({id:node.dataset.cueId, rect:node.getBoundingClientRect()}))
-        .filter(({rect}) => rect.bottom > listTop && rect.top < listTop + container.clientHeight) : [];
-      context = {cues, tokenById};
-      const activeIndex = Math.max(0, cues.findIndex(cue => cue.cue_id === activeCueId));
-      const preserved = preservedWindow(cues.length, windowStart, windowEnd);
-      const keepWindow = preservePage
-        && preserved.end > preserved.start
-        && preserved.start < cues.length;
-      const preservedSize = Math.min(maxRows, Math.max(pageSize, preserved.end - preserved.start));
-      const page = keepWindow
-        ? pageWindow(cues.length, preserved.start, activeIndex, preservedSize, true)
-        : pageWindow(cues.length, pageStart, activeIndex, pageSize, false);
-      if (!keepWindow) { topGap = 0; bottomGap = 0; gapStyle(); }
-      windowStart = page.start;
-      windowEnd = page.end;
-      const desiredRows = [];
-      for (let index = page.start; index < page.end; index += 1) {
-        const cue = cues[index];
-        if (cue) desiredRows.push(renderCue(cue, index, tokenById));
-      }
-      // Preserve unchanged Cue DOM nodes. A split updates one row and inserts
-      // one row instead of replacing the whole scrolling surface.
-      reconcileRows(desiredRows);
-      if (keepWindow) {
-        // overflow-anchor is disabled for virtual paging. Preserve the first
-        // surviving visible row explicitly when edits change preceding heights.
-        for (const anchor of viewportRows) {
-          const row = [...container.children].find(node => node.dataset?.cueId === anchor.id);
-          if (!row) continue;
-          const delta = row.getBoundingClientRect().top - anchor.rect.top;
-          if (Math.abs(delta) > 0.5) container.scrollTop += delta;
-          break;
-        }
-      }
-      notify();
-      return page;
+    function render({cues,tokenById,activeCueId,preservePage=false}){
+      if(content.parentNode!==container)container.replaceChildren(content);
+      generation++;const a=preservePage?anchor():null;
+      // If the anchor was removed, retain the next surviving visible row's offset.
+      const ids=new Set(cues.map(c=>c.cue_id));
+      if(a&&!ids.has(a.id)&&context){for(let i=a.index+1;i<context.cues.length;i++){const id=context.cues[i].cue_id;if(ids.has(id)){a.offset+=heights.offset(i)-heights.offset(a.index);a.id=id;break;}}}
+      context={cues,tokenById};active=activeCueId;indexById=new Map(cues.map((c,i)=>[c.cue_id,i]));
+      for(const id of measured.keys())if(!ids.has(id))measured.delete(id);
+      heights=createHeightIndex(cues.map(c=>measured.get(c.cue_id)||104));
+      positionRows();
+      if(a)restoreAnchor(a);else container.scrollTop=0;
+      update(true);
+      if(!preservePage&&activeCueId)revealCue(activeCueId);
+      return range;
     }
-
-    function setActive(cueId) {
-      container.querySelectorAll(".cue-row.current").forEach(row =>
-        row.classList.remove("current")
-      );
-      if (!cueId) return;
-      const row = [...container.querySelectorAll(".cue-row")]
-        .find(item => item.dataset.cueId === cueId);
-      row?.classList.add("current");
-    }
-
-    return {render, setActive, jumpToPercent};
+    function setActive(id){active=id;for(const [cueId,node] of nodes)node.classList.toggle('current',cueId===id);}
+    function destroy(){dead=true;generation++;if(frame)cancelAnimationFrame(frame);observer?.disconnect();container.removeEventListener('scroll',schedule);doc.removeEventListener?.('selectionchange',schedule);}
+    return {render,setActive,jumpToPercent,revealCue,destroy};
   }
-
-  return {createCueListView, pageWindow, preservedWindow};
+  return {createCueListView,createHeightIndex,pageWindow,preservedWindow};
 });

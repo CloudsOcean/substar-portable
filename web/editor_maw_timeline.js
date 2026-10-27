@@ -1,5 +1,5 @@
 import {createWordSelection,selectionRuns} from './editor_maw_selection.js?v=20261025-selection-1';
-import {installSubstarBoundaries} from './editor_maw_boundary.js?v=20261025-selection-1';
+import {installSubstarBoundaries} from './editor_maw_boundary.js?v=20261027-virtual-list-1';
 import {installNativeWaveformStyle} from './editor_maw_native_style.js?v=20261025-low-energy-1';
 import {installPcmWaveformPaint} from './editor_maw_pcm_paint.js?v=20261025-low-energy-1';
 import {createWaveformLoader} from './editor_maw_waveform_loader.js?v=20261025-recovery-1';
@@ -112,7 +112,7 @@ export function createTimelineController(options){
     addCueSelection:i=>select(i,'main',{toggle:true}),addExtensionSelection:i=>select(i,'extension',{toggle:true}),clearSelection:()=>{selected=null;options.selection?.clear();},
     // MAW seek callbacks already supply seconds (cue and gap ranges use milliseconds).
     seek:seconds=>seek(seconds),togglePlayback,
-    onBeginEdit:()=>{beforeEdit=M.clone([...main,...overlay]);},onCancelEdit:()=>{beforeEdit=null;readView(view);refresh();},onCommitEdit:commitTimes,
+    onBeginEdit:(_label,affected)=>{beforeEdit=(affected||[...main,...overlay]).map(s=>({id:s.id,start:s.start,end:s.end}));},onCancelEdit:()=>{beforeEdit=null;readView(view);refresh();},onCommitEdit:commitTimes,
     enterCueEditor:i=>editText(i),enterExtensionCueEditor:i=>editText(i,'extension'),enterOverlayCueEditor:i=>editText(i,'overlay'),
     splitCueAtTime:(i,t)=>split(i,t),splitOverlayCueAtTime:(i,t)=>split(i,t,'overlay'),
     showContextMenu:(x,y,i,t,mode)=>menus.cue(x,y,i,t,'main',mode),showExtensionContextMenu:(x,y,i,t)=>menus.cue(x,y,i,t,'extension'),showOverlayContextMenu:(x,y,i,t)=>menus.cue(x,y,i,t,'overlay'),
@@ -125,9 +125,24 @@ export function createTimelineController(options){
     previewGapAt:time=>{audition={end:Math.min(wave.durationMs,time+2000)/1000};seek(time/1000);options.media?.play().catch(e=>show(e.message));},
     showGapContextMenu:(x,y,index)=>menus.gap(x,y,index),
     wordTiming:{get enabled(){return wordEnabled;},getSelection:wordIndices,select:selectWord,clearSelection:()=>wordSelection.clear(),previewItems:(segment,items)=>{segment.items=items;},showMenu:(x,y,index,item)=>menus.word(x,y,index,item)},
-    beginWordEdit:()=>({before:M.clone(main),cancel:()=>{readView(view);refresh();}}),commitWordEdit:command=>{if(!command)return false;const t=M.timeline(timeline);t.word_timings={...(t.word_timings||{})};for(const s of main)for(const item of s.items)t.word_timings[item.id]={start:item.start,end:item.end};timeline=t;run(()=>persist(t));return true;},
+    beginWordEdit:segment=>({before:(segment?[segment]:main).map(s=>({id:s.id,items:s.items.map(item=>({id:item.id,start:item.start,end:item.end}))})),cancel:()=>{readView(view);refresh();}}),commitWordEdit:command=>{
+      if(!command)return false;
+      const patch=M.wordTimeChanges(command.before,main);
+      if(!Object.keys(patch.wordTimings).length)return false;
+      run(()=>enqueue(()=>options.onCommitTimelineTimes(patch.cues,patch.wordTimings)));return true;
+    },
   });
-  installSubstarBoundaries({wave,host,signal,getSelected:()=>selected,refresh});
+  installSubstarBoundaries({wave,host,signal,getSelected:()=>selected,refresh,previewRefresh:range=>{
+    if(dead || !wave.payload || !range)return;
+    const badges=wave.computeGroupBadgesCached(main);
+    for(const row of wave.renderedRows){
+      const start=Number(row.dataset.startMs),end=Number(row.dataset.endMs);
+      if(range.end<start || range.start>end)continue;
+      row.querySelectorAll('.waveform-cue-block,.waveform-cue-badge,.waveform-cue-boundary,.waveform-word-block,.waveform-word-boundary').forEach(el=>el.remove());
+      wave.appendCueBlocks(row,start,end,badges);
+    }
+    wave.refreshWordChips();
+  }});
   installNativeWaveformStyle(wave,{getSuppression});
   installPcmWaveformPaint(wave,{loadWindow:request=>options.onWaveformWindow(request),getSource:()=>$('#waveform-shape-source').value,getSuppression,onError:error=>show('PCM 波形读取失败：'+error.message),signal});
   host.addEventListener('contextmenu',event=>{if(!event.target.matches('.waveform-marker-track'))return;const row=event.target.closest('.waveform-row');event.preventDefault();event.stopPropagation();menus.blank(wave.pointerTimeMs(event,row),event.clientX,event.clientY);},{capture:true,signal});

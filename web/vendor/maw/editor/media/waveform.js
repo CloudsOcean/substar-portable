@@ -26,7 +26,7 @@ import { createWaveformModule as createWaveformThumbnails } from './waveform/thu
 import { createWaveformModule as createWaveformMedia } from './waveform/media.js';
 import { createWaveformModule as createWaveformRender } from './waveform/render.js';
 import { createWaveformModule as createWaveformCueBlocks } from './waveform/cue-blocks.js?v=20261025-word-handles-1';
-import { createWordBlocks as createWaveformWordBlocks } from './waveform/word-blocks.js';
+import { createWordBlocks as createWaveformWordBlocks } from './waveform/word-blocks.js?v=20261027-word-patch-1';
 import { createWaveformModule as createWaveformCanvas } from './waveform/canvas.js';
 import { createWaveformModule as createWaveformInput } from './waveform/input.js';
 

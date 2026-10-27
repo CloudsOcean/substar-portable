@@ -8,36 +8,49 @@ export function createBoundarySession({engine, segments, index, edge, selected, 
   const cues = track.map(item => ({cue_id:item.id, start:item.start / 1000, end:item.end / 1000}));
   const cueIndex = track.indexOf(segment);
   const adjustment = engine.boundaryMode(cues, cueIndex, edge, selected, mode);
-  const originals = track.map(item => ({start:item.start, end:item.end,
-    items:(item.items || []).map(token => ({...token}))}));
-  let intent = null;
+  // Only the one/two affected cues need word snapshots, not the whole track.
+  const byId = new Map(track.map((item, i) => [item.id, i]));
+  const originals = new Map();
+  let intent = null, range = {start:segment.start, end:segment.end};
   function restore() {
-    track.forEach((item, i) => {
-      item.start = originals[i].start; item.end = originals[i].end;
-      item.items = originals[i].items.map(token => ({...token}));
-    });
+    for (const [i, original] of originals) {
+      track[i].start = original.start; track[i].end = original.end;
+      track[i].items = original.items;
+    }
   }
   return {
     mode:adjustment,
     edgeTime:segment[edge],
     canToggle:!!engine.sharedBoundary(cues, cueIndex, edge),
     restore,
+    affectedSegments:() => (engine.previewBoundaryChange(cues,cueIndex,edge,segment[edge]/1000,selected,adjustment)?.changes || []).map(change=>track[byId.get(change.cue_id)]),
+    get previewRange() { return range; },
     changed:() => engine.previewHasTimeChange(cues, intent),
     update(timeMs) {
-      // Every preview starts from pointerdown, including when dragging back.
+      // Include the preceding preview so crossing/backtracking across rows clears it.
+      const previous = [...originals.keys()].map(i => ({start:track[i].start,end:track[i].end}));
       restore();
       intent = engine.previewBoundaryChange(cues, cueIndex, edge,
         Math.max(0, Math.min(durationMs, timeMs)) / 1000, selected, adjustment);
-      const updated = engine.applyPreview(cues, intent);
-      updated.forEach((cue, i) => {
-        const item = track[i], original = originals[i];
-        item.start = Math.round(cue.start * 1000); item.end = Math.round(cue.end * 1000);
-        if (item.start === original.start && item.end === original.end) return;
+      for (const change of intent?.changes || []) {
+        const i = byId.get(change.cue_id), item = track[i];
+        if (!originals.has(i)) originals.set(i, {start:item.start,end:item.end,items:item.items || []});
+        item[change.edge] = Math.round(change.time * 1000);
+      }
+      range = {start:segment.start,end:segment.end};
+      for (const [i, original] of originals) {
+        const item = track[i];
+        range.start = Math.min(range.start, original.start, item.start);
+        range.end = Math.max(range.end, original.end, item.end);
+        if (item.start === original.start && item.end === original.end) continue;
         const scale = (item.end - item.start) / (original.end - original.start);
         item.items = original.items.map(token => ({...token,
           start:Math.round(item.start + (token.start - original.start) * scale),
           end:Math.round(item.start + (token.end - original.start) * scale)}));
-      });
+      }
+      for (const prior of previous) {
+        range.start = Math.min(range.start, prior.start); range.end = Math.max(range.end, prior.end);
+      }
       return intent;
     }
   };
@@ -50,6 +63,7 @@ export function createWordBoundarySession({engine,segment,itemIndex,edge,selecte
   const base=createBoundarySession({engine,segments:words,index:itemIndex,edge,selected:selectedId,mode,durationMs});
   if(!base)return null;
   return {...base,
+    get previewRange(){return base.previewRange;},
     restore(){base.restore();segment.items=originals.map(item=>({...item}));},
     update(time){
       const intent=base.update(Math.max(segment.start,Math.min(segment.end,time)));
@@ -59,7 +73,7 @@ export function createWordBoundarySession({engine,segment,itemIndex,edge,selecte
   };
 }
 
-export function installSubstarBoundaries({wave, host, signal, getSelected, refresh,
+export function installSubstarBoundaries({wave, host, signal, getSelected, refresh, previewRefresh = refresh,
   engine = globalThis.EditorTimeline}) {
   const doc = host.ownerDocument, win = doc.defaultView;
   let override = null, hover = null, drag = null, suppressClick = false;
@@ -188,24 +202,35 @@ export function installSubstarBoundaries({wave, host, signal, getSelected, refre
     wave.substarBoundaryDrag = true;
     show(t, s);
   }
+  let previewFrame = 0, pendingTime = null;
+  function flushPreview() {
+    if (previewFrame) win.cancelAnimationFrame(previewFrame);
+    previewFrame = 0;
+    if (!drag || pendingTime === null) return;
+    const time = pendingTime; pendingTime = null;
+    drag.session.update(time);
+    previewRefresh(drag.session.previewRange); show(drag.target, drag.session);
+  }
   function move(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     stop(event);
     if (!drag.started && Math.abs(event.clientX - drag.x) <= 2) return;
     if (!drag.started) {
       drag.started = true;
-      if(drag.target.kind==='word')drag.command=wave.options.beginWordEdit();
-      else wave.options.onBeginEdit?.('调整字幕边界');
+      if(drag.target.kind==='word')drag.command=wave.options.beginWordEdit(drag.target.parent);
+      else wave.options.onBeginEdit?.('调整字幕边界',drag.session.affectedSegments());
       try { wave.pane.setPointerCapture(event.pointerId); } catch (_) {}
     }
     const time = wave.timeFromPointerUnbounded(event, drag.target.row, drag.geometry);
-    drag.session.update(drag.session.edgeTime + time - drag.time);
-    refresh(); show(drag.target, drag.session);
+    pendingTime = drag.session.edgeTime + time - drag.time;
+    if (!previewFrame) previewFrame = win.requestAnimationFrame(flushPreview);
   }
   function finish(event, cancel = false) {
     if (!drag || event.pointerId !== drag.pointerId) return;
     stop(event);
-    if (!cancel) move(event);
+    if (!cancel) { move(event); flushPreview(); }
+    if (previewFrame) win.cancelAnimationFrame(previewFrame);
+    previewFrame = 0; pendingTime = null;
     const finished = drag; drag = null; wave.substarBoundaryDrag = false;
     suppressClick = true;
     try { wave.pane.releasePointerCapture(event.pointerId); } catch (_) {}
@@ -248,6 +273,8 @@ export function installSubstarBoundaries({wave, host, signal, getSelected, refre
       preventDefault:() => event.preventDefault(), stopImmediatePropagation:() => event.stopImmediatePropagation()}, true);
   }, {capture:true, signal});
   signal.addEventListener('abort', () => {
+    if (previewFrame) win.cancelAnimationFrame(previewFrame);
+    previewFrame = 0; pendingTime = null;
     if (drag) drag.session.restore();
     drag = null; wave.substarBoundaryDrag = false; badge.remove(); line.remove(); legacyStyle.remove();
     if (appendZones) wave.appendSharedBoundaryZones = appendZones;

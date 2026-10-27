@@ -1,5 +1,5 @@
 import {createMawAssPanel} from './editor_maw_ass.js';
-import './editor_maw_model.js?v=20261025-settings-fix-1';
+import './editor_maw_model.js?v=20261027-virtual-list-1';
 import './vendor/maw/shared/gap-remove-core.js';
 import {createUtilsModule as markerUtils} from './vendor/maw/shared/utils/markers.js?v=20261025-settings-fix-1';
 import {createWordTiming} from './vendor/maw/shared/utils/word-timing.js';
@@ -8,8 +8,8 @@ import {createUtilsModule as dataUtils} from './vendor/maw/shared/utils/data.js'
 import {createUtilsModule as assStyle} from './vendor/maw/shared/utils/ass-style.js';
 import {createUtilsModule as textProcessing} from './vendor/maw/shared/utils/text-processing.js';
 import {createUtilsModule as timedTextCore} from './vendor/maw/shared/utils/timed-text-core.js';
-import {initWaveform} from './vendor/maw/editor/media/waveform.js?v=20261026-marker-geometry-2';
-import {createTimelineController} from './editor_maw_timeline.js?v=20261025-settings-fix-1';
+import {initWaveform} from './vendor/maw/editor/media/waveform.js?v=20261027-virtual-list-1';
+import {createTimelineController} from './editor_maw_timeline.js?v=20261027-virtual-list-1';
 
 const cloneJsonValue=v=>v==null?v:JSON.parse(JSON.stringify(v));
 const data=dataUtils({}),style=assStyle({cloneJsonValue,getNavigator:()=>navigator}),text=textProcessing(style),timed=timedTextCore({cloneJsonValue});
@@ -20,4 +20,4 @@ window.AsrEditorUtils={...data,...text,...timed,...window.AsrGapRemoveCore,...ma
 window.EditorMawAssPanel={create:createMawAssPanel};
 initWaveform();
 window.EditorMawTimeline={createTimelineController};
-const editor=document.createElement('script');editor.src='/assets/editor.js?v=20261026-search-spacing-9';document.body.append(editor);
+const editor=document.createElement('script');editor.src='/assets/editor.js?v=20261027-virtual-list-1';document.body.append(editor);

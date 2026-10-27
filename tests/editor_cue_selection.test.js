@@ -70,18 +70,14 @@ test('click release does not rerender token controls before the click event',()=
   assert.equal(refreshes,0);
   assert.equal(ctx.suppressCueClick,false);
 });
-test('cue centering corrects delayed layout but yields to manual scrolling',()=>{
+test('all editor centering delegates to the virtual list navigation API',()=>{
   const start=editorSource.indexOf('  let cueCenterGeneration = 0;');
   const end=editorSource.indexOf('  function activateCue(',start);
-  let frames=[], rowPosition=500;
-  const list={scrollTop:0,getBoundingClientRect:()=>({top:0,height:400})};
-  const row={isConnected:true,getBoundingClientRect:()=>({top:rowPosition-list.scrollTop,height:100})};
-  const ctx={state:{activeCueId:'a'},CSS:{escape:x=>x},document:{querySelector:()=>row},
-    $:()=>list,requestAnimationFrame:fn=>frames.push(fn)};
+  const calls=[];
+  const ctx={state:{cueListView:{revealCue:(id,opts)=>calls.push([id,opts.align])}}};
   vm.runInNewContext(editorSource.slice(start,end),ctx);
-  ctx.centerCueInList({cue_id:'a'});assert.equal(list.scrollTop,350);
-  rowPosition=600;frames.shift()();assert.equal(list.scrollTop,450);
-  list.scrollTop=250;frames.shift()();assert.equal(list.scrollTop,250);
+  ctx.centerCueInList({cue_id:'a'});ctx.centerCueInList(null);
+  assert.deepEqual(calls,[['a','center']]);
 });
 
 

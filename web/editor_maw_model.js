@@ -44,6 +44,20 @@
     return next;
   }
   function timeChanges(before,after){const old=new Map(before.map(s=>[s.id,s]));return after.filter(s=>{const b=old.get(s.id);return b&&(b.start!==s.start||b.end!==s.end);}).map(s=>({cue_id:s.id,start:seconds(s.start),end:seconds(s.end)}));}
+  function wordTimeChanges(before,after){
+    const byId=new Map(after.map(s=>[s.id,s])),cues=[],wordTimings={};
+    for(const original of before){
+      const segment=byId.get(original.id);if(!segment)continue;
+      const words=new Map(original.items.map(item=>[item.id,item]));let changed=false;
+      for(const item of segment.items){const old=words.get(item.id);
+        if(old&&(old.start!==item.start||old.end!==item.end)){
+          wordTimings[item.id]={start:Math.round(item.start),end:Math.round(item.end)};changed=true;
+        }
+      }
+      if(changed)cues.push({cue_id:segment.id,start:seconds(segment.start),end:seconds(segment.end)});
+    }
+    return {cues,wordTimings};
+  }
   function speakerLanes(items){const ends=[],result=new Map();for(const s of items){let lane=ends.findIndex(end=>end<=s.start);if(lane<0)lane=ends.length;ends[lane]=s.end;result.set(s.id,lane);}return {lanes:result,count:Math.max(1,ends.length)};}
-  return {markerDrag,clone,ms,seconds,segments,timeline,markers,storedMarkers,legacyGaps,withGapState,timeChanges,speakerLanes};
+  return {wordTimeChanges,markerDrag,clone,ms,seconds,segments,timeline,markers,storedMarkers,legacyGaps,withGapState,timeChanges,speakerLanes};
 });

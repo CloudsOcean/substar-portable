@@ -294,7 +294,7 @@ export function createWordBlocks(dependencies) {
         drag.resize ? { kind: 'resize', edge: drag.edge, target, linked }
           : { kind: 'move', delta: target - drag.pointer }, drag.timing);
       if (!items) return;
-      drag.command ||= this.options.beginWordEdit();
+      drag.command ||= this.options.beginWordEdit(drag.segment);
       this.options.wordTiming.previewItems(drag.segment, items);
       this.wordRefreshFrame ||= requestAnimationFrame(() => {
         this.wordRefreshFrame = 0;
