@@ -302,8 +302,10 @@ class ProjectCreationApiTests(unittest.TestCase):
         srt = application.render_document_srt(
             revision.document, application.SubtitleExportMode.SOURCE
         )
-        self.assertIn("Substar,", srt)
-        self.assertIn("works.", srt)
+        self.assertIn("Substar", srt)
+        self.assertIn("works", srt)
+        self.assertNotIn("Substar,", srt)
+        self.assertNotIn("works.", srt)
 
     def test_auto_reference_mode_uses_post_asr_language_symbols_and_limit(self) -> None:
         media = wave_bytes(self.root / "reference-auto.wav")
@@ -486,3 +488,46 @@ class ProjectCreationApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_retry_switches_only_provider_and_preserves_checkpoint_content(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from test_segmentation_runtime import SegmentationContractTests
+    original = SegmentationContractTests().request()
+    created = []
+    retried = []
+    service = SimpleNamespace(
+        get_task=lambda tid: {"state": "succeeded" if tid == "asr" else "failed"},
+        get_task_input=lambda tid: original,
+        create_task=lambda **kw: created.append(kw) or {"task_id": "new-seg"},
+        retry=lambda tid: retried.append(tid),
+    )
+    job = SimpleNamespace(id="retry-test", workflow_mode="subtitle_creation", status="failed",
+        transcription_task_id="asr", segmentation_task_id="old-seg", job_dir=tmp_path,
+        attempt=1, message="failed", error="failure", public=lambda: {"status":job.status})
+    monkeypatch.setattr(application, "_task_service", lambda:service)
+    monkeypatch.setattr(application, "_restore_persisted_jobs", lambda _:None)
+    monkeypatch.setattr(application, "_workbench_retry_inputs", lambda _:(tmp_path/'audio.wav',None))
+    monkeypatch.setattr(application, "_persist_job", lambda _:None)
+    monkeypatch.setattr(application, "_append_runtime_log", lambda *_:None)
+    monkeypatch.setattr(application, "settings_for_model_provider", lambda _: {
+        "active_model_provider":"glm", "translation_api_model":"other-model",
+        "translation_api_base_url":"https://provider.example/v4", "translation_api_key_set":True})
+    monkeypatch.setitem(application.JOBS,job.id,job)
+    result = application.retry_workbench_split_job(job.id,application.CreationRetryRequest(provider_id="glm"))
+    assert result.status_code == 202
+    assert job.segmentation_task_id == "new-seg" and not retried
+    request = created[0]["input_payload"]
+    content = lambda value:{k:v for k,v in value.items() if k not in {"provider","input_fingerprint"}}
+    assert content(request) == content(original)
+    assert request["provider"]["grouping"]["model"] == "other-model"
+    assert request["input_fingerprint"] != original["input_fingerprint"]
+    assert created[0]["depends_on_task_ids"] == ("asr",)
+    assert original["provider"]["grouping"]["model"] == "model-a"
+
+
+def test_asr_failure_does_not_offer_segmentation_models(monkeypatch):
+    from types import SimpleNamespace
+    job=SimpleNamespace(workflow_mode="subtitle_creation",status="failed",transcription_task_id="asr",segmentation_task_id="seg")
+    monkeypatch.setattr(application,"_task_service",lambda:SimpleNamespace(get_task=lambda _: {"state":"failed"}))
+    assert application._retry_segmentation_input(job) is None

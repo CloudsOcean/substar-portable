@@ -9,10 +9,11 @@ const body = source.slice(source.indexOf("  async function refreshEditorAiTask()
 function fixture(api) {
   const applied = [], history = [], errors = [];
   const context = vm.createContext({
+    AbortSignal,
     projectEpoch:1, state:{projectId:"a",editorAiTask:{task_id:"t",kind:"organize",state:"running"}},
     api, projectPath:()=>`/api/projects/${context.state.projectId}`,
     contract:{consumeRevision:r=>r},
-    editorAiTaskLocksEditor:()=>["queued","running","cancelling"].includes(context.state.editorAiTask?.state),
+    editorAiTaskLocksEditor:()=>Boolean(context.state.editorAiTaskChecking) || ["queued","running","cancelling"].includes(context.state.editorAiTask?.state),
     hasUncommittedEditorInput:()=>!!context.dirty,
     document:{body:{classList:{toggle(){}}}},renderHeader(){},renderWorkbenchTask(){},
     setRevision:r=>applied.push({revision:r,locked:context.editorAiTaskLocksEditor()}),
@@ -22,6 +23,30 @@ function fixture(api) {
   return {context,applied,history,errors};
 }
 const completed = {task_id:"t",kind:"organize",state:"succeeded"};
+
+test("freshly reopened editor stays locked until task status and latest document are confirmed",async()=>{
+  let fail=true;
+  const {context,applied}=fixture(async path=>{
+    if(fail)throw Error("offline");
+    return path.endsWith('/ai-task')?null:{revision_id:'latest'};
+  });
+  context.state.editorAiTask=null;context.state.editorAiTaskChecking=true;
+  await assert.rejects(context.refreshEditorAiTask());
+  assert.equal(context.editorAiTaskLocksEditor(),true);
+  fail=false;await context.refreshEditorAiTask();
+  assert.equal(applied[0].revision.revision_id,'latest');
+  assert.equal(applied[0].locked,true);
+  assert.equal(context.editorAiTaskLocksEditor(),false);
+});
+
+test("refresh cannot unlock a genuinely running background writer",async()=>{
+  const {context,applied}=fixture(async()=>({task_id:'live',kind:'organize',state:'running'}));
+  context.state.editorAiTask=null;context.state.editorAiTaskChecking=true;
+  await context.refreshEditorAiTask();
+  assert.equal(context.state.editorAiTaskChecking,false);
+  assert.equal(context.editorAiTaskLocksEditor(),true);
+  assert.equal(applied.length,0);
+});
 
 test("a failed task-status request never releases the running editor lock",async()=>{
   const {context,applied}=fixture(async()=>{throw Error("offline");});

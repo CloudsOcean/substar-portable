@@ -103,8 +103,14 @@
     const response = await fetch(path, options);
     let body = null;
     const contentType = response.headers.get("content-type") || "";
+    if (response.ok && String(path).endsWith("/ai-task") && !contentType.includes("json")) {
+      throw Object.assign(new Error("后台任务状态未能确认，请重试"), {status:502, code:"invalid_response"});
+    }
     if (contentType.includes("json")) {
-      try { body = await response.json(); } catch (_) { body = null; }
+      try { body = await response.json(); } catch (_) {
+        if (response.ok) throw Object.assign(new Error("服务返回的数据不完整，请重试"), {status:502, code:"invalid_response"});
+        body = null;
+      }
     }
     if (projectRequest && requestEpoch !== projectEpoch) {
       const error = new Error("项目会话已变化，忽略旧响应");
@@ -166,7 +172,7 @@
   }
 
   function editorAiTaskLocksEditor() {
-    return ["queued", "running", "cancelling"].includes(
+    return Boolean(state.editorAiTaskChecking) || ["queued", "running", "cancelling"].includes(
       state.editorAiTask?.state
     );
   }
@@ -181,12 +187,16 @@
     const pending = (async () => {
       const previousLocked = editorAiTaskLocksEditor();
       const previousTaskId = state.editorAiTask?.task_id || "";
-      const nextTask = await api(`${basePath}/ai-task`);
+      const nextTask = await api(`${basePath}/ai-task`, {signal:AbortSignal.timeout(10000)});
+      if (nextTask !== null && !["queued", "running", "cancelling", "succeeded", "succeeded_with_issues", "failed", "cancelled"].includes(nextTask?.state)) {
+        throw new Error("后台任务状态未能确认，请重试");
+      }
       if (refreshEpoch !== projectEpoch || refreshProjectId !== state.projectId
         || (state.editorAiTask?.task_id || "") !== previousTaskId) return null;
-      if (previousLocked && nextTask?.task_id === previousTaskId
-        && ["succeeded", "succeeded_with_issues"].includes(nextTask?.state)) {
-        const revision = contract.consumeRevision(await api(basePath));
+      if ((state.editorAiTaskChecking && !["queued", "running", "cancelling"].includes(nextTask?.state))
+        || (previousLocked && nextTask?.task_id === previousTaskId
+        && ["succeeded", "succeeded_with_issues"].includes(nextTask?.state))) {
+        const revision = contract.consumeRevision(await api(basePath, {signal:AbortSignal.timeout(10000)}));
         if (refreshEpoch !== projectEpoch || refreshProjectId !== state.projectId
         || (state.editorAiTask?.task_id || "") !== previousTaskId) return null;
         if (hasUncommittedEditorInput() || state.operationQueue?.getState().hasUnsavedChanges
@@ -197,9 +207,14 @@
           setRevision(revision);
           recordCommittedRevision(revision, revision.provenance);
           state.revisionHistoryLoaded = false;
+          if (nextTask?.kind === "gap_transcription") {
+            const cue=state.view.cue_views.find(c=>c.state==="active" && c.start>=nextTask.start-.02 && c.end<=nextTask.end+.02);
+            if(cue) activateCue(cue.cue_id,{seek:true,scroll:true,revealTimeline:true,explicitNavigation:true});
+          }
         }
       }
       state.editorAiTask = nextTask;
+      state.editorAiTaskChecking = false;
       const locked = editorAiTaskLocksEditor();
       document.body.classList.toggle("editor-ai-task-locked", locked);
       renderHeader();
@@ -208,7 +223,7 @@
         state.editorAiTask?.state
       );
       if ((locked || terminalSuccess || state.editorAiTask?.state === "failed") && state.editorAiTask && genericTaskOwnsPanel) {
-        const title = ({calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
+        const title = ({gap_transcription:"局部听写", calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
           state.editorAiTask.kind
         ] || "AI 任务";
         const baseMessage = state.editorAiTask.display_error || state.editorAiTask.message
@@ -225,7 +240,7 @@
         );
       }
       if (state.editorAiTask?.state === "cancelled" && genericTaskOwnsPanel) {
-        const title = ({calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
+        const title = ({gap_transcription:"局部听写", calibration:"AI 校准", punctuation:"AI标点", organize:"AI整理", translation:"字幕翻译"})[
           state.editorAiTask.kind
         ] || "AI 任务";
         renderWorkbenchTask(title, 0, "任务已取消", "cancelled");
@@ -702,11 +717,20 @@
     const sourceUpper = languageLayout.routedSourceUpper(cueSourceText(cue), presentation);
     const source = cueSourceText(cue);
     const target = languageLayout.formatText(cue.target?.target_text || "", cue.target?.language || state.trackLanguages?.target);
-    return {source, target, sourceUpper};
+    const upper = sourceUpper ? "upper" : "lower";
+    const lower = sourceUpper ? "lower" : "upper";
+    return {
+      source:languageLayout.formatText(projectPunctuation(source, presentation[`${upper}_remove`], presentation[`${upper}_space`])),
+      target:languageLayout.formatText(projectPunctuation(target, presentation[`${lower}_remove`], presentation[`${lower}_space`])),
+      sourceUpper,
+    };
   }
 
   function projectedSourceTokenText(text, cue = null) {
-    return String(text || "");
+    const presentation = state.view?.presentation || {};
+    const upper = languageLayout.routedSourceUpper(cue ? cueSourceText(cue) : text, presentation);
+    const side = upper ? "upper" : "lower";
+    return projectPunctuation(text, presentation[`${side}_remove`], presentation[`${side}_space`]);
   }
 
   function timeLabel(seconds) {
@@ -1093,6 +1117,12 @@
     }
   }
 
+  function workbenchInert(value) {
+    const workbench = $("#editorWorkbench");
+    if (value === undefined) return window.EditorRecovery.isWorkbenchInert(workbench);
+    window.EditorRecovery.setWorkbenchInert(workbench, $("#refreshDocumentBottom"), value);
+  }
+
   async function flushActiveEditorInput() {
     const active = document.activeElement;
     if (active?.closest?.("#cueList") && active.matches?.("input,textarea,[contenteditable]")) active.blur();
@@ -1109,23 +1139,23 @@
     if (state.documentWritePending || state.checkpointPending || state.restorePreparationPending
       || state.historyNavigationPending) throw new Error("正在保存或恢复文档，请稍候重试");
     state.documentWritePending = true;
-    const workbench = $("#editorWorkbench"), wasInert = workbench.inert;
+    const wasInert = workbenchInert();
     try {
       const saving = flushActiveEditorInput();
-      workbench.inert = true;
+      workbenchInert(true);
       await saving;
       state.documentWriteLocked = true;
       return await write();
     } finally {
       state.documentWriteLocked = false;
       state.documentWritePending = false;
-      workbench.inert = wasInert;
+      workbenchInert(wasInert);
     }
   }
 
   function hasUncommittedEditorInput() {
     return [...document.querySelectorAll("#cueList input,#cueList textarea")].some(field => {
-      if (field.dataset.sourceEdit) return field.value !== field.dataset.originalSource;
+      if (field.dataset.sourceEdit) return field.dataset.rawEditing !== "false" && field.value !== field.dataset.originalSource;
       if (field.dataset.targetEdit) return field.dataset.rawEditing === "true"
         && field.value.trim() !== (field.dataset.originalTarget || "");
       return field.dataset.originalEdit !== undefined && field.value.trim() !== field.dataset.originalEdit;
@@ -1133,6 +1163,7 @@
   }
 
   window.addEventListener("beforeunload", event => {
+    if (state.recoveryReloading) return;
     if (!hasUncommittedEditorInput() && !state.operationQueue?.getState().hasUnsavedChanges
       && !state.checkpointPending && !state.restorePreparationPending && !state.documentWritePending) return;
     event.preventDefault();
@@ -1204,7 +1235,7 @@
       const before = state.revision.revision_id;
       await flushActiveEditorInput();
       state.restoreWriting = true;
-      $("#editorWorkbench").inert = true;
+      workbenchInert(true);
       const latest = contract.consumeRevision(await api(projectPath()));
       if (before !== state.revision.revision_id || latest.revision_id !== state.revision.revision_id) {
         setRevision(latest);
@@ -1247,7 +1278,7 @@
     } finally {
       state.restoreWriting = false;
       state.restorePreparationPending = false;
-      $("#editorWorkbench").inert = false;
+      workbenchInert(false);
     }
   }
 
@@ -1268,11 +1299,10 @@
     const label = $("#checkpointName").value.trim();
     if (!label) { $("#checkpointName").focus(); return; }
     state.checkpointPending = true;
-    const workbench = $("#editorWorkbench");
-    const wasInert = workbench.inert;
+    const wasInert = workbenchInert();
     try {
       const saving = flushActiveEditorInput();
-      workbench.inert = true;
+      workbenchInert(true);
       await saving;
       if (await loadRevisionHistory() === false) throw new Error("版本历史未能读取，请重试暂存");
       const count = state.revisions.filter(item => item.provenance?.operation === "checkpoint").length;
@@ -1295,7 +1325,7 @@
       ordinaryError(`暂存失败：${error.message}`);
     } finally {
       state.checkpointPending = false;
-      workbench.inert = wasInert;
+      workbenchInert(wasInert);
     }
   }
 
@@ -1477,6 +1507,17 @@
     const complete = state.view?.properties.complete === true;
     const revision = state.revision;
     const locked = editorAiTaskLocksEditor();
+    // Fields created while task status was unknown must become editable once
+    // the check completes, without replacing any draft text in those fields.
+    for (const field of document.querySelectorAll("#cueList [data-source-edit],#cueList [data-target-edit]")) {
+      const id = field.dataset.sourceEdit || field.dataset.targetEdit;
+      const cue = state.indexes?.cueById.get(id);
+      field.disabled = locked || !cue || cue.state === "deleted";
+    }
+    for (const button of document.querySelectorAll("#cueList [data-cue-action]")) {
+      const cue = state.indexes?.cueById.get(button.closest(".cue-row")?.dataset.cueId);
+      button.disabled = locked || !cue || (cue.source_text != null && cue.subtitle_track !== "overlay");
+    }
     const tutorial = Boolean(state.projects.find(item => item.project_id === state.projectId)?.tutorial_case_id);
     $("#revisionLabel").textContent = revision
       ? `${currentProjectBaseName()} · ${complete ? "完成稿" : "当前编辑"}` : "尚未打开文档";
@@ -1569,6 +1610,7 @@
       const control = $(selector);
       if (control) control.disabled = !revision || locked || textProject;
     });
+    syncRevisionControls();
   }
 
   function isReferenceToken(token) {
@@ -1784,6 +1826,7 @@
     const row = $("#taskFailureRecovery");
     if (!row) return;
     row.classList.toggle("hidden", !failed);
+    if (kind === "gap_transcription") { row.classList.add("hidden"); return; }
     if (!failed) return;
     state.failedTaskKind = ["translation", "organize", "punctuation"].includes(kind) ? kind : "calibration";
     const options = state.llmOptions?.options || [];
@@ -2275,7 +2318,9 @@
       const source = document.createElement("textarea");
       source.className = "translation-track source-text-track";
       source.rows = 1;
-      source.value = cue.source_text;
+      source.value = projected.source;
+      source.dataset.projectedSource = projected.source;
+      source.dataset.rawEditing = "false";
       source.dataset.sourceEdit = cue.cue_id;
       source.dataset.originalSource = cue.source_text;
       source.setAttribute("aria-label", cue.subtitle_track === "overlay" ? "叠加字幕" : "原文字幕");
@@ -2837,13 +2882,11 @@
     if (!factory?.createOperationQueue) throw new Error("编辑队列未加载，请刷新后重试");
     const journalKey = `substar.editor.operations:${state.projectId}:${state.revision.document.document_id}`;
     let initialOperations = [];
-    try {
-      const saved = JSON.parse(localStorage.getItem(journalKey) || "[]");
-      if (Array.isArray(saved)) initialOperations = saved;
-    } catch (_) { initialOperations = []; }
-    if (initialOperations.length) {
-      const projection = state.documentStore?.restore(initialOperations);
-      if (projection) setRevision(projection, {localProjection:true});
+    // Browser reloads and reopening a project must not replay the operation
+    // that trapped the previous session. Keep its journal as a recovery copy.
+    if (window.EditorRecovery.archive(localStorage, state.projectId, [])) {
+      ordinaryError("已恢复到最后保存版本，未保存修改已保留副本；右键刷新按钮可查看。", "notice");
+      syncRecoveryDraftButton();
     }
     const queueProjectId = state.projectId;
     const queueEpoch = projectEpoch;
@@ -2983,6 +3026,7 @@
       onStatus(status) {
         if (!queueCurrent()) return;
         state.operationPending = status.hasUnsavedChanges;
+        if (!status.hasUnsavedChanges) state.timelineController?.markSaved?.(state.view);
         $("#saveRecoveryActions")?.classList.toggle("hidden", !status.failed);
         renderHeader();
         if (wasBusy && !status.busy) {
@@ -2995,6 +3039,7 @@
         wasBusy = status.busy;
       },
       onJournal(operations) {
+        if (state.recoveryReloading || !queueCurrent()) return;
         try {
           if (operations.length) localStorage.setItem(journalKey, JSON.stringify(operations));
           else localStorage.removeItem(journalKey);
@@ -3012,19 +3057,20 @@
     return state.operationQueue;
   }
 
-  async function sendOperation(operation) {
+  async function sendOperation(operation, {gapOnly = false} = {}) {
+    if (state.recoveryPreparing || state.recoveryReloading) return null;
     ordinaryError("");
     suspendPlaybackFollow();
     if (editorAiTaskLocksEditor()) {
       const kind = {translation:"翻译", calibration:"校准", organize:"整理", punctuation:"标点"}[state.editorAiTask?.kind] || "AI";
-      ordinaryError(`${kind}任务正在排队或执行中，完成前编辑器为只读`);
+      ordinaryError(`${kind}任务正在排队或执行中，完成前编辑器为只读`, "notice");
       return null;
     }
-    if (state.restoreWriting) { ordinaryError("正在恢复版本，请稍候再编辑"); return null; }
-    if (state.documentWriteLocked) { ordinaryError("正在保存文档设置，请稍候再编辑"); return null; }
+    if (state.restoreWriting) { ordinaryError("正在恢复版本，请稍候再编辑", "notice"); return null; }
+    if (state.documentWriteLocked) { ordinaryError("正在保存文档设置，请稍候再编辑", "notice"); return null; }
     const topology = isTopologyOperation(operation);
     if (state.topologyOperationPending || (topology && state.structuralPreparationPending)) {
-      ordinaryError("Cue 结构正在更新，请稍候再编辑");
+      ordinaryError("Cue 结构正在更新，请稍候再编辑", "notice");
       return null;
     }
     let topologyLocked = false;
@@ -3032,7 +3078,7 @@
       if (topology) {
         await flushActiveEditorInput();
         if (state.topologyOperationPending || state.structuralPreparationPending) {
-          ordinaryError("Cue 结构正在更新，请稍候再编辑");
+          ordinaryError("Cue 结构正在更新，请稍候再编辑", "notice");
           return null;
         }
         topologyLocked = true;
@@ -3044,7 +3090,11 @@
       if (topology) ensureOperationQueue().flushNow();
       saving.catch(() => {});
       if (projection) {
-        setRevision(projection, {
+        if (gapOnly) {
+          adoptRevisionWithoutRender(projection);
+          state.timelineController?.setView(state.view, {gapOnly:true});
+          state.skipNextQueueIdleTimelineRedraw = true;
+        } else setRevision(projection, {
           deferTimeline:activeMedia()?.paused === false,
           localProjection:true
         });
@@ -3738,6 +3788,23 @@
     await applyTimelineBoundary(intent);
   }
 
+  async function retranscribeGap(start,end) {
+    if (!state.revision || editorAiTaskLocksEditor() || state.operationPending) return;
+    state.taskPanelDismissed=false;
+    renderWorkbenchTask("局部听写",0,"准备片段音频…");
+    try {
+      const task = await withSavedDocument(()=>api(projectPath("/gap-transcriptions"),{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({start,end,expected_revision_id:state.revision.revision_id})
+      }));
+      state.editorAiTask={...task,task_id:task.job_id,kind:"gap_transcription",state:task.state==="preparing"?"running":task.state};
+      renderHeader();
+      await refreshEditorAiTask();
+      startEditorAiTaskPoll();
+    } catch(error) { ordinaryError(error.message);renderWorkbenchTask("局部听写",0,error.message,"failed"); }
+    finally { renderHeader(); }
+  }
+
   function initializeTimelineController() {
     const factory = window.EditorMawTimeline || window.EditorTimelineTools || (document.documentElement.dataset.editorLayout === "experimental"
       ? window.EditorMultilineTimeline : window.EditorTimeline);
@@ -3768,7 +3835,10 @@
       onUndo:() => $('#undoDocument').click(),
       onRedo:() => $('#redoDocument').click(),
       onCreateTimelineCue:insertTimelineCue,
+      onRetranscribeGap:retranscribeGap,
       getTimelineCueText:cueSourceText,
+      getTimelineCueLines:projectedCueLines,
+      getTimelineTokenText:projectedSourceTokenText,
       async onTimelineTextEdit({cueId,tokenId,text,track}) {
         if(state.topologyOperationPending||editorAiTaskLocksEditor())throw Error('请等待当前任务完成');
         const cue=state.view.cue_views.find(c=>c.cue_id===cueId);
@@ -3787,20 +3857,14 @@
         if(state.view.properties.speaker_names?.[id]!==name)throw new Error("轨道未保存，请重试");
         return id;
       },
-      async onTimelineChange(timeline) {
+      async onTimelineChange(timeline, {gapOnly = false} = {}) {
         const operation = contract.createOperation(state.revision, "set_timeline", {
           timeline, expected_timeline:state.revision.document.properties.timeline || null,
           provenance:manualProvenance("set_timeline")
         });
-        await sendOperation(operation);
-        if (JSON.stringify(state.view?.properties?.timeline) !== JSON.stringify(timeline)) {
-          // The server canonicalizes object key order; compare values recursively.
-          const canonical = value => JSON.stringify(value, function(key, item) {
-            return item && typeof item === "object" && !Array.isArray(item)
-              ? Object.fromEntries(Object.keys(item).sort().map(k=>[k,item[k]])) : item;
-          });
-          if (canonical(state.view?.properties?.timeline) !== canonical(timeline)) throw new Error("剪辑修改未保存，请重试");
-        }
+        // A later local edit may already be visible when this save resolves.
+        // Its timeline must not be compared to an older request snapshot.
+        if (!await sendOperation(operation, {gapOnly})) throw new Error("剪辑修改未保存，请重试");
       },
       onAiPlan:(goal,basePlanId) => api(projectPath("/cut-ai"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision_id:state.revision.revision_id,goal,base_plan_id:basePlanId||null})}),
       onCutExport: exportCutPlan,
@@ -3959,7 +4023,7 @@
     try {
       await flushActiveEditorInput();
       state.restoreWriting = true;
-      $("#editorWorkbench").inert = true;
+      workbenchInert(true);
       const revision = await api(projectPath("/restore-selection"), {method:"POST",
         headers:{"Content-Type":"application/json"}, body:JSON.stringify({
           expected_revision_id:state.revision.revision_id, revision_id:revisionId, cue_ids:ids, scope
@@ -3968,7 +4032,7 @@
       setRevision(revision); await loadRevisionHistory({force:true});
       $("#draftState").textContent = "已恢复所选内容，其他编辑已保留";
     } catch (error) { ordinaryError(`选择性恢复失败：${error.message}`); }
-    finally { state.restoreWriting = false; state.restorePreparationPending = false; $("#editorWorkbench").inert = false; }
+    finally { state.restoreWriting = false; state.restorePreparationPending = false; workbenchInert(false); }
   }
 
   let tokenSplitMode = false;
@@ -4038,7 +4102,7 @@
     try {
       await flushActiveEditorInput();
       state.restoreWriting = true;
-      $("#editorWorkbench").inert = true;
+      workbenchInert(true);
       const revision = await api(projectPath("/split-token"), {method:"POST",
         headers:{"Content-Type":"application/json"}, body:JSON.stringify({
           expected_revision_id:state.revision.revision_id, token_id:token.token_id, offset:index
@@ -4046,7 +4110,7 @@
       if (project !== state.projectId) return;
       setRevision(revision); await loadRevisionHistory({force:true});
     } catch (error) { ordinaryError(`拆分失败：${error.message}`); }
-    finally { state.restoreWriting = false; state.restorePreparationPending = false; $("#editorWorkbench").inert = false; }
+    finally { state.restoreWriting = false; state.restorePreparationPending = false; workbenchInert(false); }
   }
 
   async function deleteSelectedTokens() {
@@ -4125,8 +4189,8 @@
         return;
       }
       if (action === "restore") {
-        await sendOperation(contract.restoreOperation(
-          state.revision, {cue_ids:[cueId]}, manualProvenance("restore_cue")
+        await sendOperation(contract.restoreCueOperation(
+          state.revision, cueId, manualProvenance("restore_cue")
         ));
         return;
       }
@@ -4170,6 +4234,134 @@
 
   let projectEpoch = 0;
 
+  function captureRecoverySnapshot() {
+    const inputs = [...document.querySelectorAll("#cueList input,#cueList textarea,#cueList [contenteditable='true']")]
+      .filter(field => {
+        const data = field.dataset;
+        const value = field.value ?? field.textContent;
+        if (data.sourceEdit) return data.rawEditing !== "false" && value !== data.originalSource;
+        if (data.targetEdit) return data.rawEditing === "true" && value !== (data.originalTarget || "");
+        return data.originalEdit !== undefined ? value !== data.originalEdit : field.isContentEditable;
+      }).map(field => ({cue_id:field.dataset.sourceEdit || field.dataset.targetEdit
+          || field.closest("[data-cue-id]")?.dataset.cueId || state.activeCueId,
+        label:field.getAttribute("aria-label") || (field.dataset.targetEdit ? "译文" : "原文"),
+        value:field.value ?? field.textContent, data:{...field.dataset}}));
+    return {revision:state.revision, operations:state.documentStore?.pending() || [], inputs};
+  }
+
+  function syncRecoveryDraftButton() {
+    const button = $("#refreshDocumentBottom");
+    if (!button) return;
+    try {
+      const count = window.EditorRecovery.list(localStorage, state.projectId).length;
+      button.title = count ? `刷新并恢复编辑；右键查看恢复草稿（${count}）` : "保留未保存输入并刷新恢复编辑";
+    } catch (_) { button.title = "刷新恢复编辑；右键查看恢复草稿"; }
+  }
+
+  function openRecoveryDrafts() {
+    try {
+      const copies = window.EditorRecovery.list(localStorage, state.projectId);
+      if (!copies.length) return;
+      const dialog = document.createElement("dialog");
+      dialog.className = "editor-recovery-dialog";
+      dialog.style.cssText = "width:min(800px,90vw);max-height:85vh;padding:20px;border:1px solid #555;border-radius:12px";
+      const title = document.createElement("h3"); title.textContent = "刷新前保留的恢复草稿";
+      const help = document.createElement("p");
+      help.textContent = "草稿独立保留，不会阻塞编辑。部分内容可能已经保存；请核对后复制需要的文字，或下载完整副本。";
+      const select = document.createElement("select"); select.setAttribute("aria-label", "选择恢复草稿");
+      copies.forEach((copy, index) => {
+        const option = document.createElement("option"); option.value = String(index);
+        let stamp; try { stamp = JSON.parse(copy.text).created_at; } catch (_) {}
+        option.textContent = stamp ? new Date(stamp).toLocaleString() : `恢复副本 ${index + 1}`;
+        select.append(option);
+      });
+      const text = document.createElement("textarea"); text.readOnly = true;
+      text.setAttribute("aria-label", "恢复草稿内容，可选择并复制");
+      text.style.cssText = "display:block;width:100%;height:45vh;margin:12px 0;white-space:pre-wrap";
+      const show = () => { text.value = window.EditorRecovery.preview(copies[Number(select.value)].text); };
+      select.onchange = show; show();
+      const download = document.createElement("button"); download.textContent = "下载完整副本";
+      download.onclick = async () => {
+        try {
+          await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.projectId)}_恢复草稿.json`,
+            description:"编辑恢复草稿", mimeType:"application/json", extension:".json"},
+            new Blob([copies[Number(select.value)].text], {type:"application/json;charset=utf-8"}));
+        } catch (error) { help.textContent = `下载失败：${error.message}。草稿仍保留，可继续复制文字。`; }
+      };
+      const close = document.createElement("button"); close.textContent = "返回编辑"; close.onclick = () => dialog.close();
+      for (const button of [download, close]) {
+        button.style.cssText = "padding:7px 12px;margin-right:8px;border:1px solid #555;border-radius:6px;background:transparent;color:inherit;cursor:pointer;font:inherit";
+      }
+      dialog.append(title, help, select, text, download, close);
+      dialog.addEventListener("close", () => dialog.remove());
+      document.body.append(dialog); dialog.showModal();
+    } catch (error) { ordinaryError(`恢复草稿读取失败：${error.message}`); }
+  }
+
+  let recoveryController;
+  function refreshEditorRecovery() {
+    if (!recoveryController) {
+      let wasInert = false;
+      let progressDialog;
+      recoveryController = window.EditorRecovery.createController({
+        storage:localStorage,
+        projectId:() => state.projectId,
+        capture:captureRecoverySnapshot,
+        pause() {
+          state.recoveryPreparing = true;
+          state.operationQueue?.pause();
+        },
+        prepare:() => state.operationQueue?.waitForInFlight(),
+        resume() {
+          state.recoveryPreparing = false;
+          state.operationQueue?.resume();
+        },
+        async verify(projectId) {
+          const signal = AbortSignal.timeout(8000);
+          const path = `/api/projects/${encodeURIComponent(projectId)}`;
+          const [revisionResponse, taskResponse] = await Promise.all([
+            fetch(path, {signal, cache:"no-store"}), fetch(`${path}/ai-task`, {signal, cache:"no-store"})
+          ]);
+          if (!revisionResponse.ok || !taskResponse.ok) throw new Error("暂时无法读取工程或后台任务状态，请确认服务正常后重试");
+          contract.consumeRevision(await revisionResponse.json());
+          await taskResponse.json();
+        },
+        setBusy(busy) {
+          if (busy) wasInert = workbenchInert();
+          workbenchInert(busy || wasInert);
+          $("#refreshDocumentBottom").disabled = busy;
+          $("#refreshDocumentBottom").textContent = busy ? "正在恢复…" : "刷新";
+          if (busy) {
+            progressDialog = document.createElement("dialog");
+            progressDialog.className = "editor-recovery-dialog";
+            progressDialog.textContent = "正在核对保存状态并保留草稿，请稍候…";
+            progressDialog.addEventListener("cancel", event => event.preventDefault());
+            document.body.append(progressDialog); progressDialog.showModal();
+          } else {
+            progressDialog?.close(); progressDialog?.remove();
+          }
+        },
+        freeze() {
+          state.recoveryReloading = true;
+          state.operationQueue?.destroy();
+          ++projectEpoch;
+        },
+        reload(projectId, {draftKey}) {
+          const url = new URL(window.location.href);
+          url.searchParams.set("project", projectId);
+          url.searchParams.set("recovered", draftKey ? "draft" : "saved");
+          // A new JS context discards stale closures as well as visible locks.
+          window.location.replace(url.href);
+        },
+        onError(error) {
+          ordinaryError(`刷新恢复未完成：${error.message}。输入仍保留，请重试或下载恢复副本。`);
+          syncRecoveryDraftButton();
+        }
+      });
+    }
+    return recoveryController.refresh();
+  }
+
   async function loadProject(projectId, {restoreTranslation = true, resetTutorial = false, showTutorialIntro = true} = {}) {
     if (!projectId) return;
     if (state.checkpointPending || state.restorePreparationPending || state.historyNavigationPending || state.documentWritePending) return;
@@ -4203,7 +4395,7 @@
     state.revision = null;
     state.view = null;
     state.documentStore = null;
-    $("#editorWorkbench").inert = true;
+    workbenchInert(true);
     renderHeader();
     const current = () => epoch === projectEpoch && projectId === state.projectId;
     stopTranslationPoll();
@@ -4213,6 +4405,7 @@
     }
     ordinaryError("");
     state.projectId = projectId;
+    syncRecoveryDraftButton();
     state.timelineLayout = localStorage.getItem(`substar.editor.timeline-layout:${projectId}`) === "separated" ? "separated" : "composite";
     $("#timelineLayout").value = state.timelineLayout;
     state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
@@ -4242,8 +4435,14 @@
         state.timelineLayout = "separated";
         $("#timelineLayout").value = "separated";
       }
+      state.editorAiTask = null;
+      state.editorAiTaskChecking = !textProject;
+      document.body.classList.toggle("editor-ai-task-locked", !textProject);
       setRevision(revision, {preserveCueViewport:false});
-      $("#editorWorkbench").inert = false;
+      workbenchInert(false);
+      // Keep retrying status checks even if the first request fails. Until it
+      // succeeds, a real background writer must not be unlocked by a reload.
+      if (!textProject) startEditorAiTaskPoll();
       const aiTaskReady = textProject ? Promise.resolve(null) : refreshEditorAiTask();
       if (resetRevision && $("#aiReviewMenu")) $("#aiReviewMenu").open = false;
       seedRevisionMetadata(state.revision);
@@ -4268,6 +4467,13 @@
       if (!current()) return;
       const url = new URL(window.location.href);
       url.searchParams.set("project", projectId);
+      const recovered = url.searchParams.get("recovered");
+      if (recovered) {
+        url.searchParams.delete("recovered");
+        ordinaryError(recovered === "draft"
+          ? "已恢复到最后保存版本，未保存修改已保留副本；右键刷新按钮可查看。"
+          : "已恢复到最后保存版本。", "notice");
+      }
       history.replaceState(null, "", url);
       if (project?.tutorial_case_id && showTutorialIntro) maybeShowTutorialIntro(project.tutorial_case_id);
     } catch (error) {
@@ -4460,8 +4666,8 @@
   };
   $("#downloadConflictCopy").onclick = async () => {
     try {
-      const text = JSON.stringify({schema_version:"substar.editor-recovery.v1", project_id:state.projectId,
-        revision:state.revision, operations:state.documentStore?.pending() || []}, null, 2);
+      const text = JSON.stringify({schema_version:"substar.editor-recovery.v2", project_id:state.projectId,
+        snapshots:[captureRecoverySnapshot()]}, null, 2);
       const result = await systemSaveAs.saveBlob({
         suggestedName:`${systemSaveAs.safeFilename(state.projectId)}_未保存编辑.json`,
         description:"未保存编辑恢复副本", mimeType:"application/json", extension:".json"
@@ -4470,15 +4676,7 @@
     } catch (error) { ordinaryError(`恢复副本下载失败：${error.message}`); }
   };
   $("#keepConflictCopy").onclick = async () => {
-    try {
-      const operations = state.documentStore?.pending() || [];
-      const key = `substar.editor.conflict-copy:${state.projectId}:${Date.now()}`;
-      localStorage.setItem(key, JSON.stringify({revision:state.revision, operations}));
-      state.operationQueue?.discardUnsaved();
-      state.documentStore?.discard(operations.map(operation => operation.operation_id));
-      await loadProject(state.projectId);
-      ordinaryError("已载入保存版本。未保存编辑的恢复副本已留在本浏览器。", "completed");
-    } catch (error) { ordinaryError(`恢复副本未能保存：${error.message}`); }
+    await refreshEditorRecovery();
   };
   $("#externalCalibration").onclick = async () => {
     const epoch = projectEpoch;
@@ -4986,7 +5184,15 @@
     updateTimelineHeight();
     state.timelineController?.redraw();
   };
-  $("#refreshDocumentBottom").onclick = () => state.projectId && loadProject(state.projectId);
+  $("#refreshDocumentBottom").onclick = refreshEditorRecovery;
+  $("#refreshDocumentBottom").oncontextmenu = event => {
+    event.preventDefault();
+    openRecoveryDrafts();
+  };
+  // Capture the focused input before the browser's pointer default blurs it.
+  for (const selector of ["#refreshDocumentBottom", "#keepConflictCopy"]) {
+    $(selector).addEventListener("pointerdown", event => event.preventDefault());
+  }
   $("#undoDocument").onclick = undoLatestRevision;
   $("#redoDocument").onclick = redoLatestRevision;
   $("#resetDocument").onclick = resetToCheckpoint;
@@ -5098,6 +5304,8 @@
   $("#cueList").addEventListener("focusin", event => {
     const source = event.target.closest("[data-source-edit]");
     if (source && !source.disabled) {
+      source.value = source.dataset.originalSource;
+      source.dataset.rawEditing = "true";
       suspendPlaybackFollow();
       state.selectedTokenIds.clear();
       state.selectionAnchorTokenId = null;
@@ -5116,13 +5324,17 @@
   });
   $("#cueList").addEventListener("focusout", event => {
     const source = event.target.closest("[data-source-edit]");
-    if (source && !source.readOnly && source.value !== source.dataset.originalSource) {
+    if (source && source.dataset.rawEditing === "true" && !source.readOnly && source.value !== source.dataset.originalSource) {
       const text = source.value;
       sendOperation(contract.createOperation(state.revision, "set_source_text", {
         cue_id:source.dataset.sourceEdit, text, expected_source_text:source.dataset.originalSource,
         provenance:manualProvenance("set_source_text")}))
         .then(result => {if (result) source.dataset.originalSource = text;})
         .catch(error => ordinaryError(error.message));
+    }
+    if (source && source.value === source.dataset.originalSource) {
+      source.value = source.dataset.projectedSource || "";
+      source.dataset.rawEditing = "false";
     }
     const target = event.target.closest("[data-target-edit]");
     if (target) commitInlineTarget(target);

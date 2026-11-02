@@ -57,6 +57,7 @@ def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
         "translation_layout": normalize_layout(value.get("translation_layout")),
         "glossary_id": str(value.get("glossary_id") or "").strip()[:80],
         "llm_provider_id": llm_provider_id,
+        "preserve_punctuation": value.get("preserve_punctuation", True) is True,
         "autosave_delay_seconds": autosave_delay_seconds,
         "autosave_retry_count": autosave_retry_count,
         "source_hard_limit": source_limit,
@@ -88,6 +89,7 @@ def task_info_settings(info: Mapping[str, Any]) -> dict[str, Any]:
     target = str(info["target_language_mode"])
     result = {
         "language": source,
+        "preserve_punctuation": info.get("preserve_punctuation", True) is True,
         "translation_layout": normalize_layout(info.get("translation_layout")),
         "target_language_mode": target,
         "glossary_id": str(info.get("glossary_id") or ""),

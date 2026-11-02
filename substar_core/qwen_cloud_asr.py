@@ -29,7 +29,10 @@ _ACTIVE_STATUS_PROGRESS = {"PENDING": 0.40, "RUNNING": 0.46}
 
 
 class QwenCloudAsrError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, provider_code: str | None = None):
+        super().__init__(message)
+        self.provider_code = provider_code
+
 
 
 def _speaker_id(value: Any) -> str | None:
@@ -805,7 +808,8 @@ def run_qwen_cloud_asr(
             state["last_failure"] = output.get("message") or output.get("code") or body
             atomic_write_json(state_path, state)
             raise QwenCloudAsrError(
-                f"Qwen 云端听写失败：{output.get('message') or output.get('code') or body}"
+                f"Qwen 云端听写失败：{output.get('message') or output.get('code') or body}",
+                provider_code=output.get("code"),
             )
         cancellable_wait(poll_seconds)
     raise QwenCloudAsrError(f"Qwen 云端听写等待超过 {total_timeout} 秒；任务 {task_id} 已保留，可重试继续查询")

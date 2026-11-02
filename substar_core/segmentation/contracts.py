@@ -279,7 +279,7 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         frozenset(constraints) if isinstance(constraints, Mapping) else frozenset()
     )
     legacy_constraint_fields = constraint_fields - {"language_ratio_threshold_percent"}
-    actual_constraint_fields = actual_constraint_fields - {"other_hard_limit"}
+    actual_constraint_fields = actual_constraint_fields - {"other_hard_limit", "preserve_punctuation"}
     if actual_constraint_fields not in {
         frozenset(legacy_constraint_fields),
         frozenset(constraint_fields),
@@ -292,7 +292,10 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
     boundary_policy = str(constraints["sentence_boundary_policy"])
     if boundary_policy not in {"reference", "reconstruct", "unpunctuated"}:
         raise InvalidTaskError("sentence_boundary_policy is invalid")
+    if "preserve_punctuation" in constraints and not isinstance(constraints["preserve_punctuation"], bool):
+        raise InvalidTaskError("constraints.preserve_punctuation must be boolean")
     normalized_constraints = {
+        **({"preserve_punctuation": constraints["preserve_punctuation"]} if "preserve_punctuation" in constraints else {}),
         **({"other_hard_limit": _integer(constraints["other_hard_limit"], "constraints.other_hard_limit", 1, 200)} if "other_hard_limit" in constraints else {}),
         "target_seconds": _integer(constraints["target_seconds"], "constraints.target_seconds", 30, 600),
         "english_hard_limit": _integer(constraints["english_hard_limit"], "constraints.english_hard_limit", 1, 200),
@@ -421,6 +424,7 @@ def build_segmentation_request(
         "glossary_snapshot": [dict(item) for item in glossary_snapshot],
         "constraints": {
             "target_seconds": int(settings.get("segmentation_chunk_seconds", 90)),
+            "preserve_punctuation": bool(settings.get("preserve_punctuation", False)),
             "english_hard_limit": int(settings.get("english_hard_limit", 55)),
             "chinese_hard_limit": int(settings.get("chinese_hard_limit", 20)),
             "mixed_hard_limit": int(settings.get("mixed_hard_limit", 25)),

@@ -26,7 +26,7 @@ export function createMawMenus(h){
     sep();item('添加空隙','',()=>{const duration=h.getDuration(),length=Math.min(duration,Math.max(10,Number(h.getGapState().minimum_ms)||400)),start=Math.min(Math.max(0,Math.round(time/10)*10),duration-length);const a=h.snapGapBoundary(start),b=h.snapGapBoundary(start+length);return b-a>=10?h.manualGap(a,b):h.manualGap(start,start+length);});
     if(h.getGapState().gaps.some(g=>g.removed!==false))item('填充区间空隙','',()=>{const gaps=h.getGapState().gaps.filter(g=>g.removed!==false).sort((a,b)=>a.start-b.start);if(gaps.some(g=>g.start<=time&&time<g.end))return;const start=gaps.filter(g=>g.end<=time).at(-1)?.end||0,end=gaps.find(g=>g.start>time)?.start??h.getDuration();return h.manualGap(start,end);}).title='将点击位置两侧已移除区间之间的整段内容也设为移除；缺少一侧时延伸到媒体开头或结尾，导出剪辑时会剪掉该段。';addMarkerItems(time);open(x,y);
   }
-  function gap(x,y,index){const state=h.getGapState(),g=globalThis.AsrGapRemoveCore.getGapRemoveDisplayGaps(state.gaps)[index];if(!g)return;reset();item(g.removed===false?'移除区段':'恢复区段','',()=>h.manualGap(g.start,g.end,g.removed===false));sep();item('清理空隙','',()=>{const core=globalThis.AsrGapRemoveCore,provenance=core.removeGapRemoveProvenanceRange(state.provenance,g.start,g.end,state.gaps);return h.commitGaps({...state,provenance,gaps:core.gapRangesFromProvenance(provenance)});},{danger:true});addMarkerItems(g.start,g.end);open(x,y);}
+  function gap(x,y,index){const state=h.getGapState(),g=globalThis.AsrGapRemoveCore.getGapRemoveDisplayGaps(state.gaps)[index];if(!g)return;reset();item('重新听写此片段','',()=>options.onRetranscribeGap(g.start/1000,g.end/1000),{disabled:!options.onRetranscribeGap});sep();item(g.removed===false?'移除区段':'恢复区段','',()=>h.manualGap(g.start,g.end,g.removed===false));sep();item('清理空隙','',()=>{const core=globalThis.AsrGapRemoveCore,provenance=core.removeGapRemoveProvenanceRange(state.provenance,g.start,g.end,state.gaps);return h.commitGaps({...state,provenance,gaps:core.gapRangesFromProvenance(provenance)});},{danger:true});addMarkerItems(g.start,g.end);open(x,y);}
   function selectionItems(ranges){
     sep();
     item('添加点标记','',()=>h.createSelectionItems('point',ranges));
@@ -39,7 +39,7 @@ export function createMawMenus(h){
     reset();selectionItems(h.getWordRanges());open(x,y);
   }
 
-  async function editMany(ids,transform,track){for(const id of ids){const s=segments(track).find(s=>s.id===id);if(s)await options.onTimelineTextEdit({cueId:id,text:transform(s.text),track});}}
+  async function editMany(ids,transform,track){for(const id of ids){const s=segments(track).find(s=>s.id===id);if(s)await options.onTimelineTextEdit({cueId:id,text:transform(s.rawText??s.text),track});}}
   async function merge(ids){for(let i=1;i<ids.length;i++)await op('merge_cues',{cue_ids:[ids[0],ids[i]]});}
   function cue(x,y,index,time,track='main',mode={}){
     const s=segments(track)[index];if(!s)return;const multi=selection(track).size>1&&selection(track).has(index);if(!multi)select(index,track);

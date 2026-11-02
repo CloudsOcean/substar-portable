@@ -194,7 +194,7 @@ def _document_patch(before: EditorDocument, after: EditorDocument) -> dict[str, 
             before.display_tokens, after.display_tokens, id_attribute="token_id"
         ),
         "cues": _cue_patch(before.cues, after.cues),
-        "groups": _entity_patch(before.groups, after.groups, id_attribute="group_id"),
+        "groups": _ordered_entity_patch(before.groups, after.groups, id_attribute="group_id"),
         "changes_mode": "append" if changes_are_append else "replace",
         "changes": [
             item.to_dict()
@@ -272,7 +272,7 @@ def _apply_document_patch(
         {**cue, "index": index} for index, cue in enumerate(current_cues)
     ]
     if "groups" in patch:
-        result["groups"] = _apply_entity_patch(
+        result["groups"] = _apply_ordered_entity_patch(
             list(result["groups"]), patch.get("groups", {}), id_key="group_id"
         )
     changes = list(patch.get("changes", []))

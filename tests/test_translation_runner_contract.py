@@ -37,7 +37,7 @@ def test_translation_runner_imports_the_canonical_export_module() -> None:
 def test_translation_system_prompt_omits_empty_glossary_and_is_shared_by_repair() -> None:
     assert contextual_translation._translation_system_prompt(
         "primary", "direction", []
-    ) == "primary\n\ndirection"
+    ).startswith("primary\n\ndirection\n\n# 标点策略")
     assert contextual_translation._translation_system_prompt(
         "repair", "direction", [{
             "source": "ASR", "standard_source": "ASR", "aliases": [],
@@ -927,8 +927,8 @@ def test_main_translation_prompt_uses_target_language_boundaries() -> None:
     ).text
     assert "1|译文" in prompt
     assert "2-4" in prompt
-    assert "先分开表达，必要时才共享" in prompt
-    assert "程序不因逗号或风格触发修复" in prompt
+    assert "不刻意增加或减少" in prompt
+    assert "默认每个编号各写一行" not in prompt
     assert "内部不得出现 `，` 或 `；`" not in prompt
     assert "JSON" in output_contract("TRANSLATE")
     assert "group_id" not in prompt

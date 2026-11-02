@@ -30,15 +30,14 @@ def translation_prompt_variant(
     layout = settings.get("translation_layout")
     if not layout:
         return translation_variant(source, target)
-    # A one-direction English task still uses the accepted language prompt
-    # when launched through the per-Cue routing UI.
-    if source == "en" and layout.get("lower_target") == "zh-CN" and groups and all(
-        cue_language(cue["source_text"]) == "en"
-        and cue.get("target_language") == "zh-CN"
-        for group in groups for cue in group["cues"]
-    ):
-        return "en_to_zh"
-    return "generic"
+    targets = {str(cue.get("target_language") or layout.get("lower_target") or target)
+               for group in (groups or []) for cue in group["cues"]}
+    if not targets:
+        targets = {str(layout.get("lower_target") or target)}
+        if layout.get("bidirectional"):
+            targets.add(str(layout.get("upper_target") or "en"))
+    return "target_" + "+".join(sorted(code.removeprefix("target_") for code in
+                                      (translation_variant(source, t) for t in targets)))
 
 
 def review_request_groups(

@@ -794,6 +794,19 @@
     }, [...tokens, ...cues]);
   }
 
+  function restoreCueOperation(revisionPayload, cueId, provenance = null) {
+    const indexes = revisionIndexes(revisionPayload);
+    const cue = indexes.cues.get(String(cueId));
+    if (!cue) throw new Error("restore target cue does not exist");
+    // Fully removed cues need their words restored too; preserve partial deletions.
+    const ids = cue.display_token_ids;
+    const empty = ids.length > 0 && ids.every(id => indexes.display.get(id)?.state === DELETED);
+    return restoreOperation(revisionPayload, {
+      cue_ids:cue.state === DELETED ? [cue.cue_id] : [],
+      token_ids:empty ? ids : []
+    }, provenance);
+  }
+
   function insertOperation(revisionPayload, cueId, afterTokenId, token, provenance = null) {
     const indexes = revisionIndexes(revisionPayload);
     const cue = indexes.cues.get(String(cueId));
@@ -925,6 +938,7 @@
     deleteOperation,
     purgeCueOperation,
     restoreOperation,
+    restoreCueOperation,
     insertOperation,
     splitCueOperation,
     mergeCuesOperation,

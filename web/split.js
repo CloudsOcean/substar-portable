@@ -17,6 +17,8 @@
     references: [],
     settings: null,
     recognitionProfiles: [],
+    retryModels: [],
+    retryModelChoices: new Map(),
     edition: "standard",
     capabilities: {},
     settingsDirty: false,
@@ -403,6 +405,7 @@
     const segmentationEnabled = workflow === "one_step";
     return {
       generate_thumbnails: $("#generateThumbnailsInput").checked,
+      preserve_punctuation: $("#preservePunctuationInput").checked,
       language: $("#languageInput").value,
       target_language_mode: $("#targetLanguageInput").value,
       translation_layout:window.SubstarTranslationLayout.read("splitLanguageLayout"),
@@ -534,6 +537,7 @@
       $("#recognitionProfileInput").value = "qwen_cloud";
     }
     $("#generateThumbnailsInput").checked = effective.generate_thumbnails === true;
+    $("#preservePunctuationInput").checked = effective.preserve_punctuation === true;
     $("#chunkSecondsInput").value = settings.segmentation_chunk_seconds || 90;
     $("#workersInput").value = settings.translation_workers || 16;
     $("#retryInput").value = settings.http_retry_attempts ?? 3;
@@ -769,6 +773,7 @@
     const segmentationEnabled = workflow === "one_step";
     const result = {
       generate_thumbnails: $("#generateThumbnailsInput").checked,
+      preserve_punctuation: $("#preservePunctuationInput").checked,
       active_model_provider: current.active_model_provider,
       translation_api_base_url: current.translation_api_base_url,
       translation_api_model: current.translation_api_model,
@@ -868,17 +873,21 @@
     return track;
   }
 
-  async function retryJob(jobId, button) {
+  async function retryJob(jobId, button, providerId = "") {
     button.disabled = true;
     button.textContent = "正在重试";
     try {
-      await api(`/api/project-creations/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+      await api(`/api/project-creations/${encodeURIComponent(jobId)}/retry`, {
+        method: "POST", headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({provider_id: providerId || null}),
+      });
+      state.retryModelChoices.delete(jobId);
       toast("任务已重新进入流水线");
       await refreshJobs();
     } catch (error) {
       toast(errorMessage(error));
       button.disabled = false;
-      button.textContent = "重试";
+      button.textContent = "从断点继续";
     }
   }
 
@@ -954,10 +963,30 @@
       actions.className = "queue-job-actions";
       if (!disconnectedActive && ["failed", "interrupted"].includes(job.status)) {
         if (job.workflow_mode !== "editor_task") {
+          if (job.can_switch_retry_model) {
+            const select = document.createElement("select");
+            select.className = "queue-retry-model";
+            select.setAttribute("aria-label", "续跑切分模型");
+            select.title = "仅切换本次切分模型，保留已完成的切分块";
+            const original = document.createElement("option");
+            original.value = "";
+            original.textContent = "沿用原模型";
+            select.append(original);
+            for (const model of state.retryModels) {
+              const option = document.createElement("option");
+              option.value = model.provider_id;
+              option.textContent = `${model.label} · ${model.model}`;
+              select.append(option);
+            }
+            select.value = state.retryModelChoices.get(job.id) || "";
+            select.addEventListener("change", () => state.retryModelChoices.set(job.id, select.value));
+            actions.append(select);
+            detail.classList.add("has-retry-model");
+          }
           const retry = document.createElement("button");
           retry.type = "button";
           retry.textContent = "从断点继续";
-          retry.addEventListener("click", () => retryJob(job.id, retry));
+          retry.addEventListener("click", () => retryJob(job.id, retry, job.can_switch_retry_model ? state.retryModelChoices.get(job.id) || "" : ""));
           actions.append(retry);
         }
       }
@@ -1344,9 +1373,11 @@
   async function loadInitialState() {
     const initialJobs = refreshJobs();
     try {
-      const [settings, system, recognition] = await Promise.all([
+      const [settings, system, recognition, retryModels] = await Promise.all([
         api("/api/settings"), api("/api/system"), api("/api/recognition/profiles"),
+        api("/api/creation-retry-models"),
       ]);
+      state.retryModels = retryModels.options || [];
       state.recognitionProfiles = recognition.profiles || [];
       state.edition = recognition.edition || "standard";
       state.capabilities = recognition.capabilities || {};
@@ -1413,7 +1444,7 @@
   for (const selector of [
     "#languageInput", "#targetLanguageInput", "#glossaryInput", "#splitWorkflowInput", "#referenceBreakSymbolsInput",
     "#englishLimitInput", "#chineseLimitInput", "#mixedLimitInput", "#otherLimitInput", "#japaneseLimitInput", "#koreanLimitInput",
-    "#chunkSecondsInput", "#workersInput", "#retryInput", "#generateThumbnailsInput",
+    "#chunkSecondsInput", "#workersInput", "#retryInput", "#generateThumbnailsInput", "#preservePunctuationInput",
     "#qwenAiBriefInput", "#qwenPromptInput", "#qwenHotwordsInput",
   ]) {
     $(selector)?.addEventListener("input", markSettingsDirty);
@@ -1542,6 +1573,7 @@
       }
       form.append("confirmation", preview.confirmation);
       form.append("generate_thumbnails", String($("#generateThumbnailsInput").checked));
+      form.append("preserve_punctuation", String($("#preservePunctuationInput").checked));
       if (media.token) form.append("media_reference_token", media.token);
       else form.append("media", media, media.name);
       form.append("source_language", $("#languageInput").value);

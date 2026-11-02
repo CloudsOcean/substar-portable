@@ -74,6 +74,7 @@
         "language_ratio_threshold_percent": {"type": "integer", "minimum": 0, "maximum": 100},
         "japanese_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
         "korean_hard_limit": {"type": "integer", "minimum": 1, "maximum": 200},
+        "preserve_punctuation": {"type": "boolean"},
         "sentence_boundary_policy": {"enum": ["reference", "reconstruct", "unpunctuated"]},
         "repair_attempts": {"type": "integer", "minimum": 0, "maximum": 4},
         "request_timeout_seconds": {"type": "integer", "minimum": 10, "maximum": 3600},

@@ -38,6 +38,7 @@ from substar_core.config import (
     load_credentials,
     load_settings,
     save_settings,
+    settings_for_model_provider,
     infer_model_provider,
     apply_declared_model_capabilities,
 )
@@ -295,6 +296,8 @@ def _claim_backend_instance() -> None:
         app.state.task_scheduler = task_scheduler
         app.state.shutdown_requested = False
         task_scheduler.start()
+        from substar_core.editor.gap_transcription import recover_pending
+        recover_pending(task_service, PROJECTS_ROOT)
     except Exception:
         try:
             scheduler = getattr(app.state, "task_scheduler", None)
@@ -730,6 +733,7 @@ class Job:
             "attempt": self.attempt,
             "transcription_task_id": self.transcription_task_id,
             "segmentation_task_id": self.segmentation_task_id,
+            "can_switch_retry_model": _retry_segmentation_input(self) is not None,
             "runtime_log_url": f"/api/project-creations/{self.id}/logs",
             "export_availability": _workbench_export_availability(self) if include_exports else None,
             "tutorial_case_id": tutorial_case_id,
@@ -1232,6 +1236,7 @@ def _automatic_settings_from_payload(
     }
     allowed = {
         "generate_thumbnails",
+        "preserve_punctuation",
         "active_model_provider",
         "translation_api_base_url",
         "translation_api_model",
@@ -1404,6 +1409,7 @@ def _automatic_settings_from_payload(
 
     overrides = {
         "generate_thumbnails": raw.get("generate_thumbnails") is True,
+        "preserve_punctuation": raw.get("preserve_punctuation") is True,
         "asr_glossary_ids": injection["collection_ids"],
         "asr_glossary_snapshot": injection["entries"],
         "asr_injected_hotwords": injection["hotwords"],
@@ -2287,6 +2293,7 @@ async def create_workbench_split_job(
             "language": source_language,
             "target_language_mode": target_language,
             "translation_layout": overrides.get("translation_layout", {}),
+            "preserve_punctuation": overrides.get("preserve_punctuation", False),
             "glossary_id": str(overrides.get("glossary_id") or ""),
             "source_hard_limit": int(overrides.get(source_limit_key, 25)),
             "target_hard_limit": int(overrides.get(target_limit_key, 25)),
@@ -2772,8 +2779,44 @@ def install_app_update(request: Request):
     return request_runtime_shutdown(request)
 
 
+def _retry_segmentation_input(job: Job) -> dict[str, Any] | None:
+    if job.workflow_mode != "subtitle_creation" or job.status not in {"failed", "interrupted"}:
+        return None
+    if not job.segmentation_task_id or not job.transcription_task_id:
+        return None
+    try:
+        service = _task_service()
+        if service.get_task(job.transcription_task_id)["state"] not in {"succeeded", "succeeded_with_issues"}:
+            return None
+        if service.get_task(job.segmentation_task_id)["state"] not in {"failed", "interrupted"}:
+            return None
+        original = service.get_task_input(job.segmentation_task_id)
+        return original if original.get("mode") == "semantic" else None
+    except (RuntimeError, TaskNotFoundError):
+        return None
+
+
+@app.get("/api/creation-retry-models")
+def creation_retry_models() -> dict[str, Any]:
+    settings = load_settings(include_secret=False)
+    options = []
+    for definition in provider_catalog():
+        try:
+            configured = settings_for_model_provider(definition["id"], base_settings=settings)
+        except ValueError:
+            continue
+        if configured.get("translation_api_key_set"):
+            options.append({"provider_id": definition["id"], "label": definition["label"],
+                            "model": configured["translation_api_model"]})
+    return {"options": options}
+
+
+class CreationRetryRequest(BaseModel):
+    provider_id: str | None = None
+
+
 @app.post("/api/project-creations/{job_id}/retry")
-def retry_workbench_split_job(job_id: str) -> JSONResponse:
+def retry_workbench_split_job(job_id: str, payload: CreationRetryRequest | None = None) -> JSONResponse:
     _restore_persisted_jobs(job_id)
     with JOBS_LOCK:
         job = JOBS.get(job_id)
@@ -2801,6 +2844,19 @@ def retry_workbench_split_job(job_id: str) -> JSONResponse:
                     detail="规范任务已经终结，当前项目损坏不能通过重复调用供应商修复",
                 )
             canonical_retry_ids = tuple(retryable)
+        replacement = None
+        if payload and payload.provider_id:
+            original = _retry_segmentation_input(job)
+            if original is None:
+                raise HTTPException(409, detail="当前失败阶段不支持切换切分模型")
+            try:
+                settings = settings_for_model_provider(payload.provider_id)
+                if not settings.get("translation_api_key_set"):
+                    raise ValueError("所选模型尚未配置密钥")
+                from substar_core.creation.graph import segmentation_request_with_provider
+                replacement = segmentation_request_with_provider(original, settings)
+            except ValueError as exc:
+                raise HTTPException(400, detail=str(exc)) from exc
         media_path, auxiliary_path = _workbench_retry_inputs(job)
         history_path = job.job_dir / "creation_attempts.json"
         try:
@@ -2820,6 +2876,16 @@ def retry_workbench_split_job(job_id: str) -> JSONResponse:
             }
         )
         atomic_write_json(history_path, {**history, "attempts": attempts})
+        if replacement is not None and replacement != original:
+            renewed = _task_service().create_task(
+                task_type="segmentation", input_schema=replacement["schema_version"],
+                input_payload=replacement, project_id=job.id,
+                parent_task_id=job.transcription_task_id,
+                depends_on_task_ids=(job.transcription_task_id,),
+                idempotency_key=f"creation-model-retry:{job.segmentation_task_id}:{replacement['input_fingerprint']}",
+            )
+            canonical_retry_ids = tuple(t for t in canonical_retry_ids if t != job.segmentation_task_id)
+            job.segmentation_task_id = renewed["task_id"]
         job.input_path = media_path
         job.auxiliary_path = auxiliary_path
         job.attempt += 1
@@ -2830,7 +2896,7 @@ def retry_workbench_split_job(job_id: str) -> JSONResponse:
         _append_runtime_log(job, f"retry requested: attempt {job.attempt}")
         _persist_job(job)
         result = job.public()
-    if canonical_retry_ids:
+    if canonical_retry_ids or replacement is not None:
         for task_id in canonical_retry_ids:
             _task_service().retry(task_id)
         return JSONResponse(result, status_code=202)

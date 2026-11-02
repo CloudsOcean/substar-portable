@@ -237,6 +237,7 @@
     }
     if (source === 'manual' || source === 'legacy') result.removed = item.removed !== false;
     else result.removed = true;
+    if (source === 'manual' && item.operation === 'clear') result.operation = 'clear';
     if (source === 'manual' && item.operation === GAP_REMOVE_MANUAL_OPERATION_BOUNDARY_RESIZE) {
       const edge = item.edge;
       const base = Math.max(0, Math.round(Number(item.base)));
@@ -440,7 +441,9 @@
       result = applyGapStateRange(result, gap.start, gap.end, gap.removed, gap.removed === false);
     });
     provenance.manual_overrides.forEach((gap) => {
-      result = isBoundaryResizeRecord(gap)
+      result = gap.operation === 'clear'
+        ? clearGapStateRange(result, gap.start, gap.end)
+        : isBoundaryResizeRecord(gap)
         ? applyBoundaryResizeRecord(result, gap)
         : isGapMoveRecord(gap)
           ? applyGapMoveRecord(result, gap)
@@ -458,7 +461,7 @@
       ...provenance.sources.ai_cleanup_review,
       ...provenance.sources.audio_gate,
       ...provenance.manual_overrides.filter((record) => (
-        !isBoundaryResizeRecord(record) && !isGapMoveRecord(record)
+        record.operation !== 'clear' && !isBoundaryResizeRecord(record) && !isGapMoveRecord(record)
       )),
       ...provenance.legacy,
     ];
@@ -593,42 +596,12 @@
     const end = Math.max(0, Math.round(Math.max(Number(startMs), Number(endMs))));
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return provenance;
 
-    const baseRangesToClear = provenance.manual_overrides.flatMap((record) => (
-      isGapMoveRecord(record) && gapMoveTargetRanges(record).some((target) => (
-        target.start < end && target.end > start
-      ))
-        ? [{start: record.base_start, end: record.base_end}]
-        : []
-    ));
-    const clearRanges = [{start, end}, ...baseRangesToClear];
-    const removeFrom = (ranges, source, sort) => normalizeProvenanceRangeList(
-      ranges.flatMap((range) => {
-        if (isGapMoveRecord(range) && gapMoveTargetRanges(range).some((target) => (
-          target.start < end && target.end > start
-        ))) return [];
-        return clearRanges.reduce((remaining, clearRange) => remaining.flatMap((piece) => {
-          if (piece.end <= clearRange.start || piece.start >= clearRange.end) return [{...piece}];
-          const pieces = [];
-          if (piece.start < clearRange.start) pieces.push({...piece, end: clearRange.start});
-          if (piece.end > clearRange.end) pieces.push({...piece, start: clearRange.end});
-          return pieces;
-        }), [{...range}]);
-      }),
-      source,
-      {sort},
-    );
-
-    return {
-      schema: GAP_PROVENANCE_SCHEMA,
-      sources: {
-        script_alignment: removeFrom(provenance.sources.script_alignment, 'script_alignment', true),
-        ai_cleanup: removeFrom(provenance.sources.ai_cleanup, 'ai_cleanup', true),
-        ai_cleanup_review: removeFrom(provenance.sources.ai_cleanup_review, 'ai_cleanup_review', true),
-        audio_gate: removeFrom(provenance.sources.audio_gate, 'audio_gate', true),
-      },
-      manual_overrides: removeFrom(provenance.manual_overrides, 'manual', false),
-      legacy: removeFrom(provenance.legacy, 'legacy', false),
-    };
+    // Replay deletion after all earlier edits. Cropping a boundary record's
+    // start/end is ineffective: normalization reconstructs it from base/boundary.
+    // Keep those records intact so unrelated pieces and undo remain exact.
+    return appendGapRemoveManualOverrides(provenance, [{
+      start, end, operation: 'clear',
+    }]);
   }
 
   // Boundary expansion is destructive only to the Gap portions it reaches.
@@ -655,7 +628,7 @@
       },
       manual_overrides: normalizeProvenanceRangeList(
         provenance.manual_overrides.flatMap((item) => (
-          isGapMoveRecord(item) || isBoundaryResizeRecord(item)
+          item.operation === 'clear' || isGapMoveRecord(item) || isBoundaryResizeRecord(item)
             ? [{ ...item }]
             : subtractGapAbsorbRanges(item, clearedRanges)
         )),
@@ -714,7 +687,7 @@
       {sort},
     );
     const manual = provenance.manual_overrides.flatMap((item) => {
-      if (preserved.has(item.id)) {
+      if (item.operation === 'clear' || preserved.has(item.id)) {
         return [{ ...item }];
       }
       if (isGapMoveRecord(item)) {
@@ -1014,6 +987,8 @@
     const current = Math.round(Number(original?.[edge]));
     for (let index = provenance.manual_overrides.length - 1; index >= 0; index -= 1) {
       const record = provenance.manual_overrides[index];
+      // Never move an older adjustment past a subsequent deletion.
+      if (record.operation === 'clear') break;
       if (!isBoundaryResizeRecord(record) || record.edge !== edge
           || record.removed !== (original.removed !== false)
           || record.boundary !== current) continue;
@@ -1085,6 +1060,8 @@
     let candidateTargetIndex = -1;
     for (let index = provenance.manual_overrides.length - 1; index >= 0; index -= 1) {
       const record = provenance.manual_overrides[index];
+      // Never move an older adjustment past a subsequent deletion.
+      if (record.operation === 'clear') break;
       if (!isGapMoveRecord(record) || record.removed !== removed) continue;
       const targetIndex = gapMoveTargetRanges(record).findIndex((range) => (
         range.start === original.start && range.end === original.end

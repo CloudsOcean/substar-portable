@@ -1,10 +1,26 @@
 {
   "schema_version": "substar.prompt-registry.v1",
   "categories": [
-    {"id": "segmentation", "title": "字幕切分", "description": "Cue 边界、句界证据与语言切分规则"},
-    {"id": "translation", "title": "字幕翻译", "description": "上下文翻译、坏块修复与目标语言规则"},
-    {"id": "editor", "title": "编辑器 AI", "description": "源文校准"},
-    {"id": "exchange", "title": "外部 AI", "description": "导出给 Web LLM 的分阶段工作流"}
+    {
+      "id": "segmentation",
+      "title": "字幕切分",
+      "description": "Cue 边界、句界证据与语言切分规则"
+    },
+    {
+      "id": "translation",
+      "title": "字幕翻译",
+      "description": "上下文翻译、坏块修复与目标语言规则"
+    },
+    {
+      "id": "editor",
+      "title": "编辑器 AI",
+      "description": "源文校准"
+    },
+    {
+      "id": "exchange",
+      "title": "外部 AI",
+      "description": "导出给 Web LLM 的分阶段工作流"
+    }
   ],
   "prompts": {
     "subtitle_organize": {
@@ -35,11 +51,31 @@
       "description": "按源语言规则规划自然显示 Cue。",
       "version": "2026-09-06.17",
       "variants": {
-        "en": ["segmentation/common/semantic_grouping.md", "segmentation/en/rules.md", "cases/semantic_grouping_en.constructed.md"],
-        "zh": ["segmentation/common/semantic_grouping.md", "segmentation/zh/rules.md", "cases/semantic_grouping_zh.constructed.md"],
-        "ja": ["segmentation/common/semantic_grouping.md", "segmentation/ja/rules.md", "cases/semantic_grouping_ja.constructed.md"],
-        "ko": ["segmentation/common/semantic_grouping.md", "segmentation/ko/rules.md", "cases/semantic_grouping_ko.constructed.md"],
-        "mixed": ["segmentation/common/semantic_grouping.md", "segmentation/mixed/rules.md", "cases/semantic_grouping_mixed.constructed.md"]
+        "en": [
+          "segmentation/common/semantic_grouping.md",
+          "segmentation/en/rules.md",
+          "cases/semantic_grouping_en.constructed.md"
+        ],
+        "zh": [
+          "segmentation/common/semantic_grouping.md",
+          "segmentation/zh/rules.md",
+          "cases/semantic_grouping_zh.constructed.md"
+        ],
+        "ja": [
+          "segmentation/common/semantic_grouping.md",
+          "segmentation/ja/rules.md",
+          "cases/semantic_grouping_ja.constructed.md"
+        ],
+        "ko": [
+          "segmentation/common/semantic_grouping.md",
+          "segmentation/ko/rules.md",
+          "cases/semantic_grouping_ko.constructed.md"
+        ],
+        "mixed": [
+          "segmentation/common/semantic_grouping.md",
+          "segmentation/mixed/rules.md",
+          "cases/semantic_grouping_mixed.constructed.md"
+        ]
       }
     },
     "semantic_grouping_repair": {
@@ -48,11 +84,26 @@
       "description": "保留完整原块和已验收范围，一次修复块内全部错误。",
       "version": "2026-09-06.17",
       "variants": {
-        "en": ["segmentation/common/semantic_grouping_repair.md", "segmentation/en/rules.md"],
-        "zh": ["segmentation/common/semantic_grouping_repair.md", "segmentation/zh/rules.md"],
-        "ja": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ja/rules.md"],
-        "ko": ["segmentation/common/semantic_grouping_repair.md", "segmentation/ko/rules.md"],
-        "mixed": ["segmentation/common/semantic_grouping_repair.md", "segmentation/mixed/rules.md"]
+        "en": [
+          "segmentation/common/semantic_grouping_repair.md",
+          "segmentation/en/rules.md"
+        ],
+        "zh": [
+          "segmentation/common/semantic_grouping_repair.md",
+          "segmentation/zh/rules.md"
+        ],
+        "ja": [
+          "segmentation/common/semantic_grouping_repair.md",
+          "segmentation/ja/rules.md"
+        ],
+        "ko": [
+          "segmentation/common/semantic_grouping_repair.md",
+          "segmentation/ko/rules.md"
+        ],
+        "mixed": [
+          "segmentation/common/semantic_grouping_repair.md",
+          "segmentation/mixed/rules.md"
+        ]
       }
     },
     "boundary_evidence": {
@@ -61,112 +112,135 @@
       "description": "根据参考文稿、原始标点或无标点输入选择句界策略。",
       "version": "2026-08-17.1",
       "variants": {
-        "reference": ["segmentation/common/sentence_boundary_reference.md"],
-        "reconstruct": ["segmentation/common/sentence_boundary_reconstruct.md"],
-        "unpunctuated": ["segmentation/common/unpunctuated_reconstruct.md"]
+        "reference": [
+          "segmentation/common/sentence_boundary_reference.md"
+        ],
+        "reconstruct": [
+          "segmentation/common/sentence_boundary_reconstruct.md"
+        ],
+        "unpunctuated": [
+          "segmentation/common/unpunctuated_reconstruct.md"
+        ]
       }
     },
     "contextual_translation": {
-      "exact_mode_variants": {
-        "many_to_many": {
-          "en_to_zh": {
-            "version": "2026-10-22.separate-first.6",
-            "files": [
-              "translation/approved_en_zh/primary.md"
-            ]
-          }
-        }
-      },
       "title": "上下文翻译",
       "category": "translation",
-      "description": "由公共规则、执行阶段、映射模式和语言规则组合生成翻译提示词。",
-      "version": "2026-09-15.2",
-      "shared": ["translation/common/base.md", "translation/common/primary.md"],
+      "description": "通用翻译规则与目标语言规则组合；直接输出字幕编号和译文，无中间语义映射组。",
+      "version": "2026-11-02.target-language.1",
+      "shared": [
+        "translation/common/base.md",
+        "translation/common/primary.md"
+      ],
       "default_mode": "many_to_many",
       "modes": {
-        "one_to_one": ["translation/mode/one_to_one.md"],
-        "many_to_many": ["translation/common/contextual_translation.md"]
-      },
-      "mode_variants": {
-        "many_to_many": {
-          "en_to_zh": ["cases/contextual_translation_en_to_zh.constructed.md"],
-          "zh_to_en": ["cases/contextual_translation_zh_to_en.constructed.md"],
-          "zh_to_ja": ["cases/contextual_translation_zh_to_ja.constructed.md"],
-          "zh_to_ko": ["cases/contextual_translation_zh_to_ko.constructed.md"],
-          "en_to_ja": ["cases/contextual_translation_en_to_ja.constructed.md"],
-          "en_to_ko": ["cases/contextual_translation_en_to_ko.constructed.md"],
-          "ja_to_zh": ["cases/contextual_translation_ja_to_zh.constructed.md"],
-          "ja_to_en": ["cases/contextual_translation_ja_to_en.constructed.md"],
-          "ja_to_ko": ["cases/contextual_translation_ja_to_ko.constructed.md"],
-          "ko_to_zh": ["cases/contextual_translation_ko_to_zh.constructed.md"],
-          "ko_to_en": ["cases/contextual_translation_ko_to_en.constructed.md"],
-          "ko_to_ja": ["cases/contextual_translation_ko_to_ja.constructed.md"],
-          "mixed_to_zh": ["cases/contextual_translation_mixed.constructed.md"],
-          "mixed_to_en": ["cases/contextual_translation_mixed.constructed.md"],
-          "mixed_to_ja": ["cases/contextual_translation_mixed.constructed.md"],
-          "mixed_to_ko": ["cases/contextual_translation_mixed.constructed.md"]
-        }
+        "one_to_one": [
+          "translation/mode/one_to_one.md"
+        ],
+        "many_to_many": [
+          "translation/common/contextual_translation.md"
+        ]
       },
       "variants": {
-        "en_to_zh": ["translation/en_to_zh/rules.md"],
-        "zh_to_en": ["translation/zh_to_en/rules.md"],
-        "zh_to_ja": ["translation/ja/rules.md"],
-        "zh_to_ko": ["translation/ko/rules.md"],
-        "en_to_ja": ["translation/ja/rules.md"],
-        "en_to_ko": ["translation/ko/rules.md"],
-        "ja_to_zh": ["translation/target/zh.md"],
-        "ja_to_en": ["translation/target/en.md"],
-        "ja_to_ko": ["translation/ko/rules.md"],
-        "ko_to_zh": ["translation/target/zh.md"],
-        "ko_to_en": ["translation/target/en.md"],
-        "ko_to_ja": ["translation/ja/rules.md"],
-        "mixed_to_zh": ["translation/mixed/rules.md", "translation/target/zh.md"],
-        "mixed_to_en": ["translation/mixed/rules.md", "translation/target/en.md"],
-        "mixed_to_ja": ["translation/mixed/rules.md", "translation/ja/rules.md"],
-        "mixed_to_ko": ["translation/mixed/rules.md", "translation/ko/rules.md"],
-        "generic": ["translation/common/generic_language.md"]
+        "target_zh": [
+          "translation/target/zh.md"
+        ],
+        "target_en": [
+          "translation/target/en.md"
+        ],
+        "target_ja": [
+          "translation/target/ja.md"
+        ],
+        "target_ko": [
+          "translation/target/ko.md"
+        ],
+        "target_th": [
+          "translation/target/th.md"
+        ],
+        "target_ar": [
+          "translation/target/ar.md"
+        ],
+        "target_fr": [
+          "translation/target/fr.md"
+        ],
+        "target_de": [
+          "translation/target/de.md"
+        ],
+        "target_es": [
+          "translation/target/es.md"
+        ],
+        "target_pt": [
+          "translation/target/pt.md"
+        ],
+        "target_ru": [
+          "translation/target/ru.md"
+        ],
+        "target_it": [
+          "translation/target/it.md"
+        ],
+        "generic": [
+          "translation/common/generic_language.md"
+        ]
       }
     },
     "contextual_translation_repair": {
-      "exact_mode_variants": {
-        "many_to_many": {
-          "en_to_zh": {
-            "version": "2026-10-22.separate-first.6",
-            "files": [
-              "translation/approved_en_zh/primary.md",
-              "translation/approved_en_zh/repair.md"
-            ]
-          }
-        }
-      },
       "title": "上下文翻译修复",
       "category": "translation",
-      "description": "使用同一映射模式契约，一次修复原块内全部缺失或无效 Cue。",
-      "version": "2026-09-15.2",
-      "shared": ["translation/common/base.md", "translation/common/repair.md"],
+      "description": "通用翻译规则与目标语言规则组合；直接输出字幕编号和译文，无中间语义映射组。",
+      "version": "2026-11-02.target-language.1",
+      "shared": [
+        "translation/common/base.md",
+        "translation/common/repair.md"
+      ],
       "default_mode": "many_to_many",
       "modes": {
-        "one_to_one": ["translation/mode/one_to_one.md"],
-        "many_to_many": ["translation/common/contextual_translation.md"]
+        "one_to_one": [
+          "translation/mode/one_to_one.md"
+        ],
+        "many_to_many": [
+          "translation/common/contextual_translation.md"
+        ]
       },
       "variants": {
-        "en_to_zh": ["translation/en_to_zh/rules.md"],
-        "zh_to_en": ["translation/zh_to_en/rules.md"],
-        "zh_to_ja": ["translation/ja/rules.md"],
-        "zh_to_ko": ["translation/ko/rules.md"],
-        "en_to_ja": ["translation/ja/rules.md"],
-        "en_to_ko": ["translation/ko/rules.md"],
-        "ja_to_zh": ["translation/target/zh.md"],
-        "ja_to_en": ["translation/target/en.md"],
-        "ja_to_ko": ["translation/ko/rules.md"],
-        "ko_to_zh": ["translation/target/zh.md"],
-        "ko_to_en": ["translation/target/en.md"],
-        "ko_to_ja": ["translation/ja/rules.md"],
-        "mixed_to_zh": ["translation/mixed/rules.md", "translation/target/zh.md"],
-        "mixed_to_en": ["translation/mixed/rules.md", "translation/target/en.md"],
-        "mixed_to_ja": ["translation/mixed/rules.md", "translation/ja/rules.md"],
-        "mixed_to_ko": ["translation/mixed/rules.md", "translation/ko/rules.md"],
-        "generic": ["translation/common/generic_language.md"]
+        "target_zh": [
+          "translation/target/zh.md"
+        ],
+        "target_en": [
+          "translation/target/en.md"
+        ],
+        "target_ja": [
+          "translation/target/ja.md"
+        ],
+        "target_ko": [
+          "translation/target/ko.md"
+        ],
+        "target_th": [
+          "translation/target/th.md"
+        ],
+        "target_ar": [
+          "translation/target/ar.md"
+        ],
+        "target_fr": [
+          "translation/target/fr.md"
+        ],
+        "target_de": [
+          "translation/target/de.md"
+        ],
+        "target_es": [
+          "translation/target/es.md"
+        ],
+        "target_pt": [
+          "translation/target/pt.md"
+        ],
+        "target_ru": [
+          "translation/target/ru.md"
+        ],
+        "target_it": [
+          "translation/target/it.md"
+        ],
+        "generic": [
+          "translation/common/generic_language.md"
+        ]
       }
     },
     "external_ai_prooftranslation": {
@@ -175,7 +249,9 @@
       "description": "编排 Web AI 校准确认、翻译确认和结构化安全回导；业务规则使用活动校准与翻译提示词快照。",
       "version": "2026-08-24.1",
       "variants": {
-        "default": ["exchange/external_ai_prooftranslation.md"]
+        "default": [
+          "exchange/external_ai_prooftranslation.md"
+        ]
       }
     },
     "external_ai_split": {
@@ -184,7 +260,9 @@
       "description": "编排 Web AI 切分预览、用户确认和边界回导；业务规则使用活动切分提示词快照。",
       "version": "2026-08-24.1",
       "variants": {
-        "default": ["exchange/external_ai_split.md"]
+        "default": [
+          "exchange/external_ai_split.md"
+        ]
       }
     },
     "external_ai_edit": {
@@ -193,7 +271,9 @@
       "description": "编排 Web AI 校准、翻译、审阅和最终 SRT 交付；业务规则使用活动校准与翻译提示词快照。",
       "version": "2026-08-24.1",
       "variants": {
-        "default": ["exchange/external_ai_edit.md"]
+        "default": [
+          "exchange/external_ai_edit.md"
+        ]
       }
     },
     "calibration": {
@@ -202,11 +282,21 @@
       "description": "应用大小写、标点、专名与确定性 ASR 修正。",
       "version": "2026-09-06.17",
       "variants": {
-        "en": ["calibration/en.md"],
-        "zh": ["calibration/zh.md"],
-        "ja": ["calibration/ja.md"],
-        "ko": ["calibration/ko.md"],
-        "mixed": ["calibration/mixed.md"]
+        "en": [
+          "calibration/en.md"
+        ],
+        "zh": [
+          "calibration/zh.md"
+        ],
+        "ja": [
+          "calibration/ja.md"
+        ],
+        "ko": [
+          "calibration/ko.md"
+        ],
+        "mixed": [
+          "calibration/mixed.md"
+        ]
       }
     },
     "calibration_repair": {
@@ -214,13 +304,25 @@
       "category": "editor",
       "description": "保留完整原块和已验收 Cue，一次修复块内全部缺失或无法绑定项。",
       "version": "2026-09-06.17",
-      "shared": ["calibration/repair.md"],
+      "shared": [
+        "calibration/repair.md"
+      ],
       "variants": {
-        "en": ["calibration/en.md"],
-        "zh": ["calibration/zh.md"],
-        "ja": ["calibration/ja.md"],
-        "ko": ["calibration/ko.md"],
-        "mixed": ["calibration/mixed.md"]
+        "en": [
+          "calibration/en.md"
+        ],
+        "zh": [
+          "calibration/zh.md"
+        ],
+        "ja": [
+          "calibration/ja.md"
+        ],
+        "ko": [
+          "calibration/ko.md"
+        ],
+        "mixed": [
+          "calibration/mixed.md"
+        ]
       }
     }
   }

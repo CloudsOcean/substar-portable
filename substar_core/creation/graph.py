@@ -99,3 +99,21 @@ def create_subtitle_creation_graph(
         depends_on_task_ids=(str(transcription["task_id"]),),
     )
     return transcription, segmentation
+
+
+def segmentation_request_with_provider(original: Mapping[str, Any], settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Replace only model routing; keep content/checkpoint identity unchanged."""
+    from substar_core.segmentation.contracts import canonical_sha256, validate_segmentation_request
+    original = validate_segmentation_request(original)
+    routed = build_segmentation_request(
+        transcription_task_id=original["transcription"]["task_id"],
+        transcription_input_fingerprint=original["transcription"]["input_fingerprint"],
+        media_sha256=original["transcription"]["media_sha256"],
+        source_asset_id=original["source_asset_id"], language=original["language"],
+        segmentation_enabled=True, reference_document=original["reference_document"],
+        prompt_snapshot=original["prompt_snapshot"], glossary_snapshot=original["glossary_snapshot"],
+        settings=dict(settings),
+    )
+    content = {key: value for key, value in original.items() if key != "input_fingerprint"}
+    content["provider"] = routed["provider"]
+    return validate_segmentation_request({**content, "input_fingerprint": canonical_sha256(content)})

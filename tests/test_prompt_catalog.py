@@ -17,10 +17,10 @@ def test_prompt_catalog_projects_only_registered_production_components() -> None
     assert catalog["components_editable"] is True
     assert catalog["stats"] == {
         "families": 12,
-        "variants": 62,
-        "components": 54,
-        "core_components": 36,
-        "cases": 18,
+        "variants": 54,
+        "components": 44,
+        "core_components": 39,
+        "cases": 5,
     }
     assert [item["id"] for item in catalog["categories"]] == [
         "segmentation", "translation", "editor", "exchange",

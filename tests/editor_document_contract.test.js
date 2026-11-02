@@ -155,3 +155,23 @@ for (const status of ["translated", "needs_review"]) {
     assert.throws(() => validateDocument(document), /non-empty/);
   });
 }
+
+
+test("cue restore restores fully deleted words but preserves partial deletions", () => {
+  for (const [state, words] of [["deleted",["deleted","deleted"]],["active",["deleted","deleted"]],["deleted",["active","deleted"]],["deleted",["active","active"]]]) {
+    const document=documentWithGroupOrigin("segmentation");
+    document.source_tokens.push({token_id:"src_2",index:1,text:"world",start:0.5,end:1});
+    document.display_tokens.push({...structuredClone(document.display_tokens[0]),token_id:"display_2",source_token_ids:["src_2"]});
+    document.cues[0].display_token_ids.push("display_2");
+    document.cues[0].state=state;
+    words.forEach((s,i)=>document.display_tokens[i].state=s);
+    const revision={revision_id:"restore",revision_number:1,document_hash:"hash",document};
+    const op=contract.restoreCueOperation(revision,"cue_1");
+    assert.deepEqual(op.payload.cue_ids,state==="deleted"?["cue_1"]:[]);
+    assert.deepEqual(op.payload.token_ids,words.every(s=>s==="deleted")?["display_1","display_2"]:[]);
+    const restored=store.applyLocalOperation(revision,op);
+    assert.equal(restored.document.cues[0].state,"active");
+    assert.deepEqual(restored.document.display_tokens.map(t=>t.state),words.every(s=>s==="deleted")?["active","active"]:words);
+    assert.deepEqual(restored.document.source_tokens,document.source_tokens);
+  }
+});

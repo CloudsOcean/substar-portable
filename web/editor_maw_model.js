@@ -2,7 +2,8 @@
 (function(root,factory){const api=factory();if(typeof module==='object')module.exports=api;root.SubstarMawModel=api;})(globalThis,function(){
   const clone=v=>JSON.parse(JSON.stringify(v));
   const ms=v=>Math.round(Number(v)*1000), seconds=v=>Number(v)/1000;
-  function segments(view,sourceText){
+  function segments(view,sourceText,projectLines,projectToken){
+    const cues=new Map((view?.cue_views||[]).map(c=>[c.cue_id,c]));
     const tokens=new Map((view?.token_views||[]).map(t=>[t.token_id,t]));
     return (view?.cue_views||[]).map(c=>({
       id:c.cue_id,start:ms(c.start),end:ms(c.end),speaker:c.speaker||'',
@@ -10,7 +11,13 @@
       translation:c.target_text??c.target?.target_text??'',disabled:c.state!=='active',subtitle_track:c.subtitle_track||'main',
       manual:c.source_text!=null,
       items:(c.active_display_token_ids||c.display_token_ids||[]).map(id=>tokens.get(id)).filter(t=>t&&Number.isFinite(t.start)&&Number.isFinite(t.end)).map(t=>({id:t.token_id,text:t.text,start:ms(t.start),end:ms(t.end)})),
-    })).sort((a,b)=>a.start-b.start||a.end-b.end||a.id.localeCompare(b.id));
+    })).map(s=>{
+      const cue=cues.get(s.id);
+      const lines=projectLines?.(cue);
+      if(lines){s.rawText=s.text;s.rawTranslation=s.translation;s.text=lines.source;s.translation=lines.target;s.sourceUpper=lines.sourceUpper;}
+      if(projectToken)s.items=s.items.map(item=>({...item,rawText:item.text,text:projectToken(item.text,cue)}));
+      return s;
+    }).sort((a,b)=>a.start-b.start||a.end-b.end||a.id.localeCompare(b.id));
   }
   function timeline(value){return clone(value||{markers:[],plans:[],active_plan_id:null});}
   function markers(value){return (value?.markers||[]).map(m=>({...clone(m),start:ms(m.start),...(m.point==null?{}:{point:ms(m.point)}),...(m.end==null?{}:{end:ms(m.end)})})).map(m=>{if(m.end==null)delete m.end;return m;});}

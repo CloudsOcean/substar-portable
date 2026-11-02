@@ -206,6 +206,28 @@ class QwenCloudTranscriptionTests(unittest.TestCase):
                 )
             self.assertEqual(reused["text"], result["text"])
 
+    def test_no_words_provider_code_survives_private_message(self) -> None:
+        from substar_core.transcription.worker import _public_transcription_error
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wav = root / "audio.wav"
+            wav.write_bytes(b"wav")
+            def request(method, url, **kwargs):
+                if method == "POST":
+                    return FakeResponse({"output": {"task_id": "remote-test"}})
+                return FakeResponse({"output": {"task_status": "FAILED",
+                    "code": "ASR_RESPONSE_HAVE_NO_WORDS", "message": "private diagnostic"}})
+            with (
+                patch("substar_core.qwen_cloud_asr._encode_cloud_audio", side_effect=self.fake_audio),
+                patch("substar_core.qwen_cloud_asr.upload_temporary_file", return_value="oss://audio"),
+                patch("substar_core.qwen_cloud_asr._request", side_effect=request),
+                self.assertRaises(QwenCloudAsrError) as caught,
+            ):
+                run_qwen_cloud_asr(wav, self.settings(root / "checkpoint", "a" * 64), lambda *_: None)
+            error = _public_transcription_error(caught.exception)
+            self.assertIn("ASR_RESPONSE_HAVE_NO_WORDS", error["public_message"])
+            self.assertNotIn("private", error["public_message"])
+
     def test_changed_input_fingerprint_cannot_reuse_old_result(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

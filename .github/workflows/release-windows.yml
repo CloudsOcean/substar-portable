@@ -3,6 +3,7 @@ name: Release Windows EXE
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -25,6 +26,13 @@ jobs:
           cache-dependency-path: |
             requirements-release.txt
             requirements-test.txt
+      - name: Resolve release tag
+        shell: pwsh
+        run: |
+          $version = (Get-Content portable_manifest.json -Raw | ConvertFrom-Json).version
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) { throw 'Tag and manifest version do not match.' }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare FFmpeg release binaries
         shell: pwsh
         run: |
@@ -65,17 +73,18 @@ jobs:
         run: .\scripts\build-windows.ps1 -SkipTests
       - name: Create release archive
         shell: pwsh
-        run: Compress-Archive -LiteralPath 'dist\Substar' -DestinationPath 'Substar-Windows-x64-${{ github.ref_name }}.zip' -Force
+        run: Compress-Archive -LiteralPath 'dist\Substar' -DestinationPath 'Substar-Windows-x64-${{ env.RELEASE_TAG }}.zip' -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: Substar-Windows-x64-${{ github.ref_name }}
-          path: Substar-Windows-x64-${{ github.ref_name }}.zip
+          name: Substar-Windows-x64-${{ env.RELEASE_TAG }}
+          path: Substar-Windows-x64-${{ env.RELEASE_TAG }}.zip
           if-no-files-found: error
       - uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
-          files: Substar-Windows-x64-${{ github.ref_name }}.zip
+          files: Substar-Windows-x64-${{ env.RELEASE_TAG }}.zip

@@ -1,7 +1,2 @@
-# Target English
-
-- Produce concise, idiomatic English rather than preserving source syntax.
-- Supply a grammatical subject, articles, number and tense conservatively; never invent an actor, identity or certainty.
-- Keep auxiliaries, infinitival `to`, prepositions and determiners with a phrase that immediately completes them.
-- Preserve names, numbers, units, negation, condition, comparison, causality and modality exactly once.
-- Avoid duplicated subjects when adjacent Cues form one continuous English sentence.
+# 目标语言：英语
+使用自然英语语序、惯用搭配和口语表达。按语境准确处理主语、冠词、时态、单复数和情态，不补出未知行为者。介词、助动词、不定式与其依赖成分连贯，避免连续字幕机械重复主语。保留必要词间空格和词内撇号、连字符。

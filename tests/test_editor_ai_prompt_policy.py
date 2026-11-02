@@ -67,16 +67,16 @@ def test_all_calibration_languages_share_projection_and_alignment_safety() -> No
 def test_mixed_source_translation_uses_explicit_target_routes() -> None:
     for target in ("zh-CN", "en", "ja", "ko"):
         route = translation_variant("mixed", target)
-        assert route == f"mixed_to_{'zh' if target == 'zh-CN' else target}"
+        assert route == f"target_{'zh' if target == 'zh-CN' else target}"
         for mode in ("one_to_one", "many_to_many"):
             prompt = render_prompt("contextual_translation", variant=route, mode=mode)
             repair = render_prompt(
                 "contextual_translation_repair", variant=route, mode=mode
             )
-            assert prompt.version == "2026-09-15.2"
-            assert repair.version == "2026-09-15.2"
-            assert "production/translation/mixed/rules.md" in prompt.files
-            assert "production/translation/mixed/rules.md" in repair.files
+            assert prompt.version == "2026-11-02.target-language.1"
+            assert repair.version == "2026-11-02.target-language.1"
+            assert f"production/translation/target/{'zh' if target == 'zh-CN' else target}.md" in prompt.files
+            assert repair.files[-1] == prompt.files[-1]
             assert "编号|译文" in prompt.text
             assert "全部结构错误" in repair.text
             if mode == "many_to_many":

@@ -42,6 +42,7 @@ def build_text_task_handler(kind, projects_root, application_root):
                             timeout_seconds=float(payload["settings"].get("stage_timeout_seconds",3600)))
     def progress(context, message):
         return {"progress":float(message.progress or 0),"step":message.step,"message":message.data.get("message",""),
+                "wait_reason":None,
                 "phase":"delivery" if message.data.get("phase") == "materializing" else "primary",
                 "completed_units":int(message.data.get("completed",0)),"total_units":int(message.data.get("total",0)),
                 "progress_payload":dict(message.data.get("ai_progress") or {})}

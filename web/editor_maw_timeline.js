@@ -1,11 +1,12 @@
 import {createWordSelection,selectionRuns} from './editor_maw_selection.js?v=20261025-selection-1';
+import {refreshGapRows} from './editor_maw_gap_render.js?v=20261102-gap-1';
 import {installSubstarBoundaries} from './editor_maw_boundary.js?v=20261027-virtual-list-1';
 import {installNativeWaveformStyle} from './editor_maw_native_style.js?v=20261025-low-energy-1';
 import {installPcmWaveformPaint} from './editor_maw_pcm_paint.js?v=20261025-low-energy-1';
 import {createWaveformLoader} from './editor_maw_waveform_loader.js?v=20261025-recovery-1';
 import {createGapBoundarySnapper,createMarkerBoundarySnapper} from './editor_maw_gap_snap.js?v=20261025-selection-1';
 /* MAW waveform host adapter. All persistent edits use Substar document operations. */
-import {createMawMenus} from './editor_maw_menus.js?v=20261025-selection-1';
+import {createMawMenus} from './editor_maw_menus.js?v=20261029-punctuation-1';
 import {createCutPlanPanel} from './editor_cut_plan_panel.js?v=2';
 import {shell} from './editor_maw_shell.js?v=20261025-tools-2';
 import {initSubstarMarkersPanel} from './vendor/maw/editor/markers/editor-markers-panel.js?v=20261025-tools-2';
@@ -29,9 +30,26 @@ export function createTimelineController(options){
   const refresh=()=>{if(!dead){wave.refreshCueOverlay();wave.refreshGapOverlay?.();wave.refreshMarkerOverlay?.();decorate();}};
   function enqueue(task){pending++;host.dataset.saving='true';show('正在保存…');const done=queue.then(async()=>{if(dead)return;try{await task();if(!dead){if(pending===1){readView(view);refreshControls();refresh();}show('');}}catch(e){if(!dead){readView(view);refresh();show('保存失败：'+(e.message||e));}throw e;}finally{pending--;host.dataset.saving=String(pending>0);}});queue=done.catch(()=>{});return done;}
   const run=fn=>Promise.resolve().then(fn).catch(e=>show(e.message||e));
-  function persist(next){const snapshot=M.clone(next);return enqueue(async()=>{await options.onTimelineChange(snapshot);timeline=M.clone(snapshot);});}
+  // Stage every draft immediately in the document queue (and its recovery
+  // journal). The document queue serializes HTTP writes, not pointer input.
+  let timelineWrites=0,timelineWriteFailed=false;
+  function persist(next,{gapOnly=false}={}){
+    const snapshot=M.clone(next);
+    timelineWrites++;pending++;host.dataset.saving='true';show('正在保存…');
+    let saving;
+    try{saving=options.onTimelineChange(snapshot,{gapOnly});}catch(error){saving=Promise.reject(error);}
+    const done=Promise.resolve(saving).then(()=>{
+      timelineWriteFailed=false;
+      // Never replace the current draft with this request's older snapshot.
+    },error=>{timelineWriteFailed=true;show('保存失败，修改已保留：'+(error.message||error));throw error;}).finally(()=>{
+      timelineWrites--;pending--;host.dataset.saving=String(pending>0);
+      if(!dead&&!pending&&!timelineWriteFailed){readView(view);refreshControls();if(!gapOnly)refresh();show('');}
+    });
+    queue=Promise.all([queue,done]).then(()=>{},()=>{});
+    return done;
+  }
   function commitMarkers(mutator){const next=U().normalizeMarkers(M.clone(markers));mutator(next);markers=U().normalizeMarkers(next);const t=M.timeline(timeline);t.schema='substar.timeline.v2';t.markers=[...(t.markers||[]).filter(m=>m.plan_id&&m.plan_id!==t.active_plan_id),...M.storedMarkers(markers)];timeline=t;refresh();globalThis.MaweMarkersPanel?.render();return persist(t);}
-  function commitGaps(next){gapState=C.normalizeGapRemoveData(next);timeline=M.withGapState(timeline,gapState);refresh();renderGapPanel();cutPlanPanel?.render();return persist(timeline);}
+  function commitGaps(next){gapState=C.normalizeGapRemoveData(next);timeline=M.withGapState(timeline,gapState);refreshGapRows(wave,C.getGapRemoveDisplayGaps(gapState.gaps),field('gap-mode').value);renderGapPanel();cutPlanPanel?.render();return persist(timeline,{gapOnly:true});}
   function manualGap(start,end,removed=true){const provenance=C.appendGapRemoveManualOverrides(gapState.provenance,[{start:Math.round(start),end:Math.round(end),removed}],gapState.gaps);return commitGaps({...gapState,provenance,gaps:C.gapRangesFromProvenance(provenance)});}
   function moveGap(index,delta,copy=false){if(copy){const gaps=C.copyGapRemoveRange(gapState.gaps,index,delta,wave.durationMs);return commitGaps({...gapState,provenance:C.normalizeGapRemoveProvenance(null,gaps),gaps});}const result=C.moveGapRemoveProvenance(gapState.provenance,gapState.gaps,index,delta,wave.durationMs,gapState.gaps);return commitGaps({...gapState,provenance:result.provenance,gaps:result.gaps});}
   function markerMove(id,delta){return commitMarkers(items=>{const item=items.find(m=>m.id===id);if(!item)return;const span=item.end==null?0:item.end-item.start;item.start=Math.max(0,Math.min(wave.durationMs-span,item.start+Math.round(delta)));if(item.end!=null)item.end=item.start+span;});}
@@ -71,7 +89,7 @@ export function createTimelineController(options){
   function commitTimes(){const changes=M.timeChanges(beforeEdit||[],[...main,...overlay]);beforeEdit=null;if(!changes.length)return;const ids=new Set(changes.map(c=>c.cue_id)),wordTimes={};for(const s of [...main,...overlay])if(ids.has(s.id))for(const item of s.items)if(item.end>item.start&&item.start>=s.start&&item.end<=s.end)wordTimes[item.id]={start:Math.round(item.start),end:Math.round(item.end)};run(()=>enqueue(()=>options.onCommitTimelineTimes(changes,wordTimes)));}
   function editText(index,track='main'){
     const s=segments(track)[index];if(!s)return;
-    const box=doc.createElement('dialog');box.className='cut-dialog';const title=doc.createElement('h3');title.textContent=track==='extension'?'编辑译文':'编辑字幕';const input=doc.createElement('textarea');input.value=s.text;const save=doc.createElement('button');save.textContent='保存';const close=doc.createElement('button');close.textContent='取消';box.append(title,input,save,close);host.append(box);box.showModal();input.focus();
+    const box=doc.createElement('dialog');box.className='cut-dialog';const title=doc.createElement('h3');title.textContent=track==='extension'?'编辑译文':'编辑字幕';const input=doc.createElement('textarea');input.value=s.rawText??s.text;const save=doc.createElement('button');save.textContent='保存';const close=doc.createElement('button');close.textContent='取消';box.append(title,input,save,close);host.append(box);box.showModal();input.focus();
     close.onclick=()=>box.close();box.onclose=()=>box.remove();save.onclick=()=>run(async()=>{await options.onTimelineTextEdit({cueId:s.id,tokenId:null,text:input.value,track});box.close();});
   }
   function split(index,time,track='main'){const s=segments(track)[index];if(!s)return;const cue=view.cue_views.find(c=>c.cue_id===s.id);const tokenIds=new Set(cue.display_token_ids||[]);const tokens=(view.token_views||[]).filter(t=>tokenIds.has(t.token_id)&&t.end*1000<=time);const after=tokens.at(-1);if(!after){show('此处没有可用字词边界');return;}options.onOperation?.('split_cue',{type:'split_cue',cue_id:s.id,after_token_id:after.token_id});}
@@ -221,8 +239,8 @@ export function createTimelineController(options){
   function readView(next){
     view=next;timeline=M.timeline(next?.properties?.timeline);markers=U().normalizeMarkers(M.markers(timeline).filter(m=>!m.plan_id||m.plan_id===timeline.active_plan_id));
     const plan=timeline.plans.find(p=>p.id===timeline.active_plan_id);gapState=C.normalizeGapRemoveData(plan?.gap_remove||timeline.gap_remove||{gaps:M.legacyGaps(timeline)});
-    all=M.segments(next,options.getTimelineCueText);for(const s of all){s.sourceUpper=globalThis.SubstarLanguageLayout?.routedSourceUpper(s.text,view?.presentation||{})!==false;s.color={name:s.speaker,value:globalThis.EditorSpeakers?.color(s.speaker)||'#87bfae'};for(const item of s.items){const timing=timeline.word_timings?.[item.id];if(timing)Object.assign(item,timing);}}
-    const visible=all.filter(s=>!speaker||s.speaker===speaker);main=visible.filter(s=>s.subtitle_track!=='overlay');overlay=visible.filter(s=>s.subtitle_track==='overlay');extension=main.map(s=>{const translation={...s,text:s.translation,items:[],bound_to:s.id};for(const edge of ['start','end'])Object.defineProperty(translation,edge,{enumerable:true,get:()=>s[edge],set:value=>{s[edge]=value;}});return translation;});
+    all=M.segments(next,options.getTimelineCueText,options.getTimelineCueLines,options.getTimelineTokenText);for(const s of all){s.sourceUpper=s.sourceUpper??globalThis.SubstarLanguageLayout?.routedSourceUpper(s.text,view?.presentation||{})!==false;s.color={name:s.speaker,value:globalThis.EditorSpeakers?.color(s.speaker)||'#87bfae'};for(const item of s.items){const timing=timeline.word_timings?.[item.id];if(timing)Object.assign(item,timing);}}
+    const visible=all.filter(s=>!speaker||s.speaker===speaker);main=visible.filter(s=>s.subtitle_track!=='overlay');overlay=visible.filter(s=>s.subtitle_track==='overlay');extension=main.map(s=>{const translation={...s,text:s.translation,rawText:s.rawTranslation??s.translation,items:[],bound_to:s.id};for(const edge of ['start','end'])Object.defineProperty(translation,edge,{enumerable:true,get:()=>s[edge],set:value=>{s[edge]=value;}});return translation;});
     globalThis.MaweBoot.DATA.gap_remove=gapState;globalThis.MaweBoot.DATA.markers=markers;
   }
   function refreshControls(){
@@ -378,7 +396,7 @@ export function createTimelineController(options){
     }
   });
   waveformLoader.start();
-  return {setView(next){if(dead)return;filmstrip.setUrl(options.getThumbnailsUrl?.());if(!pending&&next!==view){readView(next);refreshControls();}else view=next;wave.refreshCueOverlay();wave.refreshGapOverlay?.();wave.refreshMarkerOverlay?.();decorate();if(doc.querySelector('[data-tool-panel=markers].experimental-tool-active'))globalThis.MaweMarkersPanel?.render();},setActiveCue(id){selected=id;},setSelectedCue(id){selected=id;wave.refreshCueBlocks();decorate();},redraw(){if(!wave.drag&&!wave.wordDrag&&!wave.substarBoundaryDrag)wave.render();decorate();},revealTime,revealRange:(start)=>revealTime(start,true),scrollToTime:revealTime,seek,
+  return {markSaved(next){if(dead)return;const recovering=timelineWriteFailed;timelineWriteFailed=false;view=next;if(!pending){readView(next);if(recovering){wave.refreshGapOverlay?.();renderGapPanel();show('');}}},setView(next,{gapOnly=false}={}){if(dead)return;if(gapOnly){view=next;return;}filmstrip.setUrl(options.getThumbnailsUrl?.());if(!pending&&!timelineWriteFailed&&next!==view){readView(next);refreshControls();}else view=next;if(timelineWrites||timelineWriteFailed)return;wave.refreshCueOverlay();wave.refreshGapOverlay?.();wave.refreshMarkerOverlay?.();decorate();if(doc.querySelector('[data-tool-panel=markers].experimental-tool-active'))globalThis.MaweMarkersPanel?.render();},setActiveCue(id){selected=id;},setSelectedCue(id){selected=id;wave.refreshCueBlocks();decorate();},redraw(){if(timelineWrites||timelineWriteFailed||wave.gapMoveDrag||wave.gapBoundaryDrag||wave.gapRangeDrag)return;if(!wave.drag&&!wave.wordDrag&&!wave.substarBoundaryDrag)wave.render();decorate();},revealTime,revealRange:(start)=>revealTime(start,true),scrollToTime:revealTime,seek,
     setFollowPlayback(value){wave.manualFollowUntil=value?0:Date.now()+3600000;},setMode(mode){wave.setMode(mode==='multiline'?'multi':mode);},getState(){return {duration:wave.durationMs/1000,selected_cue_ids:[...selection()].map(i=>main[i]?.id).filter(Boolean),mode:wave.settings.mode==='multi'?'multiline':'basic'};},
     getTimeRect(start,end){const row=wave.renderedRows.find(r=>Number(r.dataset.startMs)<=start*1000&&Number(r.dataset.endMs)>start*1000);if(!row)return null;const r=row.getBoundingClientRect(),span=Number(row.dataset.endMs)-Number(row.dataset.startMs);return {left:r.left+(start*1000-Number(row.dataset.startMs))/span*r.width,top:r.top,width:(end-start)*1000/span*r.width,height:r.height};},
     autoSnapOnce:settings=>{const intent=globalThis.EditorTimeline?.autoSnapPlan?.(view,settings);if(intent?.count)options.onOperation?.('autoSnap',intent);return intent;},

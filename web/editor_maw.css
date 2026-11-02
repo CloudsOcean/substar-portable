@@ -26,7 +26,6 @@
 .cue-timeline-panel:has(.maw-waveform-host)>.timeline-scrollbar{display:none;}
 body.editor-shell .cue-timeline-panel:has(.maw-waveform-host){display:flex!important;flex-direction:column;min-height:0;}
 .maw-waveform-host .waveform-row{background:var(--wave-row-bg);}
-.maw-waveform-host[data-saving=true] .waveform-pane{pointer-events:none;}
 
 /* A temporary word strip keeps sentence and word hit targets independent. */
 .maw-separated-words .waveform-word-block{opacity:1!important;}

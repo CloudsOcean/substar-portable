@@ -21,10 +21,10 @@ test('topology waits for blur edit to save before acquiring lock', async () => {
   const queue = createOperationQueue({base:()=>({}),sendBatch:async b=>{order.push(...b.operations.map(o=>o.type));return {};}});
   context=vm.createContext({state:{},window:{addEventListener(){}},ordinaryError(){},suspendPlaybackFollow(){},editorAiTaskLocksEditor:()=>false,
     isTopologyOperation:o=>o.type==='split_cue',ensureOperationQueue:()=>queue,
-    document:{activeElement:{closest:()=>true,matches:()=>true,blur:()=>context.sendOperation({type:'set_target'})}}});
+    document:{activeElement:{closest:()=>true,matches:()=>true,blur:()=>context.sendOperation({operation_id:'set_target',type:'set_target'})}}});
   vm.runInContext(extract('  async function flushActiveEditorInput()', '  let idleRevisionCheck')+
-    extract('  async function sendOperation(operation)', '  function manualProvenance'),context);
-  await context.sendOperation({type:'split_cue'});
+    extract('  async function sendOperation(operation,', '  function manualProvenance'),context);
+  await context.sendOperation({operation_id:'split_cue',type:'split_cue'});
   assert.deepEqual(order,['set_target','split_cue']);
   assert.equal(context.state.topologyOperationPending,false);
 });
@@ -33,12 +33,12 @@ test('flushing whole-line blur waits for its structural save acknowledgement',as
   let release,done=false,c;
   const queue=createOperationQueue({base:()=>({}),sendBatch:()=>new Promise(r=>release=r)});
   const document={activeElement:{closest:()=>true,matches:()=>true,blur(){
-    document.activeElement=null;this.editorCommit=c.sendOperation({type:'retime_text'});
+    document.activeElement=null;this.editorCommit=c.sendOperation({operation_id:'retime_text',type:'retime_text'});
   }}};
   c=vm.createContext({state:{},document,window:{addEventListener(){}},ordinaryError(){},suspendPlaybackFollow(){},
     editorAiTaskLocksEditor:()=>false,isTopologyOperation:()=>true,ensureOperationQueue:()=>queue});
   vm.runInContext(extract('  async function flushActiveEditorInput()', '  let idleRevisionCheck')+
-    extract('  async function sendOperation(operation)', '  function manualProvenance'),c);
+    extract('  async function sendOperation(operation,', '  function manualProvenance'),c);
   const flushing=c.flushActiveEditorInput().then(()=>done=true);
   for(let i=0;i<15;i++)await Promise.resolve();
   assert.equal(done,false);assert.equal(typeof release,'function');
@@ -51,13 +51,13 @@ test('a structural command saves the open whole-line edit before changing topolo
     order.push(...batch.operations.map(op=>op.type));return {};
   }});
   const document={activeElement:{closest:()=>true,matches:()=>true,blur(){
-    document.activeElement=null;this.editorCommit=c.sendOperation({type:'retime_text'});
+    document.activeElement=null;this.editorCommit=c.sendOperation({operation_id:'retime_text',type:'retime_text'});
   }}};
   c=vm.createContext({state:{},document,window:{addEventListener(){}},ordinaryError(){},suspendPlaybackFollow(){},
     editorAiTaskLocksEditor:()=>false,isTopologyOperation:()=>true,ensureOperationQueue:()=>queue});
   vm.runInContext(extract('  async function flushActiveEditorInput()', '  let idleRevisionCheck')+
-    extract('  async function sendOperation(operation)', '  function manualProvenance'),c);
-  await c.sendOperation({type:'split_cue'});
+    extract('  async function sendOperation(operation,', '  function manualProvenance'),c);
+  await c.sendOperation({operation_id:'split_cue',type:'split_cue'});
   assert.deepEqual(order,['retime_text','split_cue']);queue.destroy();
 });
 
@@ -77,6 +77,7 @@ test('restore stops at refreshed history when server version changed',async()=>{
   let posts=0,history=0;
   const panel={inert:false};
   const c=vm.createContext({state:{revision:{revision_id:'old'},undoRevisionIds:[],redoRevisionIds:[]},
+    workbenchInert:value=>value===undefined?panel.inert:(panel.inert=value),
     flushActiveEditorInput:async()=>{},api:async(path,options)=>{if(options)posts++;return {revision_id:'new'};},projectPath:()=>'',
     contract:{consumeRevision:x=>x},setRevision:r=>c.state.revision=r,loadRevisionHistory:async options=>{
       assert.equal(options.force,true);history++;
@@ -92,8 +93,8 @@ test('failed input save prevents structural operation',async()=>{
   const c=vm.createContext({state:{},ordinaryError(){},suspendPlaybackFollow(){},editorAiTaskLocksEditor:()=>false,
     isTopologyOperation:()=>true,flushActiveEditorInput:async()=>{throw Error('conflict');},
     ensureOperationQueue:()=>({enqueue:()=>enqueued=true})});
-  vm.runInContext(extract('  async function sendOperation(operation)', '  function manualProvenance'),c);
-  await c.sendOperation({type:'split_cue'});
+  vm.runInContext(extract('  async function sendOperation(operation,', '  function manualProvenance'),c);
+  await c.sendOperation({operation_id:'split_cue',type:'split_cue'});
   assert.equal(enqueued,false);assert.ok(!c.state.structuralPreparationPending);
 });
 
@@ -144,6 +145,7 @@ test('checkpoint serializes requests, locks the editor and recovers after a fail
     const panel={inert:false},errors=[];
     const state={revision:{revision_id:'r1'},revisions:[]};
     const c=vm.createContext({state,editorAiTaskLocksEditor:()=>false,
+      workbenchInert:value=>value===undefined?panel.inert:(panel.inert=value),
       $:selector=>selector==='#editorWorkbench'?panel:selector==='#checkpointName'?{value:'checkpoint'}:{},
       flushActiveEditorInput:()=>new Promise((resolve,reject)=>{release=()=>fail?reject(Error('offline')):resolve();}),
       loadRevisionHistory:async()=>{},projectPath:()=>'',api:async()=>{posts++;assert.equal(panel.inert,true);return {};},
@@ -250,7 +252,8 @@ test('full snapshot adoption cannot discard pending local operations',()=>{
 test('document writes wait for saved input, exclude competing writes and unlock on failure',async()=>{
   let release,writeCalled=false;
   const state={},panel={inert:false};
-  const c=vm.createContext({state,$:()=>panel,flushActiveEditorInput:()=>new Promise(r=>release=r)});
+  const c=vm.createContext({state,$:()=>panel,flushActiveEditorInput:()=>new Promise(r=>release=r),
+    workbenchInert:value=>value===undefined?panel.inert:(panel.inert=value)});
   vm.runInContext(extract('  async function withSavedDocument(', '  function hasUncommittedEditorInput()'),c);
   const first=c.withSavedDocument(async()=>{writeCalled=true;assert.equal(state.documentWriteLocked,true);throw Error('server error');});
   const rejected=assert.rejects(first,/server error/);
@@ -270,7 +273,7 @@ test('receipt-confirmed retry after undo clears the journal and preserves redo',
   const state={projectId:'p',revision:initial,documentStore:store,undoRevisionIds:[],redoRevisionIds:[],
     revisions:[{...initial,is_latest:true}],taskInfo:{autosave_retry_count:0}};
   const c=vm.createContext({state,projectEpoch:1,localStorage:{getItem:()=>null,setItem(){},removeItem(){}},
-    window:{EditorOperationQueue:{createOperationQueue}},console,
+    window:{EditorOperationQueue:{createOperationQueue},EditorRecovery:{archive:()=>null}},console,
     contract:{consumeRevision:r=>r,applyRevisionDelta:()=>{throw Error('base mismatch');}},
     api:async(_path,options)=>options?.method==='POST'?{acknowledged_operation_ids:[op.operation_id],action_revisions:[
       {revision_id:'r1',revision_number:2,parent_revision_id:'r0',provenance:{operation:'operation_batch'}}]}:latest,
@@ -279,7 +282,7 @@ test('receipt-confirmed retry after undo clears the journal and preserves redo',
     ordinaryError:message=>{if(message)assert.fail(message);},$:()=>({classList:{toggle(){}}})});
   vm.runInContext(extract('  function revisionMetadata(', '  function syncRevisionControls()')+
     extract('  function recordCommittedRevision(', '  async function loadRevisionHistory(')+
-    extract('  function appliedOperationIds(', '  async function sendOperation(operation)'),c);
+    extract('  function appliedOperationIds(', '  async function sendOperation(operation,'),c);
   const q=c.ensureOperationQueue(),saving=q.enqueue(op);await q.flushAndWait();await saving;
   assert.equal(q.getState().hasUnsavedChanges,false);assert.equal(store.pending().length,0);
   assert.deepEqual(Array.from(state.redoRevisionIds),['r1']);assert.equal(state.revision.revision_id,'r2');q.destroy();

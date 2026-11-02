@@ -89,3 +89,27 @@ test('a hung save times out, aborts the request and retains its operation for re
   assert.equal(signal.aborted,true);assert.equal(q.getState().failed,1);assert.equal(journal[0].operation_id,'timeout');
   q.destroy();
 });
+
+
+test("duplicate restored, pending and inflight actions share one send; conflicting IDs reject", async()=>{
+  const op={operation_id:'same',type:'edit',payload:{b:2,a:1}};
+  const equivalent={...op,payload:{a:1,b:2},retention:{different:true}};
+  let release;const batches=[];
+  const q=createOperationQueue({base:()=>({}),debounceMs:30000,initialOperations:[op,equivalent],sendBatch:async b=>{batches.push(b.operations);return new Promise(r=>release=r);}});
+  assert.equal(q.getState().pending,1);
+  const a=q.enqueue(op);assert.equal(q.enqueue(equivalent),a);
+  await assert.rejects(q.enqueue({...op,payload:{a:9}}),/同一操作编号/);
+  const flush=q.flushNow();assert.equal(q.enqueue(equivalent),a);
+  release({saved:true});await flush;assert.deepEqual(await a,{saved:true});
+  assert.equal(batches[0].length,1);q.destroy();
+  assert.throws(()=>createOperationQueue({initialOperations:[op,{...op,type:'other'}],sendBatch:async()=>{}}),/同一操作编号/);
+});
+
+test("failed duplicate shares rejection, explicit retry owns a fresh promise",async()=>{
+  let succeeds=false;const op={operation_id:'failed',type:'edit',payload:{}};
+  const q=createOperationQueue({base:()=>({}),debounceMs:30000,maxRetries:0,sendBatch:async()=>{if(!succeeds)throw Error('offline');return 'saved';}});
+  const first=q.enqueue(op);await q.flushNow();await assert.rejects(first,/offline/);
+  assert.equal(q.enqueue(op),first);
+  succeeds=true;q.retryFailed();const retried=q.enqueue(op);assert.notEqual(first,retried);
+  await q.flushNow();assert.equal(await retried,'saved');q.destroy();
+});

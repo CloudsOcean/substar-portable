@@ -35,6 +35,17 @@ from .contracts import (
 )
 
 
+def _public_transcription_error(exc: BaseException) -> dict[str, str]:
+    from substar_core.qwen_cloud_asr import QwenCloudAsrError
+
+    error = {"code": "transcription_worker_failed"}
+    # Only publish an allowlisted explanation, never provider response text,
+    # request URLs, credentials or the private traceback.
+    if isinstance(exc, QwenCloudAsrError) and exc.provider_code == "ASR_RESPONSE_HAVE_NO_WORDS":
+        error["public_message"] = "听写服务未识别出有效词语（ASR_RESPONSE_HAVE_NO_WORDS），可扩大所选范围后重试。"
+    return error
+
+
 _ARTIFACT_CONTRACTS = {
     "recognition_evidence.json": ("recognition_evidence", RECOGNITION_EVIDENCE_SCHEMA),
     "master_transcript.txt": ("recognition_transcript", None),
@@ -376,10 +387,9 @@ def run(command: WorkerCommand) -> int:
         emit(WorkerMessageType.CANCELLED, {"reason": "requested"})
         return 0
     except BaseException as exc:
-        # Public runtime state receives only the stable code. Full diagnostics
-        # remain on stderr in the attempt-owned private log.
+        # Full diagnostics remain on stderr in the attempt-owned private log.
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
-        emit(WorkerMessageType.ERROR, {"code": "transcription_worker_failed"})
+        emit(WorkerMessageType.ERROR, _public_transcription_error(exc))
         return 1
 
 

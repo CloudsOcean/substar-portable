@@ -19,12 +19,13 @@ class _TaskService:
         }]
 
 
-def test_editor_task_feed_uses_runtime_when_project_metadata_is_unreadable(monkeypatch) -> None:
+def test_editor_task_feed_uses_runtime_when_project_metadata_is_unreadable(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         http_api,
         "load_task_info",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("invalid v1 project")),
     )
+    monkeypatch.setattr(http_api, "_projects_root", lambda: tmp_path)
     request = SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(task_service=_TaskService()))
     )

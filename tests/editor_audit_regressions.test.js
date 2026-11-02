@@ -74,6 +74,8 @@ test("late project A load cannot overwrite project B session",async()=>{
   const state={projectId:'',projects:[],operationQueue:null};
   const elements=new Map();
   const context={state,URL,localStorage:{getItem:()=>null},window:{location:{href:'http://localhost/editor'}},history:{replaceState:()=>{}},
+    document:{body:{classList:{toggle(){}}}},
+    workbenchInert(){},
     $:selector=>{if(!elements.has(selector))elements.set(selector,{setAttribute(){},classList:{add(){},remove(){}}});return elements.get(selector);},
     projectPath:(suffix='')=>`/api/projects/${state.projectId}${suffix}`,
     api:path=>new Promise(resolve=>requests.push({path,resolve})),

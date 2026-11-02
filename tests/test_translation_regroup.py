@@ -90,9 +90,11 @@ def test_one_to_one_reviews_requests_without_changing_single_cue_mapping(monkeyp
 def test_accepted_prompts_are_exact_and_scoped():
     primary = render_prompt("contextual_translation", variant="en_to_zh", mode="many_to_many")
     repair = render_prompt("contextual_translation_repair", variant="en_to_zh", mode="many_to_many")
-    assert primary.sha256 == "e9e204c56246f859fc7506471a18cbe67daeb28f65ddc742439ac67570e677f3"
-    assert repair.sha256 == "95030a2d94e43995788893edbc0949e6e7a7df4e9740e49a28651afd8924b403"
-    assert repair.text.startswith(primary.text + "\n\n")
+    assert primary.version == "2026-11-02.target-language.1"
+    assert primary.files[-1] == "production/translation/target/zh.md"
+    assert repair.files[-1] == primary.files[-1]
+    assert "不刻意增加或减少" in primary.text
+    assert "默认每个编号各写一行" not in primary.text
     for variant, mode in [("en_to_zh", "one_to_one"), ("zh_to_en", "many_to_many"), ("generic", "many_to_many")]:
         assert "approved_en_zh" not in str(render_prompt("contextual_translation", variant=variant, mode=mode).files)
     # Existing frozen tasks retain their original prompt.
@@ -104,9 +106,9 @@ def test_accepted_prompts_are_exact_and_scoped():
 def test_english_routing_uses_accepted_prompt_only_for_english_cues():
     settings = {"translation_layout": {"lower_target": "zh-CN"}}
     original = groups()
-    assert regroup.translation_prompt_variant(settings, "en", "zh-CN", original) == "en_to_zh"
+    assert regroup.translation_prompt_variant(settings, "en", "zh-CN", original) == "target_zh"
     original[0]["cues"][0]["source_text"] = "今日はいい天気です"
-    assert regroup.translation_prompt_variant(settings, "en", "zh-CN", original) == "generic"
+    assert regroup.translation_prompt_variant(settings, "en", "zh-CN", original) == "target_zh"
 
 
 def test_comma_does_not_trigger_repair(monkeypatch):

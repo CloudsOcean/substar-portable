@@ -17,13 +17,39 @@
     let timer = null;
     let sequence = 0;
     let destroyed = false;
+    let paused = false;
 
     function inertEntry(operation) {
-      return {operation, resolve() {}, reject() {}, attempts:0};
+      const entry = {operation, attempts:0};
+      entry.promise = new Promise((resolve, reject) => {
+        entry.resolve = resolve;
+        entry.reject = reject;
+      });
+      // Restored entries have no caller awaiting their result.
+      entry.promise.catch(() => {});
+      return entry;
+    }
+
+    function sameOperation(left, right) {
+      // Match server receipt identity; retention/base are not action content.
+      const canonical = value => {
+        if (Array.isArray(value)) return value.map(canonical);
+        if (value && typeof value === "object") return Object.fromEntries(
+          Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+        return value;
+      };
+      return left.type === right.type
+        && JSON.stringify(canonical(left.payload || {})) === JSON.stringify(canonical(right.payload || {}));
     }
 
     (options.initialOperations || []).forEach(operation => {
-      if (operation?.operation_id) pending.push(inertEntry(operation));
+      if (!operation?.operation_id) return;
+      const existing = pending.find(entry => entry.operation.operation_id === operation.operation_id);
+      if (existing) {
+        if (!sameOperation(existing.operation, operation)) throw new Error("同一操作编号对应不同编辑，恢复记录已保留，请处理冲突");
+        return;
+      }
+      pending.push(inertEntry(operation));
     });
 
     function snapshot() {
@@ -56,7 +82,7 @@
     }
 
     function schedule(delay = debounceMs) {
-      if (destroyed || inFlight || timer || failed.length || !pending.length) return;
+      if (destroyed || paused || inFlight || timer || failed.length || !pending.length) return;
       timer = setTimeout(() => {
         timer = null;
         flush();
@@ -69,7 +95,7 @@
     }
 
     async function flush() {
-      if (destroyed || inFlight || failed.length || !pending.length) return null;
+      if (destroyed || paused || inFlight || failed.length || !pending.length) return null;
       let count = maxBatchSize;
       if (pending[0]?.retryBatchId) {
         count = 1;
@@ -129,17 +155,23 @@
 
     function enqueue(operation) {
       if (destroyed) return Promise.reject(new Error("operation queue is destroyed"));
-      const promise = new Promise((resolve, reject) => {
-        pending.push({operation, resolve, reject, attempts:0});
-      });
+      if (!operation?.operation_id) return Promise.reject(new Error("编辑缺少操作编号，无法保存"));
+      const existing = [...failed, ...(inFlight?.entries || []), ...pending]
+        .find(entry => entry.operation.operation_id === operation.operation_id);
+      if (existing) {
+        if (!sameOperation(existing.operation, operation)) return Promise.reject(new Error("同一操作编号对应不同编辑，请处理冲突"));
+        return existing.promise;
+      }
+      const entry = inertEntry(operation);
+      pending.push(entry);
       publish();
       schedule();
-      return promise;
+      return entry.promise;
     }
 
     function retryFailed() {
       if (!failed.length) return;
-      pending.unshift(...failed.splice(0).map(entry => ({...entry, error:null, attempts:0})));
+      pending.unshift(...failed.splice(0).map(entry => ({...inertEntry(entry.operation), retryBatchId:entry.retryBatchId})));
       publish();
       schedule(0);
     }
@@ -151,6 +183,15 @@
 
     return Object.freeze({
       enqueue,
+      pause() {
+        paused = true;
+        if (timer) clearTimeout(timer);
+        timer = null;
+      },
+      resume() { paused = false; schedule(); },
+      async waitForInFlight() {
+        while (inFlight && !destroyed) await new Promise(resolve => setTimeout(resolve, 20));
+      },
       configure({debounceMs:delay, maxRetries:retries}) {
         if (Number.isFinite(delay) && delay >= 0) debounceMs = delay;
         if (Number.isInteger(retries) && retries >= 0) maxRetries = retries;

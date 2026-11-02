@@ -474,3 +474,11 @@ summary span { margin-left: 7px; color: #677287; font-size: 13px; }
 
 .thumbnail-generation-option { display:flex; align-items:center; gap:12px; padding:13px 18px; border:1px solid var(--border-color, #d1d5db); border-radius:12px; cursor:pointer; }
 .thumbnail-generation-option input { width:18px; height:18px; margin:0; accent-color:var(--accent, #7761cf); }
+
+.queue-job-detail.has-retry-model { flex-wrap: wrap; }
+.queue-job-detail.has-retry-model .queue-job-actions { width: 100%; min-width: 0; }
+.queue-retry-model { height: 30px; flex: 1; min-width: 0; width: 0; padding: 5px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--panel); font-size: 12px; }
+
+.initial-text-options {display:flex;align-items:center;flex-wrap:wrap;gap:12px;}
+
+.page-shell #splitLanguageLayout .split-checkbox-stack > .language-bidirectional {min-height:24px;}

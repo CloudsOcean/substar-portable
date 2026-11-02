@@ -486,6 +486,10 @@ def build_segmentation_handler(
             request["source_asset_id"],
         )
 
+        if not request["constraints"].get("preserve_punctuation", True):
+            from substar_core.initial_punctuation import clean_initial_document
+            document = clean_initial_document(document)
+
         project_store_path = project / "project"
         if (project_store_path / "manifest.json").is_file():
             store = ProjectStore.open(project_store_path)

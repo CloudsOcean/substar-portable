@@ -26,6 +26,13 @@
       stack.className = "split-checkbox-stack";
       dialect.before(stack);
       stack.append(dialect, thumbnails);
+      const punctuation = document.getElementById("preservePunctuationInput")?.closest("label");
+      const direction = host.querySelector(".language-direction-option");
+      if (punctuation && direction) {
+        direction.append(punctuation);
+        direction.classList.add("split-checkbox-stack");
+        document.querySelector(".initial-text-options")?.remove();
+      }
     }
     const status = document.getElementById("qwenAssistStatus");
     if (status) {

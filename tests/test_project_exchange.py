@@ -87,14 +87,15 @@ def test_external_ai_prooftranslation_uses_one_routed_two_stage_prompt(tmp_path:
     assert task["task"] == "staged_correction_translation"
     assert task["source_language"] == "en"
     assert task["target_language"] == "zh-CN"
-    assert task["prompt_snapshot"]["stages"]["translation"]["variant"] == "en_to_zh"
+    assert task["prompt_snapshot"]["stages"]["translation"]["variant"] == "target_zh"
     prompt = files["02_执行提示词.md"].decode("utf-8-sig")
     assert "校准稿未经用户明确接受，不得翻译" in prompt
     assert "编号|译文" in prompt
     assert "C###[-C###]" not in prompt
-    assert "默认每个编号各写一行" in prompt
-    assert "允许最小必要的局部重排" in prompt
-    assert "English to Simplified Chinese" in prompt
+    assert "默认每个编号各写一行" not in prompt
+    assert "不刻意增加或减少" in prompt
+    assert "相邻时间槽之间重分配" in prompt
+    assert "目标语言：简体中文" in prompt
 
 
 

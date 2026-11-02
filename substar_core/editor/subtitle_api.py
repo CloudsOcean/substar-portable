@@ -56,7 +56,7 @@ def create_import(subtitle: UploadFile = File(...), secondary: UploadFile | None
                   mode: str = Form("single"), separator: str = Form("|"), first_track: str = Form("source"),
                   confirmation: str = Form(...), source_language: str = Form("Auto"), target_language: str = Form("zh-CN"),
                   source_hard_limit: int = Form(55, ge=1, le=500), target_hard_limit: int = Form(24, ge=1, le=500),
-                  generate_thumbnails: bool = Form(False)):
+                  generate_thumbnails: bool = Form(False), preserve_punctuation: bool = Form(False)):
     from .http_api import _projects_root, save_task_info
     from substar_core.environment_doctor import _find_tool
     from substar_core.media_relink import resolve_selection
@@ -101,12 +101,16 @@ def create_import(subtitle: UploadFile = File(...), secondary: UploadFile | None
         atomic_write_json(root / "import_failure.json", {"message": "媒体解码失败", "source": name})
         raise HTTPException(422, detail={"message": "媒体解码失败，未创建可编辑工程；请检查音轨或 FFmpeg"}) from exc
     document = build_subtitle_document(preview, project_id)
+    if not preserve_punctuation:
+        from substar_core.initial_punctuation import clean_initial_document
+        document = clean_initial_document(document)
     atomic_write_json(root / "run_manifest.json", {"schema_version": "substar.run-manifest.v1", "source_file": "input/" + source.name,
                                                    "input_mode": "subtitle", "media": {"duration_seconds": None}})
     atomic_write_json(root / "subtitle_import.json", preview)
     title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', Path(name).stem)[:120].strip() or "字幕导入"
     save_task_info(root, project_id, {"display_name": title, "language": source_language, "target_language_mode": target_language,
-                                     "source_hard_limit": source_hard_limit, "target_hard_limit": target_hard_limit})
+                                     "source_hard_limit": source_hard_limit, "target_hard_limit": target_hard_limit,
+                                     "preserve_punctuation": preserve_punctuation})
     store = ProjectStore.create(root / "project", project_id=project_id)
     store.save(document, provenance=ChangeProvenance(ChangeKind.IMPORT, "subtitle_import"))
     if generate_thumbnails is True:

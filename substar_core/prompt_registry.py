@@ -180,15 +180,9 @@ def calibration_variant(source_language: str) -> str:
 
 
 def translation_variant(source_language: str, target_language: str | None = None) -> str:
-    aliases = {
-        "zh": "zh", "zh-cn": "zh", "en": "en", "ja": "ja", "ko": "ko",
-        "mixed": "mixed",
-    }
-    source = aliases.get(str(source_language or "en").lower())
-    target = aliases.get(str(target_language or opposite_language(source_language)).lower())
-    if source and target and target != "mixed" and source != target:
-        return f"{source}_to_{target}"
-    return "generic"
+    target = str(target_language or opposite_language(source_language)).lower()
+    target = {"zh-cn":"zh", "zh":"zh"}.get(target, target)
+    return f"target_{target}"
 
 
 def _registry() -> dict[str, Any]:
@@ -209,6 +203,18 @@ def render_prompt(
     entry = entries.get(key) if isinstance(entries, dict) else None
     if not isinstance(entry, dict):
         raise PromptRegistryError(f"未注册提示词：{key}")
+    if key in {"contextual_translation", "contextual_translation_repair"}:
+        # Old callers may still supply a language pair; only its target selects rules.
+        targets = variant.removeprefix("target_").split("+")
+        if "_to_" in variant:
+            targets = [variant.rsplit("_to_", 1)[1]]
+        target_files = []
+        for target in dict.fromkeys(targets):
+            target = {"zh-CN":"zh", "zh-cn":"zh"}.get(target, target)
+            for path in entry["variants"].get(f"target_{target}", entry["variants"]["generic"]):
+                if path not in target_files:
+                    target_files.append(path)
+        entry = {**entry, "variants": {**entry["variants"], variant: target_files}}
     exact = entry.get("exact_mode_variants", {}).get(mode or entry.get("default_mode"), {}).get(variant)
     if exact:
         production = (PROMPT_ROOT / "production").resolve()

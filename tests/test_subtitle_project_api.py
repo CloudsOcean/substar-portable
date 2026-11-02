@@ -1,4 +1,5 @@
 import io
+import pytest
 import wave
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,10 +14,11 @@ def client_for(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def test_create_edit_review_and_export_without_tokens(tmp_path, monkeypatch):
+@pytest.mark.parametrize("preserve", [False, True])
+def test_create_edit_review_and_export_without_tokens(tmp_path, monkeypatch, preserve):
     client = client_for(tmp_path, monkeypatch)
-    srt = "1\n00:00:00,000 --> 00:00:01,000\nHello\n你好\n"
-    fields = {"mode": "bilingual-lines"}
+    srt = "1\n00:00:00,000 --> 00:00:01,000\nHello!\n你好！\n"
+    fields = {"mode": "bilingual-lines", "preserve_punctuation": str(preserve).lower()}
     files = {"subtitle": ("sub.srt", srt.encode())}
     preview = client.post("/api/subtitle-projects/preview", data=fields, files=files)
     assert preview.status_code == 200, preview.text
@@ -33,6 +35,8 @@ def test_create_edit_review_and_export_without_tokens(tmp_path, monkeypatch):
     assert next(row for row in listed if row["project_id"] == project)["subtitle_basis"] == "sentence"
     store = http_api.open_project_store(project)
     revision = store.load_latest()
+    assert revision.document.cues[0].source_text == ("Hello!" if preserve else "Hello")
+    assert revision.document.cues[0].target.target_text == ("你好！" if preserve else "你好")
     assert not revision.document.display_tokens
     cue_id = revision.document.cues[0].cue_id
     assert client.get(f"/api/projects/{project}/waveform?start=0&end=1&points=128").status_code == 200

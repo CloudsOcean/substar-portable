@@ -6,7 +6,7 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../web/editor.js"), "utf8");
 const lock = source.slice(source.indexOf("  function editorAiTaskLocksEditor()"), source.indexOf("  async function refreshEditorAiTask()"));
-const send = source.slice(source.indexOf("  async function sendOperation(operation)"), source.indexOf("  function manualProvenance(operation)"));
+const send = source.slice(source.indexOf("  async function sendOperation(operation,"), source.indexOf("  function manualProvenance(operation)"));
 
 function editor(taskState) {
   const saved = [];

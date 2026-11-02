@@ -1,10 +1,2 @@
-# Target Simplified Chinese
-
-- Produce concise, idiomatic Simplified Chinese rather than preserving source syntax.
-- Use Chinese wherever a reliable Chinese expression exists. Do not copy Latin-script words or proper names into Chinese subtitles merely because they appear that way in the source.
-- Omit repeated subjects or connectors only when reference and logic remain clear.
-- Move long modifiers, time phrases and predicate information to natural Chinese positions.
-- Preserve the identity and reference of names, numbers, units, negation, condition, comparison, causality and modality exactly once. Preserving a proper name does not mean preserving its source-language spelling.
-- For people, places, organizations, brands, programs and products, use the glossary target first; otherwise use a reliable conventional Chinese name or transliteration consistently.
-- Retain Latin script only when `do_not_translate=true`, no reliable Chinese rendering exists and transliteration would mislead, the item is a conventional abbreviation/model/code/URL, or the foreign name or spelling itself is being discussed.
-- Avoid isolated function words, translationese fragments and duplicated whole-group translations.
+# 目标语言：简体中文
+使用自然简洁的中文口语；按中文语序安排修饰语、动作和对象。上下文明确时可省略重复主语，指代与逻辑保持清楚。专名优先采用术语表或通行中文译名；通行缩写、型号、代码、网址和指定不译项保留。不要以英语表面语序组织中文，不用空格代替断句。

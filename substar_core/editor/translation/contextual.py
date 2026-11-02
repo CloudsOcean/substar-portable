@@ -1402,9 +1402,14 @@ def _translation_system_prompt(
     base_prompt: str,
     direction: str,
     glossary_entries: list[dict[str, Any]],
+    *, preserve_punctuation: bool = True,
 ) -> str:
     """Compose one stage prompt without emitting an empty glossary section."""
     sections = [str(base_prompt).strip(), str(direction).strip()]
+    sections.append("# 标点策略\n" + (
+        "使用目标语言自然的句子标点，不用标点拼接本应依次显示的独立信息。"
+        if preserve_punctuation else
+        "字幕正文不添加句子标点。保留有实际意义的小数点、负号、百分号、词内撇号和连字符、网址及必要词间空格。汉语不用空格替代标点；外语遵守正常词间空格。不要靠删除标点把多个独立信息串成一个显示单元。"))
     if glossary_entries:
         sections.append(glossary_prompt(glossary_entries))
     return "\n\n".join(section for section in sections if section)
@@ -1465,10 +1470,12 @@ def run_contextual_translation(
     task_info = load_task_info(work, work.name)
     glossary_entries = settings["glossary_snapshot"] if "glossary_snapshot" in settings else active_glossary(str(task_info.get("glossary_id") or ""))
     system_prompt = _translation_system_prompt(
-        prompt.text, direction, glossary_entries
+        prompt.text, direction, glossary_entries,
+        preserve_punctuation=settings.get("preserve_punctuation", True) is True
     )
     repair_system_prompt = _translation_system_prompt(
-        repair_prompt.text, direction, glossary_entries
+        repair_prompt.text, direction, glossary_entries,
+        preserve_punctuation=settings.get("preserve_punctuation", True) is True
     )
     batches = execution_block_batches(
         revision.document, groups, mapping_mode=mapping_mode

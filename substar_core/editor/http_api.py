@@ -19,7 +19,7 @@ import wave
 import tempfile
 import zipfile
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -136,7 +136,20 @@ from substar_core.editor.calibration.service import (
     _validated_calibration_contract_actions
 )
 
-router = APIRouter(prefix="/api", tags=["editor"])
+def _guard_gap_transcription_write(request: Request):
+    project_id = request.path_params.get("project_id")
+    if not project_id or request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    path = request.url.path
+    if (request.method == "DELETE" and path.endswith("/ai-task")) or ("/gap-transcriptions/" in path and path.endswith("/cancel")):
+        return
+    from .gap_transcription import task_projection
+    task = task_projection(project_job_path(project_id), getattr(request.app.state, "task_service", None))
+    if task and task["state"] in {"queued", "running", "cancelling"}:
+        raise HTTPException(423, detail={"code":"editor_ai_task_locked", "message":"局部听写正在执行，完成或取消后可继续编辑"})
+
+
+router = APIRouter(prefix="/api", tags=["editor"], dependencies=[Depends(_guard_gap_transcription_write)])
 PROJECT_DIRECTORY = "project"
 
 
@@ -778,6 +791,12 @@ def list_editor_tasks(request: Request) -> dict[str, Any]:
             "status": task["state"],
             "display_name": display_name,
         })
+    from .gap_transcription import task_projection
+    for folder in _projects_root().glob("*/gap-transcriptions"):
+        projection = task_projection(folder.parent, request.app.state.task_service)
+        if projection:
+            tasks.append({**projection, "project_id":folder.parent.name,
+                          "status":projection["state"], "display_name":folder.parent.name})
     tasks.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
     return {"schema_version": "substar.editor-task-list.v2", "tasks": tasks}
 
@@ -795,8 +814,12 @@ def get_project(project_id: str) -> dict[str, Any]:
 
 @router.get("/projects/{project_id}/ai-task")
 def get_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any] | None:
+    from .gap_transcription import task_projection
+    gap = task_projection(project_job_path(project_id), request.app.state.task_service)
     tasks = request.app.state.task_service.list_tasks(project_id=project_id, limit=20)
     tasks = [task for task in tasks if task["task_type"] in {"calibration", "translation", "organize", "punctuation"}]
+    if gap and (gap["state"] in {"running", "queued", "cancelling"} or not tasks or gap["created_at"] >= str(tasks[0].get("created_at", ""))):
+        return gap
     if not tasks:
         return None
     task = tasks[0]
@@ -914,6 +937,11 @@ def _retry_exact_failed_editor_task(
 
 @router.delete("/projects/{project_id}/ai-task")
 def cancel_project_editor_ai_task(project_id: str, request: Request) -> dict[str, Any]:
+    from .gap_transcription import task_projection, cancel
+    gap = task_projection(project_job_path(project_id), request.app.state.task_service)
+    if gap and gap["state"] in {"running", "queued", "cancelling"}:
+        cancel(project_job_path(project_id), gap["task_id"], request.app.state.task_service)
+        return task_projection(project_job_path(project_id), request.app.state.task_service)
     tasks = request.app.state.task_service.list_tasks(
         project_id=project_id,
         states=["queued", "running", "cancelling"],
@@ -2815,3 +2843,49 @@ router.include_router(cut_router)
 
 from .maw_waveform_api import router as maw_waveform_router
 router.include_router(maw_waveform_router)
+
+
+class GapTranscriptionRequest(BaseModel):
+    start: float
+    end: float
+    expected_revision_id: str = Field(min_length=1)
+
+
+@router.post("/projects/{project_id}/gap-transcriptions", status_code=202)
+def start_gap_transcription(project_id: str, payload: GapTranscriptionRequest, request: Request):
+    from . import gap_transcription as feature
+    service = request.app.state.task_service
+    active = service.list_tasks(project_id=project_id, states=["queued","running","cancelling"], limit=20)
+    if active:
+        raise HTTPException(409, detail="请等待当前项目任务完成后再重新听写片段")
+    media, _ = _project_media_source(project_id)
+    try:
+        return feature.start(project_job_path(project_id),media,payload.start,payload.end,payload.expected_revision_id,service)
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/gap-transcriptions")
+def latest_gap_transcription(project_id: str, request: Request):
+    from . import gap_transcription as feature
+    project = project_job_path(project_id)
+    paths = sorted((project/"gap-transcriptions").glob("gap_*/request.json"), key=lambda path:path.stat().st_mtime, reverse=True)
+    return feature.status(project,paths[0].parent.name,request.app.state.task_service) if paths else None
+
+
+@router.get("/projects/{project_id}/gap-transcriptions/{job_id}")
+def gap_transcription_status(project_id: str, job_id: str, request: Request):
+    from . import gap_transcription as feature
+    try:
+        return feature.status(project_job_path(project_id),job_id,request.app.state.task_service)
+    except (ValueError,FileNotFoundError) as exc:
+        raise HTTPException(404, detail="片段听写任务不存在") from exc
+
+
+@router.post("/projects/{project_id}/gap-transcriptions/{job_id}/cancel")
+def cancel_gap_transcription(project_id: str, job_id: str, request: Request):
+    from . import gap_transcription as feature
+    try:
+        return feature.cancel(project_job_path(project_id),job_id,request.app.state.task_service)
+    except (ValueError,FileNotFoundError) as exc:
+        raise HTTPException(404, detail="片段听写任务不存在") from exc
