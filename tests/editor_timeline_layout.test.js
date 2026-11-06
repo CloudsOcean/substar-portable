@@ -26,3 +26,17 @@ test("extra panel height preserves composite waveform bounds", () => {
     assert.equal(separatedGeometry(height + 69, true).waveformBottom, height - 10);
   }
 });
+
+
+test('rounded boundary edits stay within fractional imported neighbour times',()=>{
+  const timeline=require('../web/editor_timeline.js');
+  const cues=[{cue_id:'a',start:0,end:1.2344},{cue_id:'b',start:1.2344,end:2.5006},{cue_id:'c',start:2.5006,end:4}];
+  for(const requested of [0,1.234,1.2344,1.2345,2.5005,2.5006,10]){
+    const start=timeline.previewBoundaryChange(cues,1,'start',requested,'b','single');
+    const end=timeline.previewBoundaryChange(cues,1,'end',requested,'b','single');
+    assert.ok(start.time>=cues[0].end);
+    assert.ok(end.time<=cues[2].start);
+    assert.equal(start.changes[0].time,start.time);
+    assert.equal(end.changes[0].time,end.time);
+  }
+});

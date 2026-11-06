@@ -130,14 +130,14 @@
       const pair = sharedBoundary(cues, cueIndex, edge);
       const left = cues[pair.leftIndex];
       const right = cues[pair.rightIndex];
-      const time = clamp(number(requestedTime), left.start + MIN_CUE_SECONDS, right.end - MIN_CUE_SECONDS);
+      const time = clamp(Number(number(requestedTime).toFixed(3)), left.start + MIN_CUE_SECONDS, right.end - MIN_CUE_SECONDS);
       return {
         mode,
-        time:Number(time.toFixed(3)),
+        time,
         primary:{cue_id:cue.cue_id, edge},
         changes:[
-          {cue_id:left.cue_id, edge:"end", time:Number(time.toFixed(3))},
-          {cue_id:right.cue_id, edge:"start", time:Number(time.toFixed(3))}
+          {cue_id:left.cue_id, edge:"end", time},
+          {cue_id:right.cue_id, edge:"start", time}
         ]
       };
     }
@@ -145,12 +145,14 @@
     const next = cues[cueIndex + 1];
     const minimum = edge === "start" ? (previous?.end ?? 0) : cue.start + MIN_CUE_SECONDS;
     const maximum = edge === "start" ? cue.end - MIN_CUE_SECONDS : (next?.start ?? Infinity);
-    const time = clamp(number(requestedTime), minimum, maximum);
+    // Clamp after rounding: imported frame times can fall between milliseconds.
+    // Rounding a clamped value could otherwise move it into the adjacent cue.
+    const time = clamp(Number(number(requestedTime).toFixed(3)), minimum, maximum);
     return {
       mode,
-      time:Number(time.toFixed(3)),
+      time,
       primary:{cue_id:cue.cue_id, edge},
-      changes:[{cue_id:cue.cue_id, edge, time:Number(time.toFixed(3))}]
+      changes:[{cue_id:cue.cue_id, edge, time}]
     };
   }
 
