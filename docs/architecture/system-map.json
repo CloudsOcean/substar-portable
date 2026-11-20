@@ -2309,6 +2309,10 @@
         {
           "path": "substar_core/editor/cut_api.py",
           "symbols": []
+        },
+        {
+          "path": "substar_core/editor/agent_api.py",
+          "symbols": []
         }
       ],
       "inputs": [
@@ -2787,6 +2791,14 @@
           "symbols": []
         },
         {
+          "path": "substar_core/media/http_response.py",
+          "symbols": []
+        },
+        {
+          "path": "substar_core/media/video_encoding.py",
+          "symbols": []
+        },
+        {
           "path": "substar_core/media/waveform_cache.py",
           "symbols": []
         },
@@ -2879,6 +2891,26 @@
         },
         {
           "path": "web/editor_recovery.js",
+          "symbols": []
+        },
+        {
+          "path": "web/agent_navigation_handoff.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_agent_status.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_cue_link.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_preview_seek.js",
+          "symbols": []
+        },
+        {
+          "path": "web/editor_target_units.js",
           "symbols": []
         },
         {
@@ -3541,6 +3573,10 @@
           ]
         },
         {
+          "path": "substar_core/translation_units.py",
+          "symbols": []
+        },
+        {
           "path": "substar_core/editor/domain/cue_ordering.py",
           "symbols": []
         },
@@ -3927,6 +3963,10 @@
           "symbols": [
             "render_document_srt"
           ]
+        },
+        {
+          "path": "substar_core/editor/output_api.py",
+          "symbols": []
         },
         {
           "path": "substar_core/subtitle_exports.py",

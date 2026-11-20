@@ -21,6 +21,7 @@ from substar_core.document_operations import apply_document_operation
 from substar_core.domain import ChangeKind, ChangeProvenance, EntityState
 from substar_core.domain.editor_document import DisplayToken, SourceToken, TranslationTrack, stable_id
 from substar_core.language_layout import layout_tokens
+from substar_core.segmentation.input_contract import recognition_units_with_normalized_numbers
 from substar_core.storage import ProjectStore
 from substar_core.transcription.contracts import TRANSCRIPTION_INPUT_SCHEMA, build_transcription_request
 
@@ -108,7 +109,7 @@ def recognition_segments(evidence, offset, end, limit=55):
             segments.append(current)
             current = []
     previous = -1.0
-    for unit in units:
+    for unit in recognition_units_with_normalized_numbers(units):
         text = str(unit.get("text", "")).strip()
         a, b = float(unit["start"]), float(unit["end"])
         if not text:

@@ -146,13 +146,10 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         f"PlayResY: {options.height}", "ScaledBorderAndShadow: yes", "WrapStyle: 0", "", "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"]
     for name, item in (("Source", style), ("Target", target_style)):
+        border_style = 3 if item.background else item.border_style
         output.append(f"Style: {name},{item.font},{item.size},{ass_color(item.color)},{ass_color(item.highlight)},"
-            f"{ass_color(item.outline_color,item.outline_opacity)},{ass_color(item.back_color,item.back_opacity)},{-1 if item.bold else 0},{-1 if item.italic else 0},{-1 if item.underline else 0},{-1 if item.strike_out else 0},{item.scale_x},{item.scale_y},{item.spacing},{item.angle},{item.border_style},"
+            f"{ass_color(item.outline_color,item.outline_opacity)},{ass_color(item.back_color,item.back_opacity)},{-1 if item.bold else 0},{-1 if item.italic else 0},{-1 if item.underline else 0},{-1 if item.strike_out else 0},{item.scale_x},{item.scale_y},{item.spacing},{item.angle},{border_style},"
             f"{item.outline},{item.shadow},{item.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{item.margin_y},1")
-        if item.background:
-            output.append(f"Style: {name}Box,{item.font},{item.size},&HFF000000,&HFF000000,"
-                f"&H80000000,&H80000000,{-1 if item.bold else 0},0,0,0,100,100,0,0,3,"
-                f"6,0,{item.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{item.margin_y},1")
     output += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
     import json
     word_timing_overlays = json.loads(document.properties.timeline_json or "{}").get("word_timings", {})
@@ -173,10 +170,7 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         effect = f"{{\\fad({fade},{fade})}}" if fade and not raw else ""
         if chosen.override_tags:
             effect = "{" + chosen.override_tags + "}"
-        if chosen.background:
-            plain = re.sub(r"\{\\c&H[0-9A-Fa-f]+&\}", "", encoded) if raw else encoded
-            output.append(f"Dialogue: 0,{stamp(start)},{stamp(end)},{name}Box,,0,0,0,,{effect}{plain}")
-        output.append(f"Dialogue: {1 if chosen.background else 0},{stamp(start)},{stamp(end)},{name},,0,0,0,,{effect}{encoded}")
+        output.append(f"Dialogue: 0,{stamp(start)},{stamp(end)},{name},,0,0,0,,{effect}{encoded}")
 
     for cue in sorted(document.cues, key=lambda c:c.index):
         if cue.state is not EntityState.ACTIVE:
@@ -185,7 +179,7 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
             continue
         tokens = [display[t] for t in cue.display_token_ids if display[t].state is EntityState.ACTIVE]
         source = cue.source_text if cue.source_text is not None else layout_tokens(t.text for t in tokens)
-        target = cue.target.target_text if cue.target else ""
+        target = cue.target.target_text if cue.target and not cue.mapping.get("target_unit_ids") else ""
         source_upper = source_is_upper(document, source)
         routed = bool(document.presentation.translation_layout)
         cue_mode = options.mode
@@ -238,6 +232,28 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
                 event(cue.start,cue.end,source_style_name,source,overlay=cue.mapping.get("subtitle_track") == "overlay")
         if cue_mode in {"target", "ab-double"}:
             event(cue.start,cue.end,target_style_name,target)
+    from substar_core.translation_units import all_units
+    cues_by_id = {cue.cue_id: cue for cue in document.cues}
+    for unit in all_units(document):
+        evidence = [cues_by_id[cid] for cid in unit["source_cue_ids"]
+                    if cid in cues_by_id and cues_by_id[cid].state is EntityState.ACTIVE]
+        if not evidence or (cue_ids is not None and not any(c.cue_id in cue_ids for c in evidence)):
+            continue
+        owner = evidence[0]
+        text = owner.source_text if owner.source_text is not None else layout_tokens(
+            display[tid].text for tid in owner.display_token_ids if display[tid].state is EntityState.ACTIVE)
+        source_upper = source_is_upper(document, text)
+        routed = bool(document.presentation.translation_layout)
+        cue_mode = options.mode
+        if routed and not source_upper and cue_mode in {"source", "target"}:
+            cue_mode = "target" if cue_mode == "source" else "source"
+        if cue_mode not in {"target", "ab-double"}:
+            continue
+        _, shown = project_cue_lines(document, source=text, target=unit["text"])
+        if document.properties.script_projection != "original":
+            shown = convert_chinese_script(shown, document.properties.script_projection)
+        swap = routed and options.mode == "ab-double" and source_upper != (document.presentation.display_order.value == "source_above_target")
+        event(unit["start"], unit["end"], "Source" if swap else "Target", shown)
     return "\n".join(output)+"\n"
 
 

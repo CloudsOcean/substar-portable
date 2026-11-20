@@ -2,9 +2,7 @@
 // 列表与编辑卡片全部由本模块渲染（textContent 组装，不拼 HTML 字符串）；
 // 数据变更一律经 MaweMarkerEditing，撤销/重做、保存脏标记与波形轨道刷新
 // 都由那一层统一处理，这里只负责展示与输入采集。
-export function initSubstarMarkersPanel(global) {
-  'use strict';
-
+export function initSubstarMarkersPanel(global, {compact = false} = {}) {
   // 管理窗私有 UI 状态：过滤条件、选中高亮项与展开编辑项（不进工程数据）。
   const filter = { query: '', kind: 'all', color: 'all', review: 'all' };
   let selectedMarkerId = null;
@@ -658,6 +656,34 @@ export function initSubstarMarkersPanel(global) {
     return item;
   }
 
+  function buildLocateRow(marker) {
+    const isRegion = markerUtils().markerKind(marker) === 'region';
+    const row = document.createElement('div');
+    row.className = 'cut-change-row marker-locate-row';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cut-change-locate';
+    const name = document.createElement('span');
+    name.className = 'marker-locate-name';
+    appendSearchHighlightedText(name, marker.name || (isRegion ? '区段' : '标记'));
+    const time = document.createElement('span');
+    time.className = 'marker-locate-time';
+    time.textContent = isRegion
+      ? `${formatMarkerTime(marker.start)}–${formatMarkerTime(marker.end)}`
+      : formatMarkerTime(marker.start);
+    button.title = `${name.textContent} · ${time.textContent}`;
+    if (marker.id === selectedMarkerId) button.setAttribute('aria-current', 'true');
+    button.append(name, time);
+    button.addEventListener('click', () => {
+      selectedMarkerId = marker.id;
+      MaweDom.markersList.querySelector('[aria-current="true"]')?.removeAttribute('aria-current');
+      button.setAttribute('aria-current', 'true');
+      MaweMarkerEditing.locateMarker(marker.id);
+    });
+    row.append(button);
+    return row;
+  }
+
 
   function render() {
     if (!MaweDom.markersList) return;
@@ -684,6 +710,7 @@ export function initSubstarMarkersPanel(global) {
     const scrollTop = list.scrollTop;
     list.replaceChildren();
     if (!markers.length) {
+      if (compact) return;
       const empty = document.createElement('div');
       empty.className = 'markers-empty';
       empty.textContent = '尚无标记；在波形顶部标记轨道空白处点击（添加标记）或横向拖动（拉出区段）。';
@@ -697,7 +724,7 @@ export function initSubstarMarkersPanel(global) {
       list.appendChild(noMatch);
       return;
     }
-    for (const marker of visible) list.appendChild(buildMarkerItem(marker));
+    for (const marker of visible) list.appendChild(compact ? buildLocateRow(marker) : buildMarkerItem(marker));
     list.scrollTop = scrollTop;
   }
 

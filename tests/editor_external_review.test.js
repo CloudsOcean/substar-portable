@@ -50,7 +50,7 @@ const result = build({
   sourceText:cue => cue.source,
   targetText:cue => cue.target.target_text
 });
-assert.match(result.text, /Cue 是字幕排版与时间单位，不等同于语法句子/);
+assert.match(result.text, /Cue 是源文的排版与时间单位/);
 assert.match(result.text, /允许一对多、多对一和多对多映射/);
 assert.match(result.text, /用户补充要求\n重点核对专名/);
 assert.match(result.text, /### Cue 11【审阅】/);
@@ -69,5 +69,24 @@ const rangeResult = build({
 assert.equal(rangeResult.focusCount, 3);
 assert.match(rangeResult.text, /### Cue 12【审阅】/);
 assert.match(rangeResult.text, /### Cue 7【上下文】/);
+
+const shared = {
+  unit_id:"shared_display",
+  source_cue_ids:["cue_11", "cue_12"],
+  text:"两条 Cue 共用的译文",
+  start:10,
+  end:11.8
+};
+const linked = build({
+  cues:cues.map(cue => shared.source_cue_ids.includes(cue.cue_id)
+    ? {...cue, target_units:[shared]} : cue),
+  scope:"current",
+  currentCueId:"cue_12",
+  sourceText:cue => cue.source,
+  targetText:cue => cue.target_units?.[0]?.text || cue.target.target_text
+});
+assert.equal((linked.text.match(/下行引用：shared_display/g) || []).length, 2);
+assert.equal((linked.text.match(/两条 Cue 共用的译文/g) || []).length, 1);
+assert.match(linked.text, /显示时段 00:00:10\.000 --> 00:00:11\.800\n源文依据 Cue：11、12/);
 
 console.log("editor_external_review: ok");

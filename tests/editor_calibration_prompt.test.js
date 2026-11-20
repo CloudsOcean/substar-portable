@@ -13,11 +13,11 @@ assert.match(html, /id="organizeOptimizeBoundaries" type="checkbox">优化请求
 assert.doesNotMatch(html, /id="organizeOptimizeBoundaries"[^>]*checked/);
 assert.match(js, /runSubtitleTextTask\("punctuation"\)/);
 assert.match(js, /runSubtitleTextTask\("organize"\)/);
-assert.match(html, /id="exportDocument">导出</);
+assert.match(html, /id="exportDocument"[^>]*>导出</);
 assert.match(js, /instruction\s*\n\s*}\)\s*\n\s*}/);
 assert.match(js, /ai-calibration-instruction:\$\{state\.projectId/);
 assert.match(js, /state\.editorAiTask\.progress[\s\S]*?renderWorkbenchTask/);
-assert.match(js, /ordinaryError\(`已保存：\$\{result\.filename}`, "completed"\)/);
+assert.match(js, /projectPath\("\/output-jobs"\)/);
 assert.match(css, /\.ordinary-error\.notice/);
 assert.match(css, /\.translation-task-panel[\s\S]*?grid-template-areas:[^;]*"head close" "progress close" "steps close" "message close"/);
 assert.match(html, /id="translationTaskSteps"/);

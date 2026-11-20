@@ -124,6 +124,7 @@ def preview_srt(document, text, mode='auto'):
         reason = ''
         if mode == 'source': reason = '原文轨道，不导入译文'
         elif not cue or not source: reason = '时间轴未唯一匹配（支持前后 120 毫秒偏差）'
+        elif len(cue.mapping.get('target_unit_ids', [])) > 1: reason = '此 Cue 对应多条独立译文，请按译文单元编辑'
         elif uses[cue.cue_id] > 1: reason = '多条 SRT 对应同一字幕，请调整后重新导入'
         elif not target: reason = '无法按当前原文分离双语轨道'
         elif same_language: reason = '轨道主要语言与节目原文相同，不导入'
@@ -155,10 +156,27 @@ def import_srt(store, *, text, mode, expected_revision_id, request_id):
         raise ValueError('没有可导入的译文')
     provenance = ChangeProvenance(kind=ChangeKind.IMPORT, operation='srt_translation_import', actor='user',
                                  metadata={'format': preview['format'], 'count': len(targets), 'request_id': request_id})
+    # A shared independent unit must have one authoritative imported text.
+    # Editing only its row projection would leave preview/export on stale text.
+    unit_edits = {}
+    for cue in latest.document.cues:
+        if cue.cue_id not in targets or not cue.mapping.get('target_unit_ids'):
+            continue
+        ids = cue.mapping['target_unit_ids']
+        if len(ids) != 1:
+            raise ValueError('此 Cue 对应多条独立译文，请按译文单元编辑')
+        uid = ids[0]
+        if uid in unit_edits and unit_edits[uid] != targets[cue.cue_id]:
+            raise ValueError('同一独立译文收到不同文本，请先统一关联 Cue 的译文')
+        unit_edits[uid] = targets[cue.cue_id]
     cues = tuple(replace(c, target=TranslationTrack(target_text=targets[c.cue_id], original_text=targets[c.cue_id],
-                        language=languages[c.cue_id], provenance=provenance)) if c.cue_id in targets else c
+                        language=languages[c.cue_id], provenance=provenance)) if c.cue_id in targets and not c.mapping.get('target_unit_ids') else c
                  for c in latest.document.cues)
     candidate = replace(latest.document, cues=cues, changes=(*latest.document.changes, provenance))
+    if unit_edits:
+        from substar_core.translation_units import edit_unit
+        for uid, target in unit_edits.items():
+            candidate = edit_unit(candidate, {'unit_id': uid, 'text': target}, provenance)
     candidate = synchronize_translation_status(candidate, set(targets))
     return store.save(candidate, provenance=provenance, expected_revision_id=expected_revision_id,
                       receipt={'id': receipt_id, 'hash': digest, 'result': {'count': len(targets)}})

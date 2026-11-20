@@ -75,6 +75,8 @@
     taskPanelDismissed:false,
     mediaLoadAttempts:0,
     mediaRetryTimer:null,
+    compatiblePreview:null,
+    mediaSwitchPosition:null,
     mediaHadMetadata:false,
     mediaLoadPending:false,
     mediaLoadFailed:false,
@@ -84,7 +86,7 @@
     mediaBindingsCleanup:null,
     playbackFrameHandle:0,
     playbackLastUiAt:0,
-    cueSplitView:"virtual",
+    showDeletedTokens:localStorage.getItem("substar.editor.show-deleted-tokens") === "true",
     timelineLayout:"composite",
     referenceChangeByTokenId:new Map(),
     cuePageStart:0,
@@ -287,6 +289,13 @@
     return state.mediaElement || $("#projectVideo");
   }
 
+  function seekMedia(time) {
+    if (state.timelineController?.seekMedia) return state.timelineController.seekMedia(time);
+    const media = activeMedia();
+    if (media) media.currentTime = time;
+    return time;
+  }
+
   function configureMedia(kind) {
     const normalized = kind === "audio" ? "audio" : "video";
     const next = normalized === "audio" ? $("#projectAudio") : $("#projectVideo");
@@ -323,15 +332,92 @@
     clearMediaRetry();
     state.mediaLoadPending = true;
     state.mediaLoadFailed = false;
-    const base = projectPath("/media");
+    if (!retry) {
+      state.mediaSwitchPosition = null;
+      state.compatiblePreview = null;
+      renderPreviewButton();
+    }
+    const base = state.compatiblePreview?.url || projectPath("/media");
     // Cache-bust only recovery attempts. Normal project loads keep the stable
     // URL so the browser can reuse the local file and its range requests.
     media.src = retry ? `${base}?retry=${Date.now()}` : base;
     media.load();
   }
 
+  function renderPreviewButton() {
+    const button = $("#mediaCompatiblePreview");
+    const mode = state.compatiblePreview?.mode;
+    const compatible = mode === "active";
+    const label = compatible ? "兼容模式" : "原生模式";
+    const action = compatible ? "切换到原生模式" :
+      mode === "building" ? "正在准备兼容画面" :
+      mode === "error" ? "重试兼容模式" : "切换到兼容模式";
+    button.hidden = state.mediaKind !== "video";
+    button.disabled = mode === "building";
+    button.dataset.previewMode = compatible ? "compatible" : "native";
+    button.textContent = label;
+    button.title = action;
+    button.setAttribute("aria-label", label + "，" + action);
+  }
+
+  function switchPreviewSource(media, url) {
+    clearMediaRetry();
+    state.mediaSwitchPosition ??= {
+      time: Number.isFinite(media.currentTime) ? media.currentTime : 0,
+      playing: !media.paused,
+    };
+    state.mediaHadMetadata = false;
+    state.mediaLoadPending = true;
+    state.mediaLoadFailed = false;
+    media.src = url;
+    media.load();
+  }
+
+  async function enableCompatiblePreview({automatic = false} = {}) {
+    const media = activeMedia();
+    if (state.mediaKind !== "video" || !state.projectId || !media) return;
+    const previous = state.compatiblePreview?.mode;
+    if (previous === "building" || (automatic && previous)) return;
+    if (previous === "active") {
+      state.compatiblePreview = {mode:"original"};
+      switchPreviewSource(media, projectPath("/media"));
+      renderPreviewButton();
+      setMediaMessage("正在读取原片…");
+      return;
+    }
+    clearMediaRetry();
+    const attempt = {mode:"building"};
+    const endpoint = projectPath("/compatible-preview");
+    state.compatiblePreview = attempt;
+    renderPreviewButton();
+    setMediaMessage("正在准备兼容预览…");
+    try {
+      let status = await api(endpoint, {method:"POST"});
+      while (state.compatiblePreview === attempt && ["queued", "running"].includes(status.state)) {
+        const progress = Math.floor((status.progress || 0) * 100);
+        setMediaMessage(status.state === "queued" ? "兼容预览正在排队…" :
+          `正在生成兼容预览 ${progress}%${status.encoder ? ` · ${status.encoder}` : ""}`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (state.compatiblePreview !== attempt) return;
+        status = await api(endpoint);
+      }
+      if (state.compatiblePreview !== attempt) return;
+      if (status.state !== "ready") throw new Error(status.message || "服务已重启，请重试");
+      attempt.mode = "active";
+      attempt.url = `${endpoint}/${encodeURIComponent(status.asset)}`;
+      switchPreviewSource(media, attempt.url);
+      setMediaMessage("正在读取兼容预览…");
+    } catch (error) {
+      if (state.compatiblePreview !== attempt) return;
+      attempt.mode = "error";
+      setMediaMessage(`兼容预览生成失败：${error.message}`);
+    } finally {
+      if (state.compatiblePreview === attempt) renderPreviewButton();
+    }
+  }
+
   function scheduleMediaRetry() {
-    if (state.mediaLoadPending && !state.mediaLoadFailed) return;
+    if (state.compatiblePreview?.mode === "building" || (state.mediaLoadPending && !state.mediaLoadFailed)) return;
     clearMediaRetry();
     const media = activeMedia();
     if (!media || state.mediaLoadAttempts >= 5) {
@@ -495,11 +581,27 @@
 
   function bindMediaEvents(media) {
     const bindings = [];
+    const bufferingMessage = "正在缓冲媒体…";
+    let bufferingTimer = null;
+    const clearBuffering = () => {
+      clearTimeout(bufferingTimer);
+      bufferingTimer = null;
+      if ($("#mediaMessage").textContent === bufferingMessage) setMediaMessage();
+    };
     const on = (name, handler) => {
       media.addEventListener(name, handler);
       bindings.push([name, handler]);
     };
     const metadataReady = () => {
+      if (state.compatiblePreview?.mode === "building") return;
+      clearBuffering();
+      const firstMetadata = !state.mediaHadMetadata;
+      const position = state.mediaSwitchPosition;
+      if (position && media.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        state.mediaSwitchPosition = null;
+        media.currentTime = Number.isFinite(media.duration) ? Math.min(position.time, media.duration) : position.time;
+        if (position.playing) media.play().catch(() => {});
+      }
       clearMediaRetry();
       state.mediaLoadAttempts = 0;
       state.mediaHadMetadata = true;
@@ -508,12 +610,26 @@
       updateMediaViewport();
       syncMediaControls();
       state.timelineController?.setView(state.view);
+      if (firstMetadata && new URL(location.href).searchParams.has("cue_id")) {
+        state.timelineController?.revealTime(Number(state.mediaSwitchPosition?.time ?? media.currentTime), true);
+      }
+      renderPreview();
     };
     ["loadedmetadata", "loadeddata", "canplay"].forEach(name => on(name, metadataReady));
     on("error", event => {
+      clearBuffering();
       const current = event.currentTarget;
       state.mediaLoadPending = false;
       state.mediaLoadFailed = true;
+      if (state.compatiblePreview?.mode === "building") return;
+      if (media.tagName === "VIDEO" && !state.compatiblePreview && [3, 4].includes(current.error?.code)) {
+        void enableCompatiblePreview({automatic:true});
+        return;
+      }
+      if (state.compatiblePreview?.mode === "active") {
+        setMediaMessage("兼容画面无法播放，可点击「兼容模式」切回原生模式");
+        return;
+      }
       if (
         state.mediaHadMetadata
         || current.readyState >= HTMLMediaElement.HAVE_METADATA
@@ -524,25 +640,48 @@
       }
       scheduleMediaRetry();
     });
-    on("waiting", () => setMediaMessage("正在缓冲媒体…"));
-    on("playing", () => setMediaMessage());
+    let firstPlaybackTime = null;
+    // Count continuous playback time; seeking can jump over a long removed interval.
+    ["loadstart", "seeking", "pause"].forEach(name => on(name, () => { firstPlaybackTime = null; }));
+    on("timeupdate", () => {
+      if (media.tagName !== "VIDEO" || media.paused || media.seeking || document.hidden || state.compatiblePreview) return;
+      firstPlaybackTime ??= media.currentTime;
+      if (media.currentTime - firstPlaybackTime < 2) return;
+      const quality = media.getVideoPlaybackQuality?.();
+      if (!media.videoWidth || (quality && quality.totalVideoFrames === 0)) {
+        void enableCompatiblePreview({automatic:true});
+      }
+    });
+    on("waiting", () => {
+      if (bufferingTimer !== null || media.paused || media.ended) return;
+      bufferingTimer = setTimeout(() => {
+        bufferingTimer = null;
+        if (activeMedia() === media && !media.paused && !media.ended &&
+            !media.error && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+          setMediaMessage(bufferingMessage);
+        }
+      }, 200);
+    });
+    ["playing", "ended", "emptied"].forEach(name => on(name, clearBuffering));
     on("timeupdate", event => {
+      if(state.view?.target_units?.length)renderPreview();
       updatePlaybackUi(event.currentTarget.currentTime, {
         playing:!event.currentTarget.paused,
         timestamp:performance.now()
       });
     });
     on("seeked", event => {
+      renderPreview();
       const time = Number(event.currentTarget.currentTime) || 0;
       const cue = cueAtPlaybackTime(time);
       state.playbackCueId = cue?.cue_id || null;
       if (state.followPlayback) {
         if (state.playbackCueId !== state.activeCueId) {
-          activateCue(state.playbackCueId, {scroll:true, revealTimeline:true});
+          activateCue(state.playbackCueId, {scroll:true, keepVisible:true});
         } else {
-          centerCueInList(cue);
+          centerCueInList(cue, true);
         }
-        state.timelineController?.revealTime(time, false);
+        state.timelineController?.revealTime(time, false, {keepVisible:true});
       }
       syncPlaybackPosition(time);
     });
@@ -552,6 +691,7 @@
       startPlaybackUiLoop();
     });
     on("pause", () => {
+      clearBuffering();
       suspendPlaybackFollow();
       stopPlaybackUiLoop();
       syncPlaybackPosition(Number(media.currentTime) || 0);
@@ -560,7 +700,10 @@
       on(name, syncMediaControls);
     });
     on("click", toggleMediaPlayback);
-    return () => bindings.forEach(([name, handler]) => media.removeEventListener(name, handler));
+    return () => {
+      clearBuffering();
+      bindings.forEach(([name, handler]) => media.removeEventListener(name, handler));
+    };
   }
 
   function projectPath(suffix = "") {
@@ -619,9 +762,16 @@
       );
     });
     const activeTokenPosition = new Map(activeTokenOrder.map((id, index) => [id, index]));
+    const timeline = state.view.properties?.timeline;
+    const gapCore = window.AsrGapRemoveCore;
+    let removedGapRanges = [];
+    if (timeline && gapCore && window.SubstarMawModel) {
+      const {gaps} = window.SubstarMawModel.activeGapRemoveState(timeline);
+      removedGapRanges = gapCore.getRemovedGapRanges(gapCore.getGapRemoveDisplayGaps(gaps));
+    }
     state.indexes = {
       sourceById, tokenById, cueById, tokenToCueId, sourceTextByCueId,
-      activeTokenOrder, activeTokenPosition
+      activeTokenOrder, activeTokenPosition, removedGapRanges
     };
     state.trackLanguages = inferTrackLanguages();
 
@@ -636,7 +786,7 @@
     const problemCueIds = new Set(state.view.cue_views.filter(cue => {
       const lines = projectedCueLines(cue);
       const sourceMetric = subtitleLengthMetric(lines.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
-      const targetMetric = subtitleLengthMetric(lines.target, cue.target?.language || state.trackLanguages.target, "target");
+      const targetMetric = targetLengthMetric(cue,lines.target);
       return sourceMetric.count > sourceMetric.limit
         || (String(lines.target || "").trim() && targetMetric.count > targetMetric.limit)
         || (latestTranslation && !translationNotRequired.has(cue.cue_id) && !String(lines.target || "").trim());
@@ -708,8 +858,12 @@
   function projectPunctuation(text, remove = "", space = "") {
     const removed = new Set([...String(remove || "")]);
     const spaced = new Set([...String(space || "")].filter(char => !removed.has(char)));
-    return [...String(text || "")].map(char => removed.has(char) ? "" : spaced.has(char) ? " " : char)
-      .join("").replace(/\s+/g, " ").trim();
+    const value = languageLayout.removeGroupingCommas(text, removed, spaced);
+    return value.replace(/[\s\S]/gu, (char, index) => {
+      if (char === "." && /[0-9０-９]/.test(value[index - 1] || "")
+        && /[0-9０-９]/.test(value[index + 1] || "")) return char;
+      return removed.has(char) ? "" : spaced.has(char) ? " " : char;
+    }).replace(/\s+/g, " ").trim();
   }
 
   function projectedCueLines(cue) {
@@ -766,6 +920,9 @@
     state.revision = contract.consumeRevision(payload);
     state.view = contract.buildEditorView(state.revision);
     rebuildViewIndexes();
+    // Gap-only changes keep mounted rows and their active text editors.
+    $("#cueList").querySelectorAll(".cue-row[data-cue-id]").forEach(row => updateCueGapCoverage(row));
+    state.cueListView?.refreshGapCoverage?.();
     assPanel?.sync();
     const activeCues = state.view.cue_views.filter(cue => cue.state === "active");
     state.activeCueId = reconciledActiveCueId(previousActiveCue, activeCues, state.view.cue_views);
@@ -1125,7 +1282,7 @@
 
   async function flushActiveEditorInput() {
     const active = document.activeElement;
-    if (active?.closest?.("#cueList") && active.matches?.("input,textarea,[contenteditable]")) active.blur();
+    if (active?.closest?.("#cueList,.speaker-tool-form") && active.matches?.("input,textarea,[contenteditable]")) active.blur();
     // Whole-line edits prepare a structural operation asynchronously on blur.
     // Its queue entry may not exist yet, so draining the queue alone is insufficient.
     if (active?.editorCommit && await active.editorCommit === null) {
@@ -1154,6 +1311,8 @@
   }
 
   function hasUncommittedEditorInput() {
+    if (document.activeElement?.matches(".speaker-tool-form [data-speaker-name]") &&
+        document.activeElement.value.trim() !== document.activeElement.dataset.savedName) return true;
     return [...document.querySelectorAll("#cueList input,#cueList textarea")].some(field => {
       if (field.dataset.sourceEdit) return field.dataset.rawEditing !== "false" && field.value !== field.dataset.originalSource;
       if (field.dataset.targetEdit) return field.dataset.rawEditing === "true"
@@ -1205,6 +1364,7 @@
   let idleRevisionCheck = false;
   async function syncIdleRevision() {
     if (idleRevisionCheck || !state.revision || state.operationPending || state.historyNavigationPending
+      || hasUncommittedEditorInput() || state.operationQueue?.getState().hasUnsavedChanges || state.checkpointPending
       || state.structuralPreparationPending || state.restorePreparationPending || state.documentWritePending || editorAiTaskLocksEditor()
       || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
     idleRevisionCheck = true;
@@ -1212,6 +1372,7 @@
     try {
       const latest = contract.consumeRevision(await api(projectPath()));
       if (project !== state.projectId || revision !== state.revision?.revision_id || state.operationPending
+        || hasUncommittedEditorInput() || state.operationQueue?.getState().hasUnsavedChanges || state.checkpointPending
         || state.historyNavigationPending || state.structuralPreparationPending || state.restorePreparationPending || state.documentWritePending
         || document.activeElement?.closest?.("#cueList input,#cueList textarea,[contenteditable=true]")) return;
       if (latest.revision_id !== revision) { setRevision(latest); await loadRevisionHistory({force:true}); }
@@ -1526,14 +1687,11 @@
     $("#toggleComplete").classList.toggle("hidden", tutorial);
     $("#toggleComplete").classList.toggle("complete", complete);
     $("#toggleComplete").title = complete ? "完成只是属性；取消后仍是同一可编辑项目" : "标记后仍可继续编辑";
-    $("#cutExportMenu").classList.toggle("disabled", !revision);
-    $("#cutExportDocument").setAttribute("aria-disabled", String(!revision));
     $("#exportMenu").classList.toggle("disabled", !revision);
     $("#exportDocument").setAttribute("aria-disabled", String(!revision));
     const textProject = state.view?.cue_views.some(cue => cue.source_text != null && cue.subtitle_track !== "overlay");
     $("#translateDocument").disabled = !revision || locked || textProject
       || ["queued", "running", "cancelling"].includes(state.translationTask?.state);
-    const editingCommandDisabled = !revision || locked || textProject;
     $("#applyAutoMerge").disabled = !revision || locked || state.topologyOperationPending;
     [
       ["#translationMenu", "#translationMenuSummary"],
@@ -1542,9 +1700,11 @@
       ["#scriptProjectionMenu", "#scriptProjectionSummary"],
     ].forEach(([menuSelector, summarySelector]) => {
       const menu = $(menuSelector);
-      menu?.classList.toggle("disabled", editingCommandDisabled);
-      $(summarySelector)?.setAttribute("aria-disabled", String(editingCommandDisabled));
-      if (editingCommandDisabled && menu?.open) menu.open = false;
+      const hasFileActions = menuSelector === "#translationMenu" || menuSelector === "#aiCalibrationMenu";
+      const disabled = !revision || locked || (textProject && !hasFileActions);
+      menu?.classList.toggle("disabled", disabled);
+      $(summarySelector)?.setAttribute("aria-disabled", String(disabled));
+      if (disabled && menu?.open) menu.open = false;
     });
     ["#saveCheckpoint", "#toolSearch", "#toolReplace",
       "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace",
@@ -1578,7 +1738,7 @@
     });
     const projection = revision?.document?.properties?.script_projection || "original";
     const projectionSummary = $("#scriptProjectionSummary");
-    if (projectionSummary) projectionSummary.textContent = "繁简转换";
+    if (projectionSummary) projectionSummary.textContent = "繁简";
     ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"]
       .forEach(selector => {
         const node = $(selector);
@@ -1596,13 +1756,12 @@
     if (searchInput) {
       searchInput.placeholder = state.searchScope === "target" ? "查找译文" : "查找源语词元或短语";
     }
-    const referenceButton = $("#referenceManuscript");
-    if (referenceButton) referenceButton.disabled = !revision || locked || textProject;
+    const jumpDisabled = !revision || locked;
+    $("#cueJumpNumber").disabled = jumpDisabled;
+    $("#cueJumpButton").disabled = jumpDisabled;
     const reviewMenu = $("#aiReviewMenu");
     $("#detectSpeakers").setAttribute("aria-disabled", String($("#detectSpeakers").disabled));
     const reviewDisabled = !revision || locked || textProject;
-    $("#cueSplitView").disabled = Boolean(textProject || locked);
-    syncCueViewSwitch();
     reviewMenu?.classList.toggle("disabled", reviewDisabled);
     if (reviewDisabled && reviewMenu?.open) reviewMenu.open = false;
     $("#aiReview")?.setAttribute("aria-disabled", String(reviewDisabled));
@@ -1678,8 +1837,15 @@
     const normalize = value => String(value || "").toLocaleLowerCase();
     const matches = [];
     if (state.searchScope === "target") {
+      const seen=new Set();
       state.view.cue_views.forEach(cue => {
         if (cue.state !== "active" || !cue.target) return;
+        if(cue.target_units?.length){
+          for(const unit of cue.target_units)if(!seen.has(unit.unit_id)){
+            seen.add(unit.unit_id);if(normalize(unit.text).includes(needle))matches.push({kind:'target',cue_id:cue.cue_id,unit_id:unit.unit_id});
+          }
+          return;
+        }
         if (normalize(cue.target.target_text).includes(needle)) {
           matches.push({kind:"target", cue_id:cue.cue_id});
         }
@@ -1692,28 +1858,14 @@
       const tokens = cue.display_token_ids
         .map(tokenId => tokenById.get(tokenId))
         .filter(token => token?.state === "active");
-      const queryParts = query.split(/\s+/).filter(Boolean).map(normalize);
-      if (queryParts.length > 1) {
-        for (let start = 0; start + queryParts.length <= tokens.length; start += 1) {
-          const candidate = tokens.slice(start, start + queryParts.length)
-            .map(token => normalize(token.text)).join(" ");
-          if (candidate === queryParts.join(" ")) {
-            matches.push({
-              kind:"token",
-              cue_id:cue.cue_id,
-              token_ids:tokens.slice(start, start + queryParts.length)
-                .map(token => token.token_id)
-            });
-          }
-        }
-      } else {
-        contract.findContiguousTokenMatches(tokens, query).forEach(match => {
-          const coveredText = String(match.combined_text || "");
-          const unmatchedEdges = `${coveredText.slice(0, Number(match.start_offset || 0))}${coveredText.slice(Number(match.end_offset ?? coveredText.length))}`;
-          if (/[\p{L}\p{N}]/u.test(unmatchedEdges)) return;
-          matches.push({kind:"token", cue_id:cue.cue_id, ...match});
-        });
-      }
+      const sourceQuery = query.replace(/\s+/g, " ");
+      const separator = sourceQuery.includes(" ") ? " " : "";
+      contract.findContiguousTokenMatches(tokens, sourceQuery, separator).forEach(match => {
+        const prefix = match.combined_text.slice(0, match.start_offset);
+        const suffix = match.combined_text.slice(match.end_offset);
+        if (/[\p{L}\p{N}]/u.test(prefix + suffix)) return;
+        matches.push({kind:"token", cue_id:cue.cue_id, ...match});
+      });
     });
     return matches;
   }
@@ -2197,6 +2349,12 @@
     return metric.count > metric.limit ? " over-limit" : "";
   }
 
+  function targetLengthMetric(cue,text){
+    const texts=cue.target_units?.length?cue.target_units.map(unit=>projectedCueLines({...cue,target:{...cue.target,target_text:unit.text}}).target):[text];
+    return texts.map(value=>subtitleLengthMetric(value,cue.target?.language||state.trackLanguages.target,'target'))
+      .reduce((a,b)=>a.count/a.limit>=b.count/b.limit?a:b);
+  }
+
   function validationTrackLimit(track) {
     const override = track === "source"
       ? state.subtitlePolicy.sourceHardLimit : state.subtitlePolicy.targetHardLimit;
@@ -2211,6 +2369,34 @@
     return limits[state.trackLanguages?.[track]] || limits.en;
   }
 
+  function coveringCueGap(cue) {
+    const ranges = state.indexes?.removedGapRanges;
+    if (!cue || !ranges?.length) return null;
+    const start = Math.round(cue.start * 1000);
+    const end = Math.round(cue.end * 1000);
+    if (!(end > start)) return null;
+
+    // The removed ranges are sorted and merged. Find the first one that reaches the Cue's end.
+    let low = 0;
+    let high = ranges.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (ranges[middle].end < end) low = middle + 1;
+      else high = middle;
+    }
+    const range = ranges[low];
+    return range && start >= range.start ? range : null;
+  }
+
+  function updateCueGapCoverage(row, cue = state.indexes?.cueById.get(row.dataset.cueId)) {
+    const covered = Boolean(coveringCueGap(cue));
+    if (row.classList.contains("cue-gap-covered") === covered) return;
+    row.classList.toggle("cue-gap-covered", covered);
+    const content = row.querySelector(".cue-content");
+    if (covered) content.title = "当前方案已整条剪除";
+    else content.removeAttribute("title");
+  }
+
   function cueElement(cue, index, tokenById) {
     const row = document.createElement("article");
     const projected = projectedCueLines(cue);
@@ -2221,7 +2407,7 @@
     const hasTarget = (Boolean(cue.target) || (bilingualProject && cue.subtitle_track !== "overlay"))
       && $("#showTranslations").checked;
     const sourceMetric = subtitleLengthMetric(projected.source, state.view?.presentation?.translation_layout?.enabled ? null : state.trackLanguages.source, "source");
-    const targetMetric = subtitleLengthMetric(projected.target, cue.target?.language || state.trackLanguages.target, "target");
+    const targetMetric = targetLengthMetric(cue,projected.target);
     const overLimit = sourceMetric.count > sourceMetric.limit
       || (Boolean(cue.target) && targetMetric.count > targetMetric.limit);
     row.className = `cue-row${hasTarget ? " has-target" : " source-only"}${cue.cue_id === state.activeCueId ? " current" : ""}${cue.state === "deleted" ? " deleted" : ""}${overLimit ? " over-limit" : ""}`;
@@ -2239,8 +2425,7 @@
     const content = document.createElement("div");
     content.className = "cue-content";
     const line = document.createElement("div");
-    const virtual = state.cueSplitView === "virtual";
-    line.className = `source-token-line${virtual ? " virtual-line" : ""}`;
+    line.className = "source-token-line virtual-line";
     const hasNext = cue.subtitle_track !== "overlay" && cue.state === "active"
       && state.view.cue_views[index+1]?.state === "active" && state.view.cue_views[index+1]?.subtitle_track !== "overlay";
     const reviewGroupByToken = new Map();
@@ -2249,24 +2434,37 @@
       const ids = note.anchor.token_ids?.length ? note.anchor.token_ids : !note.anchor.text_range ? cue.display_token_ids : [];
       ids.forEach(id => reviewGroupByToken.set(id, note.id));
     });
-    cue.display_token_ids.forEach((id, tokenIndex) => {
+    const visibleTokenIds = state.showDeletedTokens ? cue.display_token_ids
+      : cue.display_token_ids.filter(id => tokenById.get(id)?.state !== "deleted");
+    visibleTokenIds.forEach((id, tokenIndex) => {
       const token = tokenById.get(id);
       if (!token) return;
       const group = reviewGroupByToken.get(id);
-      const joinsPrevious = !!group && group === reviewGroupByToken.get(cue.display_token_ids[tokenIndex - 1]);
-      const joinsNext = !!group && group === reviewGroupByToken.get(cue.display_token_ids[tokenIndex + 1]);
+      const joinsPrevious = !!group && group === reviewGroupByToken.get(visibleTokenIds[tokenIndex - 1]);
+      const joinsNext = !!group && group === reviewGroupByToken.get(visibleTokenIds[tokenIndex + 1]);
       const tokenNode = tokenElement(token, {interactive:cue.state === "active"});
       tokenNode.classList.toggle("review-joins-previous", joinsPrevious);
       tokenNode.classList.toggle("review-joins-next", joinsNext);
       line.append(tokenNode);
-      const atEnd = tokenIndex === cue.display_token_ids.length - 1;
-      if (virtual && !atEnd) {
-        const nextToken = tokenById.get(cue.display_token_ids[tokenIndex + 1]);
+      const atEnd = tokenIndex === visibleTokenIds.length - 1;
+      if (!atEnd) {
+        const nextToken = tokenById.get(visibleTokenIds[tokenIndex + 1]);
         const boundary = document.createElement(cue.state === "active" ? "button" : "span");
         const boundaryKind = languageLayout.virtualBoundaryKind(
           token.text, nextToken?.text || "", state.trackLanguages?.source
         );
         boundary.className = `virtual-boundary ${boundaryKind}-based`;
+        if (token.state === "active" && nextToken?.state === "active") {
+          const presentation = state.view.presentation;
+          const side = projected.sourceUpper ? "upper" : "lower";
+          const comma = token.text.at(-1);
+          const shouldRemove = (presentation[`${side}_remove`] || "") + (presentation[`${side}_space`] || "");
+          const pair = `${token.text} ${nextToken.text}`;
+          if ((comma === "," || comma === "，") && shouldRemove.includes(comma) &&
+              languageLayout.removeGroupingCommas(pair, new Set([comma]), new Set()) !== pair) {
+            boundary.classList.add("numeric-join");
+          }
+        }
         boundary.classList.toggle("review-group-bridge", joinsNext);
         if (boundaryKind === "word") line.classList.add("word-based");
         if (cue.state === "active") {
@@ -2292,14 +2490,7 @@
         connector.dataset.insertAfter = id;
         connector.dataset.cueId = cue.cue_id;
       }
-      if (cue.state === "active" && tokenIndex < cue.display_token_ids.length - 1) {
-        connector.dataset.boundaryAfter = id;
-        connector.dataset.cueAction = "split";
-        connector.dataset.boundaryControl = "";
-        connector.dataset.boundaryAction = "split";
-        connector.title = "右键切分";
-        connector.setAttribute("aria-label", "右键在此处切分 Cue");
-      } else if (cue.state === "active" && hasNext) {
+      if (cue.state === "active" && hasNext) {
         connector.dataset.cueAction = "merge-next";
         connector.dataset.boundaryControl = "";
         connector.dataset.boundaryAction = "merge-next";
@@ -2331,21 +2522,24 @@
       content.append(source);
     }
     if (hasTarget) {
-      const target = document.createElement("textarea");
-      target.rows = 1;
-      target.className = "translation-track";
-      target.dataset.targetEdit = cue.cue_id;
-      target.dataset.originalTarget = cue.target?.target_text || "";
-      target.dataset.expectedTarget = cue.target?.canonical_target_text ?? cue.target?.target_text ?? "";
-      target.dataset.projectedTarget = projected.target;
-      target.dataset.rawEditing = "false";
-      target.title = cue.target?.translation_status === "needs_review" ? (cue.target?.issue_code === "source_changed" ? "原文已变更，请复核译文" : "译文质量或行长需要复核") : cue.target?.translation_status === "manual_required" ? "译文需要人工处理" : "直接编辑译文";
-      target.dataset.translationStatus = cue.target?.translation_status || "manual_required";
-      target.disabled = cue.state === "deleted" || editorAiTaskLocksEditor();
-      target.value = projected.target;
-      if (!cue.target) target.placeholder = "\u8bd1\u6587";
-      if (projected.sourceUpper) content.append(target);
-      else content.prepend(target);
+      const units=cue.target_units?.length?cue.target_units:[null];
+      const fields=[];
+      for(const unit of units){
+        const target=document.createElement("textarea");target.rows=1;target.className="translation-track";
+        target.dataset.targetEdit=cue.cue_id;
+        if(unit)target.dataset.targetUnitId=unit.unit_id;
+        const text=unit?.text??cue.target?.target_text??"";
+        const projectedText=unit?projectedCueLines({...cue,target:{...cue.target,target_text:text}}).target:projected.target;
+        target.dataset.originalTarget=text;
+        target.dataset.expectedTarget=unit?text:(cue.target?.canonical_target_text??text);
+        target.dataset.projectedTarget=projectedText;target.dataset.rawEditing="false";
+        target.title=unit?`独立译文 ${timeLabel(unit.start)}–${timeLabel(unit.end)}；修改会同步所有关联 Cue`:"直接编辑译文";
+        if(cue.target?.translation_status==='needs_review')target.title+='；原文或译文需要复核';
+        target.dataset.translationStatus=cue.target?.translation_status||"manual_required";
+        target.disabled=cue.state==='deleted'||editorAiTaskLocksEditor();target.value=projectedText;
+        if(!cue.target)target.placeholder="译文";fields.push(target);
+      }
+      if(projected.sourceUpper)content.append(...fields);else content.prepend(...fields);
     }
     const actions = document.createElement("div");
     actions.className = "cue-actions";
@@ -2363,6 +2557,7 @@
       speakerButton.style.borderColor = window.EditorSpeakers.color(cue.speaker);
     }
     row.append(meta, content, actions);
+    updateCueGapCoverage(row, cue);
     if ((cue.source_text != null && cue.subtitle_track !== "overlay") || editorAiTaskLocksEditor()) actions.querySelectorAll("button").forEach(node => {node.disabled = true;});
     return row;
   }
@@ -2375,6 +2570,37 @@
     return window.EditorSpeakers.label(speaker, speakerNames());
   }
 
+  function dockedSpeakerForm() {
+    return $("#speakerDialogForm").classList.contains("speaker-tool-form");
+  }
+
+  function commitSpeakerName(input) {
+    const id = input.dataset.speakerName;
+    const name = input.value.trim();
+    if (!state.revision || name === input.dataset.savedName ||
+        !window.EditorSpeakers.ids(state.view).includes(id)) return;
+    const saved = sendOperation(contract.setSpeakerNamesOperation(
+      state.revision, {...speakerNames(), [id]:name}, manualProvenance("set_speaker_names")
+    ));
+    input.editorCommit = saved;
+    return saved;
+  }
+
+  function removeSpeaker(id) {
+    const revision = state.revision;
+    if (!revision || !window.EditorSpeakers.ids(revision.document).includes(id)) return;
+    const names = {...speakerNames()};
+    const hadName = Object.hasOwn(names, id);
+    delete names[id];
+    const cueIds = revision.document.cues.filter(cue => cue.speaker === id).map(cue => cue.cue_id);
+    const provenance = manualProvenance("remove_speaker");
+    provenance.metadata.user_action_id = crypto.randomUUID();
+    const operations = [];
+    if (cueIds.length) operations.push(contract.setCueSpeakersOperation(revision, cueIds, null, provenance));
+    if (hadName) operations.push(contract.setSpeakerNamesOperation(revision, names, provenance));
+    return Promise.all(operations.map(operation => sendOperation(operation)));
+  }
+
   function appendSpeakerInput(id, name) {
     const label = document.createElement("label");
     const swatch = document.createElement("i");
@@ -2385,15 +2611,49 @@
     input.value = name; input.placeholder = window.EditorSpeakers.label(id);
     input.setAttribute("aria-label", `${id} 名称`);
     label.append(swatch, input);
-    $("#speakerDialogForm .speaker-name-grid").append(label);
+    const list = $("#speakerDialogForm .speaker-name-grid");
+    if (dockedSpeakerForm()) {
+      const row = document.createElement("div");
+      row.className = "speaker-name-row cut-change-row";
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "删除";
+      remove.addEventListener("click", () => void removeSpeaker(id));
+      input.dataset.savedName = name;
+      input.addEventListener("change", () => void commitSpeakerName(input));
+      input.addEventListener("keydown", event => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        input.blur();
+      });
+      row.append(label, remove);
+      list.append(row);
+    } else list.append(label);
     return input;
   }
 
   function populateSpeakerSettings() {
     if (!state.revision) return;
     const names = speakerNames();
-    $("#speakerDialogForm .speaker-name-grid").replaceChildren();
+    const list = $("#speakerDialogForm .speaker-name-grid");
     const ids = window.EditorSpeakers.ids(state.view);
+    if (dockedSpeakerForm()) {
+      const existing = new Map([...list.querySelectorAll("[data-speaker-name]")].map(input => [input.dataset.speakerName, input]));
+      for (const [id, input] of existing) {
+        if (!ids.includes(id)) input.closest(".speaker-name-row").remove();
+      }
+      ids.forEach((id, index) => {
+        const name = window.EditorSpeakers.label(id, names);
+        const input = existing.get(id) || appendSpeakerInput(id, name);
+        const row = input.closest(".speaker-name-row");
+        if (input !== document.activeElement || input.value.trim() === input.dataset.savedName) input.value = name;
+        input.dataset.savedName = name;
+        row.querySelector("button").setAttribute("aria-label", `删除 ${name}`);
+        if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
+      });
+      return;
+    }
+    list.replaceChildren();
     if (!ids.length) ids.push("speaker_0");
     ids.forEach(id => appendSpeakerInput(id, names[id] || window.EditorSpeakers.label(id)));
   }
@@ -2595,6 +2855,22 @@
     if(overlayPreview) overlayPreview.textContent=(state.view?.cue_views || [])
       .filter(item=>item.subtitle_track === "overlay" && item.state === "active" && item.start<=time && item.end>time)
       .map(item=>item.source_text || "").join("\n");
+    if(state.view?.target_units?.length){
+      const upper=[],lower=[],rows=state.view.cue_views;
+      for(const item of rows.filter(c=>c.state==='active'&&c.start<=time&&c.end>time&&c.subtitle_track!=='overlay')){
+        const line=projectedCueLines(item);
+        (line.sourceUpper?upper:lower).push(line.source);
+        if(!item.target_units?.length)(line.sourceUpper?lower:upper).push(line.target);
+      }
+      for(const unit of state.view.target_units.filter(u=>u.start<=time&&u.end>time)){
+        const owner=rows.find(c=>unit.source_cue_ids.includes(c.cue_id)&&c.state==='active');
+        if(!owner)continue;
+        const line=projectedCueLines({...owner,target:{...owner.target,target_text:unit.text}});
+        (line.sourceUpper?lower:upper).push(line.target);
+      }
+      $("#previewSource").textContent=upper.filter(Boolean).join("\n");
+      $("#previewTarget").textContent=lower.filter(Boolean).join("\n");return;
+    }
     if (state.view?.cue_views.some(item => item.source_text != null)) {
       const time = activeMedia()?.currentTime || 0;
       const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time && (!overlayPreview || item.subtitle_track !== "overlay"));
@@ -2674,9 +2950,9 @@
     const rect = track.getBoundingClientRect();
     if (!rect.width) return;
     const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const time = ratio * timelineDuration();
+    const requested = ratio * timelineDuration();
     const video = activeMedia();
-    if (Number.isFinite(video.duration)) video.currentTime = Math.min(time, video.duration);
+    const time = Number.isFinite(video?.duration) ? seekMedia(Math.min(requested, video.duration)) : requested;
     const cue = state.view?.cue_views.find(item =>
       item.state === "active" && time >= Number(item.start) && time < Number(item.end)
     );
@@ -2697,19 +2973,23 @@
 
   function render({deferTimeline = false, preserveCueViewport = true} = {}) {
     renderHeader();
+    if ($("#editor-dubbing-tool-content")?.closest(".experimental-tool-active")) populateSpeakerSettings();
     renderCues({preservePage:preserveCueViewport});
     renderSelectionActions();
     renderPreview();
     renderTimeline({deferDraw:deferTimeline});
     renderNavigators();
     document.documentElement.style.setProperty("--editor-token-font-size", `${state.fontSize}px`);
-    const fontValue = $("#fontValue");
-    if (fontValue) fontValue.textContent = String(state.fontSize);
+    const fontSlider = $("#subtitleFontSize");
+    const minFontSize = Number(fontSlider.min);
+    const maxFontSize = Number(fontSlider.max);
+    fontSlider.style.setProperty("--font-range-progress", (state.fontSize - minFontSize) / (maxFontSize - minFontSize));
+    $("#fontValue").textContent = String(state.fontSize);
   }
 
   let cueCenterGeneration = 0;
-  function centerCueInList(cue) {
-    if (cue) state.cueListView?.revealCue(cue.cue_id, {align:"center"});
+  function centerCueInList(cue, keepVisible = false) {
+    if (cue) state.cueListView?.revealCue(cue.cue_id, {align:"center", keepVisible});
   }
 
   function activateCue(cueId, {
@@ -2717,6 +2997,7 @@
     scroll = false,
     revealTimeline = false,
     centerTimeline = false,
+    keepVisible = false,
     explicitNavigation = false,
     preserveCueSelection = false
   } = {}) {
@@ -2728,10 +3009,10 @@
     state.activeCueId = cueId || null;
     const cue = currentCue();
     const video = activeMedia();
-    if (seek && cue && Number.isFinite(video.duration)) video.currentTime = Number(cue.start);
+    if (seek && cue && Number.isFinite(video?.duration)) seekMedia(Number(cue.start));
     state.cueListView?.setActive(state.activeCueId);
     state.timelineController?.setActiveCue(state.activeCueId);
-    if (cue && revealTimeline) state.timelineController?.revealTime(Number(cue.start), centerTimeline);
+    if (cue && revealTimeline) state.timelineController?.revealTime(Number(cue.start), centerTimeline, {keepVisible});
     renderPreview();
     const isEditingText = document.activeElement?.matches?.(
       'textarea, [contenteditable="true"], input[type="text"], input[type="search"], input[type="number"], input[type="email"], input[type="url"], input[type="password"]'
@@ -2740,13 +3021,13 @@
     // Keep the broader guard for in-place edits, where playback-follow scrolling
     // would otherwise pull the row away while the user is typing.
     const searchHasFocus = document.activeElement === $("#toolSearch");
-    if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) centerCueInList(cue);
+    if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) centerCueInList(cue, keepVisible);
   }
 
-  function selectCue(cueId, seek = false, scroll = false, preserveCueSelection = false) {
+  function selectCue(cueId, seek = false, scroll = false, preserveCueSelection = false, keepVisible = false) {
     if (seek) syncPlaybackFollowAfterSeek();
     else suspendPlaybackFollow();
-    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek, explicitNavigation:seek, preserveCueSelection});
+    activateCue(cueId, {seek, scroll, revealTimeline:true, centerTimeline:seek, explicitNavigation:seek, preserveCueSelection, keepVisible});
   }
 
   function orderedSelectableTokenIds() {
@@ -3264,10 +3545,13 @@
     if (!cue) return;
     const query = String($("#toolSearch")?.value || "").trim();
     if (match.kind === "target") {
-      const current = String(cue.target?.target_text || "");
+      const unit=match.unit_id?state.view.target_units.find(u=>u.unit_id===match.unit_id):null;
+      const current = String(unit?.text??cue.target?.target_text??"");
       const next = replaceLiteralOnce(current, query, deleting ? "" : replacement);
       if (next !== current) {
-        const revision = await sendOperation(contract.setTargetOperation(
+        const revision = await sendOperation(unit?contract.createOperation(state.revision,'set_target_unit',{
+          unit_id:unit.unit_id,text:next,expected_text:current,provenance:manualProvenance('search_replace_target')
+        }):contract.setTargetOperation(
           state.revision, cue.cue_id, next,
           manualProvenance("search_replace_target"), {original_text:current}
         ));
@@ -3275,33 +3559,7 @@
       }
       return;
     }
-    const tokenIds = match.token_ids || [];
-    if (deleting) {
-      const revision = await sendOperation(contract.deleteOperation(
-        state.revision, {token_ids:tokenIds}, manualProvenance("search_delete")
-      ));
-      rememberSearchReplaceUndo(beforeRevisionId, revision);
-      return;
-    }
-    if (tokenIds.length > 1) {
-      const source = String(match.combined_text || "");
-      const start = Number(match.start_offset || 0);
-      const end = Number.isFinite(Number(match.end_offset)) ? Number(match.end_offset) : source.length;
-      const next = `${source.slice(0, start)}${replacement}${source.slice(end)}`;
-      const revision = await sendOperation(contract.mergeOperation(
-        state.revision, tokenIds, next,
-        manualProvenance("search_replace_phrase")
-      ));
-      rememberSearchReplaceUndo(beforeRevisionId, revision);
-      return;
-    }
-    const token = state.view?.token_views.find(item => item.token_id === tokenIds[0]);
-    if (!token) return;
-    const next = replaceLiteralOnce(token.text, query, replacement);
-    const revision = await sendOperation(contract.replaceOperation(
-      state.revision, token.token_id, next, manualProvenance("search_replace")
-    ));
-    rememberSearchReplaceUndo(beforeRevisionId, revision);
+    await replaceSourceMatches([match], replacement, beforeRevisionId);
   }
 
   async function replaceAllSearch() {
@@ -3319,10 +3577,13 @@
       for (const match of matches) {
         const cue = state.view?.cue_views.find(item => item.cue_id === match.cue_id);
         if (!cue?.target) continue;
-        const current = String(cue.target.target_text || "");
+        const unit=match.unit_id?state.view.target_units.find(u=>u.unit_id===match.unit_id):null;
+        const current = String(unit?.text??cue.target.target_text??"");
         const next = replaceLiteralAll(current, query, deleting ? "" : replacement);
         if (next !== current) {
-          operations.push(contract.setTargetOperation(
+          operations.push(unit?contract.createOperation(state.revision,'set_target_unit',{
+            unit_id:unit.unit_id,text:next,expected_text:current,provenance:manualProvenance('search_replace_all_target')
+          }):contract.setTargetOperation(
             state.revision, cue.cue_id, next,
             manualProvenance("search_replace_all_target"), {original_text:current}
           ));
@@ -3334,42 +3595,75 @@
       }
       return;
     }
-    if (deleting) {
-      const tokenIds = [...new Set(matches.flatMap(match => match.token_ids || []))];
-      if (tokenIds.length) {
-        const revision = await sendOperation(contract.deleteOperation(
-          state.revision, {token_ids:tokenIds}, manualProvenance("search_delete_all")
-        ));
-        rememberSearchReplaceUndo(beforeRevisionId, revision);
+    await replaceSourceMatches(matches, replacement, beforeRevisionId);
+  }
+
+  async function replaceSourceMatches(matches, replacement, beforeRevisionId) {
+    const words = replacement.trim().split(/\s+/);
+    if (!replacement.trim()) {
+      const token_ids = [...new Set(matches.flatMap(match => match.token_ids))];
+      const revision = await sendOperation(contract.deleteOperation(
+        state.revision, {token_ids}, manualProvenance("search_delete")
+      ));
+      rememberSearchReplaceUndo(beforeRevisionId, revision);
+      return;
+    }
+
+    const tokens = new Map(state.view.token_views.map(token => [token.token_id, token]));
+    const groups = new Map();
+    const claimed = new Set();
+    for (const match of matches) {
+      const ids = match.token_ids;
+      if (ids.length === 1 && groups.has(ids[0])) {
+        groups.get(ids[0]).matches.push(match);
+      } else if (ids.every(id => tokens.has(id) && !claimed.has(id))) {
+        groups.set(ids[0], {ids, matches:[match]});
+        ids.forEach(id => claimed.add(id));
       }
-      return;
     }
-    const phraseMatches = matches.filter(match => (match.token_ids || []).length > 1);
-    if (phraseMatches.length) {
-      const operations = phraseMatches.map(match => {
-        const source = String(match.combined_text || "");
-        const start = Number(match.start_offset || 0);
-        const end = Number.isFinite(Number(match.end_offset)) ? Number(match.end_offset) : source.length;
-        return contract.mergeOperation(
-          state.revision, match.token_ids,
-          `${source.slice(0, start)}${replacement}${source.slice(end)}`,
-          manualProvenance("search_replace_all_phrase")
-        );
-      });
-      const revisions = await Promise.all(operations.map(sendOperation));
-      rememberSearchReplaceUndo(beforeRevisionId, revisions.filter(Boolean).at(-1));
-      return;
+
+    const replacements = [];
+    const retimings = [];
+    for (const {ids, matches:group} of groups.values()) {
+      const first = group[0];
+      const source = first.combined_text;
+      let next = source;
+      for (const match of [...group].reverse()) {
+        next = next.slice(0, match.start_offset) + replacement.trim() + next.slice(match.end_offset);
+      }
+      if (next === source) continue;
+      const phrase = source.slice(first.start_offset, first.end_offset);
+      const oneWordPerToken = ids.length === 1 || phrase.split(/\s+/).length === ids.length;
+      if (oneWordPerToken && words.length === ids.length && !(
+        ids.length === 1 && /\s/.test(next)
+      )) {
+        const pieces = ids.length === 1 ? [next] : [...words];
+        if (ids.length > 1) {
+          pieces[0] = source.slice(0, first.start_offset) + pieces[0];
+          pieces[pieces.length - 1] += source.slice(first.end_offset);
+        }
+        ids.forEach((token_id, index) => {
+          if (pieces[index] !== tokens.get(token_id).text) {
+            replacements.push({token_id, text:pieces[index]});
+          }
+        });
+      } else {
+        retimings.push({cueId:first.cue_id, ids, text:next});
+      }
     }
-    const replacements = matches.map(match => {
-      const token = state.view.token_views.find(item => item.token_id === match.token_ids[0]);
-      const next = replaceLiteralAll(token.text, query, replacement);
-      return {token_id:match.token_ids[0], text:next, expected_text:token.text};
-    });
-    const revision = await sendOperation(contract.batchReplaceOperation(
-      state.revision,
-      replacements,
-      manualProvenance("search_replace_all")
-    ));
+
+    const provenance = manualProvenance("search_replace");
+    let revision = null;
+    if (replacements.length) {
+      revision = await sendOperation(contract.batchReplaceOperation(state.revision, replacements, provenance));
+      if (!revision) return;
+    }
+    // A change in word count uses the same token subdivision as waveform text edits.
+    for (const {cueId, ids, text} of retimings) {
+      const saved = await sendOperation(contract.retimeTextOperation(state.revision, cueId, ids, text, provenance));
+      if (!saved) break;
+      revision = saved;
+    }
     rememberSearchReplaceUndo(beforeRevisionId, revision);
   }
 
@@ -3612,52 +3906,6 @@
     }
   }
 
-  function chooseReferenceFile() {
-    return new Promise(resolve => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".txt,.docx,.srt,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-      input.onchange = () => resolve(input.files?.[0] || null);
-      input.click();
-    });
-  }
-
-  async function runReferenceManuscript() {
-    if (!state.revision || state.operationPending) return;
-    const file = await chooseReferenceFile();
-    if (!file) return;
-    state.operationPending = true;
-    renderHeader();
-    renderWorkbenchTask("参考文稿", 20, `正在匹配 ${file.name}…`);
-    const form = new FormData();
-    form.append("expected_revision_id", state.revision.revision_id);
-    form.append("file", file, file.name);
-    try {
-      const result = await withSavedDocument(() => {
-        form.set("expected_revision_id", state.revision.revision_id);
-        return api(projectPath("/reference-manuscript"), {method:"POST", body:form});
-      });
-      if (result.revision?.revision_id !== state.revision.revision_id) {
-        setRevision(result.revision);
-        recordCommittedRevision(state.revision, {
-          kind:"import", operation:"reference_manuscript_apply", metadata:{}
-        });
-      }
-      const similarity = Number(result.match?.similarity || 0);
-      if (result.match?.requires_review) ordinaryError("参考稿有局部待确认内容，请复核标记；未确定对应的参考文字已默认隐藏。");
-      renderWorkbenchTask(
-        "参考文稿", 100,
-        `已匹配并标记 ${result.applied || 0} 个词元 · 相似度 ${(similarity * 100).toFixed(1)}%`,
-        "completed"
-      );
-    } catch (error) {
-      renderWorkbenchTask("参考文稿", 100, error.message, "failed");
-    } finally {
-      state.operationPending = false;
-      renderHeader();
-    }
-  }
-
   async function commitInlineTarget(field) {
     if (!field || field.dataset.committing === "true") return;
     if (state.topologyOperationPending) return;
@@ -3674,18 +3922,29 @@
     }
     field.dataset.committing = "true";
     try {
-      const revision = await sendOperation(contract.setTargetOperation(
-        state.revision, cueId, text, manualProvenance("inline_edit_target"), {
-          expected_target_text:field.dataset.expectedTarget ?? current,
-          original_text:cue.target?.original_text || current,
-          language:cue.target?.language || "zh-CN"
-        }
-      ));
-      if (!revision && field.isConnected) {
-        field.dataset.rawEditing = "true";
-        field.value = text;
-        resizeTranslationField(field);
+      const provenance = manualProvenance("inline_edit_target");
+      provenance.metadata.user_action_id = crypto.randomUUID();
+      const unitId=field.dataset.targetUnitId;
+      const operation = unitId?contract.createOperation(state.revision,"set_target_unit",{
+        unit_id:unitId,text,expected_text:field.dataset.expectedTarget??current,provenance
+      }):contract.setTargetOperation(state.revision, cueId, text, provenance, {
+        expected_target_text:field.dataset.expectedTarget ?? current,
+        original_text:cue.target?.original_text || current,
+        language:cue.target?.language || "zh-CN"
+      });
+      const saving = sendOperation(operation);
+      // A focused textarea can survive an optimistic render. Advance its
+      // baseline as soon as this action is queued so the next edit can chain
+      // against it before acknowledgement, without changing an external edit's guard.
+      if (field.isConnected && state.documentStore?.pending().some(
+        item => item.operation_id === operation.operation_id
+      )) {
+        field.dataset.originalTarget = text;
+        field.dataset.expectedTarget = text;
+        const updated = state.view.cue_views.find(item => item.cue_id === cueId);
+        field.dataset.projectedTarget = updated ? projectedCueLines(unitId?{...updated,target:{...updated.target,target_text:text}}:updated).target : text;
       }
+      return saving;
     } finally {
       if (field.isConnected) field.dataset.committing = "false";
     }
@@ -3816,7 +4075,6 @@
     state.timelineController = factory.createTimelineController({
       getRevisionId:() => state.revision?.revision_id,
       onWaveformPayload:({signal} = {}) => api(projectPath('/waveform-maw'), {signal}),
-      onDetailWaveformPayload:({signal} = {}) => api(projectPath('/waveform-maw-detail'), {signal}),
       async onCommitTimelineTimes(changes,wordTimings) {
         const operation=contract.setCueTimesOperation(state.revision,changes,manualProvenance('maw_waveform'));
         if(wordTimings)operation.payload.word_timings=wordTimings;
@@ -3839,8 +4097,21 @@
       getTimelineCueText:cueSourceText,
       getTimelineCueLines:projectedCueLines,
       getTimelineTokenText:projectedSourceTokenText,
-      async onTimelineTextEdit({cueId,tokenId,text,track}) {
+      async onTargetUnitTimes(changes) {
+        for(const change of changes)if(!await sendOperation(contract.createOperation(state.revision,"set_target_unit",{
+          ...change,provenance:manualProvenance("target_unit_time")
+        })))throw Error("译文时间未保存，请重试");
+      },
+      async onTimelineTextEdit({cueId,unitId,tokenId,text,track}) {
         if(state.topologyOperationPending||editorAiTaskLocksEditor())throw Error('请等待当前任务完成');
+        if(unitId){
+          const unit=state.view.target_units?.find(u=>u.unit_id===unitId);
+          if(!unit)throw Error('译文单元已不存在');
+          if(!await sendOperation(contract.createOperation(state.revision,'set_target_unit',{
+            unit_id:unitId,text,expected_text:unit.text,provenance:manualProvenance('maw_translation_edit')
+          })))throw Error('译文未保存，请重试');
+          return;
+        }
         const cue=state.view.cue_views.find(c=>c.cue_id===cueId);
         if(!cue)throw Error('字幕已不存在');
         if(track==='extension') {
@@ -3915,7 +4186,7 @@
         }
         syncPlaybackFollowAfterSeek();
         state.timelineSelectedCueId = cueId || null;
-        if (cueId) activateCue(cueId, {seek:false, scroll:true, revealTimeline:false, explicitNavigation:true, preserveCueSelection:!!modifiers});
+        if (cueId) activateCue(cueId, {scroll:true, keepVisible:true, explicitNavigation:true, preserveCueSelection:!!modifiers});
         else activateCue(null);
       },
       onSeek(time) {
@@ -3926,6 +4197,7 @@
         if ((cue?.cue_id || null) !== state.activeCueId) activateCue(cue?.cue_id || null, {
           scroll:true,
           revealTimeline:false,
+          keepVisible:true,
           explicitNavigation:true
         });
       },
@@ -3962,6 +4234,7 @@
       positionSlider:$("#cueScrollSlider"),
       pageSize:CUE_PAGE_SIZE,
       renderCue:cueElement,
+      getCueGap:coveringCueGap,
       onWindowChange:page => { state.cuePageStart = page.start; refreshCueSelection(false); }
     });
   }
@@ -4408,8 +4681,6 @@
     syncRecoveryDraftButton();
     state.timelineLayout = localStorage.getItem(`substar.editor.timeline-layout:${projectId}`) === "separated" ? "separated" : "composite";
     $("#timelineLayout").value = state.timelineLayout;
-    state.cueSplitView = localStorage.getItem(`substar.editor.cue-split-view:${projectId}`) || "virtual";
-    if ($("#cueSplitView")) { $("#cueSplitView").value = state.cueSplitView; syncCueViewSwitch(); }
     renderProjectList();
     try {
       const project = state.projects.find(item => item.project_id === projectId);
@@ -4454,6 +4725,8 @@
       state.mediaHadMetadata = false;
       setMediaMessage("正在读取媒体…");
       loadProjectMedia();
+      restoreOutputJob(projectId);
+      refreshOutputMenu();
       state.timelineController?.redraw();
       await aiTaskReady;
       if (!current()) return;
@@ -4466,6 +4739,7 @@
       }
       if (!current()) return;
       const url = new URL(window.location.href);
+      if(url.searchParams.get("project")!==projectId){url.searchParams.delete("cue_id");url.searchParams.delete("cue");}
       url.searchParams.set("project", projectId);
       const recovered = url.searchParams.get("recovered");
       if (recovered) {
@@ -4475,11 +4749,39 @@
           : "已恢复到最后保存版本。", "notice");
       }
       history.replaceState(null, "", url);
+      navigateCueLink(url);
       if (project?.tutorial_case_id && showTutorialIntro) maybeShowTutorialIntro(project.tutorial_case_id);
     } catch (error) {
       if (current()) ordinaryError(error.message);
     }
   }
+
+  function navigateCueLink(url=new URL(location.href)) {
+    if(!state.view||url.searchParams.get('project')!==state.projectId)return;
+    try{
+      const cue=window.SubstarCueLink.resolve(url,state.view.cue_views);if(!cue)return;
+      const media=activeMedia();media?.pause();suspendPlaybackFollow();
+      if(media?.readyState>=HTMLMediaElement.HAVE_METADATA)media.currentTime=Number(cue.start);
+      else state.mediaSwitchPosition={time:Number(cue.start),playing:false};
+      activateCue(cue.cue_id,{scroll:true,revealTimeline:true,centerTimeline:true,explicitNavigation:true});
+      requestAnimationFrame(()=>state.timelineController?.revealTime(Number(cue.start),true));
+      const canonical=window.SubstarCueLink.url(state.projectId,cue,location.href);
+      history.replaceState(null,'',canonical);
+      if(cue.state==='deleted')ordinaryError('此 Cue 已标记删除，当前显示其原片位置。','notice');
+      return true;
+    }catch(error){ordinaryError(error.message);return false;}
+  }
+  window.addEventListener('popstate',()=>{
+    const url=new URL(location.href),project=url.searchParams.get('project');
+    if(project&&project!==state.projectId)loadProject(project);else navigateCueLink(url);
+  });
+  document.addEventListener('click',event=>{
+    const anchor=event.target.closest?.('a[href]');
+    if(!anchor||event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||anchor.target==='_blank')return;
+    const url=new URL(anchor.href,location.href);
+    if(url.origin!==location.origin||url.pathname!=='/editor'||url.searchParams.get('project')!==state.projectId||(!url.searchParams.has('cue_id')&&!url.searchParams.has('cue')))return;
+    event.preventDefault();history.pushState(null,'',url);navigateCueLink(url);
+  });
 
   async function loadProjects() {
     ordinaryError("");
@@ -4680,7 +4982,7 @@
   };
   $("#externalCalibration").onclick = async () => {
     const epoch = projectEpoch;
-    $("#exportMenu").open = false;
+    $("#aiCalibrationMenu").open = false;
     try {
       const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部校准生成.txt`, description:"外部校准提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
       const saved = await flushActiveEditorInput();
@@ -4694,7 +4996,7 @@
     } catch(error) { ordinaryError(`生成外部校准材料失败：${error.message}`); }
   };
   $("#importExternalCalibration").onclick = () => {
-    $("#importMenu").open = false;
+    $("#aiCalibrationMenu").open = false;
     if (!state.revision || state.operationPending || editorAiTaskLocksEditor()) return ordinaryError("请先打开项目并等待当前操作完成");
     $("#externalCalibrationInput").click();
   };
@@ -4724,7 +5026,7 @@
   };
   $("#externalTranslation").onclick = async () => {
     const epoch = projectEpoch;
-    $("#exportMenu").open = false;
+    $("#translationMenu").open = false;
     try {
       const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部翻译生成.txt`, description:"外部翻译提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
       const saved = await flushActiveEditorInput();
@@ -4740,86 +5042,326 @@
       if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .srt 文件`, "completed");
     } catch (error) { ordinaryError(`生成外部翻译材料失败：${error.message}`); }
   };
-  async function exportCutPlan(planId, format, subtitleMode = 'ab-double') {
-    const epoch = projectEpoch;
-    if (!state.projectId || !state.revision) return;
-    const current = state.revision.document.properties.timeline;
-    const selectedPlan = planId || current?.active_plan_id;
-    if (!selectedPlan) throw new Error('请先在“剪辑”中创建方案或添加移除区间');
-    const extension = ({video:'mp4',audio:'wav'})[format] || format;
-    const mimeType = ({video:'video/mp4',audio:'audio/wav',srt:'application/x-subrip',ass:'text/plain',xml:'application/xml'})[format];
-    const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_剪辑.${extension}`, description:'按当前剪辑方案导出', mimeType, extension:`.${extension}`}, async () => {
-      const saved = await flushActiveEditorInput();
-      if (epoch !== projectEpoch) throw new Error('项目已切换，请重新导出');
-      ordinaryError('正在生成剪辑文件…', 'running');
-      const response = await fetch(projectPath('/cut-export'), {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision_id:saved.revision_id,plan_id:selectedPlan,format,subtitle_mode:subtitleMode})});
-      if (!response.ok) { const error = await response.json(); throw new Error(typeof error.detail === 'string' ? error.detail : '剪辑导出失败'); }
-      return response.blob();
-    });
-    if (!result.cancelled) ordinaryError(`已保存：${result.filename}`, 'completed');
+  const outputMenu = $("#exportMenu");
+  const outputForm = $("#outputForm");
+  const outputSessions = new Map();
+  let outputPlanId = null;
+  let outputProject = null;
+
+  function outputPlan() {
+    const timeline = state.revision?.document.properties.timeline;
+    return timeline?.plans?.find(plan => plan.id === (outputPlanId || timeline.active_plan_id));
   }
-  $("#cutExportMenu").addEventListener('click', async event => {
-    const button = event.target.closest('[data-cut-export]');
-    if (!button) return;
-    $("#cutExportMenu").open = false;
-    try { await exportCutPlan(null, button.dataset.cutExport, button.dataset.cutMode || 'ab-double'); }
-    catch (error) { ordinaryError(`剪辑导出失败：${error.message}`); }
-  });
-  $("#exportMenu").addEventListener("click", async event => {
-    const exportEpoch = projectEpoch;
-    const exchange = event.target.closest("[data-exchange-export]");
-    if (exchange && state.projectId && state.revision) {
-      $("#exportMenu").open = false;
+
+  function selectedOutputValues(name) {
+    return [...outputForm.querySelectorAll(`input[name="${name}"]:checked`)].map(input => input.value);
+  }
+
+  function refreshOutputMenu() {
+    const job = outputSessions.get(state.projectId);
+    const busy = ["submitting", "queued", "running"].includes(job?.state);
+    const plan = outputPlan();
+    const xml = outputForm.querySelector('[name="outputProjectFormat"][value="cut-xml"]');
+    xml.disabled = !plan;
+    if (xml.disabled) xml.checked = false;
+    $("#outputPlan").textContent = $("#outputEdited").checked
+      ? plan ? `剪辑方案 · ${plan.name}` : "请先在剪辑中选择方案"
+      : "全片";
+    $("#outputVideo").disabled = state.mediaKind !== "video";
+    if ($("#outputVideo").disabled) $("#outputVideo").checked = false;
+    for (const [input, group] of [
+      ["#outputVideo", "#outputVideoSettings"],
+      ["#outputAudio", "#outputAudioSettings"],
+      ["#outputSubtitles", "#outputSubtitleSettings"],
+      ["#outputProjectFiles", "#outputProjectSettings"],
+    ]) $(group).hidden = !$(input).checked;
+    const maxRate = $("#outputRate").querySelector('[value="96000"]');
+    maxRate.disabled = $("#outputAudioFormat").value === "mp3";
+    if (maxRate.disabled && maxRate.selected) $("#outputRate").value = "48000";
+    const subtitles = $("#outputSubtitles").checked;
+    const incomplete = subtitles && !(selectedOutputValues("outputSubtitleFormat").length && selectedOutputValues("outputSubtitleMode").length);
+    const media = $("#outputVideo").checked || $("#outputAudio").checked || subtitles;
+    const project = $("#outputProjectFiles").checked;
+    const projectFormats = selectedOutputValues("outputProjectFormat");
+    $("#startOutput").disabled = busy || incomplete || (media && $("#outputEdited").checked && !plan) ||
+      (project && !projectFormats.length) || !(media || project) ||
+      !$("#outputTitle").value.trim() || !$("#outputDestination").value.trim();
+    $("#exportDocument").textContent = busy
+      ? `导出 · ${Math.floor((job.progress || 0) * 100)}%` : "导出";
+    $("#outputResult").hidden = !job;
+    if (!job) return;
+    $("#outputProgress").value = job.progress || 0;
+    const messages = {
+      submitting: "正在保存工程…", queued: "等待导出…", running: "正在导出",
+      ready: `已导出 ${job.files?.length || 0} 个文件`, error: "导出失败",
+    };
+    $("#outputStatus").textContent = [messages[job.state], job.encoder, job.message]
+      .filter(Boolean).join(" · ");
+    const destination = $("#outputSavedDestination");
+    destination.hidden = !job.destination;
+    destination.textContent = job.destination || "";
+    $("#outputFallback").hidden = !job.fallback_reason;
+    $("#outputFallback").textContent = job.fallback_reason ? `已回退到 CPU · ${job.fallback_reason}` : "";
+    const files = $("#outputFiles");
+    files.replaceChildren();
+    if (job.state !== "ready") return;
+    const base = projectPath(`/output-jobs/${job.id}`);
+    const appendDownload = (label, url) => {
+      const item = document.createElement("li");
+      const link = document.createElement("a");
+      link.textContent = label;
+      link.href = url;
+      link.download = "";
+      item.append(link);
+      files.append(item);
+    };
+    if (job.files.length > 1) appendDownload("下载全部文件（ZIP）", `${base}/bundle`);
+    job.files.forEach((file, index) => appendDownload(file.name, `${base}/files/${index}`));
+  }
+
+  function showOutputMenu(planId = null, kind = null, subtitleMode = "ab-double") {
+    if (!state.revision) return;
+    outputPlanId = planId;
+    if (kind) {
+      $("#outputEdited").checked = true;
+      $("#outputVideo").checked = kind === "video";
+      $("#outputAudio").checked = kind === "audio";
+      $("#outputSubtitles").checked = kind === "srt";
+      $("#outputProjectFiles").checked = false;
+      for (const input of outputForm.querySelectorAll('[name="outputSubtitleMode"]')) {
+        input.checked = input.value === subtitleMode;
+      }
+      outputForm.querySelector('[name="outputSubtitleFormat"][value="srt"]').checked = true;
+    }
+    refreshOutputMenu();
+    outputMenu.open = true;
+    $("#exportDocument").focus();
+  }
+
+  async function followOutput(project, endpoint, initial) {
+    let job = initial;
+    let failedPolls = 0;
+    while (true) {
+      outputSessions.set(project, job);
+      if (state.projectId === project) refreshOutputMenu();
+      if (["ready", "error"].includes(job.state)) return;
+      await new Promise(resolve => setTimeout(resolve, 1000));
       try {
-        const sequence = nextExportSequence();
-        const spec = systemSaveAs.exchangeSpec(
-          window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
-          exchange.dataset.exchangeExport, sequence.value, async () => {
-            const savedBase = await flushActiveEditorInput();
-            if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
-            const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
-            return projectPath(`/exchange/${encodeURIComponent(exchange.dataset.exchangeExport)}?${query}`);
-          }
-        );
-        const result = await systemSaveAs.saveUrl(spec);
-        if (result.cancelled) return;
-        commitExportSequence(sequence);
-        ordinaryError(`已保存：${result.filename}`, "completed");
+        const response = await fetch(`${endpoint}/${initial.id}`, {cache:"no-store"});
+        if (!response.ok) throw Object.assign(new Error("导出状态暂时无法读取"), {status:response.status});
+        job = await response.json();
+        failedPolls = 0;
       } catch (error) {
-        ordinaryError(`导出失败：${error.message}`);
-        if (exchange.dataset.exchangeExport === 'subtitle-project' && /媒体|文件不存在|重新链接/.test(error.message)) {
-          $("#taskInfoMenu").open = true;
-          await openTaskInfoMenu();
-          $("#relinkTaskMedia").click();
+        if (error.status === 404 || ++failedPolls >= 5) {
+          job = {state:"error", message:error.status === 404 ? "服务已重启或导出已过期" : error.message};
         }
       }
+    }
+  }
+
+  async function exportCutPlan(planId, format, subtitleMode = "ab-double") {
+    if (["srt", "video", "audio"].includes(format)) {
+      showOutputMenu(planId, format, subtitleMode);
       return;
     }
-    const button = event.target.closest("[data-export-mode]");
-    if (!button || !state.projectId || !state.revision) return;
-    $("#exportMenu").open = false;
+    const epoch = projectEpoch;
+    const selectedPlan = planId || state.revision?.document.properties.timeline?.active_plan_id;
+    if (!selectedPlan) throw new Error("请先在剪辑中选择一个方案");
+    const spec = {
+      suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_剪辑.${format}`,
+      description:"按当前剪辑方案导出", mimeType:format === "xml" ? "application/xml" : "text/plain",
+      extension:`.${format}`,
+    };
+    const result = await systemSaveAs.saveBlob(spec, async () => {
+      const saved = await flushActiveEditorInput();
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+      const response = await fetch(projectPath("/cut-export"), {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({revision_id:saved.revision_id, plan_id:selectedPlan, format, subtitle_mode:subtitleMode}),
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "剪辑导出失败");
+      }
+      return response.blob();
+    });
+    if (!result.cancelled) ordinaryError(`已保存：${result.filename}`, "completed");
+  }
+
+  function prepareOutputFields() {
+    if (outputProject === state.projectId) return;
+    outputProject = state.projectId;
+    const project = state.projectId;
+    const title = $("#outputTitle");
+    const directory = $("#outputDestination");
+    title.value = (state.taskInfo?.display_name || project).slice(0, 120);
+    directory.value = localStorage.getItem("substar.output-directory") || "";
+    $("#outputDirectoryError").hidden = true;
+    api(projectPath("/output-destination")).then(result => {
+      if (project !== state.projectId) return;
+      if (!directory.value) directory.value = result.path;
+      refreshOutputMenu();
+    }).catch(error => showOutputDirectoryError(error.message));
+  }
+
+  function showOutputDirectoryError(message) {
+    const notice = $("#outputDirectoryError");
+    notice.textContent = message;
+    notice.hidden = !message;
+  }
+
+  outputMenu.addEventListener("toggle", () => {
+    if (!outputMenu.open) {
+      outputPlanId = null;
+      closeOutputDirectory();
+      return;
+    }
+    if (!state.revision) {
+      outputMenu.open = false;
+      return;
+    }
+    document.querySelectorAll(".editor-command-menu[open]").forEach(menu => {
+      if (menu !== outputMenu) menu.open = false;
+    });
+    prepareOutputFields();
+    refreshOutputMenu();
+  });
+  document.addEventListener("click", event => {
+    if (outputMenu.open && !event.composedPath().includes(outputMenu)) outputMenu.open = false;
+  });
+  $("#outputDestination").addEventListener("input", () => showOutputDirectoryError(""));
+  const outputDirectoryPicker = $("#outputDirectoryPicker");
+  let outputDirectoryState = null;
+  let outputDirectoryRequest = 0;
+
+  function closeOutputDirectory() {
+    outputDirectoryPicker.hidden = true;
+    outputDirectoryState = null;
+    outputDirectoryRequest += 1;
+  }
+
+  async function browseOutputDirectory(path = "") {
+    const request = ++outputDirectoryRequest;
+    const list = $("#outputDirectoryList");
+    const location = $("#outputBrowsePath");
+    outputDirectoryState = null;
+    outputDirectoryPicker.hidden = false;
+    $("#useOutputDirectory").disabled = true;
+    $("#outputParentDirectory").disabled = true;
+    list.replaceChildren();
+    location.textContent = "正在读取文件夹…";
+    showOutputDirectoryError("");
     try {
-      const sequence = nextExportSequence();
-      const spec = systemSaveAs.subtitleSpec(
-        window.SubstarProjectLabel(state.taskInfo?.display_name || state.projectId),
-        button.dataset.exportMode,
-        sequence.value,
-        async () => {
-          const savedBase = await flushActiveEditorInput();
-          if (exportEpoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
-          const query = new URLSearchParams({export_sequence:String(sequence.value), revision_id:savedBase.revision_id});
-          return projectPath(`/export/${encodeURIComponent(button.dataset.exportMode)}?${query}`);
-        }
-      );
-      const result = await systemSaveAs.saveUrl(spec);
-      if (result.cancelled) return;
-      commitExportSequence(sequence);
-      ordinaryError(`已保存：${result.filename}`, "completed");
-      observeEditorTutorialEvent("export", {mode:button.dataset.exportMode});
+      const query = new URLSearchParams({browse:"true"});
+      if (path) query.set("path", path);
+      const folder = await api(projectPath(`/output-destination?${query}`));
+      if (request !== outputDirectoryRequest) return;
+      outputDirectoryState = folder;
+      location.textContent = folder.path;
+      $("#useOutputDirectory").disabled = false;
+      $("#outputParentDirectory").disabled = !folder.parent;
+      const drives = $("#outputDirectoryDrive");
+      drives.replaceChildren(...folder.roots.map(root => new Option(root, root)));
+      drives.value = folder.root;
+      drives.hidden = folder.roots.length < 2;
+      for (const directory of folder.folders) {
+        const item = document.createElement("li");
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = directory.name;
+        button.onclick = () => void browseOutputDirectory(directory.path);
+        item.append(button);
+        list.append(item);
+      }
     } catch (error) {
-      ordinaryError(`导出失败：${error.message}`);
+      if (request !== outputDirectoryRequest) return;
+      if (path && error.status === 422) {
+        await browseOutputDirectory();
+        if (!outputDirectoryPicker.hidden) showOutputDirectoryError(error.message);
+      } else {
+        location.textContent = error.message;
+      }
+    }
+  }
+
+  $("#chooseOutputDirectory").onclick = () => {
+    if (outputDirectoryPicker.hidden) void browseOutputDirectory($("#outputDestination").value.trim());
+    else closeOutputDirectory();
+  };
+  $("#outputParentDirectory").onclick = () => {
+    if (outputDirectoryState?.parent) void browseOutputDirectory(outputDirectoryState.parent);
+  };
+  $("#outputDirectoryDrive").onchange = event => void browseOutputDirectory(event.target.value);
+  $("#cancelOutputDirectory").onclick = () => {
+    closeOutputDirectory();
+    $("#chooseOutputDirectory").focus();
+  };
+  $("#useOutputDirectory").onclick = () => {
+    if (!outputDirectoryState) return;
+    $("#outputDestination").value = outputDirectoryState.path;
+    closeOutputDirectory();
+    refreshOutputMenu();
+    $("#chooseOutputDirectory").focus();
+  };
+  outputForm.addEventListener("input", refreshOutputMenu);
+  outputForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if ($("#startOutput").disabled) return;
+    const project = state.projectId;
+    const epoch = projectEpoch;
+    const endpoint = projectPath("/output-jobs");
+    const sequence = nextExportSequence();
+    const subtitles = $("#outputSubtitles").checked ? {
+      formats: selectedOutputValues("outputSubtitleFormat"),
+      modes: selectedOutputValues("outputSubtitleMode"),
+    } : null;
+    const payload = {
+      export_sequence: sequence.value,
+      title: $("#outputTitle").value.trim(),
+      destination: $("#outputDestination").value.trim(),
+      project_files: $("#outputProjectFiles").checked ? selectedOutputValues("outputProjectFormat") : [],
+      edited: $("#outputEdited").checked,
+      plan_id: outputPlan()?.id || null,
+      video: $("#outputVideo").checked ? {
+        resolution:$("#outputResolution").value, format:$("#outputVideoFormat").value,
+        codec:$("#outputCodec").value, fps:$("#outputFps").value, bitrate:$("#outputBitrate").value,
+      } : null,
+      audio: $("#outputAudio").checked ? {
+        format:$("#outputAudioFormat").value, sample_rate:$("#outputRate").value,
+      } : null,
+      subtitles,
+    };
+    outputSessions.set(project, {state:"submitting"});
+    refreshOutputMenu();
+    try {
+      const saved = await flushActiveEditorInput();
+      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+      const job = await api(endpoint, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({...payload, revision_id:saved.revision_id}),
+      });
+      commitExportSequence(sequence);
+      localStorage.setItem("substar.output-directory", payload.destination);
+      if (subtitles) observeEditorTutorialEvent("export", {mode:subtitles.modes[0]});
+      sessionStorage.setItem(`substar.output-job:${project}`, job.id);
+      await followOutput(project, endpoint, job);
+    } catch (error) {
+      outputSessions.set(project, {state:"error", message:error.message});
+      if (state.projectId === project) refreshOutputMenu();
     }
   });
+
+  function restoreOutputJob(project) {
+    if (outputSessions.has(project)) return;
+    const id = sessionStorage.getItem(`substar.output-job:${project}`);
+    if (!id) return;
+    const endpoint = projectPath("/output-jobs");
+    api(`${endpoint}/${encodeURIComponent(id)}`).then(job => {
+      if (!outputSessions.has(project)) void followOutput(project, endpoint, job);
+    }).catch(() => sessionStorage.removeItem(`substar.output-job:${project}`));
+  }
+
+
   $("#mergeTokens").onclick = mergeSelectedTokens;
   $("#deleteTokens").onclick = deleteSelectedTokens;
   $("#restoreTokens").onclick = restoreSelectedTokens;
@@ -5000,18 +5542,23 @@
     updateTimelineHeight();
     state.timelineController?.redraw();
   };
-  function syncCueViewSwitch() {
-    const select = $("#cueSplitView");
-    document.querySelectorAll("[data-cue-view]").forEach(button => {
-      button.setAttribute("aria-pressed", String(button.dataset.cueView === select.value));
-      button.disabled = select.disabled;
-    });
+  const deletedTokensButton = $("#showDeletedTokens");
+  function updateDeletedTokensButton() {
+    deletedTokensButton.setAttribute("aria-pressed", String(state.showDeletedTokens));
+    deletedTokensButton.title = state.showDeletedTokens ? "隐藏已删除词元" : "显示已删除词元";
   }
-  $("#cueSplitView").onchange = event => {
-    state.cueSplitView = event.target.value === "auxiliary" ? "auxiliary" : "virtual";
-    syncCueViewSwitch();
-    if (state.projectId) {
-      localStorage.setItem(`substar.editor.cue-split-view:${state.projectId}`, state.cueSplitView);
+  updateDeletedTokensButton();
+  deletedTokensButton.onclick = () => {
+    if (hasUncommittedEditorInput()) return;
+    state.showDeletedTokens = !state.showDeletedTokens;
+    localStorage.setItem("substar.editor.show-deleted-tokens", String(state.showDeletedTokens));
+    updateDeletedTokensButton();
+    if (!state.showDeletedTokens) {
+      const tokenById = state.indexes?.tokenById;
+      for (const id of state.selectedTokenIds) {
+        if (tokenById?.get(id)?.state === "deleted") state.selectedTokenIds.delete(id);
+      }
+      if (tokenById?.get(state.selectionAnchorTokenId)?.state === "deleted") state.selectionAnchorTokenId = null;
     }
     renderCues({preservePage:true});
     refreshTokenSelectionUi();
@@ -5035,19 +5582,8 @@
   ["#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong"].forEach(selector => {
     $(selector).onclick = event => convertScript(event.currentTarget.dataset.scriptTarget);
   });
-  $("#importProject").onclick = event => {
-    event.preventDefault();
-    const menu = $("#importMenu");
-    const opening = !menu.open;
-    if (opening) {
-      document.querySelectorAll(".editor-command-menu[open]").forEach(other => {
-        if (other !== menu) other.open = false;
-      });
-    }
-    menu.open = opening;
-  };
   $("#importProjectPackage").onclick = () => {
-    $("#importMenu").open = false;
+    $("#projectMenu").open = false;
     $("#importProjectInput").click();
   };
   let srtImport = null;
@@ -5089,7 +5625,7 @@
     }
   };
   $("#importSrtTranslation").onclick = () => {
-    $("#importMenu").open = false;
+    $("#translationMenu").open = false;
     if (!state.revision || state.operationPending) return ordinaryError("请先打开项目并等待当前操作完成");
     $("#importSrtInput").click();
   };
@@ -5173,12 +5709,45 @@
   $("#externalReviewRange").addEventListener("input", () => reviewChat.clear());
   $("#copyExternalReview").onclick = copyExternalReviewContent;
   $("#sendAiReview").onclick = () => reviewChat.start();
-  $("#referenceManuscript").onclick = () => { state.taskPanelDismissed = false; runReferenceManuscript(); };
+  const cueJumpNumber = $("#cueJumpNumber");
+  cueJumpNumber.addEventListener("input", () => cueJumpNumber.setCustomValidity(""));
+  $("#cueJumpForm").addEventListener("submit", event => {
+    event.preventDefault();
+    if (cueJumpNumber.disabled) return;
+    const value = cueJumpNumber.value.normalize("NFKC").trim();
+    const cue = /^\d+$/.test(value)
+      ? state.view?.cue_views.find(item => item.index + 1 === Number(value))
+      : null;
+    if (!cue) {
+      cueJumpNumber.setCustomValidity("请输入字幕列表中的 Cue 编号");
+      cueJumpNumber.reportValidity();
+      return;
+    }
+    if (state.selectedTokenIds.size) {
+      state.selectedTokenIds.clear();
+      state.selectionAnchorTokenId = null;
+      refreshTokenSelectionUi();
+    }
+    selectCue(cue.cue_id, true, true);
+  });
   $("#referenceKeepAsr").onclick = () => chooseReferenceVersion(false);
   $("#referenceApply").onclick = () => chooseReferenceVersion(true);
-  $("#fontDecrease").onclick = () => { state.fontSize = Math.max(11, state.fontSize - 1); render(); };
-  $("#fontIncrease").onclick = () => { state.fontSize = Math.min(22, state.fontSize + 1); render(); };
+  $("#subtitleFontSize").oninput = event => {
+    if (hasUncommittedEditorInput()) {
+      event.target.value = state.fontSize;
+      return;
+    }
+    state.fontSize = event.target.valueAsNumber;
+    render();
+  };
+  $("#showTranslationsToggle").onclick = () => {
+    if (hasUncommittedEditorInput()) return;
+    const showTranslations = $("#showTranslations");
+    showTranslations.checked = !showTranslations.checked;
+    showTranslations.dispatchEvent(new Event("change", {bubbles:true}));
+  };
   $("#showTranslations").onchange = event => {
+    $("#showTranslationsToggle").setAttribute("aria-pressed", String(event.target.checked));
     document.body.classList.toggle("hide-editor-translations", !event.target.checked);
     renderCues({preservePage:true});
     updateTimelineHeight();
@@ -5249,8 +5818,38 @@
     const interactive = event.target.closest("button, textarea, input, select, a, [contenteditable='true']");
     if (row && !interactive) selectCueGroup(row.dataset.cueId, event);
   });
+  function nearestCueControl(event, selector) {
+    if (event.target.closest("input,textarea,select,a,[contenteditable='true'],.cue-actions,.cue-meta")) return null;
+    const content = event.target.closest(".cue-content");
+    const line = (content || event.target.closest(".cue-row"))?.querySelector(".source-token-line");
+    if (!line || line.hidden) return null;
+    let nearest = null;
+    let bestDistance = Infinity;
+    let bestCenterDistance = Infinity;
+    for (const control of line.querySelectorAll(selector)) {
+      if (control.disabled) continue;
+      const auxiliary = control.classList.contains("cue-end");
+      if (!content && !auxiliary) continue;
+      const rect = control.getBoundingClientRect();
+      if (!rect.height) continue;
+      const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
+      const dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
+      const tolerance = auxiliary ? 12 : 4;
+      if (dx > tolerance || dy > tolerance) continue;
+      const distance = dx * dx + dy * dy;
+      const centerDistance = Math.abs(event.clientX - (rect.left + rect.right) / 2);
+      if (distance < bestDistance || (distance === bestDistance && centerDistance < bestCenterDistance)) {
+        nearest = control;
+        bestDistance = distance;
+        bestCenterDistance = centerDistance;
+      }
+    }
+    return nearest;
+  }
+
   $("#cueList").addEventListener("dblclick", event => {
-    const connector = event.target.closest("[data-token-connector]");
+    const connector = event.target.closest("[data-token-connector]") ||
+      (!event.target.closest("[data-token-id]") && nearestCueControl(event, "[data-token-connector].cue-end"));
     if (connector && !connector.disabled) {
       event.preventDefault();
       event.stopPropagation();
@@ -5274,7 +5873,8 @@
   });
   $("#cueList").addEventListener("contextmenu", event => {
     if (tokenSplitMode) { splitTokenAtPointer(event); return; }
-    const boundary = event.target.closest("[data-boundary-control]");
+    const boundary = event.target.closest("[data-boundary-control]") ||
+      nearestCueControl(event, "[data-boundary-control]");
     if (!boundary || boundary.disabled) return;
     event.preventDefault();
     event.stopPropagation();
@@ -5355,6 +5955,7 @@
     $("#cueList").querySelectorAll(".cue-row[data-cue-id]").forEach(row => {
       row.classList.toggle("cue-selected", ids.has(row.dataset.cueId));
       row.setAttribute("aria-selected", String(ids.has(row.dataset.cueId)));
+      updateCueGapCoverage(row);
     });
     assPanel?.selectionChanged();
   }
@@ -5365,7 +5966,7 @@
     refreshTokenSelectionUi();
     state.cueSelection.select(id, cueOrder(), {range:event.shiftKey,toggle:event.ctrlKey || event.metaKey});
     refreshCueSelection();
-    selectCue(id, !event.shiftKey && !event.ctrlKey && !event.metaKey, false, true);
+    selectCue(id, !event.shiftKey && !event.ctrlKey && !event.metaKey, false, true, true);
   }
   // A gesture keeps the target chosen on pointerdown, even when crossing other regions.
   document.body.append($("#tokenMarquee"));
@@ -5483,7 +6084,7 @@
   });
   document.addEventListener("pointerdown", event => {
     if (event.target.closest(".display-token,.token-selection-menu,.reference-selection-menu,#revisionMenu,#versionMenu")) return;
-    if (event.target.closest("#cueList")) return;
+    if (event.target.closest("#cueList,#aiReviewMenu") || isTextEditingContext(event)) return;
     if (!state.selectedTokenIds.size) return;
     state.selectedTokenIds.clear();
     state.selectionAnchorTokenId = null;
@@ -5518,21 +6119,32 @@
     }
     openSpeakerDialog();
   };
-  $("#cancelSpeakerDialog").onclick = closeSpeakerDialog;
+  $("#cancelSpeakerDialog")?.addEventListener("click", closeSpeakerDialog);
   $("#addSpeaker")?.addEventListener("click", () => {
+    if (dockedSpeakerForm()) {
+      if (!state.revision) return;
+      const id = window.EditorSpeakers.nextId(window.EditorSpeakers.ids(state.view));
+      void sendOperation(contract.setSpeakerNamesOperation(
+        state.revision, {...speakerNames(), [id]:window.EditorSpeakers.label(id)}, manualProvenance("set_speaker_names")
+      ));
+      const input = $(`#speakerDialogForm [data-speaker-name="${id}"]`);
+      input?.focus();
+      input?.select();
+      return;
+    }
     const ids = [...document.querySelectorAll("[data-speaker-name]")].map(node => node.dataset.speakerName);
     const id = window.EditorSpeakers.nextId(ids);
     appendSpeakerInput(id, window.EditorSpeakers.label(id)).focus();
   });
   $("#speakerDialogForm").addEventListener("submit", async event => {
     event.preventDefault();
+    if (dockedSpeakerForm()) return;
     const names = Object.fromEntries([...document.querySelectorAll("[data-speaker-name]")]
       .map(input => [input.dataset.speakerName, input.value.trim()]));
     closeSpeakerDialog();
     await sendOperation(contract.setSpeakerNamesOperation(
       state.revision, names, manualProvenance("set_speaker_names")
     ));
-    if($("#speakerDialogForm").closest('[data-tool-panel="dubbing"]'))populateSpeakerSettings();
   });
   $("#closeValidation").onclick = closeValidationModal;
   $("#dismissValidation").onclick = closeValidationModal;
@@ -5600,8 +6212,7 @@
   });
   $("#mediaPlayToggle").onclick = toggleMediaPlayback;
   $("#mediaSeek").addEventListener("input", event => {
-    const time = Number(event.currentTarget.value) || 0;
-    if (activeMedia()) activeMedia().currentTime = time;
+    const time = seekMedia(Number(event.currentTarget.value) || 0);
     const cue = state.view?.cue_views.find(item =>
       item.state === "active" && time >= Number(item.start) && time < Number(item.end)
     );
@@ -5628,6 +6239,7 @@
     } else { media.muted = true; }
     syncMediaControls();
   };
+  $("#mediaCompatiblePreview").onclick = () => void enableCompatiblePreview();
   $("#mediaFullscreen").onclick = () => {
     const frame = document.fullscreenElement ? null : $(".media-frame");
     if (frame?.requestFullscreen) frame.requestFullscreen();
@@ -5642,6 +6254,13 @@
   });
 
   document.addEventListener("keydown", event => {
+    if (outputMenu.open && event.key === "Escape") {
+      event.preventDefault();
+      outputMenu.open = false;
+      $("#exportDocument").focus();
+      return;
+    }
+    if (outputMenu.contains(event.target)) return;
     if (event.key === "Escape" && state.tutorial.active) {
       event.preventDefault();
       exitEditorTutorial();
@@ -5661,6 +6280,7 @@
   });
 
   document.addEventListener("keydown", event => {
+    if (outputMenu.contains(event.target)) return;
     if (event.repeat || shortcutFromEvent(event).toLowerCase() !== state.shortcuts.playPause.toLowerCase()) return;
     if (isTextEditingContext(event)) return;
     event.preventDefault();
@@ -5669,6 +6289,7 @@
   }, true);
 
   document.addEventListener("keydown", event => {
+    if (outputMenu.contains(event.target)) return;
     if (state.timelineController) return;
     if (shortcutFromEvent(event).toLowerCase() !== state.shortcuts.hideCue.toLowerCase()
       || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
@@ -5691,8 +6312,8 @@
     const importOpinions = document.createElement("button");
     importOpinions.type = "button";
     importOpinions.id = "importReviewOpinions";
-    importOpinions.textContent = "审阅意见";
-    $("#importMenu .editor-command-popover").append(importOpinions);
+    importOpinions.textContent = "导入审阅意见";
+    $("#aiReviewMenu .external-review-popover").append(importOpinions);
     const opinionFile = document.createElement("input");
     opinionFile.type = "file";
     opinionFile.accept = ".json,application/json";
@@ -5701,10 +6322,10 @@
     const exportOpinions = document.createElement("button");
     exportOpinions.type = "button";
     exportOpinions.id = "exportReviewOpinions";
-    exportOpinions.textContent = "审阅意见";
-    $("#exportMenu .export-popover").append(exportOpinions);
+    exportOpinions.textContent = "导出审阅意见";
+    $("#aiReviewMenu .external-review-popover").append(exportOpinions);
     exportOpinions.onclick = async () => {
-      $("#exportMenu").open = false;
+      $("#aiReviewMenu").open = false;
       if (!state.projectId) return;
       try {
         const epoch = projectEpoch;
@@ -5722,7 +6343,7 @@
       } catch (error) {ordinaryError(error.status === 404 ? "请重启 Substar 以加载审阅意见导入、导出功能" : error.message);}
     };
     importOpinions.onclick = () => {
-      $("#importMenu").open = false;
+      $("#aiReviewMenu").open = false;
       if (state.projectId) opinionFile.click();
     };
     opinionFile.onchange = async () => {
@@ -6136,5 +6757,14 @@
   initializeCueListView();
   configureMedia("video");
   loadEditorSettings();
-  loadProjects();
+  window.SubstarAgentStatus?.create({
+    anchor:$("#refreshDocumentBottom"),getProjectId:()=>state.projectId,getRevisionId:()=>state.revision?.revision_id,
+    canSync:()=>!hasUncommittedEditorInput()&&!state.operationQueue?.getState().hasUnsavedChanges&&!state.checkpointPending&&!state.documentWritePending,
+    syncLatest:syncIdleRevision
+  });
+  (async()=>{
+    await loadProjects();
+    window.SubstarCueLink.startSession({getProject:()=>state.projectId,onNavigate:navigateCueLink,
+      canNavigate:()=>Boolean(state.view)&&!hasUncommittedEditorInput()});
+  })();
 })();

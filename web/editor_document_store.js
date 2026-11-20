@@ -83,7 +83,7 @@
         break;
       case "replace": {
         const token = tokenById.get(String(payload.token_id));
-        if (token) {
+        if (token && token.text !== String(payload.text || token.text)) {
           token.text = String(payload.text || token.text);
           if (Object.hasOwn(token, "canonical_text")) token.canonical_text = token.text;
           token.provenance = provenance;
@@ -93,7 +93,7 @@
       case "batch_replace":
         (payload.replacements || []).forEach(item => {
           const token = tokenById.get(String(item.token_id));
-          if (token) {
+          if (token && token.text !== String(item.text || token.text)) {
             token.text = String(item.text || token.text);
             if (Object.hasOwn(token, "canonical_text")) token.canonical_text = token.text;
             token.provenance = provenance;
@@ -105,8 +105,22 @@
         if (cue && cue.source_text != null) cue.source_text = String(payload.text);
         break;
       }
+      case "set_target_unit":
+        (globalThis.SubstarTargetUnits || require("./editor_target_units.js")).edit(document,payload,provenance);
+        break;
+      case "set_target_units": {
+        const helper=globalThis.SubstarTargetUnits || require("./editor_target_units.js"),scope=new Set(payload.replace_cue_ids||[]);
+        const units=helper.all(document).filter(u=>!u.source_cue_ids.some(id=>scope.has(id)));
+        helper.install(document,[...units,...clone(payload.units||[])],provenance);
+        break;
+      }
       case "set_target": {
         const cue = cueById.get(String(payload.cue_id));
+        if(cue?.mapping?.target_unit_ids?.length===1){
+          (globalThis.SubstarTargetUnits || require("./editor_target_units.js")).edit(document,{
+            unit_id:cue.mapping.target_unit_ids[0],text:payload.target_text,expected_text:payload.expected_target_text
+          },provenance);break;
+        }
         if (cue) {
           const text = String(payload.target_text || "").trim();
           cue.target = text ? {

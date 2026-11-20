@@ -249,8 +249,9 @@ export function createWaveformModule(dependencies) {
             return;
           }
           const timeMs = this.timeFromPointer(event, row);
-          this.options.previewGapAt?.(index, timeMs);
-          this.options.seek(timeMs / 1000, { mouseClick: true });
+          if (this.options.previewGapAt?.(index, timeMs) !== true) {
+            this.options.seek(timeMs / 1000, { mouseClick: true });
+          }
           this.updatePlayback();
         });
         block.addEventListener('dblclick', (event) => {

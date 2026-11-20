@@ -53,9 +53,9 @@ from substar_core.manuscript_matching import (
 from substar_core.media import (
     WAVEFORM_WINDOW_CACHE,
     pcm_wave_frame_count,
-    prepare_playback_media,
     smart_forward_snap,
 )
+from substar_core.media.http_response import PlaybackFileResponse
 from substar_core.model_gateway import (
     ModelGatewayError,
     ModelGatewayRequestError,
@@ -1220,12 +1220,33 @@ def get_thumbnail_asset(project_id: str, revision: str, asset: str) -> FileRespo
                         headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
+@router.get("/projects/{project_id}/compatible-preview")
+@router.post("/projects/{project_id}/compatible-preview")
+def compatible_preview_status(project_id: str, request: Request) -> dict[str, Any]:
+    from substar_core.media.playback_proxy import request_compatible_preview
+
+    source, manifest = _project_media_source(project_id)
+    if _project_media_kind(source, manifest) != "video":
+        raise HTTPException(422, "此素材没有视频画面")
+    return request_compatible_preview(source, project_job_path(project_id) / "playback_cache",
+                                      start=request.method == "POST")
+
+
+@router.get("/projects/{project_id}/compatible-preview/{asset}")
+def compatible_preview_media(project_id: str, asset: str) -> PlaybackFileResponse:
+    from substar_core.media.playback_proxy import preview_file
+
+    source, _ = _project_media_source(project_id)
+    path = preview_file(source, project_job_path(project_id) / "playback_cache")
+    if asset != path.stem or not path.is_file():
+        raise HTTPException(404, "兼容预览尚未就绪")
+    return PlaybackFileResponse(path, media_type="video/mp4")
+
+
 @router.get("/projects/{project_id}/media")
-def get_project_media(project_id: str) -> FileResponse:
-    job_dir = project_job_path(project_id)
-    source_path, _manifest = _project_media_source(project_id)
-    playback_path = prepare_playback_media(source_path, job_dir / "playback_cache")
-    return FileResponse(playback_path, media_type=None)
+def get_project_media(project_id: str) -> PlaybackFileResponse:
+    source, _ = _project_media_source(project_id)
+    return PlaybackFileResponse(source)
 
 
 def _pcm_peak_buckets(samples: array, bucket: int) -> list[float]:
@@ -2841,8 +2862,14 @@ def get_project_translation(project_id: str, request: Request) -> dict[str, Any]
 from .cut_api import router as cut_router
 router.include_router(cut_router)
 
+from .output_api import router as output_router
+router.include_router(output_router)
+
 from .maw_waveform_api import router as maw_waveform_router
 router.include_router(maw_waveform_router)
+
+from .agent_api import router as agent_router
+router.include_router(agent_router)
 
 
 class GapTranscriptionRequest(BaseModel):

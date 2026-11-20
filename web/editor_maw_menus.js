@@ -24,9 +24,20 @@ export function createMawMenus(h){
     if(track==='extension')item('创建副字幕','N',()=>h.editText(ext,'extension'),{disabled:ext<0||Boolean(segments('extension')[ext]?.text)});
     else {item('创建字幕','N',()=>create(time,'main'),{disabled:index>=0});if(h.overlayEnabled())item('创建叠加字幕','',()=>create(time,'overlay'),{disabled:at(time,'overlay')>=0});}
     sep();item('添加空隙','',()=>{const duration=h.getDuration(),length=Math.min(duration,Math.max(10,Number(h.getGapState().minimum_ms)||400)),start=Math.min(Math.max(0,Math.round(time/10)*10),duration-length);const a=h.snapGapBoundary(start),b=h.snapGapBoundary(start+length);return b-a>=10?h.manualGap(a,b):h.manualGap(start,start+length);});
-    if(h.getGapState().gaps.some(g=>g.removed!==false))item('填充区间空隙','',()=>{const gaps=h.getGapState().gaps.filter(g=>g.removed!==false).sort((a,b)=>a.start-b.start);if(gaps.some(g=>g.start<=time&&time<g.end))return;const start=gaps.filter(g=>g.end<=time).at(-1)?.end||0,end=gaps.find(g=>g.start>time)?.start??h.getDuration();return h.manualGap(start,end);}).title='将点击位置两侧已移除区间之间的整段内容也设为移除；缺少一侧时延伸到媒体开头或结尾，导出剪辑时会剪掉该段。';addMarkerItems(time);open(x,y);
+    addMarkerItems(time);open(x,y);
   }
-  function gap(x,y,index){const state=h.getGapState(),g=globalThis.AsrGapRemoveCore.getGapRemoveDisplayGaps(state.gaps)[index];if(!g)return;reset();item('重新听写此片段','',()=>options.onRetranscribeGap(g.start/1000,g.end/1000),{disabled:!options.onRetranscribeGap});sep();item(g.removed===false?'移除区段':'恢复区段','',()=>h.manualGap(g.start,g.end,g.removed===false));sep();item('清理空隙','',()=>{const core=globalThis.AsrGapRemoveCore,provenance=core.removeGapRemoveProvenanceRange(state.provenance,g.start,g.end,state.gaps);return h.commitGaps({...state,provenance,gaps:core.gapRangesFromProvenance(provenance)});},{danger:true});addMarkerItems(g.start,g.end);open(x,y);}
+  function gap(x,y,index){
+    const g=globalThis.AsrGapRemoveCore.getGapRemoveDisplayGaps(h.getGapState().gaps)[index];
+    if(!g)return;
+    reset();
+    item('重新听写此片段','',()=>options.onRetranscribeGap(g.start/1000,g.end/1000),{disabled:!options.onRetranscribeGap});
+    sep();
+    item('恢复部分片段','',()=>h.startPartialGapRestore(g),{disabled:g.removed===false});
+    sep();
+    item('删除空隙','',()=>h.clearGapRange(g.start,g.end),{danger:true});
+    addMarkerItems(g.start,g.end);
+    open(x,y);
+  }
   function selectionItems(ranges){
     sep();
     item('添加点标记','',()=>h.createSelectionItems('point',ranges));
@@ -39,16 +50,23 @@ export function createMawMenus(h){
     reset();selectionItems(h.getWordRanges());open(x,y);
   }
 
-  async function editMany(ids,transform,track){for(const id of ids){const s=segments(track).find(s=>s.id===id);if(s)await options.onTimelineTextEdit({cueId:id,text:transform(s.rawText??s.text),track});}}
+  async function editMany(ids,transform,track){for(const id of ids){const s=segments(track).find(s=>s.id===id);if(s)await options.onTimelineTextEdit({cueId:s.source_cue_id||id,unitId:s.unit_id,text:transform(s.rawText??s.text),track});}}
   async function merge(ids){for(let i=1;i<ids.length;i++)await op('merge_cues',{cue_ids:[ids[0],ids[i]]});}
   function cue(x,y,index,time,track='main',mode={}){
     const s=segments(track)[index];if(!s)return;const multi=selection(track).size>1&&selection(track).has(index);if(!multi)select(index,track);
     const selected=multi?[...selection(track)].sort((a,b)=>a-b):[index],targets=selected.map(i=>segments(track)[i]),ids=targets.map(s=>s.id);reset();
     if(track==='extension'){
-      const bound=(label,key)=>{const entry=item(label,key,()=>{},{disabled:true});entry.title='当前译文与主字幕共用时间范围，尚不支持独立副字幕';};
-      bound('在鼠标位置拆分','B');bound('合并副字幕块','C');bound('隐藏副字幕','Alt+点击');
-      item('删除副字幕','',()=>editMany(ids,()=>'',track),{danger:true});
-      bound('对齐主字幕时间范围','H');bound('解绑','Shift+G');open(x,y);return;
+      item('编辑译文','',()=>h.editText(index,'extension'));
+      item('删除译文','',()=>editMany(ids,()=>'',track),{danger:true});
+      if(s.unit_id){
+        item('调整译文显示时间','',async()=>{
+          const input=prompt('开始秒数,结束秒数',`${(s.start/1000).toFixed(3)},${(s.end/1000).toFixed(3)}`);if(input===null)return;
+          const values=input.split(/[\s,，;；]+/).filter(Boolean).map(Number);
+          if(values.length!==2||values.some(v=>!Number.isFinite(v))||values[0]<0||values[1]<=values[0])throw Error('时间格式应为：开始秒数,结束秒数');
+          return h.enqueue(()=>options.onTargetUnitTimes([{unit_id:s.unit_id,start:values[0],end:values[1]}]));
+        });
+      }
+      open(x,y);return;
     }
     if(multi)item(`合并 ${ids.length} 条字幕`,'C',()=>merge(ids));
     if(multi)item('批量替换选中字幕…','',()=>{const from=prompt('查找文字');if(!from)return;const to=prompt('替换为','');if(to!==null)return editMany(ids,text=>text.split(from).join(to),track);});
@@ -74,7 +92,9 @@ export function createMawMenus(h){
   }
   doc.addEventListener('pointerdown',e=>{if(!menu.contains(e.target))close();},{signal});
   doc.addEventListener('keydown',e=>{if(!menu.classList.contains('show'))return;if(e.key==='Escape'){e.preventDefault();close();return;}if(e.ctrlKey||e.metaKey||e.altKey||e.target.matches('input,textarea,[contenteditable=true]'))return;const entry=[...menu.querySelectorAll('button:not(:disabled)')].find(el=>el.querySelector('kbd')?.textContent.toLowerCase()===e.key.toLowerCase());if(entry){e.preventDefault();e.stopPropagation();entry.click();}},{capture:true,signal});
-  doc.addEventListener('scroll',e=>{if(!menu.contains(e.target))close();},{capture:true,signal});window.addEventListener('resize',close,{signal});
+  // Selecting a waveform cue scrolls the separate subtitle list as the menu opens.
+  host.addEventListener('scroll',e=>{if(!menu.contains(e.target))close();},{capture:true,signal});
+  window.addEventListener('resize',close,{signal});
   menu.addEventListener('keydown',e=>{if(!['ArrowDown','ArrowUp','Home','End'].includes(e.key))return;const list=[...menu.querySelectorAll('button:not(:disabled)')].filter(el=>el.getClientRects().length),i=list.indexOf(doc.activeElement);if(!list.length)return;e.preventDefault();list[e.key==='Home'?0:e.key==='End'?list.length-1:(i+(e.key==='ArrowDown'?1:-1)+list.length)%list.length].focus();});
   return {blank,gap,word,cue,close};
 }

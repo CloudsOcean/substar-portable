@@ -1,4 +1,3 @@
-from .playback_proxy import needs_interleaved_proxy, prepare_playback_media
 from .waveform_cache import (
     WAVEFORM_WINDOW_CACHE,
     WaveformWindowCache,
@@ -7,8 +6,6 @@ from .waveform_cache import (
 )
 
 __all__ = [
-    "needs_interleaved_proxy",
-    "prepare_playback_media",
     "WAVEFORM_WINDOW_CACHE",
     "WaveformWindowCache",
     "pcm_wave_frame_count",

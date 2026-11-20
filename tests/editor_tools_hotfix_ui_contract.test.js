@@ -40,6 +40,6 @@ test("smart snap and multi-token search producers match their consumers", () => 
   assert.match(js, /autoSnapOnce\(\{[\s\S]*forwardStarts/);
   assert.match(timeline, /function autoSnapPlan\(view, options = \{\}\)/);
   assert.match(documentContract, /function findContiguousTokenMatches/);
-  assert.match(js, /contract\.findContiguousTokenMatches\(tokens, query\)/);
+  assert.match(js, /contract\.findContiguousTokenMatches\(tokens, sourceQuery, separator\)/);
 });
 

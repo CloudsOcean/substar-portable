@@ -41,7 +41,7 @@ test("all cue boundary controls use the shared right-click contract", () => {
   assert.match(editorCss, /\.virtual-boundary \{[^}]*width: \.48em;[^}]*margin: 0 -\.24em;/);
   assert.doesNotMatch(editorJs, /scheduleConnectorAction|connectorClickTimer/);
   assert.doesNotMatch(editorHtml, /右键间隙切分 · 右键紫点合并/);
-  assert.match(editorHtml, />视图\s+<select id="cueSplitView"/);
+  assert.match(editorHtml, /id="timelineLayout"/);
   assert.doesNotMatch(editorHtml, /<summary>行长<\/summary>/);
   assert.match(editorHtml, /id="taskInfoMenu"[^>]*class="[^"]*editor-command-menu[^\"]*task-info-menu/);
   assert.match(editorHtml, /<summary id="taskInfo"[^>]*>任务信息<\/summary>/);
@@ -50,8 +50,6 @@ test("all cue boundary controls use the shared right-click contract", () => {
   assert.match(editorHtml, /id="taskInfoSourceLimit"/);
   assert.match(editorHtml, /id="taskInfoTargetLimit"/);
   assert.match(editorJs, /projectPath\("\/task-info"\)/);
-  assert.match(editorHtml, /<option value="virtual" selected>光标<\/option>/);
-  assert.match(editorHtml, /<option value="auxiliary">辅助点<\/option>/);
 });
 
 test("editor chrome exposes the bounded project list and concise usage guide", () => {
@@ -71,10 +69,10 @@ test("regional Chinese conversion choices remain explicit", () => {
   assert.match(editorHtml, /繁体中文（香港）/);
 });
 
-test("AI and manuscript commands follow the requested editor order", () => {
+test("AI commands appear in the current editor toolbar order", () => {
   assert.match(
     editorHtml,
-    /AI 翻译[\s\S]*AI整理[\s\S]*AI\s*审阅[\s\S]*AI标点[\s\S]*参考文稿[\s\S]*繁简转换[\s\S]*说话人设置/,
+    /id="aiOrganizeMenu"[\s\S]*id="translationMenu"[\s\S]*id="aiCalibrationMenu"[\s\S]*id="aiReviewMenu"/,
   );
   assert.match(editorJs, /translationMenuSummary"\)\.textContent = running \? "AI 翻译中…" : "AI 翻译"/);
 });
@@ -91,4 +89,5 @@ test("external AI review is read-only and the retired generation exchange is abs
 });
 
 const experimentalScript = fs.readFileSync(path.join(__dirname, "..", "web", "editor_experimental.js"), "utf8");
-assert.match(experimentalScript, /\['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu','scriptProjectionMenu','referenceManuscript'\]/);
+assert.match(experimentalScript, /\['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu'\]/);
+assert.match(experimentalScript, /projection\.addEventListener\('toggle'/);

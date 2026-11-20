@@ -13,11 +13,17 @@
   }
   function pageWindow(count,start,active,size,preserve){start=Math.max(0,start||0);if(!preserve&&(active<start||active>=start+size))start=Math.max(0,active-Math.floor(size/3));return {start:Math.min(start,Math.max(0,count-1)),end:Math.min(count,start+size)};}
   function preservedWindow(count,start,end){return {start:Math.max(0,Math.min(start,count-1)),end:Math.min(count,end)};}
-  function createCueListView({container,renderCue,onWindowChange=null,positionSlider=null}){
+  function createCueListView({container,renderCue,onWindowChange=null,positionSlider=null,getCueGap=null}){
     if(!container||typeof renderCue!=='function')throw Error('Cue list view requires a container and cue renderer');
     const doc=container.ownerDocument||document;
     const content=doc.createElement('div');content.className='cue-virtual-content';
     content.style.position='relative';content.style.width='100%';
+    const gapLayer = getCueGap ? doc.createElement('div') : null;
+    if (gapLayer) {
+      gapLayer.className = 'cue-gap-overlay-layer';
+      gapLayer.setAttribute('aria-hidden', 'true');
+      content.append(gapLayer);
+    }
     container.replaceChildren(content);
     // Padding belongs to the viewport, never to offscreen row compensation.
     const css=typeof getComputedStyle==='function'?getComputedStyle(container):{};
@@ -25,6 +31,8 @@
     let context=null,indexById=new Map(),heights=createHeightIndex([]),frame=0,generation=0,dead=false,active=null;
     let range={start:0,end:0},lastWidth=container.clientWidth,sliderDragging=false;
     const measured=new Map(),nodes=new Map();
+    const gapOverlays = new Map();
+    let gapGroups = [];
     const request=fn=>requestAnimationFrame(fn);
     const viewport=()=>Math.max(1,container.clientHeight-baseTop-baseBottom);
     const localTop=()=>Math.max(0,container.scrollTop-baseTop);
@@ -52,6 +60,53 @@
       content.style.height=`${heights.total()}px`;
       for(const [id,node] of nodes){const i=indexById.get(id);if(i!==undefined){node.style.position='absolute';node.style.top=`${heights.offset(i)}px`;node.style.left='0';node.style.right='0';}}
     }
+    function rebuildGapGroups() {
+      if (!gapLayer) return;
+      let group = null;
+      gapGroups = context.cues.map((cue, index) => {
+        const gap = getCueGap(cue);
+        if (!gap) group = null;
+        else if (group?.gap === gap) group.end = index + 1;
+        else group = {gap, start:index, end:index + 1};
+        return group;
+      });
+    }
+    function positionGapOverlays() {
+      if (!gapLayer) return;
+      const visible = new Set();
+      for (let index = range.start; index < range.end;) {
+        const group = gapGroups[index];
+        if (!group) {
+          index++;
+          continue;
+        }
+        index = group.end;
+        visible.add(group.start);
+        let overlay = gapOverlays.get(group.start);
+        if (!overlay) {
+          overlay = doc.createElement('div');
+          overlay.className = 'cue-gap-overlay';
+          gapOverlays.set(group.start, overlay);
+          gapLayer.append(overlay);
+        }
+        // Anchor the stripes to the whole run, even as its first row scrolls out of view.
+        const top = heights.offset(group.start);
+        const lastId = context.cues[group.end - 1].cue_id;
+        const bottom = heights.offset(group.end) - (measured.get(lastId)?.margin || 0);
+        overlay.style.top = `${top}px`;
+        overlay.style.height = `${bottom - top}px`;
+      }
+      for (const [start, overlay] of gapOverlays) {
+        if (visible.has(start)) continue;
+        overlay.remove();
+        gapOverlays.delete(start);
+      }
+    }
+    function refreshGapCoverage() {
+      if (!context) return;
+      rebuildGapGroups();
+      positionGapOverlays();
+    }
     function measure(){
       const a=anchor();let changed=false;
       for(const [id,node] of nodes){
@@ -59,7 +114,7 @@
         const rect=node.getBoundingClientRect();
         const margin=typeof getComputedStyle==='function'?parseFloat(getComputedStyle(node).marginBottom)||0:0;
         const height=rect.height+margin;if(height<=0)continue;
-        measured.set(id,height);
+        measured.set(id,{height,margin});
         if(Math.abs(height-heights.height(i))>.5){heights.update(i,height);changed=true;}
       }
       if(changed){positionRows();restoreAnchor(a);}
@@ -131,34 +186,55 @@
       for(let i=ordered.length-1;i>=0;i--){const node=ordered[i][1];if(node.nextSibling!==before)content.insertBefore(node,before);before=node;}
       for(const [id,node] of nodes)node.classList.toggle('current',id===active);
       positionRows();const changed=measure();
+      positionGapOverlays();
       onWindowChange?.(range);syncPosition();
       if(changed)schedule();
     }
     function schedule(){if(!frame&&!dead)frame=request(()=>{frame=0;update();});}
-    function revealCue(id,{align='center'}={}){
+    function revealCue(id,{align='center',keepVisible=false}={}){
       const i=indexById.get(id);if(i===undefined)return false;
       const ticket=++generation;
+      const row=nodes.get(id);
+      if(keepVisible&&row){
+        const viewportTop=container.getBoundingClientRect().top+container.clientTop;
+        const rect=row.getBoundingClientRect();
+        if(rect.bottom>viewportTop&&rect.top<viewportTop+container.clientHeight)return true;
+      }
       function locate(){
         const height=heights.height(i),offset=align==='start'?0:Math.max(0,(viewport()-height)/2);
         container.scrollTop=Math.max(0,heights.offset(i)-offset+baseTop);
         update();
       }
-      locate();let expected=container.scrollTop;
-      const settle=remaining=>request(()=>{
-        if(dead||ticket!==generation||Math.abs(container.scrollTop-expected)>1)return;
-        const node=nodes.get(id);if(!node)return;
-        measure();locate();expected=container.scrollTop;
-        if(remaining>1)settle(remaining-1);
+      locate();
+      const settle = remaining => request(() => {
+        if (dead || ticket !== generation) return;
+        const node = nodes.get(id);
+        if (!node) return;
+        const listRect = container.getBoundingClientRect();
+        const rowRect = node.getBoundingClientRect();
+        const delta = align === 'start'
+          ? rowRect.top - listRect.top - container.clientTop - baseTop
+          : rowRect.top + rowRect.height / 2 - listRect.top - listRect.height / 2;
+        if (Math.abs(delta) > 1) {
+          const before = container.scrollTop;
+          container.scrollTop += delta;
+          if (container.scrollTop !== before) update();
+        }
+        if (remaining > 1) settle(remaining - 1);
       });
-      settle(2);return true;
+      settle(4);
+      return true;
     }
     function jumpToPercent(value){
       if(!context?.cues.length)return;
       const percent=Math.max(0,Math.min(100,Number(value)||0));
-      revealCue(context.cues[Math.round(percent/100*(context.cues.length-1))].cue_id,{align:'start'});
-      if(percent===0)container.scrollTop=0;
-      if(percent===100)container.scrollTop=heights.total();
-      update();
+      if (percent === 0 || percent === 100) {
+        generation++;
+        container.scrollTop = percent === 0 ? 0 : heights.total();
+        update();
+      } else {
+        revealCue(context.cues[Math.round(percent/100*(context.cues.length-1))].cue_id,{align:'start'});
+      }
     }
     const userScroll=()=>{generation++;};
     container.addEventListener('wheel',userScroll,{passive:true});
@@ -166,7 +242,12 @@
     container.addEventListener('keydown',userScroll);
     container.addEventListener('scroll',schedule,{passive:true});
     container.addEventListener('focusout',schedule);
-    doc.addEventListener?.('selectionchange',schedule);
+    function scheduleCueSelection(event) {
+      const selection = doc.getSelection?.();
+      if (container.contains(event.target) || container.contains(doc.activeElement) ||
+          container.contains(selection?.anchorNode) || container.contains(selection?.focusNode)) schedule();
+    }
+    doc.addEventListener?.('selectionchange',scheduleCueSelection);
     if(positionSlider){
       positionSlider.addEventListener('pointerdown',()=>{sliderDragging=true;generation++;});
       positionSlider.addEventListener('input',()=>jumpToPercent(positionSlider.value));
@@ -185,7 +266,8 @@
       if(a&&!ids.has(a.id)&&context){for(let i=a.index+1;i<context.cues.length;i++){const id=context.cues[i].cue_id;if(ids.has(id)){a.offset+=heights.offset(i)-heights.offset(a.index);a.id=id;break;}}}
       context={cues,tokenById};active=activeCueId;indexById=new Map(cues.map((c,i)=>[c.cue_id,i]));
       for(const id of measured.keys())if(!ids.has(id))measured.delete(id);
-      heights=createHeightIndex(cues.map(c=>measured.get(c.cue_id)||104));
+      heights=createHeightIndex(cues.map(c=>measured.get(c.cue_id)?.height||104));
+      rebuildGapGroups();
       positionRows();
       if(a)restoreAnchor(a);else container.scrollTop=0;
       update(true);
@@ -193,8 +275,8 @@
       return range;
     }
     function setActive(id){active=id;for(const [cueId,node] of nodes)node.classList.toggle('current',cueId===id);}
-    function destroy(){dead=true;generation++;if(frame)cancelAnimationFrame(frame);observer?.disconnect();container.removeEventListener('scroll',schedule);doc.removeEventListener?.('selectionchange',schedule);}
-    return {render,setActive,jumpToPercent,revealCue,destroy};
+    function destroy(){dead=true;generation++;if(frame)cancelAnimationFrame(frame);observer?.disconnect();container.removeEventListener('scroll',schedule);doc.removeEventListener?.('selectionchange',scheduleCueSelection);}
+    return {render,setActive,jumpToPercent,revealCue,refreshGapCoverage,destroy};
   }
   return {createCueListView,createHeightIndex,pageWindow,preservedWindow};
 });

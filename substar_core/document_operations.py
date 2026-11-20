@@ -240,6 +240,8 @@ def _replace(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
     expected = payload.get("expected_text", payload.get("original_text"))
     if expected is not None and tokens[token_id].text != expected:
         raise DocumentOperationError("replacement precondition failed: source text changed")
+    if tokens[token_id].text == text:
+        return document
     provenance = _provenance(operation, "replace")
     updated = replace(tokens[token_id], text=text, provenance=provenance)
     display_tokens = tuple(
@@ -286,7 +288,7 @@ def _batch_replace(
     provenance = _provenance(operation, "batch_replace")
     display_tokens = tuple(
         replace(token, text=prepared[token.token_id], provenance=provenance)
-        if token.token_id in prepared
+        if token.token_id in prepared and token.text != prepared[token.token_id]
         else token
         for token in document.display_tokens
     )
@@ -537,6 +539,17 @@ def _set_target(document: EditorDocument, operation: Mapping[str, Any]) -> Edito
     """
     payload = operation["payload"]
     cue = _find_cue(document, str(payload["cue_id"]))
+    unit_ids = cue.mapping.get("target_unit_ids", [])
+    if unit_ids:
+        if len(unit_ids) != 1:
+            raise DocumentOperationError("此 Cue 关联多条独立译文，请按译文单元编辑")
+        from substar_core.translation_units import edit_unit
+        provenance = _provenance(operation, "set_target")
+        result = edit_unit(document, {
+            "unit_id": unit_ids[0], "text": payload.get("target_text", ""),
+            "expected_text": payload.get("expected_target_text", cue.target.target_text if cue.target else ""),
+        }, provenance)
+        return replace(result, changes=(*result.changes, provenance))
     text = str(payload.get("target_text", "")).strip()
     current_text = cue.target.target_text if cue.target else ""
     if "expected_target_text" in payload:
@@ -1287,7 +1300,23 @@ def _set_timeline(document: EditorDocument, operation: Mapping[str, Any]) -> Edi
                    changes=(*document.changes, _provenance(operation, "set_timeline")))
 
 
+def _set_target_units(document, operation):
+    from substar_core.translation_units import set_units
+    provenance = _provenance(operation, "set_target_units")
+    result = set_units(document, operation["payload"], provenance)
+    return replace(result, changes=(*result.changes, provenance))
+
+
+def _set_target_unit(document, operation):
+    from substar_core.translation_units import edit_unit
+    provenance = _provenance(operation, "set_target_unit")
+    result = edit_unit(document, operation["payload"], provenance)
+    return replace(result, changes=(*result.changes, provenance))
+
+
 _APPLIERS = {
+    "set_target_units": _set_target_units,
+    "set_target_unit": _set_target_unit,
     "set_timeline": _set_timeline,
     "replace": _replace,
     "retime_text": _retime_text,
@@ -1334,6 +1363,8 @@ def apply_document_batch(document: EditorDocument, operations: list[Mapping[str,
             text = str(payload.get("text", "")).strip()
             if not text:
                 raise DocumentOperationError("replacement text cannot be empty")
+            if text == token.text:
+                continue
             provenance = _provenance(operation, "replace")
             tokens[token_id] = replace(token, text=text, provenance=provenance)
             changed_ids.add(token_id)
@@ -1342,7 +1373,9 @@ def apply_document_batch(document: EditorDocument, operations: list[Mapping[str,
             error = DocumentOperationError(str(exc))
             error.operation_id = operation.get("operation_id")
             raise error from exc
-    return synchronize_translation_status(replace(document, display_tokens=tuple(tokens[t.token_id] for t in document.display_tokens), changes=tuple(changes)), changed_ids)
+    result = replace(document, display_tokens=tuple(tokens[t.token_id] for t in document.display_tokens), changes=tuple(changes))
+    from substar_core.translation_units import reconcile_units
+    return synchronize_translation_status(reconcile_units(document, result), changed_ids)
 
 
 def synchronize_translation_status(document: EditorDocument, changed_ids: set[str], changed_cues: set[str] | None = None) -> EditorDocument:
@@ -1372,7 +1405,7 @@ def apply_document_operation(
     document: EditorDocument, operation: Mapping[str, Any]
 ) -> EditorDocument:
     operation_type = str(operation.get("type", ""))
-    if not document.source_tokens and any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_cue_time", "set_cue_times", "auto_merge_cues", "set_timeline", "set_speaker_names", "set_cue_speaker"}:
+    if not document.source_tokens and any(cue.source_text is not None and cue.mapping.get("subtitle_track") != "overlay" for cue in document.cues) and operation_type not in {"set_source_text", "set_target", "set_target_unit", "set_target_units", "set_cue_time", "set_cue_times", "auto_merge_cues", "set_timeline", "set_speaker_names", "set_cue_speaker"}:
         raise DocumentOperationError("字幕导入项目仅支持文本和时间编辑，不支持词元操作")
     if operation_type not in _APPLIERS:
         raise DocumentOperationError(f"unsupported operation: {operation_type}")
@@ -1383,6 +1416,9 @@ def apply_document_operation(
         ordered_document, operation_type, operation.get("payload", {})
     )
     result = _APPLIERS[operation_type](ordered_document, operation)
+    if operation_type not in {"set_target_units", "set_target_unit", "set_target"}:
+        from substar_core.translation_units import reconcile_units
+        result = reconcile_units(ordered_document, result)
     changed_ids = set()
     if operation_type in {"retime_text", "replace", "batch_replace", "set_ai_calibration", "delete", "restore", "insert", "merge"}:
         before = {token.token_id: (token.text, token.state) for token in document.display_tokens}

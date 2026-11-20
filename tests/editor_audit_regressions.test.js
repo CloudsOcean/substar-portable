@@ -73,8 +73,8 @@ test("late project A load cannot overwrite project B session",async()=>{
   const requests=[],adopted=[],errors=[];
   const state={projectId:'',projects:[],operationQueue:null};
   const elements=new Map();
-  const context={state,URL,localStorage:{getItem:()=>null},window:{location:{href:'http://localhost/editor'}},history:{replaceState:()=>{}},
-    document:{body:{classList:{toggle(){}}}},
+  const context={state,URL,localStorage:{getItem:()=>null},window:{location:{href:'http://localhost/editor'},addEventListener(){}},history:{replaceState:()=>{}},
+    document:{addEventListener(){},body:{classList:{toggle(){}}}},
     workbenchInert(){},
     $:selector=>{if(!elements.has(selector))elements.set(selector,{setAttribute(){},classList:{add(){},remove(){}}});return elements.get(selector);},
     projectPath:(suffix='')=>`/api/projects/${state.projectId}${suffix}`,
@@ -85,7 +85,7 @@ test("late project A load cannot overwrite project B session",async()=>{
     refreshTranslationTask:async()=>null,
     loadRevisionHistory:async()=>{},
   };
-  for(const name of ['syncCueViewSwitch','renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
+  for(const name of ['syncRecoveryDraftButton','restoreOutputJob','refreshOutputMenu','syncCueViewSwitch','renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
   vm.createContext(context);vm.runInContext(code,context);
   const a=context.loadProject('A');
   const b=context.loadProject('B');

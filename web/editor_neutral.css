@@ -38,7 +38,7 @@ html:not([data-theme="light"]) body.editor-shell :is(input:not([type="range"]):n
   border-color: var(--theme-line-strong) !important;
   color: var(--theme-text);
 }
-html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button,summary) {
+html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button:not(.editor-dismiss-button),summary) {
   background-color: var(--theme-panel-2) !important;
   border-color: var(--theme-line-strong) !important;
   color: var(--theme-text);
@@ -74,7 +74,7 @@ html:not([data-theme="light"]) body.editor-shell .cue-row:hover:not(.current):no
   background: #303034 !important;
   border-color: #49464f !important;
 }
-html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button,summary):hover:not(:disabled) {
+html:not([data-theme="light"]) body.editor-shell :is(.editor-command-bar,#editorTools,.pane-heading,.preview-heading,.cue-task-island) :is(button:not(.editor-dismiss-button),summary):hover:not(:disabled) {
   background-color: color-mix(in srgb,var(--theme-accent) 12%,var(--theme-panel-2)) !important;
   border-color: var(--theme-accent) !important;
 }

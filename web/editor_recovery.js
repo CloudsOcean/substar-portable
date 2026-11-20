@@ -61,8 +61,16 @@
     let key = null;
     if (dirty) {
       key = `substar.editor.conflict-copy:${projectId}:${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      // The saved document already lives in the project database. Storing two
+      // projected copies in localStorage can exhaust its quota on long videos.
+      const compact = snapshots.map(({revision, operations, inputs}) => ({
+        revision:revision ? {revision_id:revision.revision_id, document_hash:revision.document_hash} : null,
+        operations,
+        inputs
+      }));
+      const uniqueSnapshots = [...new Set(compact.map(item => JSON.stringify(item)))].map(item => JSON.parse(item));
       const text = JSON.stringify({schema_version:"substar.editor-recovery.v2", project_id:projectId,
-        created_at:new Date().toISOString(), snapshots, journals});
+        created_at:new Date().toISOString(), snapshots:uniqueSnapshots, journals});
       storage.setItem(key, text);
       if (storage.getItem(key) !== text) throw new Error("恢复草稿写入校验失败");
     }
@@ -79,12 +87,23 @@
   function preview(raw) {
     let copy;
     try { copy = JSON.parse(raw); } catch (_) { return raw; }
-    const snapshots = copy.snapshots || [copy];
+    const snapshots = copy.snapshots?.length ? copy.snapshots : (copy.journals || []).map(journal => {
+      try { return {operations:JSON.parse(journal.value)}; }
+      catch (_) { return {unreadableJournal:journal.value}; }
+    });
+    if (!snapshots.length) snapshots.push(copy);
     const lines = [];
     snapshots.forEach((snapshot, index) => {
       lines.push(`—— 刷新前快照 ${index + 1} ——`);
       for (const input of snapshot.inputs || []) {
         lines.push(`尚未提交的输入 · ${input.label || "字幕"} · ${input.cue_id || ""}`, input.value === "" ? "（空文本）" : input.value, "");
+      }
+      if (snapshot.unreadableJournal) lines.push(snapshot.unreadableJournal, "");
+      for (const operation of Array.isArray(snapshot.operations) ? snapshot.operations : []) {
+        const payload = operation.payload || {};
+        const value = payload.target_text ?? payload.text;
+        lines.push(`待保存操作 · ${operation.type} · ${payload.cue_id || payload.token_id || operation.operation_id || ""}`);
+        if (typeof value === "string") lines.push(value || "（空文本）", "");
       }
       const document = snapshot.revision?.document;
       const tokens = new Map((document?.display_tokens || []).map(token => [token.token_id, token.text]));

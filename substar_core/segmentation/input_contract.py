@@ -4,10 +4,10 @@ import json
 import hashlib
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from .material import AlignmentUnit
-from substar_core.language_layout import editor_token_fragments, layout_tokens
+from substar_core.language_layout import editor_token_fragments, layout_tokens, remove_grouping_commas
 
 
 SEGMENTATION_MATERIAL_SCHEMA = "substar.segmentation-material.v1"
@@ -26,6 +26,74 @@ def _unpunctuated_word(value: object) -> str:
         previous = text
         text = _GRAMMATICAL_EDGE_PUNCTUATION.sub("", text).strip()
     return text
+
+
+_OPEN_GROUPED_NUMBER = re.compile(r"[0-9０-９]{1,3}(?:[,，][0-9０-９]{3})*[,，]$")
+_GROUP_CONTINUATION = re.compile(
+    r"([0-9０-９]{3}(?:[,，][0-9０-９]{3})*(?:\.[0-9０-９]+)?)(?![0-9０-９])"
+    r"([^\W\d_].*|[%％‰.,，。!?！？;；:：…\"“”'’）)\]】]*)$"
+)
+
+
+def recognition_units_with_normalized_numbers(
+    units: Iterable[Mapping[str, Any]],
+) -> Iterator[dict[str, Any]]:
+    """Join explicit thousands groups before stripping punctuation or assigning token IDs."""
+    pending: dict[str, Any] | None = None
+
+    def normalized(unit: dict[str, Any]) -> dict[str, Any]:
+        if unit.pop("_joined_number", False):
+            unit["text"] = remove_grouping_commas(unit["text"])
+        return unit
+
+    for index, raw in enumerate(units):
+        unit = {**raw, "index": raw.get("index", index),
+                "text": str(raw.get("text", raw.get("word", "")) or "").strip()}
+        if pending is not None:
+            continuation = _GROUP_CONTINUATION.fullmatch(unit["text"])
+            if (
+                continuation and _OPEN_GROUPED_NUMBER.fullmatch(pending["text"])
+                and not (pending.get("reference_only") or unit.get("reference_only"))
+                and not any(str(item.get("timing_source", "")).startswith("reference")
+                            for item in (pending, unit))
+                and pending.get("sentence_id") == unit.get("sentence_id")
+                and pending.get("speaker_id") == unit.get("speaker_id")
+                and not (pending.get("sentence_end") or unit.get("sentence_start"))
+            ):
+                digits, suffix = continuation.groups()
+                word_suffix = bool(suffix and suffix[0].isalpha())
+                end = float(unit["end"])
+                if word_suffix:
+                    start = float(unit["start"])
+                    end = start + (end - start) * len(digits) / len(unit["text"])
+                left_timing = pending.get("timing") or {}
+                right_timing = unit.get("timing") or {}
+                native_ids = dict.fromkeys([
+                    *left_timing.get("native_token_ids", [str(pending["index"])]),
+                    *right_timing.get("native_token_ids", [str(unit["index"])]),
+                ])
+                pending.update(
+                    text=pending["text"] + digits + ("" if word_suffix else suffix),
+                    _joined_number=True,
+                    end=max(float(pending["end"]), end),
+                    sentence_end=bool(unit.get("sentence_end")) and not word_suffix,
+                    timing={
+                        **left_timing,
+                        "kind": "subdivided" if word_suffix else "envelope-inherited",
+                        "native_token_ids": list(native_ids),
+                        "native_start": left_timing.get("native_start", pending["start"]),
+                        "native_end": right_timing.get("native_end", unit["end"]),
+                    },
+                )
+                if not word_suffix:
+                    continue
+                unit.update(text=suffix, start=end, sentence_start=False,
+                            timing={**right_timing, "kind": "subdivided",
+                                    "native_start": right_timing.get("native_start", unit["start"])})
+            yield normalized(pending)
+        pending = unit
+    if pending is not None:
+        yield normalized(pending)
 
 
 def _number(value: object, field: str) -> float:
@@ -63,7 +131,7 @@ def build_segmentation_material_with_reference_projection(
     reference_suggestions: list[dict[str, Any]] = []
     pending_punctuation = ""
     evidence_hash = hashlib.sha256(json.dumps(evidence, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
-    for evidence_index, item in enumerate(evidence.get("units", [])):
+    for evidence_index, item in enumerate(recognition_units_with_normalized_numbers(evidence.get("units", []))):
         raw_text = str(item.get("text", item.get("word", "")) or "").strip()
         if bool(item.get("reference_only")):
             if raw_text:

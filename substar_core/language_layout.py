@@ -12,6 +12,23 @@ _CJK = _HAN + _KANA
 _CHARACTER_BASED = _HAN + _KANA + _HANGUL
 
 
+_GROUPING_SEPARATOR = re.compile(r"[,，][^\S\r\n]*")
+_GROUPED_NUMBER = re.compile(
+    r"(?<![0-9０-９.,，])[0-9０-９]{1,3}(?:[,，][^\S\r\n]*[0-9０-９]{3})+"
+    r"(?![0-9０-９]|[,，][0-9０-９])"
+)
+
+
+def remove_grouping_commas(text: str, commas: str = ",，") -> str:
+    """Remove only commas used inside grouped numbers."""
+    return _GROUPED_NUMBER.sub(
+        lambda number: _GROUPING_SEPARATOR.sub(
+            lambda separator: "" if separator[0][0] in commas else separator[0], number[0]
+        ),
+        text,
+    )
+
+
 def normalize_language(language: str | None) -> str:
     value = str(language or "").strip().lower().replace("_", "-")
     if value.startswith("zh"):

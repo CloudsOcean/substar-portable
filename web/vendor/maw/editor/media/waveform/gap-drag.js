@@ -7,6 +7,14 @@ export function createWaveformModule(dependencies) {
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
+    gapDragRow(event, drag) {
+      // Pointer capture keeps event.target on the original handle or row.
+      // Use the vertical position to follow the wrapped timeline on each move.
+      drag.pointerRow = this.findVisibleWaveformRowAtY(event.clientY) || drag.pointerRow || drag.row;
+      return drag.pointerRow;
+    }
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
     beginGapBoundaryDrag(event, index, row, edge) {
       if (event.button !== 0 || !gapOperationAllowsBoundary(this.options.getGapOperationMode?.())) return;
       event.preventDefault();
@@ -85,7 +93,7 @@ export function createWaveformModule(dependencies) {
         drag.captureTarget.classList.add('dragging');
       }
       event.preventDefault();
-      const pointerMs = this.timeFromPointerUnbounded(event, drag.row);
+      const pointerMs = this.timeFromPointerUnbounded(event, this.gapDragRow(event, drag));
       const deltaMs = roundMs(pointerMs - drag.startPointerMs);
       drag.targetGap = this.gapMoveTarget(drag.originalGaps[drag.index], deltaMs);
       drag.deltaMs = drag.targetGap.start - drag.originalGaps[drag.index].start;
@@ -148,6 +156,7 @@ export function createWaveformModule(dependencies) {
     endGapMoveDrag(event) {
       const drag = this.gapMoveDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (event.type === 'pointerup') this.moveGapMoveDrag(event);
       window.removeEventListener('pointermove', this._gapMoveMove);
       window.removeEventListener('pointerup', this._gapMoveEnd);
       window.removeEventListener('pointercancel', this._gapMoveEnd);
@@ -264,12 +273,13 @@ export function createWaveformModule(dependencies) {
         drag.captureTarget.classList.add('dragging');
       }
       event.preventDefault();
+      const row = this.gapDragRow(event, drag);
       const rawMs = clamp(
-        roundMs(this.timeFromPointerUnbounded(event, drag.row)),
+        roundMs(this.timeFromPointerUnbounded(event, row)),
         0,
         Math.max(0, this.durationMs),
       );
-      const valueMs = this.options.snapGapBoundary?.(rawMs, {event, row:drag.row}) ?? rawMs;
+      const valueMs = this.options.snapGapBoundary?.(rawMs, {event, row}) ?? rawMs;
       drag.nextGaps = window.AsrEditorUtils.resizeGapRemoveBoundary(
         drag.originalGaps,
         drag.index,
@@ -297,6 +307,7 @@ export function createWaveformModule(dependencies) {
     endGapBoundaryDrag(event) {
       const drag = this.gapBoundaryDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (event.type === 'pointerup') this.moveGapBoundaryDrag(event);
       window.removeEventListener('pointermove', this._gapBoundaryMove);
       window.removeEventListener('pointerup', this._gapBoundaryEnd);
       window.removeEventListener('pointercancel', this._gapBoundaryEnd);
@@ -412,7 +423,7 @@ export function createWaveformModule(dependencies) {
         drag.moved = true;
       }
       event.preventDefault();
-      drag.endMs = this.gapRangePointerTime(event, drag.row);
+      drag.endMs = this.gapRangePointerTime(event, this.gapDragRow(event, drag));
       this.layoutGapRangePreview(drag);
     }
 
@@ -421,6 +432,7 @@ export function createWaveformModule(dependencies) {
     endGapRangeDrag(event) {
       const drag = this.gapRangeDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
+      if (event.type === 'pointerup') this.moveGapRangeDrag(event);
       window.removeEventListener('pointermove', this._gapRangeMove);
       window.removeEventListener('pointerup', this._gapRangeEnd);
       window.removeEventListener('pointercancel', this._gapRangeEnd);
@@ -431,9 +443,12 @@ export function createWaveformModule(dependencies) {
       const first = roundMs(Math.min(drag.startMs, drag.endMs));
       const last = roundMs(Math.max(drag.startMs, drag.endMs));
       // Reapply snapping after the legacy grid rounding to preserve exact word clocks.
-      const context = {event, row:drag.row, altIsGesture:drag.altIsGesture};
-      const start = this.options.snapGapBoundary?.(first, context) ?? first;
-      const end = this.options.snapGapBoundary?.(last, context) ?? last;
+      const rows = [drag.row, drag.pointerRow || drag.row];
+      if (drag.endMs < drag.startMs) rows.reverse();
+      const snap = (value, row) =>
+        this.options.snapGapBoundary?.(value, {event, row, altIsGesture:drag.altIsGesture}) ?? value;
+      const start = snap(first, rows[0]);
+      const end = snap(last, rows[1]);
       if (end - start < ROUND_MS) return;
       this.options.applyGapRange?.(start, end, drag.removed);
     }

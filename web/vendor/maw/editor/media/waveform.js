@@ -17,18 +17,18 @@ import { createWaveformModule as createWaveformWorkspace } from './waveform/work
 import { createWaveformModule as createWaveformScaleControls } from './waveform/scale-controls.js';
 import { createWaveformModule as createWaveformCueDrag } from './waveform/cue-drag.js';
 import { createWaveformModule as createWaveformCueCommands } from './waveform/cue-commands.js';
-import { createWaveformModule as createWaveformGapDrag } from './waveform/gap-drag.js?v=20261024-boundary-snap-1';
-import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261026-marker-geometry-2';
+import { createWaveformModule as createWaveformGapDrag } from './waveform/gap-drag.js?v=20261118-gap-drag';
+import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261118-visible-bounds-1';
 import { createWaveformModule as createWaveformCueDragUpdate } from './waveform/cue-drag-update.js';
 import { createWaveformModule as createWaveformPlayback } from './waveform/playback.js';
 import { createThumbnailModule as createEditorThumbnails } from './editor-thumbnails.js';
 import { createWaveformModule as createWaveformThumbnails } from './waveform/thumbnails.js';
 import { createWaveformModule as createWaveformMedia } from './waveform/media.js';
 import { createWaveformModule as createWaveformRender } from './waveform/render.js';
-import { createWaveformModule as createWaveformCueBlocks } from './waveform/cue-blocks.js?v=20261025-word-handles-1';
+import { createWaveformModule as createWaveformCueBlocks } from './waveform/cue-blocks.js?v=20261116-playback-3';
 import { createWordBlocks as createWaveformWordBlocks } from './waveform/word-blocks.js?v=20261027-word-patch-1';
 import { createWaveformModule as createWaveformCanvas } from './waveform/canvas.js';
-import { createWaveformModule as createWaveformInput } from './waveform/input.js';
+import { createWaveformModule as createWaveformInput } from './waveform/input.js?v=20261116-playback-3';
 
 export function initWaveform() {
   'use strict';

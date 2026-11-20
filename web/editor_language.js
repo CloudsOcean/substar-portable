@@ -93,7 +93,15 @@
     if (resolved === "en") return "word";
     return leftKind === "character" && rightKind === "character" ? "character" : "word";
   }
+  function removeGroupingCommas(text, removed, spaced) {
+    return String(text || "").replace(
+      /(?<![0-9０-９.,，])[0-9０-９]{1,3}(?:[,，][^\S\r\n]*[0-9０-９]{3})+(?![0-9０-９]|[,，][0-9０-９])/g,
+      number => number.replace(/[,，][^\S\r\n]*/g, separator =>
+        removed.has(separator[0]) || spaced.has(separator[0]) ? "" : separator)
+    );
+  }
   return Object.freeze({
+    removeGroupingCommas,
     routedSourceUpper,
     normalizeLanguage,
     detectLanguage,

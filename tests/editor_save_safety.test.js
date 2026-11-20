@@ -103,7 +103,7 @@ test('idle synchronization preserves drafts and refreshes only a clean editor',a
   const c=vm.createContext({state:{revision:{revision_id:'old'},projectId:'p'},
     document:{activeElement:{closest:()=>editing},addEventListener(){}},window:{addEventListener(){}},
     editorAiTaskLocksEditor:()=>false,api:async()=>{fetches++;return {revision_id:'new'};},projectPath:()=>'',
-    contract:{consumeRevision:x=>x},setRevision:r=>{updates++;c.state.revision=r;},loadRevisionHistory:async()=>{},console});
+    hasUncommittedEditorInput:()=>editing,contract:{consumeRevision:x=>x},setRevision:r=>{updates++;c.state.revision=r;},loadRevisionHistory:async()=>{},console});
   vm.runInContext(extract('  let idleRevisionCheck', '  async function restoreRevision('),c);
   await c.syncIdleRevision();assert.equal(fetches,0);
   editing=false;c.state.operationPending=true;
@@ -176,7 +176,7 @@ test('refresh protection detects unsent input and failed saves without flagging 
 });
 
 test('project switch saves the focused input before replacing the document',async()=>{
-  const c=vm.createContext({state:{revision:{revision_id:'old'}},
+  const c=vm.createContext({window:{addEventListener(){}},document:{addEventListener(){}},state:{revision:{revision_id:'old'}},
     flushActiveEditorInput:async()=>{throw Error('not saved');},ordinaryError(){},renderProjectList(){}});
   vm.runInContext(extract('  let projectEpoch = 0;', '  async function loadProjects()'),c);
   await c.loadProject('other');

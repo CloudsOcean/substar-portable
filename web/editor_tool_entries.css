@@ -1,117 +1,520 @@
-/* Tool entry relocation and a quiet task dismiss control. */
+/* Tool entry relocation. */
 body.editor-shell .maw-waveform-host :is(#gap-remove-manage,#markers-quick-toggle)[hidden] { display:none !important; }
-html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss {
-  width:20px !important; min-width:20px !important; height:20px !important; min-height:20px !important;
-  padding:0 !important; border:0 !important; box-shadow:none !important;
-  background:transparent !important; color:var(--theme-muted) !important;
-  font-size:15px !important; line-height:20px; border-radius:4px; opacity:.55;
-}
-html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss:hover:not(:disabled),
-html[data-editor-layout="experimental"] body.editor-shell #dismissTaskPanel.task-dismiss:focus-visible {
-  opacity:1; color:var(--theme-text) !important; background:var(--theme-panel-2) !important;
-}
-
 html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs {
   grid-template-columns:repeat(5,minmax(0,1fr)) !important;
-  grid-template-rows:repeat(2,auto) !important;
+  grid-template-rows:repeat(2,32px) !important;
+  gap:2px;
+  margin:8px -7px 4px;
+  padding:3px;
+  border:0;
+  border-radius:7px;
+  background:transparent;
 }
 html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs > button {
-  min-width:0 !important; width:100% !important;
+  min-width:0 !important;
+  width:100% !important;
+  height:32px;
+  padding:0 2px;
+  gap:4px;
+  border:0 !important;
+  background:transparent !important;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs > button:hover {
+  background:color-mix(in srgb,var(--theme-text) 7%,transparent) !important;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools > .experimental-tool-tabs > button[aria-selected="true"] {
+  color:var(--theme-text) !important;
+  background:color-mix(in srgb,var(--theme-accent) 20%,var(--theme-panel-2)) !important;
 }
 
-/* A single visual system for sidebar tools, including the docked MAW controls. */
+/* Keep the editing tools aligned across sidebar and floating layouts. */
 body.editor-shell #editorTools {
-  --bg-panel:var(--theme-panel); --bg-base:var(--theme-bg); --bg-raised:var(--theme-panel-2);
-  --bg-overlay:var(--theme-panel-2); --text-primary:var(--theme-text); --text-secondary:var(--theme-muted);
-  --text-muted:var(--theme-muted); --border:var(--theme-line); --accent:var(--theme-accent);
-  --btn-bg:var(--theme-panel-2); --btn-bg-hover:#333237; --radius-sm:5px;
+  --bg-panel: var(--theme-panel);
+  --bg-base: var(--theme-bg);
+  --bg-raised: var(--theme-panel-2);
+  --bg-overlay: var(--theme-panel-2);
+  --text-primary: var(--theme-text);
+  --text-secondary: var(--theme-muted);
+  --text-muted: var(--theme-muted);
+  --border: var(--theme-line);
+  --accent: var(--theme-accent);
+  --btn-bg: var(--theme-panel-2);
+  --radius-sm: 5px;
+  --tool-spacing: 8px;
+  --tool-inset: 10px;
+  --tool-small-height: 30px;
+  --tool-large-height: 38px;
+  --tool-field-height: 32px;
+  --tool-label-width: min(6.5em, 46%);
 }
-body.editor-shell #editorTools > .tool-accordion { padding:12px 8px; box-sizing:border-box; }
-body.editor-shell #editorTools .tool-panel { padding:0; font-size:12px; line-height:1.5; }
-body.editor-shell #editorTools :is(h3,h4) { margin:0 0 10px; color:var(--theme-text); font-size:13px; font-weight:600; }
-body.editor-shell #editorTools :is(.tool-section,fieldset,.cut-ai-section,.cut-plan-review) {
-  padding:10px; margin:0 0 12px; border:1px solid var(--theme-line); border-radius:6px;
-  background:var(--theme-panel) !important; box-shadow:none;
+html[data-editor-layout="experimental"] body.editor-shell #editorTools > .tool-accordion {
+  box-sizing: border-box;
+  padding: var(--tool-inset) var(--tool-inset) 12px;
 }
-body.editor-shell #editorTools :is(label,legend) { font-size:12px; color:var(--theme-muted); }
-body.editor-shell #editorTools :is(button,input,select,textarea) { font:inherit; border-radius:5px; box-sizing:border-box; }
-body.editor-shell #editorTools :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),select,textarea) {
-  min-width:0; max-width:100%; background:var(--theme-field) !important;
-  border:1px solid var(--theme-line-strong) !important; color:var(--theme-text); padding:6px 8px;
+body.editor-shell #editorTools .tool-panel {
+  min-width: 0;
+  padding: 0;
+  gap: var(--tool-inset);
+  font-size: 13px;
+  line-height: 1.5;
 }
-body.editor-shell #editorTools :is(button,select,input:not([type="checkbox"]):not([type="radio"]):not([type="range"])) { min-height:30px; }
-body.editor-shell #editorTools button { background:var(--theme-panel-2); border:1px solid var(--theme-line-strong); color:var(--theme-text); }
-body.editor-shell #editorTools button:disabled { opacity:.4; cursor:default; }
-body.editor-shell #editorTools button.tool-primary {
-  background:color-mix(in srgb,var(--theme-accent) 24%,var(--theme-panel-2)) !important;
-  border-color:color-mix(in srgb,var(--theme-accent) 65%,var(--theme-line)) !important;
+body.editor-shell #editorTools .tool-panel :is(h3,h4,#speakerDialogTitle) {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--theme-text);
 }
-body.editor-shell #editorTools .docked-wave-tool { display:block; min-height:0; }
+body.editor-shell #editorTools .tool-panel :is(fieldset,.cut-plan-review,.markers-filters-field) {
+  min-width: 0;
+  margin: 0;
+  padding: var(--tool-inset);
+  border: 1px solid var(--theme-line);
+  border-radius: 6px;
+  background: var(--theme-panel) !important;
+}
+body.editor-shell #editorTools .tool-panel fieldset {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools .tool-panel legend {
+  padding: 0 5px;
+  color: var(--theme-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+body.editor-shell #editorTools .tool-panel :is(input,select,textarea,button) {
+  box-sizing: border-box;
+  border-radius: 5px;
+}
+body.editor-shell #editorTools .tool-panel :is(input:not([type="checkbox"],[type="radio"],[type="range"]),select,textarea) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--theme-text);
+  background: var(--theme-field) !important;
+  border: 1px solid var(--theme-line-strong) !important;
+}
+body.editor-shell #editorTools .tool-panel :is(input:not([type="checkbox"],[type="radio"],[type="range"]),select) {
+  height: var(--tool-field-height);
+  min-height: var(--tool-field-height);
+}
+body.editor-shell #editorTools .tool-panel button {
+  height: var(--tool-small-height);
+  min-height: var(--tool-small-height);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--theme-text);
+  background: var(--theme-panel-2);
+  border: 1px solid var(--theme-line-strong);
+}
+body.editor-shell #editorTools .tool-panel button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools button.tool-primary {
+  background-color: color-mix(in srgb,var(--theme-accent) 24%,var(--theme-panel-2)) !important;
+  border-color: var(--theme-accent) !important;
+}
+body.editor-shell #editorTools .tool-panel :is(
+  .replace-actions > button, .search-scope-toggle > button, .markers-actions-primary > button,
+  .gap-remove-advanced-toggle, #gap-remove-scan, #cut-plan-preview
+) {
+  height: var(--tool-large-height);
+  min-height: var(--tool-large-height);
+  font-size: 13px;
+}
+body.editor-shell #editorTools .tool-panel :is(.replace-actions,.markers-actions-primary) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools .tool-panel :is(.replace-actions,.markers-actions-primary) > button {
+  min-width: 0;
+  width: 100%;
+}
+body.editor-shell #editorTools .tool-panel :is(
+  .panel-actions, .merge-actions, .auto-snap-actions, .gap-remove-inline-action,
+  .markers-batch-actions, .speaker-tool-form > div:last-child
+) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools .tool-panel :is(.panel-actions,.merge-actions,.auto-snap-actions) button {
+  width: auto;
+  min-width: 58px;
+  height: var(--tool-small-height);
+}
+body.editor-shell #editorTools .tool-panel :is(.merge-actions,.auto-snap-actions) > button,
+body.editor-shell #editorTools .tool-panel .panel-actions > #applyPunctuation,
+body.editor-shell #editorTools .speaker-tool-form > div:last-child > button {
+  flex:1 1 0;
+  width:auto;
+  height:var(--tool-large-height);
+  min-height:var(--tool-large-height);
+  font-size:13px;
+}
+body.editor-shell #editorTools .tool-panel :is(label.tool-field,.markers-filters > label,.cut-plan-label) {
+  display: grid;
+  grid-template-columns: var(--tool-label-width) minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  gap: var(--tool-spacing);
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--theme-text);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+body.editor-shell #editorTools .tool-panel :is(label.tool-field,.markers-filters > label) > :is(input,select) {
+  width: 100%;
+}
+body.editor-shell #editorTools .tool-panel .tool-number {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: stretch;
+  gap: 0;
+  min-width: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--theme-line-strong);
+  border-radius: 5px;
+  background: var(--theme-panel-2);
+}
+body.editor-shell #editorTools .tool-panel .tool-number:focus-within {
+  border-color: var(--theme-accent);
+}
+body.editor-shell #editorTools .tool-panel .tool-number input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  height: calc(var(--tool-field-height) - 2px);
+  min-height: 0;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  border: 0 !important;
+  border-radius: 4px 0 0 4px;
+}
+body.editor-shell #editorTools .tool-panel .tool-number > span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--theme-muted);
+  border-left: 1px solid var(--theme-line-strong);
+  background: transparent;
+}
+body.editor-shell #editorTools .tool-panel :is(.merge-options,.auto-snap-options) {
+  display: grid;
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools .tool-panel :is(.merge-options > .merge-check,.auto-snap-option,.markers-show-notes) {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--tool-spacing);
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  font: inherit;
+  color: var(--theme-text);
+  background: transparent !important;
+}
+body.editor-shell #editorTools .tool-panel :is(input[type="checkbox"],input[type="radio"]) {
+  appearance: auto !important;
+  flex: none;
+  width: 14px !important;
+  min-width: 14px !important;
+  height: 14px !important;
+  min-height: 14px !important;
+  margin: 0;
+  padding: 0 !important;
+  accent-color: var(--theme-accent);
+}
+body.editor-shell #editorTools .tool-panel :is(.tool-status,.tool-feedback,#autoSnapStatus,#autoMergeStatus) {
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--theme-muted);
+  overflow-wrap: anywhere;
+}
+body.editor-shell #editorTools :is(#toolSearchStatus,#autoSnapStatus,#autoMergeStatus):empty { display: none; }
+
+body.editor-shell #editorTools #experimental-search-panel { padding: 0; }
+body.editor-shell #editorTools #experimental-search-panel + .tool-locator-group { padding: 20px 0 0; }
+body.editor-shell #editorTools #experimental-search-panel :is(input,.search-scope-toggle button) {
+  height: var(--tool-large-height);
+  min-height: var(--tool-large-height);
+  font-size: 13px;
+}
+body.editor-shell #editorTools .tool-locator-row {
+  gap: var(--tool-spacing);
+  padding: var(--tool-spacing) 0;
+  border-color: var(--theme-line);
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools .tool-locator-group > .tool-locator-row {
+  border:0;
+  padding:5px 0;
+}
+body.editor-shell #editorTools .tool-locator-row strong { font-size: 13px; }
+body.editor-shell #editorTools .tool-locator-row span { font-size: 12px; color: var(--theme-muted); }
+body.editor-shell #editorTools .tool-locator-row button {
+  width: var(--tool-small-height);
+  height: var(--tool-small-height);
+  min-width: var(--tool-small-height);
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+body.editor-shell #editorTools .tool-panel.experimental-help :is(p,dl,.tool-panel > span) {
+  font-size: 13px;
+  line-height: 1.55;
+}
+body.editor-shell #editorTools .cut-plan-label {
+  --tool-label-width: max-content;
+}
+body.editor-shell #editorTools .cut-plan-review {
+  display: grid;
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools .cut-plan-review p { margin: 0; }
+body.editor-shell #editorTools .cut-change-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px;
+  padding: 3px 0;
+  border-top: 1px solid var(--theme-line);
+}
+body.editor-shell #editorTools .speaker-tool-form .speaker-name-grid { gap: 0; }
+body.editor-shell #editorTools .speaker-name-row { align-items: center; }
+body.editor-shell #editorTools .speaker-name-row > button { white-space: nowrap; }
+body.editor-shell #editorTools .cut-change-row .cut-change-locate {
+  min-width: 0;
+  padding-inline: 5px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* Dock the MAW tools inside the same panel geometry as the editor forms. */
+body.editor-shell #editorTools .docked-wave-tool { display: block; min-height: 0; }
 body.editor-shell #editorTools .docked-tool-panel {
-  display:block !important; position:static !important; inset:auto !important; transform:none !important;
-  width:100% !important; min-width:0 !important; max-width:none !important; max-height:none !important;
-  margin:0 !important; padding:0 !important; border:0 !important; border-radius:0 !important;
-  background:transparent !important; box-shadow:none !important; overflow:visible !important; z-index:auto !important;
+  display: block !important;
+  position: static !important;
+  inset: auto !important;
+  transform: none !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  z-index: auto !important;
 }
 body.editor-shell #editorTools .docked-tool-panel > header {
-  padding:0 0 10px; margin:0; border:0; background:transparent; cursor:default; min-height:0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  height: auto;
+  min-height: 0;
 }
-body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-eyebrow,.gap-remove-close,.gap-remove-help-button,.gap-remove-panel-footer,#markers-help) { display:none !important; }
-body.editor-shell #editorTools .docked-tool-panel .gap-remove-panel-body { display:flex; flex-direction:column; gap:12px; padding:0; overflow:visible; }
-body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-fields,.markers-filters) { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
-body.editor-shell #editorTools .docked-tool-panel :is(.gap-remove-field,.gap-remove-advanced,.gap-remove-disable-section) {
-  padding:10px; border:1px solid var(--theme-line); border-radius:6px; background:var(--theme-panel);
-}
-body.editor-shell #editorTools .docked-tool-panel :is(.markers-actions-primary,.markers-actions,.markers-summary-row,.markers-batch-actions) { display:flex; flex-wrap:wrap; gap:8px; }
-body.editor-shell #editorTools .docked-tool-panel .markers-search-input { width:100%; }
-body.editor-shell #editorTools .docked-tool-panel .markers-list { max-height:none; overflow:visible; }
-body.editor-shell #editorTools .docked-tool-panel :is(.markers-item,.markers-card) { box-shadow:none; border-color:var(--theme-line); }
-body.editor-shell #editorTools .docked-tool-panel .gap-remove-scan { background:var(--theme-panel-2); color:var(--theme-text); box-shadow:none; }
-body.editor-shell #editorTools .tool-feedback { margin:0; font-size:12px; color:var(--theme-muted); overflow-wrap:anywhere; }
-body.editor-shell #editorTools .cut-ai-section { display:flex; flex-direction:column; gap:10px; }
-body.editor-shell #editorTools .cut-ai-section textarea { width:100%; resize:vertical; min-height:95px; }
-body.editor-shell #editorTools .cut-ai-section .tool-check { display:flex; flex-direction:row; align-items:center; }
-body.editor-shell #editorTools .cut-change-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; padding:10px 0; border-top:1px solid var(--theme-line); }
-body.editor-shell #editorTools .cut-change-row p { grid-column:1 / -1; margin:0; }
-body.editor-shell #editorTools .cut-plan-review p { margin:0 0 8px; }
-body.editor-shell #editorTools .cut-change-row button { width:auto; padding:4px 7px; }
-
-body.editor-shell #editorTools input[type="checkbox"] {
-  appearance:auto !important; width:14px !important; height:14px !important;
-  min-width:14px !important; min-height:14px !important; padding:0 !important; margin:0;
-  accent-color:var(--theme-accent);
-}
-body.editor-shell #editorTools .markers-show-notes { flex-direction:row; align-items:center; gap:6px; }
-body.editor-shell #editorTools .docked-tool-panel .markers-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
-body.editor-shell #editorTools .docked-tool-panel .markers-filter-item { min-width:0; align-items:stretch; }
-body.editor-shell #editorTools .docked-tool-panel .markers-filter-item select { width:100%; }
-
-html[data-editor-layout="experimental"] body.editor-shell #editorTools button.tool-primary {
-  background-color:color-mix(in srgb,var(--theme-accent) 24%,var(--theme-panel-2)) !important;
-  border-color:var(--theme-accent) !important;
+body.editor-shell #editorTools :is(
+  #gap-remove-panel.docked-tool-panel > header, .docked-tool-panel .gap-remove-eyebrow,
+  .docked-tool-panel .gap-remove-close, .docked-tool-panel .gap-remove-panel-footer, #markers-help
+) { display: none !important; }
+body.editor-shell #editorTools .docked-tool-panel .gap-remove-panel-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: var(--tool-inset);
+  padding: 0;
+  overflow: visible;
 }
 
-/* Remove legacy blue fills from merge/snap groups and search scope states. */
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools :is(.merge-options > label,.auto-snap-option,.sidebar-legend span) {
-  background:#252527 !important;
-  border-color:#3b3b3e !important;
-  color:var(--theme-muted) !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-fields {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--tool-spacing);
 }
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools :is(.merge-options > label,.auto-snap-option):hover {
-  background:#2b2b2e !important; border-color:#4b4b4f !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-field-label {
+  min-width: 0;
+  color: inherit;
+  font: inherit;
+  white-space: normal;
 }
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle {
-  background:#171719 !important; border-color:#3b3b3e !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-advanced { margin: 0; }
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--tool-spacing);
+  width: 100%;
+  text-align: left;
 }
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button {
-  background:transparent !important; color:var(--theme-muted) !important; box-shadow:none !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-advanced-toggle[aria-expanded="true"] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button[aria-pressed="true"] {
-  background:#3b3b3f !important; color:var(--theme-text) !important;
-  border-color:#59595f !important; box-shadow:inset 0 0 0 1px #59595f !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-advanced-label {
+  flex: 1;
+  min-width: 0;
+  white-space: normal;
+  letter-spacing: normal;
 }
-html:not([data-theme="light"])[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button:hover:not([aria-pressed="true"]) {
-  background:#29292c !important; color:var(--theme-text) !important;
+body.editor-shell #editorTools #gap-remove-panel .gap-remove-advanced-body {
+  padding: var(--tool-inset);
+  background: var(--theme-panel);
+  border-color: var(--theme-line);
+}
+body.editor-shell #editorTools #gap-remove-scan {
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  box-shadow: none;
+}
+body.editor-shell #editorTools #gap-remove-list {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-muted);
+  font-size: 13px;
+}
+
+body.editor-shell #editorTools #markers-panel > header {
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--theme-line);
+  margin-bottom: 9px;
+}
+body.editor-shell #editorTools #markers-panel .gap-remove-heading {
+  flex: none;
+}
+body.editor-shell #editorTools #markers-panel-title {
+  margin: 0;
+}
+body.editor-shell #editorTools #markers-panel .gap-remove-panel-body {
+  gap: 8px;
+}
+body.editor-shell #editorTools #markers-panel .markers-summary {
+  flex: 0 1 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--theme-muted);
+  text-align: right;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+body.editor-shell #editorTools #markers-panel .markers-actions {
+  display: block;
+  margin: 0;
+}
+body.editor-shell #editorTools #markers-panel .markers-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools #markers-panel .markers-filters-field { margin: 0; }
+body.editor-shell #editorTools #markers-panel .markers-filters > label {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 5px;
+}
+body.editor-shell #editorTools #markers-panel .markers-filters select { max-width: none; }
+body.editor-shell #editorTools #markers-panel :is(.markers-list,.markers-batch-actions) {
+  margin: 0;
+}
+body.editor-shell #editorTools #markers-panel .markers-list {
+  max-height: none;
+  overflow: visible;
+  gap: 0;
+  padding: 0;
+}
+body.editor-shell #editorTools #markers-panel .marker-locate-row { grid-template-columns: minmax(0, 1fr); }
+body.editor-shell #editorTools #markers-panel .marker-locate-row button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--tool-spacing);
+}
+body.editor-shell #editorTools #markers-panel .marker-locate-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.editor-shell #editorTools #markers-panel .marker-locate-time { color: var(--theme-muted); white-space: nowrap; }
+body.editor-shell #editorTools #markers-panel .marker-locate-row button[aria-current="true"] {
+  border-color: var(--theme-accent) !important;
+}
+body.editor-shell #editorTools #markers-panel :is(.markers-filter-item,.markers-batch-actions)[hidden] {
+  display: none;
+}
+body.editor-shell #editorTools #markers-panel .markers-item {
+  border-radius: 6px;
+  border-color: var(--theme-line);
+  box-shadow: none;
+}
+body.editor-shell #editorTools #markers-panel button.markers-item-main {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 2px 6px;
+  height: auto;
+  min-width: 0;
+  padding: 5px 4px;
+  background: transparent;
+  border-color: transparent;
+  text-align: left;
+}
+body.editor-shell #editorTools #markers-panel .markers-item-time {
+  grid-column: 2;
+  padding: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+body.editor-shell #editorTools #markers-panel .markers-review-badge {
+  grid-column: 2;
+  justify-self: start;
+}
+body.editor-shell #editorTools #markers-panel .markers-item-edit {
+  margin: 0;
+  padding: 0 7px;
+  align-self: center;
+}
+body.editor-shell #editorTools #markers-panel .markers-item-delete:hover { color: var(--theme-text); }
+
+/* Share the segmented search state with both editor themes. */
+html[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle {
+  gap: 3px;
+  padding: 2px;
+  background: var(--theme-field) !important;
+  border-color: var(--theme-line);
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  box-shadow: none !important;
+  color: var(--theme-muted) !important;
+}
+html[data-editor-layout="experimental"] body.editor-shell #editorTools #experimental-search-panel .search-scope-toggle button:is([aria-pressed="true"],:hover:not(:disabled)) {
+  background: var(--theme-panel-2) !important;
+  border-color: var(--theme-line-strong) !important;
+  color: var(--theme-text) !important;
 }
 
 html:not([data-theme="light"]) body.editor-shell .translation-language-layout .language-slot {

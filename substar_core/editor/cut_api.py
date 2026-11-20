@@ -12,6 +12,7 @@ from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
+from substar_core.media.video_encoding import EncodingError
 from substar_core.cut_timeline import kept_intervals, projected_subtitles, export_xml, ai_plan_from_ranges, frame_intervals
 
 router = APIRouter()
@@ -95,38 +96,20 @@ def cut_export(project_id: str, payload: CutRequest):
         try:
             use_video = payload.format == "video"
             output = directory / ("cut.mp4" if use_video else "cut.wav")
-            filters=[];inputs=[]
-            for i,(a,b) in enumerate(intervals):
-                if use_video:
-                    from fractions import Fraction
-                    rate = Fraction(fps)
-                    filters.append(f"[0:v:0]fps={fps},trim=start_frame={round(a*rate)}:end_frame={round(b*rate)},setpts=PTS-STARTPTS[v{i}]")
-                    inputs.append(f"[v{i}]")
-                if audio:
-                    filters.append(f"[0:a:0]atrim=start={a:.9f}:end={b:.9f},asetpts=PTS-STARTPTS[a{i}]")
-                    inputs.append(f"[a{i}]")
-            filters.append("".join(inputs)+f"concat=n={len(intervals)}:v={int(use_video)}:a={int(audio is not None)}"+
-                           ("[v]" if use_video else "")+("[a]" if audio else ""))
-            script = directory / "filters.txt"
-            script.write_text(";\n".join(filters),encoding="utf-8")
-            args=[executable("ffmpeg"),"-nostdin","-hide_banner","-loglevel","error","-y","-i",str(path),"-/filter_complex",str(script)]
-            if use_video:
-                args += ["-map","[v]","-c:v","libx264","-preset","fast","-crf","18","-movflags","+faststart"]
-            if audio:
-                args += ["-map","[a]","-c:a","aac" if use_video else "pcm_s24le"]
-            args.append(str(output))
-            try:
-                subprocess.run(args,check=True,capture_output=True,timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
-            except subprocess.CalledProcessError as exc:
-                if b"Unrecognized option" not in (exc.stderr or b""):
-                    raise
-                args[args.index("-/filter_complex")] = "-filter_complex_script"
-                subprocess.run(args,check=True,capture_output=True,timeout=7200,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+            from .output_api import AudioOptions, OutputRequest, VideoOptions, _render_media
+
+            options = OutputRequest(revision_id=payload.revision_id, export_sequence=1,
+                                    video=VideoOptions() if use_video else None,
+                                    audio=None if use_video else AudioOptions())
+            _render_media(options, path, intervals, fps, video, audio,
+                          sum(end - start for start, end in intervals),
+                          output if use_video else None, None if use_video else output,
+                          lambda *_: None)
             return FileResponse(output,filename=output.name,background=BackgroundTask(shutil.rmtree,directory,ignore_errors=True))
         except BaseException:
             shutil.rmtree(directory,ignore_errors=True)
             raise
-    except (ValueError,subprocess.SubprocessError) as exc:
+    except (ValueError, EncodingError, subprocess.SubprocessError) as exc:
         detail = getattr(exc,"stderr",b"")
         if isinstance(detail,bytes):
             detail = detail.decode("utf-8",errors="replace")

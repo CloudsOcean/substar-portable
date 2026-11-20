@@ -5,14 +5,13 @@
     toggle.type = "checkbox";
     label.style.cssText = "display:flex;align-items:center;gap:8px";
     label.append(toggle, doc.createTextNode("显示画面预览图"));
-    const status = doc.createElement("small"), retry = doc.createElement("button");
+    const status = doc.createElement("small");
     status.setAttribute("role", "status");
     status.className = "settings-panel-hint";
-    retry.type = "button"; retry.textContent = "生成 / 重试"; retry.hidden = true;
-    settingsPanel.append(label, status, retry);
+    settingsPanel.append(label, status);
     let manifest = null, closed = false, timer = 0, enabled = false, chosen = false, version = 0, busy = false;
     let active = 0, imageEpoch = 0, generateAgain = false;
-    let abort = new AbortController(), requestEpoch = 0;
+    let abort = new AbortController(), requestEpoch = 0, requestFailed = false;
     const images = new Map(), queue = new Map(), pending = new Set(), failed = new Set();
     let preference = `substar.editor.thumbnails:${url}`;
     try { const saved = localStorage.getItem(preference); chosen = saved !== null; enabled = saved === "true"; } catch (_) {}
@@ -25,7 +24,6 @@
       const state = manifest?.state || "idle";
       status.textContent = ({idle:"尚未生成画面预览图", queued:"画面预览图等待生成", generating:`正在生成画面预览图 ${Math.round((manifest?.progress || 0) * 100)}%`,
         ready:`画面预览图已就绪 · 每 ${manifest?.interval || .5} 秒一帧`, unavailable:"此素材没有视频画面", error:manifest?.message || "画面预览图读取失败"})[state];
-      retry.hidden = !["idle", "error"].includes(state);
       toggle.disabled = state === "unavailable";
     }
     async function refresh(generate = false) {
@@ -38,6 +36,7 @@
         if (!response.ok) throw new Error("Thumbnail request failed");
         const next = await response.json();
         if (closed || epoch !== requestEpoch) return;
+        requestFailed = false;
         if (manifest?.revision !== next.revision) { drop(); version++; }
         manifest = next;
         if (!chosen && manifest.requested && manifest.state !== "unavailable") show(true);
@@ -46,7 +45,8 @@
         if (["queued", "generating"].includes(manifest.state)) timer = setTimeout(() => refresh(), 2000);
       } catch (error) {
         if (closed || epoch !== requestEpoch || error.name === "AbortError") return;
-        status.textContent = "画面预览图读取失败"; retry.hidden = false;
+        requestFailed = true;
+        status.textContent = "画面预览图读取失败";
       } finally {
         if (epoch === requestEpoch) {
           busy = false;
@@ -57,9 +57,8 @@
     toggle.onchange = () => {
       chosen = true; show(toggle.checked);
       try { localStorage.setItem(preference, String(enabled)); } catch (_) {}
-      if (enabled && (!manifest || ["idle", "error"].includes(manifest.state))) refresh(true);
+      if (enabled && (requestFailed || !manifest || ["idle", "error"].includes(manifest.state))) refresh(true);
     };
-    retry.onclick = () => { chosen = true; show(true); refresh(true); };
     function drop() {
       imageEpoch++; active = 0; pending.clear();
       for (const image of images.values()) { image.onload = image.onerror = null; image.removeAttribute("src"); }
@@ -123,13 +122,13 @@
       setUrl(next) {
         if (!next || next === url) return;
         requestEpoch++; abort.abort(); abort = new AbortController(); clearTimeout(timer);
-        drop(); version++; busy = false; generateAgain = false; manifest = null; url = next;
+        drop(); version++; busy = false; generateAgain = false; requestFailed = false; manifest = null; url = next;
         preference = `substar.editor.thumbnails:${url}`; chosen = false;
         let nextEnabled = false;
         try { const saved = localStorage.getItem(preference); chosen = saved !== null; nextEnabled = saved === "true"; } catch (_) {}
         show(nextEnabled); paintStatus(); void refresh();
       },
-      close() { closed = true; clearTimeout(timer); abort.abort(); drop(); label.remove(); status.remove(); retry.remove(); }};
+      close() { closed = true; clearTimeout(timer); abort.abort(); drop(); label.remove(); status.remove(); }};
   }
   root.EditorThumbnails = {create};
 })(globalThis);

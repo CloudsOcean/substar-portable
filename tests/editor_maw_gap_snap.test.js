@@ -47,9 +47,13 @@ test('native range commit retains exact snapped word times after grid rounding',
  const row={releasePointerCapture(){}};let result;
  instance.options={snapGapBoundary:createGapBoundarySnapper(()=>cues,()=>true),applyGapRange:(...args)=>result=args};
  instance.clearGapRangePreviews=()=>{};
+ instance.findVisibleWaveformRowAtY=()=>row;
+ instance.timeFromPointerUnbounded=()=>3000;
+ instance.durationMs=10000;
+ instance.layoutGapRangePreview=()=>{};
  instance.gapRangeDrag={pointerId:1,row,moved:true,startMs:1603,endMs:3000,removed:true};
  const previous=globalThis.window;globalThis.window={removeEventListener(){}};
- try{instance.endGapRangeDrag({pointerId:1,type:'pointerup',altKey:false});}finally{globalThis.window=previous;}
+ try{instance.endGapRangeDrag({pointerId:1,type:'pointerup',altKey:false,preventDefault(){},stopPropagation(){}});}finally{globalThis.window=previous;}
  assert.deepEqual(result,[1603,3000,true]);
 });
 

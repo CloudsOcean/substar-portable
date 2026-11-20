@@ -22,12 +22,12 @@ test('gap menus resolve the same projected index that MAW renders',()=>{
   const state=C.normalizeGapRemoveData({...before,...C.moveGapRemoveProvenance(before.provenance,before.gaps,0,500,10000,before.gaps)});
   let committed,heard;const actions=[];
   const start=source.indexOf('function gap('),end=source.indexOf('\n  function word(',start);
-  const sandbox={options:{onRetranscribeGap:(a,b)=>heard=[a,b]},globalThis:{AsrGapRemoveCore:C},h:{getGapState:()=>state,commitGaps:s=>committed=s},reset(){},sep(){},open(){},addMarkerItems(){},item:(label,key,fn)=>actions.push({label,fn})};
+  const sandbox={options:{onRetranscribeGap:(a,b)=>heard=[a,b]},globalThis:{AsrGapRemoveCore:C},h:{getGapState:()=>state,clearGapRange:(start,end)=>committed={...state,provenance:C.removeGapRemoveProvenanceRange(state.provenance,start,end,state.gaps)}},reset(){},sep(){},open(){},addMarkerItems(){},item:(label,key,fn)=>actions.push({label,fn})};
   vm.runInNewContext(source.slice(start,end)+';gap(0,0,0);',sandbox);
   actions.find(a=>a.label==='重新听写此片段').fn();
   assert.deepEqual(heard,[1.5,2.5]);
-  actions.find(a=>a.label==='清理空隙').fn();
-  assert.equal(C.getGapRemoveDisplayGaps(C.normalizeGapRemoveData(committed).gaps).length,0);
+  actions.find(a=>a.label==='删除空隙').fn();
+  assert.equal(C.getGapRemoveDisplayGaps(C.normalizeGapRemoveData({...committed,gaps:undefined}).gaps).length,0);
 });
 
 const plain = state => C.gapRangesFromProvenance(state.provenance).map(g=>[g.start,g.end,g.removed]);

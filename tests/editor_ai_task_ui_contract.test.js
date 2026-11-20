@@ -47,7 +47,7 @@ test("an active calibration or translation task dims every editor-writing comman
     '["#aiCalibrationMenu", "#aiCalibrate"]',
     '["#scriptProjectionMenu", "#scriptProjectionSummary"]',
   ]) assert.ok(editorJs.includes(pair));
-  assert.match(editorJs, /const editingCommandDisabled = !revision \|\| locked \|\| textProject;/);
+  assert.match(editorJs, /const disabled = !revision \|\| locked \|\| \(textProject && !hasFileActions\);/);
 });
 
 test("blank manual translation tracks still render editable rows", () => {

@@ -1,3 +1,4 @@
+import {createPreviewSeek} from './editor_preview_seek.js?v=20261116-audio-fade-4';
 import {createWordSelection,selectionRuns} from './editor_maw_selection.js?v=20261025-selection-1';
 import {refreshGapRows} from './editor_maw_gap_render.js?v=20261102-gap-1';
 import {installSubstarBoundaries} from './editor_maw_boundary.js?v=20261027-virtual-list-1';
@@ -6,10 +7,10 @@ import {installPcmWaveformPaint} from './editor_maw_pcm_paint.js?v=20261025-low-
 import {createWaveformLoader} from './editor_maw_waveform_loader.js?v=20261025-recovery-1';
 import {createGapBoundarySnapper,createMarkerBoundarySnapper} from './editor_maw_gap_snap.js?v=20261025-selection-1';
 /* MAW waveform host adapter. All persistent edits use Substar document operations. */
-import {createMawMenus} from './editor_maw_menus.js?v=20261029-punctuation-1';
-import {createCutPlanPanel} from './editor_cut_plan_panel.js?v=2';
-import {shell} from './editor_maw_shell.js?v=20261025-tools-2';
-import {initSubstarMarkersPanel} from './vendor/maw/editor/markers/editor-markers-panel.js?v=20261025-tools-2';
+import {createMawMenus} from './editor_maw_menus.js?v=20261120-boundary-hit';
+import {createCutPlanPanel} from './editor_cut_plan_panel.js?v=20261120-compact-tool-panels';
+import {shell} from './editor_maw_shell.js?v=20261120-waveform-settings-cleanup';
+import {initSubstarMarkersPanel} from './vendor/maw/editor/markers/editor-markers-panel.js?v=20261120-compact-tool-panels-2';
 const M=globalThis.SubstarMawModel;
 const C=globalThis.AsrGapRemoveCore;
 const U=()=>globalThis.AsrEditorUtils;
@@ -20,10 +21,14 @@ export function createTimelineController(options){
   const host=doc.createElement('div');host.className='maw-waveform-host';panel.append(host);
   host.innerHTML=shell;
   const $=s=>host.querySelector(s)||doc.querySelector('#editor-gaps-tool-content')?.querySelector(s)||doc.querySelector('#editor-markers-tool-content')?.querySelector(s),field=n=>$(`[data-field="${n}"]`)||doc.querySelector(`#editor-cut-tool-content [data-field="${n}"]`),status=field('save-status');
-  let view=null,timeline=M.timeline(),markers=[],gapState=C.normalizeGapRemoveData(null),all=[],main=[],overlay=[],extension=[],beforeEdit=null;
-  let cutPlanPanel=null;
+  let view=null,timeline=M.timeline(),markers=[],gapState=C.normalizeGapRemoveData(null),all=[],main=[],overlay=[],extension=[],beforeEdit=null,pendingReveal=null;
+  let cutPlanPanel=null,partialGapRestore=null;
   let dead=false,queue=Promise.resolve(),pending=0,selected=null,markerEnabled=true,wordEnabled=false,overlayEnabled=false,speaker='',newSpeaker='',payload=null,menu=null,frame=0,audition=null,wordSelection=createWordSelection();
   const abort=new AbortController(),signal=abort.signal;
+  const previewSeek=createPreviewSeek(options.media,{signal});
+  for(const event of ['pointerdown','keydown']){
+    doc.addEventListener(event,()=>previewSeek.prepare(),{capture:true,signal});
+  }
   let lowEnergySuppression=0;try{lowEnergySuppression=Math.max(0,Math.min(100,Number(localStorage.getItem('substar.maw.low-energy-suppression'))||0));}catch(_){}
   const getSuppression=()=>lowEnergySuppression/100;
   const show=text=>{status.textContent=text?' · '+text:'';};
@@ -49,7 +54,37 @@ export function createTimelineController(options){
     return done;
   }
   function commitMarkers(mutator){const next=U().normalizeMarkers(M.clone(markers));mutator(next);markers=U().normalizeMarkers(next);const t=M.timeline(timeline);t.schema='substar.timeline.v2';t.markers=[...(t.markers||[]).filter(m=>m.plan_id&&m.plan_id!==t.active_plan_id),...M.storedMarkers(markers)];timeline=t;refresh();globalThis.MaweMarkersPanel?.render();return persist(t);}
-  function commitGaps(next){gapState=C.normalizeGapRemoveData(next);timeline=M.withGapState(timeline,gapState);refreshGapRows(wave,C.getGapRemoveDisplayGaps(gapState.gaps),field('gap-mode').value);renderGapPanel();cutPlanPanel?.render();return persist(timeline,{gapOnly:true});}
+  function commitGaps(next){gapState=C.normalizeGapRemoveData(next);timeline=M.withGapState(timeline,gapState);refreshGapRows(wave,C.getGapRemoveDisplayGaps(gapState.gaps),C.DEFAULT_GAP_REMOVE_OPERATION_MODE);renderGapPanel();cutPlanPanel?.render();return persist(timeline,{gapOnly:true});}
+  function saveGapSetting(key,value){
+    const next=C.normalizeGapRemoveData({...gapState,[key]:value});
+    if(next[key]===gapState[key]){renderGapPanel();return;}
+    gapState=next;
+    timeline=M.withGapState(timeline,gapState,{updateCuts:false});
+    globalThis.MaweBoot.DATA.gap_remove=gapState;
+    renderGapPanel();
+    return persist(timeline,{gapOnly:true});
+  }
+  function clearGapRange(start,end){
+    const provenance=C.removeGapRemoveProvenanceRange(gapState.provenance,start,end,gapState.gaps);
+    return commitGaps({...gapState,provenance,gaps:C.gapRangesFromProvenance(provenance)});
+  }
+  function startPartialGapRestore(gap){
+    cancelPartialGapRestore();
+    partialGapRestore={gap,planId:timeline.active_plan_id,drag:null};
+    host.classList.add('maw-partial-gap-restore');
+    partialRestoreHint.hidden=false;
+  }
+  function cancelPartialGapRestore(){
+    if(!partialGapRestore)return;
+    const {drag}=partialGapRestore;
+    partialGapRestore=null;
+    if(drag&&host.hasPointerCapture(drag.pointerId))host.releasePointerCapture(drag.pointerId);
+    wave.clearGapRangePreviews();
+    partialRestoreAnchor.remove();
+    partialRestoreCursor.remove();
+    host.classList.remove('maw-partial-gap-restore');
+    partialRestoreHint.hidden=true;
+  }
   function manualGap(start,end,removed=true){const provenance=C.appendGapRemoveManualOverrides(gapState.provenance,[{start:Math.round(start),end:Math.round(end),removed}],gapState.gaps);return commitGaps({...gapState,provenance,gaps:C.gapRangesFromProvenance(provenance)});}
   function moveGap(index,delta,copy=false){if(copy){const gaps=C.copyGapRemoveRange(gapState.gaps,index,delta,wave.durationMs);return commitGaps({...gapState,provenance:C.normalizeGapRemoveProvenance(null,gaps),gaps});}const result=C.moveGapRemoveProvenance(gapState.provenance,gapState.gaps,index,delta,wave.durationMs,gapState.gaps);return commitGaps({...gapState,provenance:result.provenance,gaps:result.gaps});}
   function markerMove(id,delta){return commitMarkers(items=>{const item=items.find(m=>m.id===id);if(!item)return;const span=item.end==null?0:item.end-item.start;item.start=Math.max(0,Math.min(wave.durationMs-span,item.start+Math.round(delta)));if(item.end!=null)item.end=item.start+span;});}
@@ -80,17 +115,62 @@ export function createTimelineController(options){
   const auxiliaryPanels=[];
   for(const [id,button,close] of [['auto-merge-panel','auto-merge-manage','auto-merge-close'],['subtitle-extend-panel','subtitle-extend-manage','subtitle-extend-close']]){const ctrl=floatingPanel({panel:$('#'+id),dragHandle:$('#'+id+' header'),manageButton:$('#'+button)});$('#'+close).addEventListener('click',ctrl.close,{signal});auxiliaryPanels.push(ctrl);}
   function segments(track='main'){return track==='extension'?extension:track==='overlay'?overlay:main;}
-  function selection(track='main'){const ids=new Set(options.selection?.ids||[]);if(selected)ids.add(selected);return new Set(segments(track).flatMap((s,i)=>ids.has(s.id)?[i]:[]));}
-  function select(index,track='main',modifiers={}){const s=segments(track)[index];if(!s)return;selected=s.id;options.selection?.select?.(s.id,all.map(s=>s.id),modifiers);options.onSelectCue?.(s.id,s.start/1000,modifiers);refresh();}
+  function selection(track='main'){const ids=new Set(options.selection?.ids||[]);if(selected)ids.add(selected);return new Set(segments(track).flatMap((s,i)=>ids.has(s.source_cue_id||s.id)?[i]:[]));}
+  function select(index,track='main',modifiers={}){const s=segments(track)[index];if(!s)return;selected=s.source_cue_id||s.id;options.selection?.select?.(selected,all.map(s=>s.id),modifiers);options.onSelectCue?.(selected,s.start/1000,modifiers);refresh();}
   function rangeSelect(index,track='main'){select(index,track,{range:true});}
   function selectToggle(index,track='main'){select(index,track,{toggle:true});}
-  function seek(seconds){if(options.media)options.media.currentTime=seconds;options.onSeek?.(seconds);}
+  function skippedGapAt(seconds){
+    if(!gapState.skip_playback)return null;
+    return C.findGapRemoveAtTime(C.getGapRemoveDisplayGaps(gapState.gaps),seconds*1000+1e-7,true);
+  }
+  function seekMedia(seconds,{auditionEnd=null,forceSkip=false}={}){
+    const media=options.media;
+    audition=auditionEnd===null?null:{end:auditionEnd};
+    const gap=!audition&&(forceSkip||(media&&!media.paused))?skippedGapAt(seconds):null;
+    const target=gap?gap.end/1000:seconds;
+    if(media){
+      if(gap&&gap.end>=wave.durationMs)media.pause();
+      previewSeek.seek(target);
+    }
+    return target;
+  }
+  function seek(seconds,settings){
+    const target=seekMedia(seconds,settings);
+    options.onSeek?.(target);
+    if(settings?.mouseClick&&target===seconds){
+      if(wave.settings.mode==='basic'){
+        const start=wave.basicWindowStartMs,end=start+wave.settings.visibleSeconds*1000;
+        if(target*1000>=start&&target*1000<=end){
+          wave.manualFollowUntil=Math.max(wave.manualFollowUntil,Date.now()+3000);
+        }
+      }else{
+        const rowIndex=Math.floor(target/wave.settings.secondsPerRow);
+        if(visibleWaveformRow(rowIndex)){
+          wave.multiFollowRowIndex=rowIndex;
+          wave.multiFollowCheckPending=false;
+        }
+      }
+    }
+  }
+  function auditionRange(start,end){
+    const media=options.media;
+    if(!media||end<=start)return false;
+    seek(start/1000,{auditionEnd:end/1000});
+    return media.play();
+  }
   function togglePlayback(){const media=options.media;if(media?.paused)media.play().catch(e=>show(e.message));else media?.pause();}
-  function commitTimes(){const changes=M.timeChanges(beforeEdit||[],[...main,...overlay]);beforeEdit=null;if(!changes.length)return;const ids=new Set(changes.map(c=>c.cue_id)),wordTimes={};for(const s of [...main,...overlay])if(ids.has(s.id))for(const item of s.items)if(item.end>item.start&&item.start>=s.start&&item.end<=s.end)wordTimes[item.id]={start:Math.round(item.start),end:Math.round(item.end)};run(()=>enqueue(()=>options.onCommitTimelineTimes(changes,wordTimes)));}
+  function commitTimes(){
+    const changes=M.timeChanges(beforeEdit||[],[...main,...overlay]);
+    const targets=(beforeEdit||[]).flatMap(old=>{const unit=extension.find(s=>s.unit_id&&s.id===old.id);return unit&&(old.start!==unit.start||old.end!==unit.end)?[{unit_id:unit.unit_id,start:unit.start/1000,end:unit.end/1000}]:[];});
+    beforeEdit=null;if(!changes.length&&!targets.length)return;
+    const ids=new Set(changes.map(c=>c.cue_id)),wordTimes={};
+    for(const s of [...main,...overlay])if(ids.has(s.id))for(const item of s.items)if(item.end>item.start&&item.start>=s.start&&item.end<=s.end)wordTimes[item.id]={start:Math.round(item.start),end:Math.round(item.end)};
+    run(()=>enqueue(async()=>{if(changes.length)await options.onCommitTimelineTimes(changes,wordTimes);if(targets.length)await options.onTargetUnitTimes(targets);}));
+  }
   function editText(index,track='main'){
     const s=segments(track)[index];if(!s)return;
     const box=doc.createElement('dialog');box.className='cut-dialog';const title=doc.createElement('h3');title.textContent=track==='extension'?'编辑译文':'编辑字幕';const input=doc.createElement('textarea');input.value=s.rawText??s.text;const save=doc.createElement('button');save.textContent='保存';const close=doc.createElement('button');close.textContent='取消';box.append(title,input,save,close);host.append(box);box.showModal();input.focus();
-    close.onclick=()=>box.close();box.onclose=()=>box.remove();save.onclick=()=>run(async()=>{await options.onTimelineTextEdit({cueId:s.id,tokenId:null,text:input.value,track});box.close();});
+    close.onclick=()=>box.close();box.onclose=()=>box.remove();save.onclick=()=>run(async()=>{await options.onTimelineTextEdit({cueId:s.source_cue_id||s.id,unitId:s.unit_id,tokenId:null,text:input.value,track});box.close();});
   }
   function split(index,time,track='main'){const s=segments(track)[index];if(!s)return;const cue=view.cue_views.find(c=>c.cue_id===s.id);const tokenIds=new Set(cue.display_token_ids||[]);const tokens=(view.token_views||[]).filter(t=>tokenIds.has(t.token_id)&&t.end*1000<=time);const after=tokens.at(-1);if(!after){show('此处没有可用字词边界');return;}options.onOperation?.('split_cue',{type:'split_cue',cue_id:s.id,after_token_id:after.token_id});}
   const wordKey=(segment,item)=>JSON.stringify([segment.id,item.id]);
@@ -113,15 +193,22 @@ export function createTimelineController(options){
   const snapGapBoundary=createGapBoundarySnapper(()=>main,()=>wordEnabled);
   const menus=createMawMenus({host,signal,run,segments,selection,select,split,editText,snapGapBoundary,
     getView:()=>view,getTimeline:()=>timeline,persist,enqueue,options,show,
-    getGapState:()=>gapState,commitGaps,manualGap,markerAdd,getDuration:()=>wave.durationMs,
+    getGapState:()=>gapState,clearGapRange,startPartialGapRestore,manualGap,markerAdd,getDuration:()=>wave.durationMs,
     overlayEnabled:()=>overlayEnabled,newSpeaker:()=>newSpeaker,
-    audition:(start,end)=>{audition={end:end/1000};seek(start/1000);return options.media.play();},
+    audition:auditionRange,
     getWordSelection:index=>wordIndices(main[index]),setWordSelection:(index,items)=>{wordSelection.clear();for(const item of items)selectWord(index,item,{ctrlKey:true});},
     getWordRanges:()=>selectionRuns(wordEntries(),wordSelection.keys),createSelectionItems,
   });
+  function openWaveformContextMenu(time,x,y,track){
+    // The transparent marker track can receive right-clicks above a gap block.
+    const gaps=C.getGapRemoveDisplayGaps(gapState.gaps);
+    const gap=C.findGapRemoveAtTime(gaps,time);
+    if(gap){menus.gap(x,y,gaps.indexOf(gap));return;}
+    menus.blank(time,x,y,track);
+  }
   const wave=globalThis.AsrWaveform.create({host,getSegments:segments,getExtensionSegments:()=>extension,getSelection:selection,getExtensionSelection:()=>selection('extension'),getOverlaySelection:()=>selection('overlay'),
     multiSubtitleVisible:()=>options.getShowTranslations?.()!==false&&extension.some(s=>s.text),showTrackBadges:()=>false,
-    getMarkers:()=>markers,getGapRemoveGaps:()=>C.getGapRemoveDisplayGaps(gapState.gaps),getGapOperationMode:()=>field('gap-mode').value,snapGapBoundary,snapMarkerBoundary:createMarkerBoundarySnapper(()=>main,()=>wordEnabled),
+    getMarkers:()=>markers,getGapRemoveGaps:()=>C.getGapRemoveDisplayGaps(gapState.gaps),getGapOperationMode:()=>C.DEFAULT_GAP_REMOVE_OPERATION_MODE,snapGapBoundary,snapMarkerBoundary:createMarkerBoundarySnapper(()=>main,()=>wordEnabled),
     getAutoSnapAdjacentCues:()=>true,getAdjacentBoundaryMode:()=> 'dual',getClickBehavior:()=> 'select-and-seek',getClickTarget:()=> 'pointer',getHoverSeekPreview:()=>false,getSnapToFrame:()=>false,
     getWaveShapeSource:()=>$('#waveform-shape-source').value,
     getOverlayCreateEnabled:()=>overlayEnabled,getHideDisabled:()=>false,isPlaybackActive:()=>!options.media?.paused,
@@ -129,18 +216,23 @@ export function createTimelineController(options){
     toggleCueSelection:i=>selectToggle(i),toggleExtensionSelection:i=>selectToggle(i,'extension'),toggleOverlaySelection:i=>selectToggle(i,'overlay'),selectCueRange:i=>rangeSelect(i),selectExtensionRange:i=>rangeSelect(i,'extension'),selectOverlayRange:i=>rangeSelect(i,'overlay'),
     addCueSelection:i=>select(i,'main',{toggle:true}),addExtensionSelection:i=>select(i,'extension',{toggle:true}),clearSelection:()=>{selected=null;options.selection?.clear();},
     // MAW seek callbacks already supply seconds (cue and gap ranges use milliseconds).
-    seek:seconds=>seek(seconds),togglePlayback,
-    onBeginEdit:(_label,affected)=>{beforeEdit=(affected||[...main,...overlay]).map(s=>({id:s.id,start:s.start,end:s.end}));},onCancelEdit:()=>{beforeEdit=null;readView(view);refresh();},onCommitEdit:commitTimes,
+    seek,togglePlayback,
+    onBeginEdit:(_label,affected)=>{beforeEdit=[...main,...overlay,...extension.filter(s=>s.unit_id)].map(s=>({id:s.id,start:s.start,end:s.end}));},onCancelEdit:()=>{beforeEdit=null;readView(view);refresh();},onCommitEdit:commitTimes,
     enterCueEditor:i=>editText(i),enterExtensionCueEditor:i=>editText(i,'extension'),enterOverlayCueEditor:i=>editText(i,'overlay'),
     splitCueAtTime:(i,t)=>split(i,t),splitOverlayCueAtTime:(i,t)=>split(i,t,'overlay'),
     showContextMenu:(x,y,i,t,mode)=>menus.cue(x,y,i,t,'main',mode),showExtensionContextMenu:(x,y,i,t)=>menus.cue(x,y,i,t,'extension'),showOverlayContextMenu:(x,y,i,t)=>menus.cue(x,y,i,t,'overlay'),
-    showBlankWaveformMenu:(time,x,y,track)=>menus.blank(time,x,y,track),
+    showBlankWaveformMenu:openWaveformContextMenu,
     addCueRange:(start,end,_x,_y,track)=>run(()=>enqueue(()=>options.onCreateTimelineCue(start/1000,end/1000,newSpeaker||null,track==='overlay'))),onCueCreateRejected:()=>show('此处已有字幕，可在叠加轨创建'),
     onMarkerAdd:start=>run(()=>markerAdd(start)),onMarkerCreateRegion:(start,end)=>run(()=>markerAdd(start,end)),onMarkerMove:(id,delta)=>run(()=>markerMove(id,delta)),onMarkerResize:(id,edge,value)=>run(()=>markerFields(id,{[edge]:value==null?null:Math.round(value)})),onMarkerQuickEditFields:(id,v)=>run(()=>markerFields(id,v)),onMarkerQuickEditDelete:id=>globalThis.MaweMarkerEditing.deleteMarker(id),
     applyGapRange:(start,end,removed)=>run(()=>manualGap(start,end,removed)),toggleGapRemoved:index=>{const g=C.getGapRemoveDisplayGaps(gapState.gaps)[index];if(g)run(()=>manualGap(g.start,g.end,g.removed===false));},
     resizeGapBoundary:(index,edge,value)=>run(()=>{const result=C.resizeGapRemoveProvenanceBoundary(gapState.provenance,gapState.gaps,index,edge,value,gapState.gaps);return commitGaps({...gapState,provenance:result.provenance,gaps:result.gaps});}),
     moveGap:(index,delta)=>run(()=>moveGap(index,delta)),copyGap:(index,delta)=>run(()=>moveGap(index,delta,true)),
-    previewGapAt:time=>{audition={end:Math.min(wave.durationMs,time+2000)/1000};seek(time/1000);options.media?.play().catch(e=>show(e.message));},
+    previewGapAt:(_index,timeMs)=>{
+      const playing=auditionRange(timeMs,Math.min(wave.durationMs,timeMs+2000));
+      if(!playing)return false;
+      playing.catch(error=>show(error.message));
+      return true;
+    },
     showGapContextMenu:(x,y,index)=>menus.gap(x,y,index),
     wordTiming:{get enabled(){return wordEnabled;},getSelection:wordIndices,select:selectWord,clearSelection:()=>wordSelection.clear(),previewItems:(segment,items)=>{segment.items=items;},showMenu:(x,y,index,item)=>menus.word(x,y,index,item)},
     beginWordEdit:segment=>({before:(segment?[segment]:main).map(s=>({id:s.id,items:s.items.map(item=>({id:item.id,start:item.start,end:item.end}))})),cancel:()=>{readView(view);refresh();}}),commitWordEdit:command=>{
@@ -150,6 +242,102 @@ export function createTimelineController(options){
       run(()=>enqueue(()=>options.onCommitTimelineTimes(patch.cues,patch.wordTimings)));return true;
     },
   });
+  const partialRestoreHint=doc.createElement('span');
+  partialRestoreHint.className='maw-partial-gap-hint';
+  partialRestoreHint.setAttribute('role','status');
+  partialRestoreHint.textContent='拖选要恢复的片段，Esc 取消';
+  partialRestoreHint.hidden=true;
+  $('#word-timing-quick-toggle').parentElement.append(partialRestoreHint);
+  const partialRestoreCursor=doc.createElement('div');
+  partialRestoreCursor.className='maw-partial-restore-guide';
+  partialRestoreCursor.setAttribute('aria-hidden','true');
+  const partialRestoreAnchor=partialRestoreCursor.cloneNode();
+  partialRestoreAnchor.classList.add('anchor');
+
+  function placePartialRestoreGuide(guide,time,row){
+    if(!row?.isConnected||time<Number(row.dataset.startMs)||time>Number(row.dataset.endMs)){
+      row=wave.findVisibleWaveformRowForTime(time);
+    }
+    const start=Number(row?.dataset.startMs),end=Number(row?.dataset.endMs);
+    if(!(end>start)){guide.remove();return;}
+    guide.style.left=String((time-start)/(end-start)*100)+'%';
+    if(guide.parentElement!==row)row.append(guide);
+  }
+
+  const pointerOptions={capture:true,signal};
+  host.addEventListener('pointerdown',event=>{
+    const restore=partialGapRestore;
+    const row=event.target.closest('.waveform-row');
+    if(!restore||!row||event.button!==0||!event.isPrimary)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const startMs=wave.pointerTimeMs(event,row);
+    restore.drag={pointerId:event.pointerId,row,startMs,
+      startX:event.clientX,startY:event.clientY,moved:false};
+    if(startMs>=restore.gap.start&&startMs<=restore.gap.end){
+      placePartialRestoreGuide(partialRestoreCursor,startMs,row);
+    }else partialRestoreCursor.remove();
+    host.setPointerCapture(event.pointerId);
+  },pointerOptions);
+  function partialGapSelection(event,restore){
+    const {drag,gap}=restore;
+    const row=wave.findVisibleWaveformRowAtY(event.clientY)||drag.row;
+    const time=Math.round(wave.pointerTimeMs(event,row));
+    return {
+      row, backwards:time<drag.startMs,
+      start:Math.max(gap.start,Math.min(drag.startMs,time)),
+      end:Math.min(gap.end,Math.max(drag.startMs,time)),
+    };
+  }
+  host.addEventListener('pointermove',event=>{
+    const restore=partialGapRestore;
+    if(!restore||!event.isPrimary)return;
+    const {drag,gap}=restore;
+    if(!drag){
+      const row=event.target.closest('.waveform-row');
+      const time=row?wave.pointerTimeMs(event,row):NaN;
+      if(time>=gap.start&&time<=gap.end)placePartialRestoreGuide(partialRestoreCursor,time,row);
+      else partialRestoreCursor.remove();
+      return;
+    }
+    if(drag.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    drag.moved ||= Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)>=3;
+    const {row,backwards,start,end}=partialGapSelection(event,restore);
+    const hasRange=drag.moved&&end>start;
+    wave.layoutGapRangePreview({row:drag.row,startMs:start,endMs:end,removed:false,moved:hasRange});
+    if(hasRange)placePartialRestoreGuide(partialRestoreAnchor,backwards?end:start,drag.row);
+    else partialRestoreAnchor.remove();
+    if(end>=start)placePartialRestoreGuide(partialRestoreCursor,backwards?start:end,row);
+    else partialRestoreCursor.remove();
+  },pointerOptions);
+  host.addEventListener('pointerleave',()=>{
+    if(!partialGapRestore?.drag)partialRestoreCursor.remove();
+  },{signal});
+  host.addEventListener('pointerup',event=>{
+    const restore=partialGapRestore,drag=restore?.drag;
+    if(drag?.pointerId!==event.pointerId)return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const {start,end}=partialGapSelection(event,restore);
+    cancelPartialGapRestore();
+    if(!drag.moved||end<=start||restore.planId!==timeline.active_plan_id)return;
+    const gapStillExists=C.getGapRemoveDisplayGaps(gapState.gaps).some(gap=>
+      gap.removed!==false&&gap.start===restore.gap.start&&gap.end===restore.gap.end);
+    if(gapStillExists)run(()=>clearGapRange(start,end));
+  },pointerOptions);
+  for(const type of ['pointercancel','lostpointercapture']){
+    host.addEventListener(type,event=>{
+      if(partialGapRestore?.drag?.pointerId===event.pointerId)cancelPartialGapRestore();
+    },pointerOptions);
+  }
+  doc.addEventListener('keydown',event=>{
+    if(event.key!=='Escape'||!partialGapRestore)return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelPartialGapRestore();
+  },pointerOptions);
   installSubstarBoundaries({wave,host,signal,getSelected:()=>selected,refresh,previewRefresh:range=>{
     if(dead || !wave.payload || !range)return;
     const badges=wave.computeGroupBadgesCached(main);
@@ -163,25 +351,35 @@ export function createTimelineController(options){
   }});
   installNativeWaveformStyle(wave,{getSuppression});
   installPcmWaveformPaint(wave,{loadWindow:request=>options.onWaveformWindow(request),getSource:()=>$('#waveform-shape-source').value,getSuppression,onError:error=>show('PCM 波形读取失败：'+error.message),signal});
-  host.addEventListener('contextmenu',event=>{if(!event.target.matches('.waveform-marker-track'))return;const row=event.target.closest('.waveform-row');event.preventDefault();event.stopPropagation();menus.blank(wave.pointerTimeMs(event,row),event.clientX,event.clientY);},{capture:true,signal});
+  host.addEventListener('contextmenu',event=>{
+    if(!event.target.matches('.waveform-marker-track'))return;
+    const row=event.target.closest('.waveform-row');
+    event.preventDefault();
+    event.stopPropagation();
+    openWaveformContextMenu(wave.pointerTimeMs(event,row),event.clientX,event.clientY);
+  },{capture:true,signal});
   const cutTool=doc.querySelector('#editor-cut-tool-content');
+  const planSelect=field('plan');
   if(cutTool){
     cutTool.replaceChildren();
-    const heading=doc.createElement('h3');heading.textContent='剪辑';cutTool.append(heading);
-    for(const name of ['plan','export']){const input=field(name);cutTool.append(input.closest('label'));if(name==='export')input.closest('label').hidden=true;if(name==='plan'){const button=$('[data-action="new-plan"]');cutTool.append(button);button.addEventListener('click',()=>{const name=prompt('剪辑方案名称','新方案');if(name===null)return;run(async()=>{const next=M.timeline(timeline),id=crypto.randomUUID();next.plans.push({id,name:name||'新方案',keep:null,cuts:[]});next.active_plan_id=id;delete next.gap_remove;await persist(next);readView({...view,properties:{...view.properties,timeline:next}});refresh();refreshControls();});},{signal});}}
-    const gapButton=doc.createElement('button');gapButton.type='button';gapButton.textContent='空隙设置';gapButton.addEventListener('click',()=>gapPanel.open(),{signal});cutTool.append(gapButton);
-    const hint=doc.createElement('p');hint.className='muted';hint.textContent='在波形中添加、调整空隙，按当前剪辑方案导出。';cutTool.append(hint);
+    planSelect.closest('label').remove();
+    $('[data-action="new-plan"]')?.remove();
   }
-  if(cutTool)host.querySelector('.maw-plan-controls-staging')?.remove();
-  cutPlanPanel=createCutPlanPanel({root:cutTool,signal,options,getTimeline:()=>timeline,getGapState:()=>gapState,
-    getDuration:()=>wave.durationMs,waitQueue:()=>queue,persist,manualGap,refresh:()=>{readView(view);refreshControls();refresh();},
-    preview:()=>{const first=globalThis.EditorCutTimeline.kept(timeline.plans.find(p=>p.id===timeline.active_plan_id),wave.durationMs/1000)[0];if(!first)return;field('skip').checked=true;seek(first.start);options.media?.play().catch(e=>show(e.message));},
+  cutPlanPanel=createCutPlanPanel({root:cutTool,planSelect,signal,getTimeline:()=>timeline,getGapState:()=>gapState,
+    getDuration:()=>wave.durationMs,manualGap,
     locate:start=>{seek(start);revealTime(start,true);},show});
   wave.attachPlayer(options.media);wave.setMediaAvailable(Boolean(options.media));
   globalThis.MaweCoreState={waveformEditor:wave,player:options.media};
   // MAW's main track is sequential. Substar permits different speakers to overlap:
   // run neighbour constraints on each speaker's sequence, then map indices back.
   const sharedBoundary=wave.isSharedBoundary.bind(wave);
+  const captureMoves=wave.captureSelectedMoveTracks.bind(wave);
+  wave.captureSelectedMoveTracks=function(drag){
+    if(drag.track==='extension'&&segments('extension')[drag.index]?.unit_id){drag.independent=true;return;}
+    const originalSelection=wave.options.getSelection;
+    wave.options.getSelection=track=>new Set([...originalSelection(track)].filter(i=>track!=='extension'||!segments(track)[i]?.unit_id));
+    try{return captureMoves(drag);}finally{wave.options.getSelection=originalSelection;}
+  };
   const reindexTracks=wave.reindexSelectedMoveTracks.bind(wave);
   wave.reindexSelectedMoveTracks=function(drag){for(const move of drag.moveTracks){const list=wave.options.getSegments(move.track),byId=new Map(list.map(s=>[s.id,s])),old=[...move.moveOriginals];move.moveOriginals=new Map(old.filter(([s])=>byId.has(s.id)).map(([s,t])=>[byId.get(s.id),t]));move.moveAnchorSegment=byId.get(move.moveAnchorSegment?.id);move.moveCommitSegments=new Set([...move.moveCommitSegments].map(s=>byId.get(s.id)).filter(Boolean));}return reindexTracks(drag);};
   wave.isSharedBoundary=function(event,left,right,row,track){const list=segments(track);return list[left]?.speaker===list[right]?.speaker&&sharedBoundary(event,left,right,row,track);};
@@ -222,8 +420,8 @@ export function createTimelineController(options){
       const track=block.dataset.track||'main',index=Number(block.dataset.idx??block.dataset.extIdx??block.dataset.overlayIdx),s=segments(track)[index];if(!s)continue;
       block.style.height=cueHeight+'px';
       block.dataset.substarSpeaker=s.speaker;const color=globalThis.EditorSpeakers?.color(s.speaker)||'#9cc9be';block.style.setProperty('--substar-speaker-color',color);
-      if(track!=='overlay'){const lane=packed.lanes.get(s.id)||0;block.style.bottom=(bandBottom+lane*(bilingual?2:1)*cueStep+(bilingual&&((track==='main')===s.sourceUpper)?cueStep:0))+'px';block.style.height=laneHeight+'px';}
-      if(wordEnabled&&track!=='overlay'){const lane=packed.lanes.get(s.id)||0;const offset=bandBottom+lane*((bilingual?2:1)*cueStep+wordStep);block.style.bottom=(offset+(bilingual&&((track==='main')===s.sourceUpper)?cueStep:0))+'px';block.style.height=cueHeight+'px';block.classList.remove('word-timing-background','word-timing-compact');}
+      if(track!=='overlay'){const lane=packed.lanes.get(s.source_cue_id||s.id)||0;block.style.bottom=(bandBottom+lane*(bilingual?2:1)*cueStep+(bilingual&&((track==='main')===s.sourceUpper)?cueStep:0))+'px';block.style.height=laneHeight+'px';}
+      if(wordEnabled&&track!=='overlay'){const lane=packed.lanes.get(s.source_cue_id||s.id)||0;const offset=bandBottom+lane*((bilingual?2:1)*cueStep+wordStep);block.style.bottom=(offset+(bilingual&&((track==='main')===s.sourceUpper)?cueStep:0))+'px';block.style.height=cueHeight+'px';block.classList.remove('word-timing-background','word-timing-compact');}
       block.title=(globalThis.EditorSpeakers?.label(s.speaker,view?.properties?.speaker_names)||'未分配')+' · '+s.text;
     }
     // Shared seam hit areas follow the same resized lanes as their subtitle blocks.
@@ -236,25 +434,67 @@ export function createTimelineController(options){
   }
   const nativeWordRefresh=wave.refreshWordBlocks.bind(wave);wave.refreshWordBlocks=function(...args){nativeWordRefresh(...args);decorate();};
   function decorate(){wave.renderedRows.forEach(decorateRow);}
-  function readView(next){
-    view=next;timeline=M.timeline(next?.properties?.timeline);markers=U().normalizeMarkers(M.markers(timeline).filter(m=>!m.plan_id||m.plan_id===timeline.active_plan_id));
-    const plan=timeline.plans.find(p=>p.id===timeline.active_plan_id);gapState=C.normalizeGapRemoveData(plan?.gap_remove||timeline.gap_remove||{gaps:M.legacyGaps(timeline)});
-    all=M.segments(next,options.getTimelineCueText,options.getTimelineCueLines,options.getTimelineTokenText);for(const s of all){s.sourceUpper=s.sourceUpper??globalThis.SubstarLanguageLayout?.routedSourceUpper(s.text,view?.presentation||{})!==false;s.color={name:s.speaker,value:globalThis.EditorSpeakers?.color(s.speaker)||'#87bfae'};for(const item of s.items){const timing=timeline.word_timings?.[item.id];if(timing)Object.assign(item,timing);}}
-    const visible=all.filter(s=>!speaker||s.speaker===speaker);main=visible.filter(s=>s.subtitle_track!=='overlay');overlay=visible.filter(s=>s.subtitle_track==='overlay');extension=main.map(s=>{const translation={...s,text:s.translation,rawText:s.rawTranslation??s.translation,items:[],bound_to:s.id};for(const edge of ['start','end'])Object.defineProperty(translation,edge,{enumerable:true,get:()=>s[edge],set:value=>{s[edge]=value;}});return translation;});
+  function readTimeline(value){
+    timeline=M.timeline(value);
+    markers=U().normalizeMarkers(M.markers(timeline).filter(m=>!m.plan_id||m.plan_id===timeline.active_plan_id));
+    if(partialGapRestore&&partialGapRestore.planId!==timeline.active_plan_id)cancelPartialGapRestore();
+    gapState=M.activeGapRemoveState(value);
     globalThis.MaweBoot.DATA.gap_remove=gapState;globalThis.MaweBoot.DATA.markers=markers;
+  }
+  function readView(next){
+    view=next;readTimeline(next?.properties?.timeline);
+    all=M.segments(next,options.getTimelineCueText,options.getTimelineCueLines,options.getTimelineTokenText);for(const s of all){s.sourceUpper=s.sourceUpper??globalThis.SubstarLanguageLayout?.routedSourceUpper(s.text,view?.presentation||{})!==false;s.color={name:s.speaker,value:globalThis.EditorSpeakers?.color(s.speaker)||'#87bfae'};for(const item of s.items){const timing=timeline.word_timings?.[item.id];if(timing)Object.assign(item,timing);}}
+    const visible=all.filter(s=>!speaker||s.speaker===speaker);main=visible.filter(s=>s.subtitle_track!=='overlay');overlay=visible.filter(s=>s.subtitle_track==='overlay');extension=main.filter(s=>!s.target_unit_ids?.length).map(s=>{const translation={...s,text:s.translation,rawText:s.rawTranslation??s.translation,items:[],bound_to:s.id};for(const edge of ['start','end'])Object.defineProperty(translation,edge,{enumerable:true,get:()=>s[edge],set:value=>{s[edge]=value;}});return translation;});
+    for(const unit of next?.target_units||[]){
+      const owner=main.find(s=>unit.source_cue_ids.includes(s.id)&&!s.disabled);if(!owner)continue;
+      const cue=next.cue_views.find(c=>c.cue_id===owner.id);
+      const text=options.getTimelineCueLines?.({...cue,target:{...cue.target,target_text:unit.text}})?.target??unit.text;
+      extension.push({...owner,id:unit.unit_id,unit_id:unit.unit_id,source_cue_id:owner.id,start:Math.round(unit.start*1000),end:Math.round(unit.end*1000),text,rawText:unit.text,items:[]});
+    }
+    extension.sort((a,b)=>a.start-b.start||a.end-b.end);
   }
   function refreshControls(){
     const laneCount=M.speakerLanes(main).count,bilingual=options.getShowTranslations?.()!==false&&extension.some(s=>s.text);
     const needed=66+laneCount*(bilingual?2:1)*cueStep;
     if(wave.settings.rowHeight<needed){wave.settings.rowHeight=Math.ceil(needed/24)*24;if(![...wave.rowHeightSelect.options].some(o=>Number(o.value)===wave.settings.rowHeight))wave.rowHeightSelect.add(new Option(wave.settings.rowHeight+' px',String(wave.settings.rowHeight)));wave.multiRange=[-1,-1];wave.render();}
-    const plan=field('plan');plan.replaceChildren();for(const p of timeline.plans)plan.add(new Option(p.name,p.id));plan.value=timeline.active_plan_id||'';$('#multi-subtitle-quick-toggle').setAttribute('aria-pressed',String(options.getShowTranslations?.()!==false));renderGapPanel();cutPlanPanel?.render();
+    $('#multi-subtitle-quick-toggle').setAttribute('aria-pressed',String(options.getShowTranslations?.()!==false));renderGapPanel();cutPlanPanel?.render();
   }
-  function renderGapPanel(){if(!wave)return;for(const input of $('#gap-remove-panel').querySelectorAll('[data-gap]'))if(doc.activeElement!==input)input.value=gapState[input.dataset.gap]??({minimum_ms:400,threshold_db:-28,hysteresis_db:2,lead_in_ms:120,lead_out_ms:80})[input.dataset.gap];
-    const gaps=gapState.gaps||[],removed=gaps.filter(g=>g.removed!==false);field('gap-summary').textContent=gaps.length?`已移除 ${removed.length}/${gaps.length} 段，共 ${(removed.reduce((n,g)=>n+g.end-g.start,0)/1000).toFixed(3)} 秒；左键定位，Alt+点击切换，空白处 Alt+左键拖动增加，空隙块左键拖动偏移，Ctrl/Cmd+拖动复制。`:'未能找到符合门限的静音空隙；尝试提高「音量阈值」来检测更多静音。';
+  function renderGapPanel(){if(!wave)return;for(const input of $('#gap-remove-panel').querySelectorAll('[data-gap]'))if(doc.activeElement!==input)input.value=gapState[input.dataset.gap];
+    setSkipGaps(gapState.skip_playback);
+    $('#gap-remove-disable-coverage').value=gapState.disable_coverage_percent;
+    $('#gap-remove-disable-remaining').value=gapState.disable_remaining_ms;
+    const gaps = gapState.gaps || [], removed = gaps.filter(g => g.removed !== false);
+    const removedSeconds = removed.reduce((total, gap) => total + gap.end - gap.start, 0) / 1000;
+    const summary = field('gap-summary');
+    const summaryText = gaps.length
+      ? `已移除 ${removed.length}/${gaps.length} 段 · ${removedSeconds.toFixed(3)} 秒`
+      : '暂无符合条件的空隙';
+    if (summary.textContent !== summaryText) summary.textContent = summaryText;
     const list=field('gap-list');list.replaceChildren();for(const g of gaps){const line=doc.createElement('div');line.className='maw-gap-row';const label=doc.createElement('span');label.textContent=`${(g.start/1000).toFixed(3)}—${(g.end/1000).toFixed(3)}`;const locate=doc.createElement('button');locate.textContent='定位';locate.onclick=()=>{seek(g.start/1000);revealTime(g.start/1000,true);};const toggle=doc.createElement('button');toggle.textContent=g.removed===false?'移除':'恢复';toggle.onclick=()=>run(()=>manualGap(g.start,g.end,g.removed===false));line.append(label,locate,toggle);list.append(line);}
   }
   async function scan(){if(!payload)throw Error('波形尚未加载');const values={...gapState};for(const input of $('#gap-remove-panel').querySelectorAll('[data-gap]'))values[input.dataset.gap]=Number(input.value);const ranges=C.detectAudioGapRemoveGaps({...wave.activeWaveShape().payload,peaks:wave.activeWaveShape().peaks},{minimumMs:values.minimum_ms,thresholdDb:values.threshold_db,hysteresisDb:values.hysteresis_db,leadInMs:values.lead_in_ms,leadOutMs:values.lead_out_ms});const provenance=C.replaceGapRemoveProvenanceSource(gapState.provenance,'audio_gate',ranges,gapState.gaps);await commitGaps({...values,provenance,gaps:C.gapRangesFromProvenance(provenance)});}
-  function revealTime(time,center=true){if(!wave.payload)return;if(wave.settings.mode==='basic'){wave.basicWindowStartMs=Math.max(0,time*1000-(center?wave.settings.visibleSeconds*500:0));wave.renderBasic();}else{wave.scroll.scrollTop=Math.max(0,Math.floor(time/wave.settings.secondsPerRow)*(wave.getTimelineRowHeight()+10)-(center?wave.scroll.clientHeight/2:0));wave.renderMultiVisible();}}
+  function visibleWaveformRow(rowIndex){
+    const row=wave.renderedRows.find(row=>Number(row.dataset.rowIndex)===rowIndex);
+    if(!row)return false;
+    const viewportTop=wave.scroll.getBoundingClientRect().top+wave.scroll.clientTop;
+    const rect=row.getBoundingClientRect();
+    return rect.bottom>viewportTop&&rect.top<viewportTop+wave.scroll.clientHeight;
+  }
+  function revealTime(time,center=true,{keepVisible=false}={}){
+    if(!wave.payload){pendingReveal={time,center,keepVisible};return;}
+    pendingReveal=null;
+    if(wave.settings.mode==='basic'){
+      const start=wave.basicWindowStartMs,end=start+wave.settings.visibleSeconds*1000;
+      if(keepVisible&&time*1000>=start&&time*1000<=end)return;
+      wave.basicWindowStartMs=Math.max(0,time*1000-(center?wave.settings.visibleSeconds*500:0));
+      wave.renderBasic();
+      return;
+    }
+    const rowIndex=Math.floor(time/wave.settings.secondsPerRow);
+    if(keepVisible&&visibleWaveformRow(rowIndex))return;
+    wave.scroll.scrollTop=Math.max(0,rowIndex*(wave.getTimelineRowHeight()+10)-(center?wave.scroll.clientHeight/2:0));
+    wave.renderMultiVisible();
+  }
   const handlePanelAction=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action==='gaps')gapPanel.toggle();if(action==='close-gaps')gapPanel.close();if(action==='scan')run(scan);};host.addEventListener('click',handlePanelAction,{signal});doc.querySelector('#editor-gaps-tool-content')?.addEventListener('click',handlePanelAction,{signal});
   $('#gap-remove-manage').textContent='空隙';$('#gap-remove-manage').hidden=true;
   $('#gap-remove-panel-title').textContent='空隙';
@@ -293,10 +533,7 @@ export function createTimelineController(options){
   const suppressionHint=doc.createElement('small');suppressionHint.className='settings-panel-hint';suppressionHint.textContent='仅压低弱波形显示，不改变音量或空隙检测。';
   $('#waveform-scale-label').closest('.editor-settings-item').after(suppressionRow,suppressionHint);
 
-  const playback=doc.createElement('section');playback.className='settings-panel-section waveform-settings-section';playback.setAttribute('role','group');playback.setAttribute('aria-label','播放与空隙');
-  const playbackTitle=doc.createElement('span');playbackTitle.className='settings-panel-title waveform-settings-title';playbackTitle.textContent='播放与空隙';
-  playback.append(playbackTitle,field('gap-mode').closest('label'),field('skip').closest('label'));
-  settingsBody.append(appearance,display,playback);
+  settingsBody.append(appearance,display);
 
   // Reuse MAW's row shells and pointer navigation with Substar's project cache.
   wave.thumbnailController?.close();
@@ -342,6 +579,18 @@ export function createTimelineController(options){
   doc.addEventListener('scroll',positionWaveformSettings,{capture:true,signal});
   doc.addEventListener('pointerup',positionWaveformSettings,{signal});
   doc.addEventListener('keydown',e=>{if(e.key==='Escape'&&!settingsPanel.hidden){e.preventDefault();closeWaveformSettings({focus:true});}},{signal});
+  const skipToggle=doc.createElement('button');
+  skipToggle.type='button';
+  skipToggle.id='gap-playback-quick-toggle';
+  skipToggle.className='waveform-quick-toggle';
+  $('#word-timing-quick-toggle').after(skipToggle);
+  function setSkipGaps(skip){
+    skipToggle.textContent=skip?'跳过空隙':'播放空隙';
+    skipToggle.title=skip?'预览时跳过空隙，点击改为播放空隙':'预览时播放空隙，点击改为跳过空隙';
+    skipToggle.setAttribute('aria-pressed',String(skip));
+  }
+  skipToggle.addEventListener('click',()=>run(()=>saveGapSetting('skip_playback',!gapState.skip_playback)),{signal});
+  setSkipGaps(gapState.skip_playback);
   $('#word-timing-quick-toggle').addEventListener('click',()=>toggleWords(!wordEnabled),{signal});
   $('#overlay-quick-toggle').addEventListener('click',()=>{overlayEnabled=!overlayEnabled;$('#overlay-quick-toggle').setAttribute('aria-pressed',String(overlayEnabled));},{signal});
   $('#multi-subtitle-quick-toggle').addEventListener('click',()=>{const toggle=doc.querySelector('#showTranslations');if(toggle){toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change',{bubbles:true}));$('#multi-subtitle-quick-toggle').setAttribute('aria-pressed',String(toggle.checked));refresh();}},{signal});
@@ -357,31 +606,65 @@ export function createTimelineController(options){
   $('#auto-merge-run').addEventListener('click',()=>run(()=>enqueue(()=>options.onNativeMawOperation('auto_merge_cues',{gap_ms:Number($('#auto-merge-gap-ms').value),snap_direction:$('#auto-merge-snap-direction').value==='forward'?'next':'previous',absorb:$('#auto-merge-absorb-short').checked,short_count:Number($('#auto-merge-short-count').value),absorb_direction:$('#auto-merge-absorb-direction').value}))),{signal});
   $('#subtitle-extend-run').addEventListener('click',()=>run(async()=>{const changes=[];for(const sid of new Set(main.map(s=>s.speaker))){const list=main.filter(s=>s.speaker===sid),ids=options.selection?.ids||new Set();const chosen=list.flatMap((s,i)=>ids.has(s.id)?[i]:[]);if(ids.size&&!chosen.length)continue;const plan=U().planSubtitleExtension(list,chosen,{forwardMs:Number($('#subtitle-extend-forward-ms').value),backwardMs:Number($('#subtitle-extend-backward-ms').value),durationMs:wave.durationMs});for(const change of plan.changes)if(change.changed)changes.push({cue_id:list[change.index].id,start:change.start/1000,end:change.end/1000});}if(changes.length)await enqueue(()=>options.onCommitTimelineTimes(changes));else show('没有需要延长的字幕');}),{signal});
   field('layer').onchange=()=>{toggleWords(field('layer').value==='word');};
-  field('plan').onchange=()=>run(async()=>{const t=M.timeline(timeline);t.active_plan_id=field('plan').value;delete t.gap_remove;await persist(t);readView({...view,properties:{...view.properties,timeline:t}});refresh();});
+  planSelect.addEventListener('change',()=>run(()=>{
+    if(planSelect.value===timeline.active_plan_id)return;
+    readTimeline(M.activateCutPlan(timeline,planSelect.value));
+    refreshControls();
+    refresh();
+    return persist(timeline);
+  }),{signal});
+  $('#gap-remove-panel').addEventListener('change',event=>{
+    const input=event.target;
+    const key=input.dataset.gap||({'gap-remove-disable-coverage':'disable_coverage_percent','gap-remove-disable-remaining':'disable_remaining_ms'})[input.id];
+    if(key&&input.value!==''&&input.validity.valid)run(()=>saveGapSetting(key,Number(input.value)));
+  },{signal});
   field('export').onchange=()=>run(async()=>{const format=field('export').value;field('export').value='';if(!format)return;await queue;if(!timeline.active_plan_id)throw Error('请先添加移除区间或建立方案');await options.onCutExport(timeline.active_plan_id,format,'ab-double');});
   doc.addEventListener('pointerdown',e=>{if(menu&&!menu.contains(e.target)){menu.remove();menu=null;}if(!e.target.closest('#waveform-settings'))closeWaveformSettings();},{signal});
   host.addEventListener('keydown',e=>{if(e.target.matches('input,textarea,select,[contenteditable=true]'))return;if(e.key==='Escape'){gapPanel.close();globalThis.MaweMarkersPanel?.closePanel();menus.close();}if(e.key.toLowerCase()==='q'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();toggleWords(!wordEnabled);}if(e.key.toLowerCase()==='m'&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();$('#markers-quick-toggle').click();}},{signal});
-  function tick(){if(dead)return;const media=options.media;if(media&&!media.paused){const time=media.currentTime;if(audition){if(time>=audition.end){media.pause();audition=null;}}else if(field('skip').checked){const g=gapState.gaps.find(g=>g.removed!==false&&time*1000>=g.start&&time*1000<g.end);if(g){if(g.end>=wave.durationMs)media.pause();else media.currentTime=g.end/1000;}}wave.updatePlayback();}frame=requestAnimationFrame(tick);}
+  function tick(){
+    if(dead)return;
+    const media=options.media;
+    if(media&&!media.paused&&!media.seeking&&!previewSeek.pending){
+      const time=media.currentTime;
+      if(audition){
+        if(time>=audition.end){media.pause();audition=null;}
+      }else{
+        const gap=skippedGapAt(time);
+        if(gap){
+          if(gap.end>=wave.durationMs)media.pause();
+          else previewSeek.seek(gap.end/1000);
+        }
+      }
+      wave.updatePlayback();
+    }
+    frame=requestAnimationFrame(tick);
+  }
   frame=requestAnimationFrame(tick);
   // Import the original marker manager and bind its host services once per controller.
-  run(async()=>{const response=await fetch('/assets/vendor/maw/markers-panel.html');if(!response.ok)throw Error('标记面板读取失败');const html=await response.text();if(dead)return;const template=doc.createElement('template');template.innerHTML=html;host.append(template.content);
+  run(async()=>{const response=await fetch('/assets/vendor/maw/markers-panel.html?v=20261118-panel-polish');if(!response.ok)throw Error('标记面板读取失败');const html=await response.text();if(dead)return;const template=doc.createElement('template');template.innerHTML=html;host.append(template.content);
     const names={markersPanel:'markers-panel',markersDragHandle:'markers-drag-handle',markersManageButton:'markers-quick-toggle',markersSearchInput:'markers-search',markersFilterKind:'markers-filter-kind',markersFilterColor:'markers-filter-color',markersFilterReview:'markers-filter-review',markersList:'markers-list',markersSummary:'markers-summary',markersAddCurrentButton:'markers-add-current',markersBatchSelectButton:'markers-batch-select',markersBatchActions:'markers-batch-actions',markersDeleteSelectedButton:'markers-delete-selected',markersSelectAllButton:'markers-select-all',markersSelectionSummary:'markers-selection-summary'};
-    globalThis.MaweDom=Object.fromEntries(Object.entries(names).map(([k,id])=>[k,$('#'+id)]));initSubstarMarkersPanel(window);dockPanel($('#markers-panel'),'markers');$('#markers-panel-title').textContent='标记';$('#markers-filter-review')?.closest('label')?.setAttribute('hidden','');$('#markers-close')?.addEventListener('click',()=>globalThis.MaweMarkersPanel.closePanel(),{signal});
+    const panel=$('#markers-panel');
+    const compact=Boolean(doc.querySelector('#editor-markers-tool-content'));
+    if(compact){
+      panel.querySelector('header').remove();
+      panel.querySelector('.markers-actions').remove();
+      panel.querySelector('.markers-show-notes').remove();
+      panel.querySelector('.markers-batch-actions').remove();
+      panel.querySelector('#markers-filter-review').closest('label').remove();
+      panel.removeAttribute('aria-labelledby');
+      panel.removeAttribute('aria-modal');
+      panel.setAttribute('role','group');
+      panel.setAttribute('aria-label','标记与区段');
+    }
+    globalThis.MaweDom=Object.fromEntries(Object.entries(names).map(([k,id])=>[k,$('#'+id)]));
+    initSubstarMarkersPanel(window,{compact});
+    dockPanel(panel,'markers');
+    $('#markers-close')?.addEventListener('click',()=>globalThis.MaweMarkersPanel.closePanel(),{signal});
   });
-  const shapeSource=$('#waveform-shape-source');
-  shapeSource.options[1].textContent='精细波形（ReaPeaks）';
-  const pcmOption=doc.createElement('option');pcmOption.value='pcm';pcmOption.textContent='原版 PCM 波形';shapeSource.prepend(pcmOption);shapeSource.value='reapeaks';
-  const shapeStatus=doc.createElement('small');shapeStatus.id='waveform-detail-status';shapeStatus.setAttribute('role','status');shapeStatus.textContent='原版 PCM · 按区间读取';shapeStatus.style.cssText='display:block;margin:4px 0 8px;color:var(--theme-muted);font-size:12px';
-  shapeSource.closest('label').after(shapeStatus);
-  shapeSource.addEventListener('change',()=>{if(shapeSource.value==='reapeaks')detailLoader.start();else shapeStatus.textContent=shapeSource.value==='pcm'?'原版 PCM · 按区间读取':'内置波形';wave.render();decorate();},{signal});
-  const detailLoader=createWaveformLoader({
-    load:request=>options.onDetailWaveformPayload(request),timeoutMs:660000,retries:1,
-    apply(detail){if(dead||!wave.setReapeaksWaveform(detail))return false;shapeStatus.textContent=`精细波形已就绪 · ${Math.round(detail.sample_rate/detail.division)} 点/秒`;decorate();},
-    onState({state,error}){if(dead)return;if(state==='loading')shapeStatus.textContent='精细波形生成中，暂用内置波形…';if(state==='error')shapeStatus.textContent=`精细波形不可用，使用内置波形：${error.message}`;}
-  });
+  $('#waveform-shape-source').addEventListener('change',()=>{wave.render();decorate();},{signal});
   const waveformLoader=createWaveformLoader({
     load:request=>options.onWaveformPayload(request),
-    apply(loaded){if(!wave.setPayload(loaded))return false;payload=loaded;decorate();if(shapeSource.value==='reapeaks')detailLoader.start();},
+    apply(loaded){if(!wave.setPayload(loaded))return false;payload=loaded;decorate();cutPlanPanel?.render();if(pendingReveal)revealTime(pendingReveal.time,pendingReveal.center,pendingReveal);},
     onState({state,attempt,error}){
       if(dead)return;
       const empty=wave.empty;
@@ -396,10 +679,10 @@ export function createTimelineController(options){
     }
   });
   waveformLoader.start();
-  return {markSaved(next){if(dead)return;const recovering=timelineWriteFailed;timelineWriteFailed=false;view=next;if(!pending){readView(next);if(recovering){wave.refreshGapOverlay?.();renderGapPanel();show('');}}},setView(next,{gapOnly=false}={}){if(dead)return;if(gapOnly){view=next;return;}filmstrip.setUrl(options.getThumbnailsUrl?.());if(!pending&&!timelineWriteFailed&&next!==view){readView(next);refreshControls();}else view=next;if(timelineWrites||timelineWriteFailed)return;wave.refreshCueOverlay();wave.refreshGapOverlay?.();wave.refreshMarkerOverlay?.();decorate();if(doc.querySelector('[data-tool-panel=markers].experimental-tool-active'))globalThis.MaweMarkersPanel?.render();},setActiveCue(id){selected=id;},setSelectedCue(id){selected=id;wave.refreshCueBlocks();decorate();},redraw(){if(timelineWrites||timelineWriteFailed||wave.gapMoveDrag||wave.gapBoundaryDrag||wave.gapRangeDrag)return;if(!wave.drag&&!wave.wordDrag&&!wave.substarBoundaryDrag)wave.render();decorate();},revealTime,revealRange:(start)=>revealTime(start,true),scrollToTime:revealTime,seek,
+  return {markSaved(next){if(dead)return;const recovering=timelineWriteFailed;timelineWriteFailed=false;view=next;if(!pending){readView(next);if(recovering){wave.refreshGapOverlay?.();renderGapPanel();show('');}}},setView(next,{gapOnly=false}={}){if(dead)return;if(gapOnly){view=next;return;}filmstrip.setUrl(options.getThumbnailsUrl?.());if(!pending&&!timelineWriteFailed&&next!==view){readView(next);refreshControls();}else view=next;if(timelineWrites||timelineWriteFailed)return;wave.refreshCueOverlay();wave.refreshGapOverlay?.();wave.refreshMarkerOverlay?.();decorate();if(doc.querySelector('[data-tool-panel=markers].experimental-tool-active'))globalThis.MaweMarkersPanel?.render();},setActiveCue(id){selected=id;},setSelectedCue(id){selected=id;wave.refreshCueBlocks();decorate();},redraw(){if(timelineWrites||timelineWriteFailed||wave.gapMoveDrag||wave.gapBoundaryDrag||wave.gapRangeDrag)return;if(!wave.drag&&!wave.wordDrag&&!wave.substarBoundaryDrag)wave.render();decorate();},revealTime,revealRange:(start)=>revealTime(start,true),scrollToTime:revealTime,seek,seekMedia,
     setFollowPlayback(value){wave.manualFollowUntil=value?0:Date.now()+3600000;},setMode(mode){wave.setMode(mode==='multiline'?'multi':mode);},getState(){return {duration:wave.durationMs/1000,selected_cue_ids:[...selection()].map(i=>main[i]?.id).filter(Boolean),mode:wave.settings.mode==='multi'?'multiline':'basic'};},
     getTimeRect(start,end){const row=wave.renderedRows.find(r=>Number(r.dataset.startMs)<=start*1000&&Number(r.dataset.endMs)>start*1000);if(!row)return null;const r=row.getBoundingClientRect(),span=Number(row.dataset.endMs)-Number(row.dataset.startMs);return {left:r.left+(start*1000-Number(row.dataset.startMs))/span*r.width,top:r.top,width:(end-start)*1000/span*r.width,height:r.height};},
     autoSnapOnce:settings=>{const intent=globalThis.EditorTimeline?.autoSnapPlan?.(view,settings);if(intent?.count)options.onOperation?.('autoSnap',intent);return intent;},
-    destroy(){dead=true;detailLoader.dispose();waveformLoader.dispose();abort.abort();cancelAnimationFrame(frame);wave.resizeObserver?.disconnect();wave.attachPlayer(null);wave.cancelCueDrag?.();wave.cancelWordDrag?.();wave.thumbnailController?.close();for(const name of ['resizeFrame','multiVisibleFrame','basicRenderFrame','cueRefreshFrame','gapMovePreviewFrame'])cancelAnimationFrame(wave[name]);menus.close();for(const key of ['gaps','markers'])doc.querySelector('#editor-'+key+'-tool-content')?.replaceChildren();host.remove();original.hidden=false;},
+    destroy(){cancelPartialGapRestore();dead=true;waveformLoader.dispose();abort.abort();cancelAnimationFrame(frame);wave.resizeObserver?.disconnect();wave.attachPlayer(null);wave.cancelCueDrag?.();wave.cancelWordDrag?.();wave.thumbnailController?.close();for(const name of ['resizeFrame','multiVisibleFrame','basicRenderFrame','cueRefreshFrame','gapMovePreviewFrame'])cancelAnimationFrame(wave[name]);menus.close();for(const key of ['gaps','markers'])doc.querySelector('#editor-'+key+'-tool-content')?.replaceChildren();host.remove();original.hidden=false;},
   };
 }

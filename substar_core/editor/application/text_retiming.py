@@ -74,7 +74,7 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
             continue
         if len(selected) == 1 and last - j == 1 and interval(i, end)[1] > interval(i, end)[0]:
             token = selected[0]
-            deleted[token.token_id] = replace(token, text=words[j], provenance=provenance)
+            deleted[token.token_id] = replace(token, text=words[j], provenance=provenance) if token.text != words[j] else token
             continue
         start, finish = interval(i, end)
         if finish <= start:
@@ -82,6 +82,9 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
         parent_ids = [sid for token in selected for sid in token.source_token_ids]
         removed_sources.update(parent_ids)
         parts = []
+        unchanged = {new_index+k: selected[old_index+k] for old_index, new_index, count in
+                     SequenceMatcher(None, [token.text for token in selected], words[j:last], autojunk=False).get_matching_blocks()
+                     for k in range(count)}
         for offset, word in enumerate(words[j:last]):
             left = start + (finish-start)*offset/(last-j)
             right = start + (finish-start)*(offset+1)/(last-j)
@@ -89,8 +92,11 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
             source = SourceToken(source_id, 0, word, left, right, cue.speaker,
                                  {"kind":"subdivided", "method":"equal_split", "parent_source_ids":parent_ids,
                                   "parent_sources":[sources[sid].to_dict() for sid in dict.fromkeys(parent_ids)]})
-            token = DisplayToken(stable_id("dsp", {"operation":operation_id, "word":j+offset}),
-                                 word, word, (source_id,), provenance)
+            # Borrowing a neighbour's time span does not change that word. Keep
+            # its ID, original text and provenance so it does not turn blue.
+            token = (replace(unchanged[offset], source_token_ids=(source_id,)) if offset in unchanged else
+                     DisplayToken(stable_id("dsp", {"operation":operation_id, "word":j+offset}),
+                                  word, word, (source_id,), provenance))
             new_sources.append(source); new_displays.append(token); parts.append(token.token_id)
         if selected:
             replacements[selected[0].token_id] = parts
@@ -110,7 +116,9 @@ def edit_timed_text(document, cue, token_ids, text, provenance, operation_id):
             if position == len(old)-1:
                 ids.extend(insertions.get(len(old), []))
         return replace(owner, display_token_ids=tuple(dict.fromkeys(ids)))
-    remaining_sources = [s for s in document.source_tokens if s.token_id not in removed_sources]
+    retained_refs = {sid for token in document.display_tokens if token.token_id not in replacements
+                     for sid in token.source_token_ids}
+    remaining_sources = [s for s in document.source_tokens if s.token_id not in removed_sources or s.token_id in retained_refs]
     ordered_sources = sorted([*remaining_sources, *new_sources], key=lambda s:s.start)
     remaining_displays = [deleted.get(t.token_id, t) for t in document.display_tokens if t.token_id not in replacements]
     return replace(document,

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from substar_core.domain import DisplayOrder, EditorDocument
-from substar_core.language_layout import format_text
+from substar_core.language_layout import format_text, remove_grouping_commas
 from substar_core.translation_layout import source_is_upper
 
 
 def project_line(text: str, *, remove: str = "", space: str = "") -> str:
     remove_chars = set(remove)
     space_chars = set(space) - remove_chars
+    value = remove_grouping_commas(str(text or ""), remove + space)
+    digits = "0123456789０１２３４５６７８９"
     projected = "".join(
-        "" if character in remove_chars else " " if character in space_chars else character
-        for character in str(text or "")
+        character if (
+            character == "." and 0 < index < len(value) - 1
+            and value[index - 1] in digits and value[index + 1] in digits
+        ) else "" if character in remove_chars else " " if character in space_chars else character
+        for index, character in enumerate(value)
     )
     return format_text(projected)
 

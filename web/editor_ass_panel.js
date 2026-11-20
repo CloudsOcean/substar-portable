@@ -4,7 +4,7 @@
     const $=s=>document.querySelector(s), form=$('#assForm'), menu=$('#assMenu');
     let config=null, draft=null, layerId=null, library={}, busy=false, dirty=false, wholeProfile=false;
     const dirtyLayers=new Set();
-    let renderer=null, fonts=null, fontKey='', timer=0, epoch=0, project='', revision='', ready=false;
+    let renderer=null, fontRequest=null, fontKey='', timer=0, epoch=0, project='', revision='', ready=false;
     const clone=value=>JSON.parse(JSON.stringify(value));
     const message=text=>{ $('#assStatus').textContent=text; };
     const selected=()=>[...state.cueSelection.ids];
@@ -65,6 +65,12 @@
         options:{width:media?.videoWidth || 1920,height:media?.videoHeight || 1080},
         ...(useDraft && menu.open && dirty ? scopePayload() : {})};
     }
+    function getFonts() {
+      if (!fontRequest) {
+        fontRequest=api('/api/ass/fonts').catch(error=>{fontRequest=null;throw error;});
+      }
+      return fontRequest;
+    }
     function closeFrame() { $('#assFramePreview').hidden=true; $('#assFrameImage').removeAttribute('src'); }
     async function live() {
       if (!state.revision || !config) return;
@@ -74,7 +80,7 @@
         const response=await fetch(projectPath('/ass/export'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         if (!response.ok) {const error=await response.json();throw new Error(typeof error.detail==='string' ? error.detail : '字幕预览暂时不可用');}
         const content=await response.text();
-        fonts ||= await api('/api/ass/fonts');
+        const fonts=await getFonts();
         if (ticket!==epoch || thisProject!==state.projectId) return;
         const fontUrls=new Set();
         for (const line of content.split('\n')) {
@@ -167,6 +173,7 @@
       options($('#assProfile'),Object.keys(library).map(x=>[x,x]),$('#assProfile').value);
     }
     menu.addEventListener('toggle',async()=>{
+      if (menu.hidden) return;
       if (!menu.open) {dirty=false;wholeProfile=false;schedule();return;}
       if (busy) return;
       $('#assScope').value=selected().length ? 'selection' : 'project';
@@ -252,7 +259,15 @@
     });
     window.addEventListener('pagehide',()=>{renderer?.dispose();renderer=null;ready=false;});
     return {sync,selectionChanged,
-      async openDraft() { await sync(); if (!config) throw new Error('字幕配置尚未加载'); menu.open=true; loadEffective(); return clone(draft); },
+      async openDraft(scope='project') {
+        await sync();
+        if (!config) throw new Error('字幕配置尚未加载');
+        $('#assScope').value=scope;
+        menu.open=true;
+        loadEffective();
+        return clone(draft);
+      },
+      getFonts,
       setDraft(value,scope='project') { if(busy) return; draft=clone(value); layerId=draft.layers[0].id; $('#assScope').value=scope; dirty=true; wholeProfile=true; fillLayer(); schedule(); },
       cancelDraft() {menu.open=false;dirty=false;closeFrame();schedule();},
       async applyDraft() {if(busy) return;busy=true;try {await apply();} finally {busy=false;}},

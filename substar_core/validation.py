@@ -162,6 +162,8 @@ def validate_revision(
     effective_policy = policy or ValidationPolicy()
     reference_script = _is_reference_script(document)
     issues: list[ValidationIssue] = []
+    from substar_core.translation_units import all_units
+    units = {unit["unit_id"]: unit for unit in all_units(document)}
     for cue in document.cues:
         if cue.state is EntityState.DELETED:
             continue
@@ -205,11 +207,10 @@ def validate_revision(
             )
         if cue.target is None:
             continue
-        target_length = _character_count(
-            target,
-            count_spaces=effective_policy.count_spaces,
-            count_punctuation=effective_policy.count_punctuation,
-        )
+        targets = [project_cue_lines(document, source=source_cue_text(document, cue.cue_id), target=units[uid]["text"])[1]
+                   for uid in cue.mapping.get("target_unit_ids", []) if uid in units] or [target]
+        target_length = max(_character_count(text, count_spaces=effective_policy.count_spaces,
+                                             count_punctuation=effective_policy.count_punctuation) for text in targets)
         if target_length > effective_policy.target_hard_limit:
             issues.append(
                 ValidationIssue(

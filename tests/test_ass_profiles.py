@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 from substar_core.ass_profiles import configuration, default_profile, apply_profile, render_configuration, Profile
-from substar_core.domain import DisplayCue, ChangeProvenance
+from substar_core.domain import DisplayCue, ChangeProvenance, TranslationTrack
 from substar_core.storage import ProjectStore
 from test_editor_actions_ass_updates import document
 
@@ -24,7 +24,11 @@ def test_default_layers_and_reference_resolution():
     a=render_configuration(doc,1920,1080)
     b=render_configuration(doc,1280,720)
     assert a==b
-    assert 'Style: P0L0Source' in a and 'Box' in a
+    assert 'Style: P0L0Source' in a
+    target = TranslationTrack(target_text='译文', provenance=ChangeProvenance(kind='manual', operation='test'))
+    doc = replace(doc, cues=(replace(doc.cues[0], target=target), doc.cues[1]))
+    target_style = next(line for line in render_configuration(doc).splitlines() if line.startswith('Style: P0L1Target,'))
+    assert target_style.split(',')[15] == '3'
 
 
 def test_assignment_is_deduplicated_and_survives_revision_replay(tmp_path):
@@ -65,7 +69,7 @@ def test_word_highlight_is_persistent_and_partitioned_by_cue():
     edited=apply_profile(doc,p,[doc.cues[0].cue_id])
     result=render_configuration(edited)
     assert r'\c&H0000FFFF&' in result
-    assert result.count('hello')==2  # background and foreground, one active word interval
+    assert result.count('hello') == 1  # native ASS style draws the background on the same event
     assert not configuration(doc).cue_profiles
     with pytest.raises(ValueError):
         p.layers[1].word_highlight=True;Profile.model_validate(p.model_dump())

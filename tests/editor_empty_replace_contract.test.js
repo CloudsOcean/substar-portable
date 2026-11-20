@@ -8,13 +8,13 @@ const documentContract = require("../web/editor_document.js");
 
 test("blank source replacement uses reversible delete operations", () => {
   assert.match(source, /manualProvenance\("search_delete"\)/);
-  assert.match(source, /manualProvenance\("search_delete_all"\)/);
+  assert.match(source, /replaceSourceMatches\(matches, replacement, beforeRevisionId\)/);
   assert.doesNotMatch(source, /请填写替换文字/);
 });
 
 test("single-token search keeps token-covering matches such as here within here.", () => {
-  assert.match(source, /contract\.findContiguousTokenMatches\(tokens, query\)/);
-  assert.match(source, /\[\\p\{L\}\\p\{N\}\]\/u\.test\(unmatchedEdges\)/);
+  assert.match(source, /contract\.findContiguousTokenMatches\(tokens, sourceQuery, separator\)/);
+  assert.match(source, /tokens, sourceQuery, separator/);
   assert.deepEqual(
     documentContract.findContiguousTokenMatches(
       [{token_id:"token-here", text:"here."}], "here"

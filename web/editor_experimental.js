@@ -235,82 +235,19 @@
     new MutationObserver(sync).observe(naming, {attributes:true, attributeFilter:["hidden"]});
     sync();
   }
-  function installCueViewSwitch() {
-    const label = document.querySelector("#cueSplitViewLabel");
-    const select = label.querySelector("select");
-    const group = document.createElement("div");
-    group.id = label.id; group.className = "cue-view-switch";
-    group.setAttribute("role", "group"); group.setAttribute("aria-label", "字幕视图");
-    select.hidden = true;
-    group.append(select);
-    for (const option of select.options) {
-      const button = document.createElement("button");
-      button.type = "button"; button.textContent = option.textContent;
-      button.dataset.cueView = option.value;
-      button.setAttribute("aria-pressed", String(select.value === option.value));
-      button.addEventListener("click", () => {
-        if (select.disabled || select.value === option.value) return;
-        select.value = option.value;
-        select.dispatchEvent(new Event("change", {bubbles:true}));
-      });
-      group.append(button);
-    }
-    label.replaceWith(group);
-    document.querySelector(".editor-document-pane .pane-heading > div:first-child").append(group);
-    const reviewToggle = document.querySelector("#reviewModeToggle");
-    if (reviewToggle) group.before(reviewToggle);
-    const fontGroup = document.createElement("div"); fontGroup.className = "cue-font-control";
-    fontGroup.setAttribute("role", "group"); fontGroup.setAttribute("aria-label", "字幕字号");
-    const decrease = document.querySelector("#fontDecrease"), value = document.querySelector("#fontValue"), increase = document.querySelector("#fontIncrease");
-    decrease.before(fontGroup); fontGroup.append(decrease, value, increase);
-    decrease.setAttribute("aria-label", "减小字幕字号"); increase.setAttribute("aria-label", "增大字幕字号");
-    value.setAttribute("aria-label", "当前字幕字号");
-    const bilingual = document.querySelector("#showTranslations").parentElement;
-    bilingual.classList.add("bilingual-toggle");
-    [...bilingual.childNodes].filter(node => node.nodeType === Node.TEXT_NODE)
-      .forEach(node => { node.textContent = "双语字幕"; });
-    const displayMenu = document.createElement("details"); displayMenu.className = "cue-display-settings multiline-waveform-settings";
-    const displayToggle = document.createElement("summary");
-    displayToggle.textContent = '⚙️'; displayToggle.classList.add('workspace-settings-gear');
-    displayToggle.setAttribute("aria-label", "字幕显示设置"); displayToggle.title = "字幕显示设置";
-    const displayContent = document.createElement("div"); displayContent.className = "cue-display-settings-content multiline-waveform-settings-panel";
-    const fontLabel = document.createElement("span"); fontLabel.textContent = "字号";
-    const fontRow = document.createElement("div"); fontRow.className = "cue-settings-font-row";
-    const fontSlider = document.createElement("input"); fontSlider.type = "range"; fontSlider.min = "11"; fontSlider.max = "22"; fontSlider.step = "1"; fontSlider.value = value.textContent || "18";
-    fontSlider.setAttribute("aria-label", "字幕字号");
-    const fontOutput = document.createElement("output"); fontOutput.textContent = fontSlider.value;
-    const syncFont = () => { fontSlider.value = value.textContent; fontOutput.textContent = value.textContent; };
-    new MutationObserver(syncFont).observe(value, {childList:true, characterData:true, subtree:true});
-    fontSlider.oninput = () => {
-      const target = Number(fontSlider.value), current = Number(value.textContent);
-      for (let i = 0; i < Math.abs(target-current); i++) (target > current ? increase : decrease).click();
-      syncFont();
-    };
-    fontGroup.hidden = true;
-    const sliderControls = document.createElement("span"); sliderControls.className = "waveform-gain-controls"; sliderControls.append(fontSlider, fontOutput);
-    const settingsTitle = document.createElement("strong"); settingsTitle.textContent = "字幕显示设置";
-    const settingsHeader = document.createElement("div"); settingsHeader.className = "cue-settings-header";
-    const settingsClose = document.createElement("button"); settingsClose.type = "button"; settingsClose.textContent = "×";
-    settingsClose.setAttribute("aria-label", "关闭字幕显示设置"); settingsClose.onclick = () => { displayMenu.open = false; };
-    settingsHeader.append(settingsTitle, settingsClose);
-    const settingsBody = document.createElement("div"); settingsBody.className = "cue-settings-body";
-    fontRow.append(fontLabel, sliderControls); settingsBody.append(fontRow, bilingual, fontGroup);
-    displayContent.append(settingsHeader, settingsBody);
-    displayMenu.append(displayToggle, displayContent);
-    document.querySelector(".pane-live-controls").append(displayMenu);
-  }
   function installSpeakerMenu() {
     document.querySelector('#detectSpeakers').hidden=true;
     const form=document.querySelector('#speakerDialogForm');
     form.classList.remove('text-dialog','speaker-dialog');form.classList.add('speaker-tool-form');
-    form.querySelector('p').textContent='管理当前工程中的说话人名称；点击字幕右侧人形按钮分配说话人。';
+    form.querySelector('p')?.remove();
+    form.querySelector('#cancelSpeakerDialog')?.remove();
+    form.querySelector('button[type="submit"]')?.remove();
   }
   document.addEventListener("DOMContentLoaded", () => {
     if (experimental) {
       document.querySelector("#taskInfo").textContent = "项目配置";
       document.querySelector("#taskInfoTitle").textContent = "项目配置";
       document.querySelector("#projectMenu > summary").textContent = "选择项目";
-      document.querySelector("#exportMenu").before(document.querySelector("#importMenu"));
       const versions = document.querySelector("#versionMenu"), reset = document.querySelector("#resetDocument");
       reset.hidden = true; reset.before(versions);
       versions.classList.add("island-version-menu");
@@ -319,9 +256,6 @@
       document.querySelector(".editor-document-pane .pane-heading strong").textContent = "字幕";
       installTaskIsland();
       installSpeakerMenu();
-      installCueViewSwitch();
-      const cueSwitch=document.querySelector('.cue-view-switch');
-      cueSwitch.after(...['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu','scriptProjectionMenu','referenceManuscript'].map(id=>document.getElementById(id)));
       for(const id of ['translationMenu','aiOrganizeMenu','aiReviewMenu','aiCalibrationMenu']) {
         const menu=document.getElementById(id);
         const position=()=>{
@@ -584,7 +518,7 @@
         </dl><p>词级与句级选区独立保存，互不干扰。右键词条操作词选区，右键句条操作句选区。</p><p>右键波形空白处可创建字幕；波形齿轮可设置每行时长、行高与振幅。</p></section>
         <section><h3>标记与空隙</h3><p>右键选中的词条或句条，可添加点标记、线标记或空隙。顺序相邻的选中项合为一段（包含中间停顿），不连续的选区分别创建；点标记位于每段起点。</p><p>蓝标是定位点，白点是范围边界。未展开时拖蓝标移动整个点标记，拖白点展开范围；展开后蓝标只在范围内移动，不带动边界。两侧收拢后恢复点标记。</p><p>蓝标和白点按当前模式吸附词边界或句边界，按住 Alt 暂时取消吸附。双击或右键标记可编辑名称等属性，标记面板可编辑、删除和定位。</p><p>空隙操作决定鼠标编辑方式：拖动边界调整起止，中键拖动圈选；可同时开启或关闭编辑。启用“跳过静音空隙”后，播放跳过已移除区间。</p></section>
         <section><h3>波形设置</h3><p>低能量抑制使用加减按钮调节，每次 5%；只改变弱波形的显示，不改变音量和空隙检测结果。</p><p>“隐藏字幕”决定已隐藏字幕在波形中的显示方式：变淡或完全隐藏，并同步句条、译文条和词条。显示画面预览图可开启已有的视频帧导航。</p></section>
-        <section><h3>导出与剪辑导出</h3><p>“导出”保留原有字幕、外部 AI 材料和字幕工程导出。</p><p>“剪辑导出”按当前剪辑方案输出 MP4 视频、WAV 音频，或上行、下行、上下行单行、上下行双行四种 SRT 字幕；字幕时间随剪辑结果重新计算。</p><p>标记与选区创建操作支持撤销；批量创建可整批撤销。关闭页面前确认保存完成。</p></section>
+        <section><h3>导出</h3><p>勾选“成片是否剪辑”后，视频、音频和字幕使用当前剪辑方案。可同时导出多个字幕格式和版本。工程导出支持字幕工程 ZIP 和剪辑方案 XML。</p><p>标记与选区创建操作支持撤销；批量创建可整批撤销。关闭页面前确认保存完成。</p></section>
 `;
       if (legend) {
         const section = document.createElement("section");
@@ -602,6 +536,7 @@
         rules[offset].remove();
         ["移除符号", "替换为空格"].forEach((name, index) => {
           const label = document.createElement("label");
+          label.className = "tool-field";
           const text = document.createElement("span"); text.textContent = name;
           const input = rules[offset + index + 1];
           input.placeholder = index ? "例如：，、" : "例如：。！？";
@@ -616,13 +551,12 @@
         const legend = document.createElement("legend"); legend.textContent = name;
         group.append(legend, ...nodes); return group;
       }
-      const findActions = document.createElement("div"); findActions.className = "panel-actions";
-      findActions.append(searchContent.querySelector("#toolSearchNext"));
-      const replaceActions = document.createElement("div"); replaceActions.className = "panel-actions replace-actions";
-      replaceActions.append(findActions.querySelector("#toolSearchNext"), ...["#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace"].map(id => searchContent.querySelector(id)));
-      const queryRow = document.createElement("div"); queryRow.className = "search-query-row";
-      queryRow.append(searchContent.querySelector("#toolSearch"), findActions);
-      const findGroup = searchGroup("查找与替换", [searchContent.querySelector(".search-scope-toggle"), queryRow, searchContent.querySelector("#toolReplace"), replaceActions]);
+      const replaceActions = document.createElement("div"); replaceActions.className = "replace-actions";
+      replaceActions.append(...["#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace"].map(id => searchContent.querySelector(id)));
+      const findGroup = searchGroup("查找与替换", [
+        searchContent.querySelector(".search-scope-toggle"), searchContent.querySelector("#toolSearch"),
+        searchContent.querySelector("#toolReplace"), replaceActions
+      ]);
       const searchStatus = searchContent.querySelector("#toolSearchStatus");
       searchContent.replaceChildren(findGroup, searchStatus);
       tools.prepend(tabs);

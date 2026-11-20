@@ -353,18 +353,21 @@ export function createWaveformModule(dependencies) {
     positionMarkerQuickEdit(anchorElement) {
       const popup = this.markerQuickEdit?.element;
       if (!popup) return;
-      const popupWidth = popup.offsetWidth || 208;
-      const popupHeight = popup.offsetHeight || 120;
       const contentRect = this.content.getBoundingClientRect();
+      const scrollRect = (this.scroll || this.pane || this.content).getBoundingClientRect();
       const anchorRect = anchorElement.getBoundingClientRect();
-      const anchorLeft = anchorRect.left - contentRect.left;
-      const anchorTop = anchorRect.top - contentRect.top;
-      const maxLeft = Math.max(0, this.content.clientWidth - popupWidth - 4);
-      const maxTop = Math.max(0, this.content.clientHeight - popupHeight - 4);
-      popup.style.left = `${Math.min(Math.max(4, anchorLeft - 8), maxLeft)}px`;
-      // 默认浮层在标记上方；贴着可视区顶部时放到下方。
-      const aboveTop = anchorTop - popupHeight - 8;
-      popup.style.top = `${Math.min(Math.max(4, aboveTop >= 4 ? aboveTop : anchorTop + anchorRect.height + 8), maxTop)}px`;
+      const left = Math.max(4, scrollRect.left + 4, contentRect.left + 4);
+      const right = Math.min(innerWidth - 4, scrollRect.right - 4);
+      const top = Math.max(4, scrollRect.top + 4);
+      const bottom = Math.min(innerHeight - 4, scrollRect.bottom - 4);
+      popup.style.maxHeight = Math.max(40, bottom - top) + 'px';
+      popup.style.maxWidth = Math.max(80, right - left) + 'px';
+      popup.style.overflow = 'auto';
+      const width = popup.offsetWidth || 208, height = popup.offsetHeight || 120;
+      const above = anchorRect.top - height - 8;
+      const y = above >= top ? above : anchorRect.bottom + 8;
+      popup.style.left = `${Math.max(left, Math.min(anchorRect.left - 8, right - width)) - contentRect.left}px`;
+      popup.style.top = `${Math.max(top, Math.min(y, bottom - height)) - contentRect.top}px`;
     }
 
 

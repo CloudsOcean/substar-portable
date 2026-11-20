@@ -14,7 +14,7 @@
   const DELETED = "deleted";
   const CHANGE_KINDS = new Set(["source", "import", "manual", "ai", "normalization"]);
   const OPERATION_TYPES = new Set([
-    "replace", "retime_text", "set_target", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
+    "replace", "retime_text", "set_target", "set_target_unit", "set_target_units", "set_source_text", "set_cue_time", "set_cue_times", "insert_cue",
     "merge", "delete", "purge_cue", "restore", "insert", "split_cue", "merge_cues", "auto_merge_cues",
     "set_cue_speaker", "set_speaker_names", "batch_replace", "set_ai_calibration", "set_timeline"
   ]);
@@ -348,6 +348,9 @@
       state:token.state,
       tone:provenanceTone(token.provenance)
     }));
+    const targetUnits=(globalThis.SubstarTargetUnits || require("./editor_target_units.js")).all(revision.document);
+    const unitsByCue=new Map();
+    for(const unit of targetUnits)for(const id of unit.source_cue_ids)unitsByCue.set(id,[...(unitsByCue.get(id)||[]),unit]);
     const cueViews = ordering.canonicalCueOrder(revision.document.cues).map(cue => ({
       cue_id:cue.cue_id,
       index:cue.index,
@@ -355,6 +358,8 @@
       active_display_token_ids:cue.display_token_ids.filter(id => displayById.get(id)?.state === ACTIVE),
       source_text:cue.source_text ?? null,
       subtitle_track:cue.mapping?.subtitle_track || "main",
+      mapping:clone(cue.mapping || {}),
+      target_units:unitsByCue.get(cue.cue_id) || [],
       start:cue.start,
       end:cue.end,
       target:cue.target === null ? null : clone(cue.target),
@@ -373,6 +378,7 @@
       groups:clone(revision.document.groups || []),
       token_views:tokenViews,
       cue_views:cueViews,
+      target_units:targetUnits,
       active_token_ids:tokenViews.filter(token => token.state === ACTIVE).map(token => token.token_id),
       active_cue_ids:cueViews.filter(cue => cue.state === ACTIVE).map(cue => cue.cue_id),
       validation:null
@@ -876,7 +882,7 @@
     });
   }
 
-  function findContiguousTokenMatches(tokensInput, queryInput) {
+  function findContiguousTokenMatches(tokensInput, queryInput, separator = "") {
     const tokens = (Array.isArray(tokensInput) ? tokensInput : [])
       .filter(token => token && typeof token.token_id === "string")
       .map(token => ({...token, text:String(token.text || "")}));
@@ -885,11 +891,12 @@
     const spans = [];
     let cursor = 0;
     for (const token of tokens) {
+      if (spans.length) cursor += separator.length;
       const start = cursor;
       cursor += token.text.length;
       spans.push({token, start, end:cursor});
     }
-    const source = tokens.map(token => token.text).join("");
+    const source = tokens.map(token => token.text).join(separator);
     const haystack = source.toLocaleLowerCase();
     const needle = query.toLocaleLowerCase();
     const matches = [];

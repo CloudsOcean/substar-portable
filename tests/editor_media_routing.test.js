@@ -18,6 +18,6 @@ test("editor routes audio and video through one active media clock", () => {
 
 test("playback UI uses animation frames with timeupdate as an unconditional fallback", () => {
   assert.match(editorJs, /state\.playbackFrameHandle = requestAnimationFrame\(tick\)/);
-  assert.match(editorJs, /on\("timeupdate", event => \{\s*updatePlaybackUi\(/);
+  assert.match(editorJs, /on\("timeupdate", event => \{\s*(?:if[^\n]+renderPreview\(\);\s*)?updatePlaybackUi\(/);
   assert.doesNotMatch(editorJs, /timeupdate[\s\S]{0,180}!state\.playbackFrameHandle/);
 });

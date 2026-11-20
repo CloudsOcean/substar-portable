@@ -1,7 +1,7 @@
 // input: waveform class methods with explicit dependencies.
 export function createWaveformModule(dependencies) {
   'use strict';
-  const { PLAYHEAD_DRAG_SEEK_INTERVAL_MS, POINTER_DRAG_THRESHOLD_PX, ROW_HEIGHT_PRESETS, ROW_PRESETS, SPLIT_FLASH_DURATION_MS, clamp, roundMs, saveSettings, wheelScrollDelta } = dependencies;
+  const { PLAYHEAD_DRAG_SEEK_INTERVAL_MS, POINTER_DRAG_THRESHOLD_PX, ROW_GAP, ROW_HEIGHT_PRESETS, ROW_PRESETS, SPLIT_FLASH_DURATION_MS, clamp, roundMs, saveSettings, wheelScrollDelta } = dependencies;
 
   class WaveformMethods {
 
@@ -614,6 +614,16 @@ export function createWaveformModule(dependencies) {
         // 批次 2：窗口推进与钳制都由 panBasicByMs 处理——平移走位图平移
         // + 露出窄条补绘，内部无法原位表达时自动回退全量重绘路径。
         this.panBasicByMs(delta);
+        return;
+      }
+      if (this.isMultiMode() && !event.ctrlKey && !event.metaKey && event.deltaY) {
+        event.preventDefault();
+        const stride = this.getTimelineRowHeight() + ROW_GAP;
+        const offset = this.scroll.scrollTop / stride;
+        const row = scrollDelta > 0 ? Math.floor(offset) + 1 : Math.ceil(offset) - 1;
+        const maxScroll = Math.max(0, this.scroll.scrollHeight - this.scroll.clientHeight);
+        this.manualFollowUntil = Date.now() + 3000;
+        this.scroll.scrollTop = clamp(row * stride, 0, maxScroll);
         return;
       }
       if (this.isMultiMode() && (event.ctrlKey || event.metaKey)) {

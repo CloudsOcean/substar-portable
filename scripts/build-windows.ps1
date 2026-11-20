@@ -69,7 +69,7 @@ try {
     foreach ($file in @(
         'app.py', 'launcher.py', 'portable_manifest.json', 'requirements-release.txt',
         '启动_Substar.cmd', '停止_Substar.cmd', '只检测环境.cmd', '便携版说明.txt',
-        'README.md', 'CHANGELOG.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
+        'README.md', 'CHANGELOG.md', 'AGENTS.md', 'SKILL.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
     )) { Copy-RequiredFile $file }
 
     $sourceCommit = if ($env:GITHUB_SHA -match '^[0-9a-fA-F]{40}$') {
@@ -207,7 +207,7 @@ try {
         'app.py', 'launcher.py', 'substar_core', 'web', 'prompts', 'schemas', 'scripts', 'assets',
         'runtime', 'docs', 'portable_manifest.json', 'requirements-release.txt', 'release-verification.json',
         '启动_Substar.cmd', '停止_Substar.cmd', '只检测环境.cmd', '便携版说明.txt', 'README.md',
-        'CHANGELOG.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
+        'CHANGELOG.md', 'AGENTS.md', 'SKILL.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
     )
     $unexpected = @(Get-ChildItem -LiteralPath $BundleRoot -Force | Where-Object { $_.Name -notin $AllowedTopLevel } | ForEach-Object Name)
     if ($unexpected.Count -gt 0) { throw "Unexpected bundle top-level entries: $($unexpected -join ', ')" }

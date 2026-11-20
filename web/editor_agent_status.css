@@ -1,0 +1,7 @@
+.agent-run-history{position:relative;flex:none;font-size:12px}
+.agent-run-history>summary{cursor:pointer;padding:7px 9px;white-space:nowrap;border:1px solid var(--border,#42434b);border-radius:5px;background:var(--panel,#24252a)}
+.agent-run-history-panel{position:fixed;z-index:10040;box-sizing:border-box;width:min(420px,calc(100vw - 16px));padding:12px;overflow:auto;border:1px solid var(--border,#545561);border-radius:7px;background:var(--panel,#202127);color:var(--text,#f2f2f5);box-shadow:0 8px 28px #0008;text-align:left}
+.agent-run-history-panel button{display:block;width:100%;margin:5px 0;text-align:left}
+.agent-run-history-panel p{margin:6px 0 12px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5}
+.agent-run-history-panel section{border-top:1px solid var(--border,#42434b);padding-top:4px;margin-top:9px}
+.agent-run-history-panel a{display:inline-block;margin:5px 0;color:#98baff}

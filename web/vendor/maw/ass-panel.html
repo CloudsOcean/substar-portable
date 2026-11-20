@@ -8,10 +8,6 @@
     <aside class="ass-style-library-sidebar" aria-label="样式与方案列表">
       <div class="ass-style-section-heading"><span>样式</span><span class="ass-style-section-count" id="ass-style-count">0</span></div>
       <div class="ass-style-list" id="ass-style-list" role="listbox" aria-label="ASS 样式"></div>
-      <div class="ass-style-list-actions">
-        <button type="button" id="ass-style-new">＋ 新建样式</button>
-        <button type="button" id="ass-style-duplicate">复制当前</button>
-      </div>
       <div class="ass-style-section-heading ass-profile-heading"><span>ASS 输出方案</span><span class="ass-style-section-count" id="ass-profile-count">0</span></div>
       <div class="ass-style-list" id="ass-profile-list" role="listbox" aria-label="ASS 输出方案"></div>
       <div class="ass-style-list-actions ass-profile-list-actions">
@@ -22,33 +18,17 @@
         <label class="ass-style-assignment-row" for="ass-ass-default-profile">ASS 导出
           <select id="ass-ass-default-profile" aria-label="ASS 导出默认方案"></select>
         </label>
-        <small>ASS 导出使用此方案及其动画；双语字幕的副字幕样式在该方案的表单中配置。</small>
+        <small>此方案用于 ASS 导出的动画设置。</small>
       </div>
     </aside>
     <main class="ass-style-editor" aria-live="polite">
       <div class="ass-style-editor-empty" id="ass-style-editor-empty" hidden>从左侧选择一个样式或 ASS 方案。</div>
-      <section class="ass-style-form" id="ass-style-form" aria-labelledby="ass-style-form-title">
-        <div class="ass-style-form-header">
-          <div class="ass-style-form-heading">
-            <span class="ass-style-form-kicker">STYLE</span>
-            <div class="ass-style-form-title-row">
-              <h3 id="ass-style-form-title">样式</h3>
-              <span class="ass-style-srt-hint" id="ass-style-srt-hint" hidden>这里用来配置 SRT 字幕默认烧录样式，用于工具箱的「烧录字幕」功能。</span>
-              <span class="ass-style-preview-mode-hint" id="ass-style-preview-mode-hint" data-ass-style-preview-hint>
-                <span class="ass-style-preview-mode-hint-prefix"></span><span class="ass-style-preview-mode-hint-status"></span>
-              </span>
-            </div>
+      <section class="ass-style-form" id="ass-style-form" aria-label="字幕样式参数">
+        <div class="ass-style-preview-card ass-row-preview">
+          <span class="ass-style-preview-label">实时样式预览</span>
+          <div class="ass-row-preview-stage">
+            <canvas id="ass-style-preview-sample" aria-label="上行和下行字幕样式预览"></canvas>
           </div>
-          <div class="ass-style-form-header-side">
-            <span class="ass-style-builtin-badge" id="ass-style-builtin-badge" hidden>内置</span>
-            <span class="ass-style-delete-slot" id="ass-style-delete-slot">
-              <button type="button" class="ass-style-delete" id="ass-style-delete" title="删除当前样式或方案">删除当前</button>
-              <button type="button" class="ass-style-reset" id="ass-style-reset" title="恢复此内置条目的默认值" hidden>重置</button>
-            </span>
-          </div>
-        </div>
-        <div class="ass-style-fields ass-style-fields-main">
-          <label class="ass-style-field ass-style-field-wide">名称<input type="text" id="ass-style-name" data-ass-style-field="name" maxlength="80" autocomplete="off"></label>
         </div>
         <section class="ass-style-form-section" aria-labelledby="ass-style-basic-heading">
           <div class="ass-style-subheading" id="ass-style-basic-heading">基础样式</div>
@@ -65,7 +45,7 @@
               <div class="ass-style-font-row">
                 <div class="font-combobox" id="ass-style-font-picker">
                   <input type="text" id="ass-style-font-name" data-ass-style-field="fontName" maxlength="128" autocomplete="off" spellcheck="false" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" aria-controls="ass-font-name-options" placeholder="Arial">
-                  <button type="button" class="font-combobox-toggle" id="ass-style-font-toggle" tabindex="-1" aria-label="展开字体列表"></button>
+                  <button type="button" class="font-combobox-toggle" id="ass-style-font-toggle" tabindex="-1" aria-label="展开字体列表" aria-expanded="false" aria-controls="ass-font-name-options"></button>
                   <div class="font-combobox-options" id="ass-font-name-options" role="listbox" aria-label="可选字体" hidden></div>
                 </div>
                 <button type="button" id="ass-style-local-font-scan" title="读取本机字体，填充字体下拉列表">读取本机字体</button>
@@ -113,22 +93,21 @@
             </div>
           </div>
         </section>
-        <div class="ass-style-preview-card"><span class="ass-style-preview-label">ASS 预览</span><canvas id="ass-style-preview-sample" aria-label="字幕样式示例"></canvas></div>
-        <p class="ass-style-preview-actions editor-settings-hint" hidden><span>如果想要查看当前画面实际的 ASS 字幕效果，可以</span> <button type="button" class="ass-preview-link" id="ass-style-frame-preview-open" hidden>打开 ASS 实际画面预览窗口</button>。</p>
       </section>
       <section class="ass-style-form" id="ass-profile-form" aria-labelledby="ass-profile-form-title" hidden>
         <div class="ass-style-form-header">
           <div><span class="ass-style-form-kicker">PROFILE</span><h3 id="ass-profile-form-title">ASS 输出方案</h3></div>
           <div class="ass-style-form-header-side">
             <span class="ass-style-builtin-badge" id="ass-profile-builtin-badge" hidden>内置</span>
-            <span class="ass-style-delete-slot" id="ass-profile-delete-slot"></span>
+            <span class="ass-style-delete-slot">
+              <button type="button" class="ass-style-delete" id="ass-style-delete" title="删除当前方案">删除当前</button>
+              <button type="button" class="ass-style-reset" id="ass-style-reset" title="恢复内置方案的默认值" hidden>重置</button>
+            </span>
           </div>
         </div>
         <small class="ass-profile-effects-hint" id="ass-profile-effects-hint">在这里配置的覆盖标签会应用到每一句字幕上，例如批量淡入淡出。</small>
         <div class="ass-style-fields ass-style-fields-main">
           <label class="ass-style-field ass-style-field-wide">名称<input type="text" id="ass-profile-name" data-ass-profile-field="name" maxlength="80" autocomplete="off"></label>
-          <label class="ass-style-field ass-style-field-wide">主字幕样式<select id="ass-profile-style-id" data-ass-profile-field="styleId"></select></label>
-          <label class="ass-style-field ass-style-field-wide" id="ass-profile-extension-style-field" hidden>副字幕默认样式<select id="ass-profile-extension-style" aria-label="副字幕默认样式"></select></label>
         </div>
         <div class="ass-style-subheading">逐句动画（导出时自动添加到每一句）</div>
         <div class="ass-animation-card">

@@ -130,6 +130,7 @@ def projected_subtitles(document, intervals):
     from substar_core.language_layout import layout_tokens
     tokens = {t.token_id:t for t in document.display_tokens}
     cues = []
+    original_ids = {}
     for cue in document.cues:
         if cue.state != EntityState.ACTIVE:
             continue
@@ -138,13 +139,37 @@ def projected_subtitles(document, intervals):
         if not text.strip() and cue.target is None:
             continue
         for start, end in project_range(cue.start, cue.end, intervals):
+            original_ids[f"export_{len(cues)}"] = cue.cue_id
             cues.append(replace(cue, cue_id=f"export_{len(cues)}", index=len(cues), start=start, end=end,
                                 display_token_ids=(), source_text=text, group_id=None))
     cues.sort(key=lambda c:(c.start,c.end,c.index))
     cues = tuple(replace(c, index=i) for i,c in enumerate(cues))
-    return EditorDocument(document.document_id, (), (), cues, presentation=document.presentation,
-                          properties=DocumentProperties(speaker_names=document.properties.speaker_names,
-                                                        script_projection=document.properties.script_projection))
+    from substar_core.translation_units import all_units, install_units
+    units = all_units(document)
+    if units:
+        from substar_core.domain import ChangeKind, ChangeProvenance
+        # Strip source-clock unit records before constructing the projected document.
+        cues = tuple(replace(cue, target=None if cue.mapping.get("target_unit_ids") else cue.target,
+                             mapping={key:value for key,value in cue.mapping.items()
+                                          if key not in {"target_units", "target_unit_ids"}}) for cue in cues)
+    projected = EditorDocument(document.document_id, (), (), cues, presentation=document.presentation,
+                               properties=DocumentProperties(speaker_names=document.properties.speaker_names,
+                                                             script_projection=document.properties.script_projection))
+    if not units:
+        return projected
+    translated = []
+    for unit in units:
+        parts = list(project_range(unit["start"], unit["end"], intervals))
+        if parts:
+            # Removed gaps collapse on the output clock. One continuous unit
+            # remains one target event across those joins.
+            start, end = parts[0][0], parts[-1][1]
+            evidence = [cue.cue_id for cue in cues if original_ids.get(cue.cue_id) in unit["source_cue_ids"]
+                        and cue.end > start and cue.start < end]
+            if evidence:
+                translated.append(dict(unit,
+                                       start=start, end=end, source_cue_ids=evidence))
+    return install_units(projected, translated, ChangeProvenance(ChangeKind.NORMALIZATION, "cut_translation_projection"))
 
 
 def export_xml(path, intervals, fps="25/1", width=1920, height=1080, has_video=True, has_audio=True):

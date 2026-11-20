@@ -97,14 +97,20 @@
     async function flush() {
       if (destroyed || paused || inFlight || failed.length || !pending.length) return null;
       let count = maxBatchSize;
+      const action = entry => entry.operation.payload?.provenance?.metadata?.user_action_id || entry.operation.operation_id;
       if (pending[0]?.retryBatchId) {
         count = 1;
         while (count < pending.length && count < maxBatchSize && pending[count].retryBatchId === pending[0].retryBatchId) count++;
       } else if (options.groupByUserAction && pending.length) {
-        const action = entry => entry.operation.payload?.provenance?.metadata?.user_action_id || entry.operation.operation_id;
         const first = action(pending[0]);
         count = 1;
         while (count < pending.length && count < maxBatchSize && action(pending[count]) === first) count++;
+      } else if (options.preserveUserActions && count < pending.length) {
+        // Keep a multi-operation edit together when it straddles a batch boundary.
+        const nextAction = action(pending[count]);
+        let boundary = count;
+        while (boundary > 0 && action(pending[boundary - 1]) === nextAction) boundary--;
+        if (boundary > 0) count = boundary;
       }
       const entries = pending.splice(0, count);
       const batch = {
