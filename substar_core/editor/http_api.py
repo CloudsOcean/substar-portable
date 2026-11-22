@@ -2863,6 +2863,7 @@ from .cut_api import router as cut_router
 router.include_router(cut_router)
 
 from .output_api import router as output_router
+from . import native_export  # Registers the Windows handoff routes.
 router.include_router(output_router)
 
 from .maw_waveform_api import router as maw_waveform_router

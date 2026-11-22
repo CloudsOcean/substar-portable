@@ -20,4 +20,4 @@ window.AsrEditorUtils={...data,...text,...timed,...window.AsrGapRemoveCore,...ma
 window.EditorMawAssPanel={create:createMawAssPanel};
 initWaveform();
 window.EditorMawTimeline={createTimelineController};
-const editor=document.createElement('script');editor.src='/assets/editor.js?v=20261120-builtin-waveform';document.body.append(editor);
+const editor=document.createElement('script');editor.src='/assets/editor.js?v=20261122-windows-export';document.body.append(editor);

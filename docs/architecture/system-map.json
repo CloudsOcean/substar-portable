@@ -17,6 +17,7 @@
       "substar_core/**/*.py",
       "web/**/*.js",
       "scripts/build-windows.ps1",
+      "scripts/windows_export.cs",
       "scripts/run_transcription_worker.py",
       "scripts/run_segmentation_worker.py",
       "scripts/run_semantic_segmentation.py",
@@ -3969,6 +3970,14 @@
           "symbols": []
         },
         {
+          "path": "substar_core/editor/native_export.py",
+          "symbols": []
+        },
+        {
+          "path": "scripts/windows_export.cs",
+          "symbols": []
+        },
+        {
           "path": "substar_core/subtitle_exports.py",
           "symbols": [
             "render_track",
@@ -4004,6 +4013,7 @@
         "ASS assignments carry one deduplicated configuration in existing revision metadata; each batch application is one revision",
         "Per-layer Cue overrides inherit unassigned project layers; profile-library edits never mutate historical projects",
         "Output is derived from one verified revision",
+        "The Windows export component publishes completed files into a new title-based subdirectory of the user-selected parent",
         "Unavailable target tracks are reported rather than synthesized"
       ],
       "failure_modes": [

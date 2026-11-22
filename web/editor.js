@@ -5046,7 +5046,6 @@
   const outputForm = $("#outputForm");
   const outputSessions = new Map();
   let outputPlanId = null;
-  let outputProject = null;
 
   function outputPlan() {
     const timeline = state.revision?.document.properties.timeline;
@@ -5059,7 +5058,7 @@
 
   function refreshOutputMenu() {
     const job = outputSessions.get(state.projectId);
-    const busy = ["submitting", "queued", "running"].includes(job?.state);
+    const busy = ["choosing", "submitting", "queued", "running", "saving"].includes(job?.state);
     const plan = outputPlan();
     const xml = outputForm.querySelector('[name="outputProjectFormat"][value="cut-xml"]');
     xml.disabled = !plan;
@@ -5085,15 +5084,17 @@
     const projectFormats = selectedOutputValues("outputProjectFormat");
     $("#startOutput").disabled = busy || incomplete || (media && $("#outputEdited").checked && !plan) ||
       (project && !projectFormats.length) || !(media || project) ||
-      !$("#outputTitle").value.trim() || !$("#outputDestination").value.trim();
+      !$("#outputTitle").value.trim();
     $("#exportDocument").textContent = busy
       ? `导出 · ${Math.floor((job.progress || 0) * 100)}%` : "导出";
     $("#outputResult").hidden = !job;
     if (!job) return;
     $("#outputProgress").value = job.progress || 0;
     const messages = {
-      submitting: "正在保存工程…", queued: "等待导出…", running: "正在导出",
-      ready: `已导出 ${job.files?.length || 0} 个文件`, error: "导出失败",
+      choosing: "请选择保存位置", submitting: "正在保存工程…", queued: "等待导出…", running: "正在导出",
+      saving: "正在写入所选文件", ready: job.savedName ? `已保存 ${job.savedName}` : job.savedFolder
+        ? `已保存 ${job.files.length} 个文件到 ${job.savedFolder}` : `已生成 ${job.files?.length || 0} 个文件`,
+      error: "导出失败",
     };
     $("#outputStatus").textContent = [messages[job.state], job.encoder, job.message]
       .filter(Boolean).join(" · ");
@@ -5102,21 +5103,6 @@
     destination.textContent = job.destination || "";
     $("#outputFallback").hidden = !job.fallback_reason;
     $("#outputFallback").textContent = job.fallback_reason ? `已回退到 CPU · ${job.fallback_reason}` : "";
-    const files = $("#outputFiles");
-    files.replaceChildren();
-    if (job.state !== "ready") return;
-    const base = projectPath(`/output-jobs/${job.id}`);
-    const appendDownload = (label, url) => {
-      const item = document.createElement("li");
-      const link = document.createElement("a");
-      link.textContent = label;
-      link.href = url;
-      link.download = "";
-      item.append(link);
-      files.append(item);
-    };
-    if (job.files.length > 1) appendDownload("下载全部文件（ZIP）", `${base}/bundle`);
-    job.files.forEach((file, index) => appendDownload(file.name, `${base}/files/${index}`));
   }
 
   function showOutputMenu(planId = null, kind = null, subtitleMode = "ab-double") {
@@ -5138,13 +5124,14 @@
     $("#exportDocument").focus();
   }
 
-  async function followOutput(project, endpoint, initial) {
+  async function followOutput(project, endpoint, initial, saveAfterExport = false) {
     let job = initial;
     let failedPolls = 0;
     while (true) {
+      if (saveAfterExport && job.state === "ready") return job;
       outputSessions.set(project, job);
       if (state.projectId === project) refreshOutputMenu();
-      if (["ready", "error"].includes(job.state)) return;
+      if (["ready", "error"].includes(job.state)) return job;
       await new Promise(resolve => setTimeout(resolve, 1000));
       try {
         const response = await fetch(`${endpoint}/${initial.id}`, {cache:"no-store"});
@@ -5188,32 +5175,38 @@
     if (!result.cancelled) ordinaryError(`已保存：${result.filename}`, "completed");
   }
 
-  function prepareOutputFields() {
-    if (outputProject === state.projectId) return;
-    outputProject = state.projectId;
-    const project = state.projectId;
-    const title = $("#outputTitle");
-    const directory = $("#outputDestination");
-    title.value = (state.taskInfo?.display_name || project).slice(0, 120);
-    directory.value = localStorage.getItem("substar.output-directory") || "";
-    $("#outputDirectoryError").hidden = true;
-    api(projectPath("/output-destination")).then(result => {
-      if (project !== state.projectId) return;
-      if (!directory.value) directory.value = result.path;
-      refreshOutputMenu();
-    }).catch(error => showOutputDirectoryError(error.message));
-  }
-
-  function showOutputDirectoryError(message) {
-    const notice = $("#outputDirectoryError");
-    notice.textContent = message;
-    notice.hidden = !message;
+  function outputSaveSpec(payload) {
+    const scope = payload.edited ? "剪辑" : "全片";
+    const formats = {
+      mp4: "video/mp4", mov: "video/quicktime", wav: "audio/wav", mp3: "audio/mpeg",
+      m4a: "audio/mp4", flac: "audio/flac", srt: "application/x-subrip",
+      txt: "text/plain", xml: "application/xml", zip: "application/zip",
+    };
+    const subtitleLabels = {
+      source: "上行字幕", target: "下行字幕", "ab-single": "上下行单行字幕", "ab-double": "上下行双行字幕",
+    };
+    const files = [];
+    if (payload.video) files.push([`${scope}_视频`, payload.video.format]);
+    if (payload.audio) files.push([`${scope}_音频`, payload.audio.format]);
+    for (const format of payload.subtitles?.formats || []) {
+      for (const mode of payload.subtitles.modes) files.push([`${scope}_${subtitleLabels[mode]}`, format]);
+    }
+    if (payload.project_files.includes("subtitle-project")) files.push(["字幕工程", "zip"]);
+    if (payload.project_files.includes("cut-xml")) files.push(["剪辑方案", "xml"]);
+    if (files.length > 1) return null;
+    const [label, format] = files[0];
+    const version = String(payload.export_sequence).padStart(2, "0");
+    return {
+      suggestedName: `${systemSaveAs.safeFilename(payload.title)}_${label}_v${version}.${format}`,
+      description: label,
+      mimeType: formats[format],
+      extension: `.${format}`,
+    };
   }
 
   outputMenu.addEventListener("toggle", () => {
     if (!outputMenu.open) {
       outputPlanId = null;
-      closeOutputDirectory();
       return;
     }
     if (!state.revision) {
@@ -5223,86 +5216,61 @@
     document.querySelectorAll(".editor-command-menu[open]").forEach(menu => {
       if (menu !== outputMenu) menu.open = false;
     });
-    prepareOutputFields();
+    const title = $("#outputTitle");
+    if (title.dataset.project !== state.projectId) {
+      title.dataset.project = state.projectId;
+      title.value = (state.taskInfo?.display_name || state.projectId).slice(0, 120);
+    }
     refreshOutputMenu();
   });
   document.addEventListener("click", event => {
     if (outputMenu.open && !event.composedPath().includes(outputMenu)) outputMenu.open = false;
   });
-  $("#outputDestination").addEventListener("input", () => showOutputDirectoryError(""));
-  const outputDirectoryPicker = $("#outputDirectoryPicker");
-  let outputDirectoryState = null;
-  let outputDirectoryRequest = 0;
 
-  function closeOutputDirectory() {
-    outputDirectoryPicker.hidden = true;
-    outputDirectoryState = null;
-    outputDirectoryRequest += 1;
+  let nativeOutputAvailable = ["127.0.0.1", "localhost"].includes(location.hostname) &&
+    /Windows/i.test(navigator.userAgent);
+  if (nativeOutputAvailable) {
+    api("/api/native-output/availability").then(result => {
+      nativeOutputAvailable = result.available;
+    }).catch(() => { nativeOutputAvailable = false; });
   }
 
-  async function browseOutputDirectory(path = "") {
-    const request = ++outputDirectoryRequest;
-    const list = $("#outputDirectoryList");
-    const location = $("#outputBrowsePath");
-    outputDirectoryState = null;
-    outputDirectoryPicker.hidden = false;
-    $("#useOutputDirectory").disabled = true;
-    $("#outputParentDirectory").disabled = true;
-    list.replaceChildren();
-    location.textContent = "正在读取文件夹…";
-    showOutputDirectoryError("");
+  async function waitForNativeOutput(url, waiting, timeout) {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const status = await api(url, {cache:"no-store"});
+      if (status.state === "error") throw new Error(status.message || "Windows 保存失败");
+      if (!waiting.includes(status.state)) return status;
+      await new Promise(resolve => setTimeout(resolve, 750));
+    }
+    throw new Error("等待 Windows 保存超时。请确认 Substar 已通过 Windows 启动器启动。");
+  }
+
+  async function saveNativeOutput(title, prepareOutput) {
+    const {token} = await api(projectPath("/native-output"), {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({title}),
+    });
+    const ticket = `/api/native-output/${token}`;
+    const update = (action, details = {}) => api(ticket, {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({action, ...details}),
+    });
     try {
-      const query = new URLSearchParams({browse:"true"});
-      if (path) query.set("path", path);
-      const folder = await api(projectPath(`/output-destination?${query}`));
-      if (request !== outputDirectoryRequest) return;
-      outputDirectoryState = folder;
-      location.textContent = folder.path;
-      $("#useOutputDirectory").disabled = false;
-      $("#outputParentDirectory").disabled = !folder.parent;
-      const drives = $("#outputDirectoryDrive");
-      drives.replaceChildren(...folder.roots.map(root => new Option(root, root)));
-      drives.value = folder.root;
-      drives.hidden = folder.roots.length < 2;
-      for (const directory of folder.folders) {
-        const item = document.createElement("li");
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = directory.name;
-        button.onclick = () => void browseOutputDirectory(directory.path);
-        item.append(button);
-        list.append(item);
-      }
+      const opened = await waitForNativeOutput(ticket, ["choosing"], 20000);
+      const selected = opened.state === "dialog"
+        ? await waitForNativeOutput(ticket, ["dialog"], 10 * 60 * 1000)
+        : opened;
+      if (selected.state === "cancelled") return {cancelled:true};
+      if (selected.state !== "selected") throw new Error("Windows 导出位置未确认");
+      await prepareOutput(job => update("render", {job_id:job.id}));
+      const result = await waitForNativeOutput(ticket, ["rendering"], 60 * 60 * 1000);
+      if (result.state !== "saved") throw new Error("Windows 保存未完成");
+      return {cancelled:false, directory:result.folder};
     } catch (error) {
-      if (request !== outputDirectoryRequest) return;
-      if (path && error.status === 422) {
-        await browseOutputDirectory();
-        if (!outputDirectoryPicker.hidden) showOutputDirectoryError(error.message);
-      } else {
-        location.textContent = error.message;
-      }
+      await update("error", {message:String(error.message || error).slice(0, 1000)}).catch(() => {});
+      throw error;
     }
   }
 
-  $("#chooseOutputDirectory").onclick = () => {
-    if (outputDirectoryPicker.hidden) void browseOutputDirectory($("#outputDestination").value.trim());
-    else closeOutputDirectory();
-  };
-  $("#outputParentDirectory").onclick = () => {
-    if (outputDirectoryState?.parent) void browseOutputDirectory(outputDirectoryState.parent);
-  };
-  $("#outputDirectoryDrive").onchange = event => void browseOutputDirectory(event.target.value);
-  $("#cancelOutputDirectory").onclick = () => {
-    closeOutputDirectory();
-    $("#chooseOutputDirectory").focus();
-  };
-  $("#useOutputDirectory").onclick = () => {
-    if (!outputDirectoryState) return;
-    $("#outputDestination").value = outputDirectoryState.path;
-    closeOutputDirectory();
-    refreshOutputMenu();
-    $("#chooseOutputDirectory").focus();
-  };
   outputForm.addEventListener("input", refreshOutputMenu);
   outputForm.addEventListener("submit", async event => {
     event.preventDefault();
@@ -5318,7 +5286,6 @@
     const payload = {
       export_sequence: sequence.value,
       title: $("#outputTitle").value.trim(),
-      destination: $("#outputDestination").value.trim(),
       project_files: $("#outputProjectFiles").checked ? selectedOutputValues("outputProjectFormat") : [],
       edited: $("#outputEdited").checked,
       plan_id: outputPlan()?.id || null,
@@ -5331,22 +5298,49 @@
       } : null,
       subtitles,
     };
-    outputSessions.set(project, {state:"submitting"});
+    const previous = outputSessions.get(project);
+    const spec = outputSaveSpec(payload);
+    let generated = null;
+    outputSessions.set(project, {state:"choosing"});
     refreshOutputMenu();
     try {
-      const saved = await flushActiveEditorInput();
-      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
-      const job = await api(endpoint, {
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({...payload, revision_id:saved.revision_id}),
-      });
-      commitExportSequence(sequence);
-      localStorage.setItem("substar.output-directory", payload.destination);
-      if (subtitles) observeEditorTutorialEvent("export", {mode:subtitles.modes[0]});
-      sessionStorage.setItem(`substar.output-job:${project}`, job.id);
-      await followOutput(project, endpoint, job);
+      const prepareFiles = async (onJob = null) => {
+        if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+        outputSessions.set(project, {state:"submitting"});
+        refreshOutputMenu();
+        const saved = await flushActiveEditorInput();
+        if (epoch !== projectEpoch) throw new Error("项目已切换，请重新导出");
+        const job = await api(endpoint, {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({...payload, revision_id:saved.revision_id}),
+        });
+        commitExportSequence(sequence);
+        if (subtitles) observeEditorTutorialEvent("export", {mode:subtitles.modes[0]});
+        sessionStorage.setItem(`substar.output-job:${project}`, job.id);
+        if (onJob) await onJob(job);
+        const output = await followOutput(project, endpoint, job, true);
+        if (output.state !== "ready") throw new Error(output.message || "导出失败");
+        generated = output;
+        outputSessions.set(project, {...output, state:"saving"});
+        if (state.projectId === project) refreshOutputMenu();
+        return output.files.map((file, index) => ({name:file.name, url:`${endpoint}/${job.id}/files/${index}`}));
+      };
+      const result = spec
+        ? await systemSaveAs.saveUrl({...spec, url:async () => (await prepareFiles())[0].url})
+        : nativeOutputAvailable
+          ? await saveNativeOutput(payload.title, prepareFiles)
+          : await systemSaveAs.saveFiles(prepareFiles);
+      if (result.cancelled) {
+        if (previous) outputSessions.set(project, previous);
+        else outputSessions.delete(project);
+      } else {
+        outputSessions.set(project, {...generated, savedName:result.filename, savedFolder:result.directory});
+      }
     } catch (error) {
-      outputSessions.set(project, {state:"error", message:error.message});
+      outputSessions.set(project, generated
+        ? {...generated, message:`保存失败：${error.message}`}
+        : {state:"error", message:error.message});
+    } finally {
       if (state.projectId === project) refreshOutputMenu();
     }
   });

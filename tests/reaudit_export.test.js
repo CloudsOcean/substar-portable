@@ -12,7 +12,7 @@ function handler(context) {
   return vm.runInNewContext("(" + source.slice(start, end) + "})", context);
 }
 
-for (const scenario of ["saved", "disabled", "failed", "switched"]) {
+for (const scenario of ["saved", "disabled", "cancelled", "failed", "switched"]) {
   test("output jobs submit only after saving the current project: " + scenario, async () => {
     const events = [];
     let complete;
@@ -30,7 +30,16 @@ for (const scenario of ["saved", "disabled", "failed", "switched"]) {
       outputSessions:new Map(),
       nextExportSequence:() => ({value:1}), commitExportSequence:() => events.push("sequence"),
       refreshOutputMenu(){}, observeEditorTutorialEvent(){},
-      localStorage:{setItem(){}}, sessionStorage:{setItem(){}},
+      outputSaveSpec:() => ({suggestedName:"demo.srt"}),
+      systemSaveAs:{
+        async saveUrl(spec) {
+          events.push("picker");
+          if (scenario === "cancelled") return {cancelled:true};
+          assert.equal(await spec.url(), "/api/projects/p/output-jobs/output/files/0");
+          return {cancelled:false, filename:spec.suggestedName};
+        }
+      },
+      sessionStorage:{setItem(){}},
       api:async (url, options) => {
         events.push("start");
         assert.equal(url, "/api/projects/p/output-jobs");
@@ -38,7 +47,10 @@ for (const scenario of ["saved", "disabled", "failed", "switched"]) {
         assert.deepEqual(JSON.parse(options.body).subtitles, {formats:["srt"],modes:["source"]});
         return {id:"output"};
       },
-      followOutput:async () => events.push("follow"),
+      followOutput:async () => {
+        events.push("follow");
+        return {state:"ready", files:[{name:"demo.srt"}]};
+      },
       flushActiveEditorInput:async () => {
         events.push("wait");
         await ack;
@@ -48,10 +60,10 @@ for (const scenario of ["saved", "disabled", "failed", "switched"]) {
       }
     };
     const done = handler(context)({preventDefault(){}});
-    assert.deepEqual(events, scenario === "disabled" ? [] : ["wait"]);
+    assert.deepEqual(events, scenario === "disabled" ? [] : scenario === "cancelled" ? ["picker"] : ["picker", "wait"]);
     complete();
     await done;
-    if (scenario === "saved") assert.deepEqual(events, ["wait", "start", "sequence", "follow"]);
+    if (scenario === "saved") assert.deepEqual(events, ["picker", "wait", "start", "sequence", "follow"]);
     else assert.ok(!events.includes("start"));
   });
 }

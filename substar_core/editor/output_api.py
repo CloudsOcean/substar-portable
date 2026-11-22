@@ -262,8 +262,10 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
             _update(key, state="running")
             workspace.mkdir()
             if destination is not None:
-                staging = tempfile.TemporaryDirectory(prefix=".substar-export-", dir=destination)
-            directory = Path(staging.name) if staging else workspace
+                candidate = destination / f".substar-export-{uuid4().hex}"
+                candidate.mkdir()
+                staging = candidate
+            directory = staging or workspace
             duration, video, audio = inspect_media(source) if (plan or payload.video or payload.audio) else (0, None, None)
             if payload.video and video is None:
                 raise ValueError("源媒体没有视频流")
@@ -327,7 +329,7 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
         raise
     finally:
         if staging:
-            staging.cleanup()
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 def _source_rate(video):

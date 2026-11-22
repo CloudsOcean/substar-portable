@@ -125,14 +125,48 @@
     if (!handle) return {cancelled:true};
     const fetcher = dependencies.fetch || globalThis.fetch.bind(globalThis);
     const response = await fetcher(typeof spec.url === "function" ? await spec.url() : spec.url);
+    await writeResponse(handle, response);
+    return {cancelled:false, filename:handle.name || spec.suggestedName};
+  }
+
+  async function writeResponse(handle, response) {
     if (!response.ok) throw new Error(await responseError(response));
     if (response.body && typeof response.body.pipeTo === "function") {
       const writable = await handle.createWritable();
       await response.body.pipeTo(writable);
-      return {cancelled:false, filename:handle.name || spec.suggestedName};
+    } else {
+      await writeBlob(handle, await response.blob());
     }
-    await writeBlob(handle, await response.blob());
-    return {cancelled:false, filename:handle.name || spec.suggestedName};
+  }
+
+  async function saveFiles(prepareFiles, dependencies = {}) {
+    const picker = dependencies.directoryPicker || globalThis.showDirectoryPicker?.bind(globalThis);
+    if (!picker) throw new Error("当前浏览器不支持 Windows 文件夹选择窗口");
+    let directory;
+    try {
+      directory = await picker({mode:"readwrite", id:"substar-export"});
+    } catch (error) {
+      if (error?.name === "AbortError") return {cancelled:true};
+      throw error;
+    }
+    const files = await prepareFiles();
+    for (const {name} of files) {
+      try {
+        await directory.getFileHandle(name);
+      } catch (error) {
+        if (error?.name === "NotFoundError") continue;
+        throw error;
+      }
+      throw new Error(`所选文件夹已有同名文件：${name}`);
+    }
+    const fetcher = dependencies.fetch || globalThis.fetch.bind(globalThis);
+    for (const {name, url} of files) {
+      const response = await fetcher(url);
+      if (!response.ok) throw new Error(await responseError(response));
+      const handle = await directory.getFileHandle(name, {create:true});
+      await writeResponse(handle, response);
+    }
+    return {cancelled:false, directory:directory.name};
   }
 
   async function saveBlob(spec, blob, dependencies = {}) {
@@ -142,5 +176,5 @@
     return {cancelled:false, filename:handle.name || spec.suggestedName};
   }
 
-  return {exchangeSpec, glossarySpec, safeFilename, saveBlob, saveUrl, subtitleSpec};
+  return {exchangeSpec, glossarySpec, safeFilename, saveBlob, saveFiles, saveUrl, subtitleSpec};
 });

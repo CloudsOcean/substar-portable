@@ -72,6 +72,15 @@ try {
         'README.md', 'CHANGELOG.md', 'AGENTS.md', 'SKILL.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
     )) { Copy-RequiredFile $file }
 
+    $nativeExportDir = Join-Path $BundleRoot 'runtime\windows-export'
+    New-Item -ItemType Directory -Path $nativeExportDir -Force | Out-Null
+    $nativeExportCompiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+    $nativeExportExe = Join-Path $nativeExportDir 'SubstarWindowsExport.exe'
+    Copy-RequiredFile 'scripts\windows_export.cs'
+    $nativeExportSource = Join-Path $RepoRoot 'scripts\windows_export.cs'
+    & $nativeExportCompiler /nologo /target:winexe /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/out:$nativeExportExe" $nativeExportSource
+    if ($LASTEXITCODE -ne 0) { throw 'Windows export component compilation failed.' }
+
     $sourceCommit = if ($env:GITHUB_SHA -match '^[0-9a-fA-F]{40}$') {
         $env:GITHUB_SHA.ToLowerInvariant()
     } else {
