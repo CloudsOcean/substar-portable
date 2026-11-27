@@ -81,15 +81,6 @@ def test_translation_candidate_reload_srt_and_ass_share_order(tmp_path, reverse)
     upper_events = [line for line in ass.splitlines() if line.startswith("Dialogue:") and "P0L0" in line]
     assert any("Today is nice" in line for line in upper_events)
     assert not any("今天很好" in line for line in upper_events)
-    from substar_core.editor.application.srt_import import preview_srt
-    translated = render_document_srt(result, "target", language_rows=False)
-    imported = preview_srt(result, translated, mode="target")
-    assert imported["matched"] == len(TEXTS)
-    assert [row["target_language"] for row in imported["rows"]] == ["en", "zh-CN", "zh-CN", "zh-CN", "zh-CN"]
-    from substar_core.project_exchange import external_translation_text
-    external = external_translation_text(replace(revision, document=result), source_language="mixed", target_language="zh-CN")
-    assert "TARGET_LANGUAGE 1 en" in external and "TARGET_LANGUAGE 2 zh-CN" in external
-    assert "今天很好" in external
 
 
 def test_failed_translation_does_not_relabel_previous_wrong_language():

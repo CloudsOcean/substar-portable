@@ -59,11 +59,12 @@
       if (ids && !ids.length) throw new Error('请先选择字幕');
       return {profile:draft,cue_ids:ids,layer_ids:wholeProfile ? null : (dirtyLayers.size ? [...dirtyLayers] : [layerId])};
     }
-    function renderPayload(useDraft=true) {
+    function renderPayload({preview=false}={}) {
       const media=activeMedia();
       return {expected_revision_id:state.revision.revision_id,use_configuration:true,
         options:{width:media?.videoWidth || 1920,height:media?.videoHeight || 1080},
-        ...(useDraft && menu.open && dirty ? scopePayload() : {})};
+        ...(preview && state.previewTracksSwapped ? {swap_preview_tracks:true} : {}),
+        ...(menu.open && dirty ? scopePayload() : {})};
     }
     function getFonts() {
       if (!fontRequest) {
@@ -76,9 +77,10 @@
       if (!state.revision || !config) return;
       const ticket=++epoch, thisProject=state.projectId;
       try {
-        const payload=renderPayload();
+        const payload=renderPayload({preview:true});
         const response=await fetch(projectPath('/ass/export'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         if (!response.ok) {const error=await response.json();throw new Error(typeof error.detail==='string' ? error.detail : '字幕预览暂时不可用');}
+        if (payload.swap_preview_tracks && response.headers.get('X-Substar-Preview-Tracks-Swapped')!=='true') return;
         const content=await response.text();
         const fonts=await getFonts();
         if (ticket!==epoch || thisProject!==state.projectId) return;
@@ -117,6 +119,19 @@
       }
     }
     function schedule() { clearTimeout(timer); timer=setTimeout(live,180); }
+    function refreshPreviewOrder() {
+      closeFrame();
+      ++epoch;
+      clearTimeout(timer);
+      if (renderer && !ready) {
+        renderer.dispose();
+        renderer=null;
+      }
+      ready=false;
+      $("#assLiveCanvas").hidden=true;
+      $(".subtitle-overlay").hidden=false;
+      if (!state.documentStore?.pending().length) live();
+    }
     function resize() {
       if (!renderer) return;
       const rect=$('#mediaViewport').getBoundingClientRect();
@@ -233,7 +248,7 @@
     }
     async function render(seconds) {
       const origin=state.projectId;
-      const payload=renderPayload();
+      const payload=renderPayload({preview:seconds!=null});
       message(seconds==null ? '正在烧录视频…' : '正在生成当前帧…');
       await flush();if(origin!==state.projectId)throw new Error('项目已切换');
       payload.expected_revision_id=state.revision.revision_id;
@@ -246,7 +261,15 @@
         await new Promise(resolve=>setTimeout(resolve,1000));
       }
     }
-    $('#assPreview').onclick=()=>action(async()=>{const origin=state.projectId;activeMedia()?.pause();const url=await render(Number(activeMedia()?.currentTime)||0);if(origin!==state.projectId)return;$('#assFrameImage').src=url;$('#assFramePreview').hidden=false;message('当前帧已生成；播放时返回实时字幕。');});
+    $('#assPreview').onclick=()=>action(async()=>{
+      const origin=state.projectId, swapped=state.previewTracksSwapped;
+      activeMedia()?.pause();
+      const url=await render(Number(activeMedia()?.currentTime)||0);
+      if(origin!==state.projectId || swapped!==state.previewTracksSwapped)return;
+      $('#assFrameImage').src=url;
+      $('#assFramePreview').hidden=false;
+      message('当前帧已生成；播放时返回实时字幕。');
+    });
     $('#assExport').onclick=()=>action(async()=>{
       const origin=state.projectId;
       const result=await systemSaveAs.saveBlob({suggestedName:systemSaveAs.safeFilename(state.taskInfo?.display_name || origin)+'.ass',description:'ASS 字幕',mimeType:'text/plain',extension:'.ass'},async()=>{
@@ -258,7 +281,7 @@
       media.addEventListener('loadedmetadata',schedule);
     });
     window.addEventListener('pagehide',()=>{renderer?.dispose();renderer=null;ready=false;});
-    return {sync,selectionChanged,
+    return {sync,selectionChanged,refreshPreviewOrder,
       async openDraft(scope='project') {
         await sync();
         if (!config) throw new Error('字幕配置尚未加载');

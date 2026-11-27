@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -18,8 +20,10 @@ _INSTALL_ID = hashlib.sha256(
 ).hexdigest()[:16]
 RUNTIME_FILE = APP_DATA_DIR / "runtime" / f"{_INSTALL_ID}.json"
 APP_MARKER = "substar-workbench"
-BACKEND_MUTEX_NAME = "Local\\Substar.Workbench.Backend"
+BACKEND_MUTEX_NAME = "Global\\Substar.Workbench.Backend"
 ERROR_ALREADY_EXISTS = 183
+PORT_IN_USE_EXIT_CODE = 98
+_REMEMBERED_PORT_FILE = APP_DATA_DIR / "last-backend-port.json"
 TASK_SCHEDULER_SHUTDOWN_TIMEOUT = 40.0
 INSTANCE_SHUTDOWN_TIMEOUT = 55.0
 # A newly copied transparent runtime can spend tens of seconds in antivirus
@@ -67,6 +71,48 @@ def startup_port() -> int:
         except ValueError:
             pass
     return int(load_settings().get("startup_port", 8769))
+
+
+def remembered_startup_port() -> int:
+    try:
+        port = json.loads(_REMEMBERED_PORT_FILE.read_text(encoding="utf-8"))
+        if type(port) is int and 1024 <= port <= 65535:
+            return port
+    except (OSError, ValueError):
+        pass
+    return 8769
+
+
+def remember_startup_port(port: int) -> None:
+    _REMEMBERED_PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(_REMEMBERED_PORT_FILE, port)
+
+
+def bind_backend_socket(port: int) -> socket.socket:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name == "nt":
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", port))
+        return listener
+    except OSError:
+        listener.close()
+        raise
+
+
+def is_port_in_use(error: OSError, port: int) -> bool:
+    if error.errno in {errno.EADDRINUSE, 10048} or getattr(error, "winerror", None) == 10048:
+        return True
+    # Windows can report access denied when an exclusive listener owns the port.
+    if os.name == "nt" and error.errno in {errno.EACCES, 10013}:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                return True
+        except OSError:
+            pass
+    return False
 
 
 def build_id(root: Path = PROJECT_ROOT) -> str:

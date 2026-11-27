@@ -46,6 +46,7 @@ from substar_core.prompt_registry import (  # noqa: E402
     normalize_source_language,
     render_prompt,
     source_language_analysis,
+    segmentation_prompt_variants,
 )
 from substar_core.language_layout import layout_tokens  # noqa: E402
 from substar_core.storage import ProjectStore  # noqa: E402
@@ -280,7 +281,6 @@ def balanced_target_times(units: list[Any], maximum_seconds: int) -> list[float]
 
 def direct_seam_request(
     units: list[Any], target_times: list[float], context_seconds: float = 30.0,
-    *, sentence_boundary_policy: str = "reference",
 ) -> dict[str, Any]:
     """Give ExecutionPlanning timed transcript windows, not program-ranked seam candidates."""
     targets: list[dict[str, Any]] = []
@@ -520,7 +520,6 @@ def model_cue_script(
 
 def units_payload(
     units: list[Any], left: int, right: int, context: int = 20,
-    *, sentence_boundary_policy: str = "reference",
 ) -> dict[str, Any]:
     context_left = max(0, left - context)
     context_right = min(len(units) - 1, right + context)
@@ -554,12 +553,9 @@ def normalize_exception_rows(value: Any) -> list[dict[str, Any]]:
 
 
 def semantic_grouping_binding(
-    units: list[Any], left: int, right: int, chunk_number: int, *,
-    sentence_boundary_policy: str,
+    units: list[Any], left: int, right: int, chunk_number: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    payload = units_payload(
-        units, left, right, sentence_boundary_policy=sentence_boundary_policy
-    )
+    payload = units_payload(units, left, right)
     fingerprint = hashlib.sha256(
         json.dumps(
             payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -1202,10 +1198,7 @@ def request_semantic_grouping_block(
     """Run semantic grouping and Cue layout with a strict input-bound contract."""
     left, right = bounds
     block_id = f"c{chunk_number:04d}"
-    payload, binding = semantic_grouping_binding(
-        units, left, right, chunk_number,
-        sentence_boundary_policy=getattr(args, "sentence_boundary_policy", "reference"),
-    )
+    payload, binding = semantic_grouping_binding(units, left, right, chunk_number)
     request = {
         **payload,
         "result_binding": binding,
@@ -1472,7 +1465,7 @@ def request_semantic_grouping_block(
                     auth_mode=args.auth_mode,
                     system=(
                         "\n\n".join((
-                            full_system_prompt,
+                            full_repair_system_prompt,
                             "REPAIR OVERRIDE: Return only two-column replacement rows for every OWN_RANGE. "
                             "Do not repeat CONTEXT or accepted first-pass ranges."
                         ))
@@ -1743,7 +1736,7 @@ def main(
         "--sentence-boundary-policy",
         choices=["reference", "reconstruct", "unpunctuated"],
         default="unpunctuated",
-        help="Treat native ASR sentence boundaries as soft references or hide them.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
     # Only the model creates display boundaries; unresolved lengths are
@@ -1779,13 +1772,7 @@ def main(
         "detected_language": language_analysis["resolved_language"],
         "resolved_language": source_language,
     }
-    prompt_variant = {
-        "zh-CN": "zh",
-        "en": "en",
-        "ja": "ja",
-        "ko": "ko",
-        "mixed": "mixed",
-    }.get(source_language, "en")
+    prompt_variant = "+".join(segmentation_prompt_variants(source_language_selection, units))
     language_limits = {
         "zh-CN": args.chinese_hard_limit,
         "en": args.english_hard_limit,
@@ -1810,16 +1797,6 @@ def main(
     semantic_grouping_repair_prompt = render_prompt(
         "semantic_grouping_repair", variant=prompt_variant
     )
-    boundary_evidence_prompt = render_prompt(
-        "boundary_evidence", variant=args.sentence_boundary_policy
-    )
-    grouping_system_prompt = (
-        semantic_grouping_prompt.text + "\n\n" + boundary_evidence_prompt.text
-    )
-    grouping_repair_system_prompt = (
-        semantic_grouping_repair_prompt.text + "\n\n" + boundary_evidence_prompt.text
-    )
-    rule_profile = grouping_system_prompt
     if args.glossary_snapshot is not None:
         raw_glossary = json.loads(read(args.glossary_snapshot))
         if not isinstance(raw_glossary, list) or any(
@@ -1924,15 +1901,28 @@ def main(
             "semantic grouping 已载入中断响应缓存",
             {"cached_blocks": sorted(response_cache), "count": len(response_cache)},
         )
+    block_prompt_variants = {}
+    prompt_by_variant = {
+        prompt_variant: (semantic_grouping_prompt.text, semantic_grouping_repair_prompt.text),
+    }
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(args.block_concurrency, len(ranges)))) as executor:
         futures = []
         for number, bounds in enumerate(ranges, start=1):
             block_id = f"c{number:04d}"
             cached_value = response_cache.get(block_id)
+            left, right = bounds
+            variant = "+".join(segmentation_prompt_variants(source_language_selection, units[left:right + 1]))
+            block_prompt_variants[block_id] = variant
+            if variant not in prompt_by_variant:
+                prompt_by_variant[variant] = tuple(
+                    render_prompt(key, variant=variant).text
+                    for key in ("semantic_grouping", "semantic_grouping_repair")
+                )
+            primary_prompt, repair_prompt = prompt_by_variant[variant]
             futures.append(executor.submit(
                 request_semantic_grouping_block,
-                units, bounds, number, args, grouping_system_prompt, glossary,
-                progress, cached_value, grouping_repair_system_prompt,
+                units, bounds, number, args, primary_prompt, glossary,
+                progress, cached_value, repair_prompt,
             ))
         try:
             rows = [future.result() for future in concurrent.futures.as_completed(futures)]
@@ -2005,10 +1995,9 @@ def main(
             "source_language": source_language,
             "language_detection": language_analysis,
             "resolved_hard_limit": args.hard_limit,
-            "sentence_boundary_policy": args.sentence_boundary_policy,
             "semantic_grouping_prompt": semantic_grouping_prompt.metadata(),
             "semantic_grouping_repair_prompt": semantic_grouping_repair_prompt.metadata(),
-            "boundary_evidence_prompt": boundary_evidence_prompt.metadata(),
+            "block_prompt_variants": block_prompt_variants,
             "models": {
                 "execution_planning": "deterministic.v1",
                 "semantic_grouping": args.grouping_model,

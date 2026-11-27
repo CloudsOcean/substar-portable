@@ -46,7 +46,7 @@ def test_translation_checks_each_track_not_bilingual_pair():
 def test_semantic_validation_uses_each_cue_language():
     units = [AlignmentUnit(index=i, start=i, end=i + .8, text=text) for i, text in enumerate([
         "This English line is longer than twenty five.", "独立的中文字幕", "今天我们开始使用 ChatGPT"])]
-    _, binding = semantic_grouping_binding(units, 0, 2, 1, sentence_boundary_policy="unpunctuated")
+    _, binding = semantic_grouping_binding(units, 0, 2, 1)
     value = {"schema_version": "substar.semantic-grouping-result.v1", **binding,
              "meaning_groups": [{"alignment_start": 0, "alignment_end": 2, "line_breaks_after": [0, 1, 2]}], "exceptions": []}
     issues = semantic_grouping_overflow_issues(value, units, (0, 2), 1, binding,

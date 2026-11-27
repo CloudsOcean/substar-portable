@@ -13,11 +13,11 @@
       "portable_manifest.json",
       "requirements-release.txt",
       "启动_Substar.cmd",
-      "停止_Substar.cmd",
       "substar_core/**/*.py",
       "web/**/*.js",
       "scripts/build-windows.ps1",
       "scripts/windows_export.cs",
+      "scripts/windows_launcher.cs",
       "scripts/run_transcription_worker.py",
       "scripts/run_segmentation_worker.py",
       "scripts/run_semantic_segmentation.py",
@@ -248,12 +248,6 @@
       "authority": "substar_core/export.py",
       "schema": null,
       "description": "Source, target or bilingual SRT rendered from the current verified revision."
-    },
-    "external_ai_exchange": {
-      "title": "External AI prooftranslation and segmentation package",
-      "authority": "substar_core/project_exchange.py",
-      "schema": null,
-      "description": "Revision-bound structured prooftranslation and token-boundary segmentation packages with strict hashes, preview validation and atomic revision commits."
     },
     "subtitle_project_exchange": {
       "title": "Portable subtitle project",
@@ -562,6 +556,12 @@
           "path": "substar_core/creation/projection.py",
           "symbols": [
             "subtitle_creation_projection"
+          ]
+        },
+        {
+          "path": "substar_core/job_diagnostics.py",
+          "symbols": [
+            "response_diagnostics"
           ]
         }
       ],
@@ -2248,7 +2248,7 @@
     "editor_api": {
       "title": "Editor HTTP API",
       "layer": "api",
-      "role": "Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration and external-AI exchange commands.",
+      "role": "Expose project/revision/media endpoints and revision-bound editing, reference-manuscript, translation, calibration commands.",
       "must_not": [
         "Bypass ProjectStore",
         "Allow edits while an exclusive AI operation is running",
@@ -2322,8 +2322,7 @@
         "editor_revision",
         "reference_document",
         "translation_request",
-        "project_task_info",
-        "external_ai_exchange"
+        "project_task_info"
       ],
       "outputs": [
         "editor_revision",
@@ -2331,8 +2330,7 @@
         "calibration_result",
         "media_info",
         "media_stream",
-        "project_task_info",
-        "external_ai_exchange"
+        "project_task_info"
       ],
       "calls": [
         "project_store",
@@ -2652,10 +2650,6 @@
           ]
         },
         {
-          "path": "substar_core/editor/calibration/exchange.py",
-          "symbols": []
-        },
-        {
           "path": "substar_core/cue_script.py",
           "symbols": [
             "render_cue_request",
@@ -2694,6 +2688,12 @@
           "path": "substar_core/editor/http_api.py",
           "symbols": [
             "ai_calibrate_project"
+          ]
+        },
+        {
+          "path": "substar_core/editor/calibration/text_track.py",
+          "symbols": [
+            "compute_text_calibration"
           ]
         }
       ],
@@ -3338,6 +3338,10 @@
           "symbols": [
             "refreshGapRows"
           ]
+        },
+        {
+          "path": "web/editor_shortcuts.js",
+          "symbols": []
         }
       ],
       "inputs": [
@@ -3703,10 +3707,6 @@
           "symbols": []
         },
         {
-          "path": "substar_core/editor/application/srt_import.py",
-          "symbols": []
-        },
-        {
           "path": "scripts/run_reference_match.py",
           "symbols": []
         },
@@ -4053,7 +4053,7 @@
     "project_exchange_service": {
       "title": "Portable subtitle project exchange",
       "layer": "application_service",
-      "role": "Export referenced original media into portable subtitle packages using package-relative paths; reject missing originals before streaming. Native local selection stores media_reference.json without copying the original; browser upload remains explicit copy-import compatibility. Imported packages must not install external media references. Historical external-AI exchange APIs remain backend-compatible.",
+      "role": "Export referenced original media into portable subtitle packages using package-relative paths; reject missing originals before streaming. Native local selection stores media_reference.json without copying the original; browser upload remains explicit copy-import compatibility. Imported packages must not install external media references.",
       "must_not": [
         "Call a model provider",
         "Rewrite immutable ASR source evidence",
@@ -4065,14 +4065,6 @@
       ],
       "code": [
         {
-          "path": "substar_core/editor/application/srt_import.py",
-          "symbols": [
-            "parse_srt",
-            "preview_srt",
-            "import_srt"
-          ]
-        },
-        {
           "path": "substar_core/media_reference.py",
           "symbols": []
         },
@@ -4083,21 +4075,13 @@
         {
           "path": "substar_core/project_exchange.py",
           "symbols": [
-            "external_prooftranslation_files",
-            "external_split_files",
-            "inspect_external_prooftranslation",
-            "apply_external_prooftranslation",
-            "inspect_external_split",
-            "apply_external_split",
             "export_subtitle_project",
-            "import_subtitle_project",
-            "external_translation_text"
+            "import_subtitle_project"
           ]
         }
       ],
       "inputs": [
         "editor_revision",
-        "external_ai_exchange",
         "subtitle_project_exchange",
         "project_task_info"
       ],
@@ -4105,7 +4089,6 @@
         "editor_operation",
         "editor_revision",
         "project_creation_projection",
-        "external_ai_exchange",
         "subtitle_project_exchange",
         "project_task_info"
       ],
@@ -4155,7 +4138,6 @@
       },
       "tests": [
         "tests/test_project_exchange.py",
-        "tests/test_srt_translation_import.py",
         "tests/editor_timeline_manual_cue.test.js"
       ],
       "change_impact": {
@@ -4173,7 +4155,6 @@
         "contracts": [
           "editor_revision",
           "editor_operation",
-          "external_ai_exchange",
           "subtitle_project_exchange",
           "project_creation_projection",
           "project_task_info"
@@ -4754,7 +4735,7 @@
     "launcher_runtime": {
       "title": "Launcher, backend instance ownership and graceful shutdown",
       "layer": "process",
-      "role": "Enforce one backend per install identity, start the backend, open the correct UI and stop the exact recorded process safely.",
+      "role": "Enforce one backend per computer, show its address without opening a browser, and stop the owned processes when the visible window closes.",
       "must_not": [
         "Kill a process without PID/start-time/install-root proof",
         "Use socket disappearance as proof of process exit",
@@ -4767,9 +4748,8 @@
           "path": "launcher.py",
           "symbols": [
             "main",
-            "_stop_running_instance",
             "_request_graceful_shutdown",
-            "_target_matches_instance"
+            "_foreground_backend_window"
           ]
         },
         {
@@ -4824,7 +4804,8 @@
         "scheduler"
       ],
       "invariants": [
-        "Force-stop requires PID creation time and install-root match",
+        "Only the visible backend window can request graceful shutdown through its private launch token",
+        "The launcher probes ports in ascending order only on address conflicts and persists the last successful listener",
         "Launcher shutdown deadline exceeds backend global shutdown budget",
         "Runtime records are install-root scoped",
         "Every Windows backend inherits one visible launcher console and headless ASGI startup fails closed",
@@ -4841,7 +4822,7 @@
         "Worker refuses shutdown"
       ],
       "recovery": {
-        "strategy": "Probe identity, wait for graceful shutdown, then use strictly verified process-tree termination only as fallback.",
+        "strategy": "Raise the existing backend window; on close request graceful shutdown and let the owned Job Object reap unfinished children.",
         "reuses": [
           "runtime identity record"
         ],
@@ -5416,7 +5397,7 @@
           "symbols": []
         },
         {
-          "path": "停止_Substar.cmd",
+          "path": "scripts/windows_launcher.cs",
           "symbols": []
         }
       ],
@@ -5653,7 +5634,6 @@
       "success": "The editor exposes portable subtitle-project import/export and previewed SRT translation-track import; a verified archive becomes one new project visible from both editor and split without overwriting existing data.",
       "tests": [
         "tests/test_project_exchange.py",
-        "tests/test_srt_translation_import.py",
         "tests/editor_timeline_manual_cue.test.js"
       ]
     },

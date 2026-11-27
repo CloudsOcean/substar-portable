@@ -6,10 +6,6 @@
   "use strict";
 
   const exchangeNames = {
-    "external-ai-prooftranslation":"外部AI校译",
-    "external-ai-split":"外部AI切分",
-    "external-ai-edit":"外部AI编辑",
-    "external-ai-generation":"外部AI生成",
     "subtitle-project":"字幕工程"
   };
 

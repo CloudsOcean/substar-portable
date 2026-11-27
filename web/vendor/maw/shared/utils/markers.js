@@ -36,19 +36,6 @@ export function createUtilsModule() {
     return MARKER_PRESET_COLOR_LABELS[value.trim().toLowerCase()] || '';
   }
 
-  // 复核三态循环：无（无 review 字段）→ 待复核 → 已确认 → 无。
-  function nextMarkerReviewStatus(marker) {
-    return marker?.review?.status === 'pending'
-      ? 'confirmed'
-      : marker?.review?.status === 'confirmed' ? null : 'pending';
-  }
-
-  function markerReviewStatusLabel(marker) {
-    if (marker?.review?.status === 'pending') return '待复核';
-    if (marker?.review?.status === 'confirmed') return '已确认';
-    return '无';
-  }
-
   function cloneMarkerValue(value) {
     return value === undefined ? undefined : JSON.parse(JSON.stringify(value ?? null));
   }
@@ -235,8 +222,6 @@ export function createUtilsModule() {
     MARKER_REVIEW_REASON_MAX_LENGTH,
     MARKER_MIN_VISIBLE_PERCENT,
     markerPresetColorLabel,
-    markerReviewStatusLabel,
-    nextMarkerReviewStatus,
     cloneMarkerValue,
     normalizeMarkerColor,
     normalizeMarkerItem,

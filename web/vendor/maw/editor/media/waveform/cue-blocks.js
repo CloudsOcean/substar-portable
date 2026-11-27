@@ -223,13 +223,8 @@ export function createWaveformModule(dependencies) {
         this.layoutGapBlock(block, gap, startMs, endMs);
         block.addEventListener('pointerdown', (event) => {
           const handle = (/** @type {Element | null} */ ((/** @type {HTMLElement} */ (event.target)).closest('.waveform-gap-handle')));
-          if (event.button === 0 && !handle) {
-            this.beginGapMoveDrag(
-              event,
-              index,
-              row,
-              event.ctrlKey || event.metaKey ? 'copy' : 'move',
-            );
+          if (event.button === 0 && !handle && (event.ctrlKey || event.metaKey)) {
+            this.beginGapCopyDrag(event, index, row);
             return;
           }
           if (!handle || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -250,7 +245,8 @@ export function createWaveformModule(dependencies) {
           }
           const timeMs = this.timeFromPointer(event, row);
           if (this.options.previewGapAt?.(index, timeMs) !== true) {
-            this.options.seek(timeMs / 1000, { mouseClick: true });
+            const targetMs = this.options.snapPlayheadBoundary?.(timeMs, { event, row }) ?? timeMs;
+            this.options.seek(targetMs / 1000, { mouseClick: true });
           }
           this.updatePlayback();
         });

@@ -22,7 +22,16 @@ def backend_launch_surface(
     if console_window_provider is None:
         import ctypes
 
-        console_window_provider = ctypes.windll.kernel32.GetConsoleWindow
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetConsoleWindow.restype = wintypes.HWND
+        user32 = ctypes.windll.user32
+        user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+
+        def console_window_provider():
+            window = kernel32.GetConsoleWindow()
+            return window if window and user32.IsWindowVisible(window) else 0
     try:
         return VISIBLE_CONSOLE if int(console_window_provider() or 0) else HEADLESS
     except (AttributeError, OSError, TypeError, ValueError):
@@ -40,7 +49,7 @@ def require_visible_backend(
     )
     if surface == HEADLESS:
         raise RuntimeError(
-            "Substar 后端拒绝隐藏启动。请在可见终端中运行启动_Substar.cmd；"
+            "Substar 后端拒绝隐藏启动。请双击 Substar.exe；"
             "网络与端到端测试必须复用这个正式后端。"
         )
     return surface

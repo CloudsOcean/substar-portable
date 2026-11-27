@@ -1,4 +1,13 @@
 /* Workspace actions and draggable tool windows. */
+.maw-gap-draw-armed .waveform-row { cursor: crosshair; }
+.maw-waveform-host .waveform-gap-block.maw-gap-selected { outline: 2px solid var(--theme-accent, #bd9aff); outline-offset: -2px; }
+
+html body.editor-shell :is(.subtitle-command-group,.cue-history-row,.command-right-zone)[inert] :is(button,input,details,.editor-command-link),
+html body.editor-shell #versionMenu[inert] {
+  opacity: .36;
+  filter: grayscale(1);
+}
+
 #detectSpeakers[hidden], .workspace-tool-dock[hidden] { display:none !important; }
 .workspace-tool-dock { position:fixed; display:flex; align-items:center; gap:4px; height:54px; box-sizing:border-box; padding:4px 6px; z-index:60; border:1px solid #383838; border-radius:6px; background:#202020; }
 html[data-editor-layout="experimental"] .workspace-tool-dock .experimental-tool-tabs { display:flex; align-items:center; flex-wrap:nowrap; gap:3px; height:44px; min-height:44px; margin:0; padding:0; border:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; flex:1; min-width:0; }
@@ -102,7 +111,7 @@ body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-color-
   background:var(--marker-color);border:1px solid #ffffff66;
 }
 body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-color-swatch.active {outline:2px solid var(--theme-accent-soft);outline-offset:1px;}
-body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-item-actions {display:flex;justify-content:space-between;align-items:center;gap:8px;}
+body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-item-actions {display:flex;justify-content:flex-end;align-items:center;gap:8px;}
 body.editor-shell .maw-waveform-host .waveform-marker-quick-edit .markers-item-actions button {height:30px;min-height:30px;padding:0 10px;font-size:12px;}
 
 /* Mostly solid cue fills keep waveforms from competing with subtitle text. */

@@ -8,9 +8,18 @@ from .reasoning_capabilities import (
 )
 
 
-REPAIR_STAGES = frozenset(
-    {"segmentation_repair", "translation_repair", "audit_repair"}
+TEXT_STAGE_FALLBACKS = {
+    "organize": "calibration",
+    "organize_repair": "audit_repair",
+    "punctuation": "calibration",
+    "punctuation_repair": "audit_repair",
+}
+STAGE_SETTING_SUFFIXES = ("model", "thinking_mode", "reasoning_effort", "max_tokens", "temperature")
+MODEL_STAGES = (
+    "segmentation", "segmentation_repair", "translation", "translation_repair",
+    "calibration", "audit_repair", *TEXT_STAGE_FALLBACKS,
 )
+REPAIR_STAGES = frozenset(stage for stage in MODEL_STAGES if stage.endswith("_repair"))
 
 
 def resolve_stage_request(
@@ -27,22 +36,28 @@ def resolve_stage_request(
     stage = str(stage).strip()
     if not stage:
         raise ValueError("stage is required")
+    def stage_setting(suffix: str) -> Any:
+        key = f"stage_{stage}_{suffix}"
+        if key in settings or stage not in TEXT_STAGE_FALLBACKS:
+            return settings.get(key)
+        return settings.get(f"stage_{TEXT_STAGE_FALLBACKS[stage]}_{suffix}")
+
     base_url = str(
         settings.get("translation_api_base_url") or "https://api.deepseek.com"
     ).strip()
     default_model = str(
         settings.get("translation_api_model") or "deepseek-v4-flash"
     ).strip()
-    model = str(settings.get(f"stage_{stage}_model") or default_model).strip()
+    model = str(stage_setting("model") or default_model).strip()
     requested_thinking = str(
-        settings.get(f"stage_{stage}_thinking_mode")
+        stage_setting("thinking_mode")
         or ("disabled" if stage in REPAIR_STAGES else "enabled")
     ).strip().lower()
     effective_thinking = resolve_thinking_mode(
         base_url, model, requested_thinking
     )
     requested_effort = str(
-        settings.get(f"stage_{stage}_reasoning_effort") or "low"
+        stage_setting("reasoning_effort") or "low"
     ).strip().lower()
     effective_effort = reasoning_effort_for_request(
         base_url, model, requested_effort
@@ -61,9 +76,9 @@ def resolve_stage_request(
         "requested_reasoning_effort": requested_effort,
         "reasoning_effort": effective_effort,
         "max_tokens": int(
-            settings.get(f"stage_{stage}_max_tokens") or 65536
+            stage_setting("max_tokens") or 65536
         ),
         "temperature": float(
-            settings.get(f"stage_{stage}_temperature") or 0.0
+            stage_setting("temperature") or 0.0
         ),
     }

@@ -3,6 +3,10 @@ setlocal
 chcp 65001 >nul
 title Substar 正在启动
 cd /d "%~dp0"
+if exist "%~dp0Substar.exe" (
+    "%~dp0Substar.exe"
+    exit /b
+)
 set "SUBSTAR_DATA_ROOT=%~dp0data"
 set SUBSTAR_EDITION=slim
 set "PATH=%~dp0runtime\ffmpeg\bin;%PATH%"

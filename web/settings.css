@@ -708,6 +708,13 @@ details[open].advanced summary i {
 #settingsForm:has(.settings-panel[data-settings-panel="personalization"].active) > .save-bar {
   position: static;
 }
+.ai-processing-group + .ai-processing-group {
+  margin-top: 30px;
+}
+.ai-processing-group h2 {
+  margin: 0 0 14px;
+  font-size: 18px;
+}
 .stage-settings {
   display: grid;
   gap: 12px;

@@ -1,5 +1,5 @@
 from substar_core.subtitle_exports import BilingualBlock, render_track
-from substar_core.editor.application.srt_import import parse_srt
+from substar_core.editor.application.subtitle_project_import import parse_srt
 from substar_core.export import render_document_srt
 from substar_core.editor.application.subtitle_project_import import preview_subtitle_project, build_subtitle_document
 

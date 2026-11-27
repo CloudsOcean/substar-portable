@@ -14,7 +14,7 @@ type WaveformMethods =
   DescriptorValues<ReturnType<typeof import('./cue-commands.js').createWaveformModule>, 'adjustSelectedByKeyboard' | 'adjustSelectedBoundaryByKeyboard' | 'setCueBoundaryToTime' | 'snapSelectedCueBoundaryByKeyboard' | 'adjustActiveCueDragBy' | 'handleHeldCueKey' | 'snapActiveCueBoundaryByKeyboard' | 'cancelCueDrag' | 'applyIndependentBoundaryDrag'> &
   DescriptorValues<ReturnType<typeof import('./cue-drag-update.js').createWaveformModule>, 'moveCueDrag' | 'moveDragDelta' | 'applySelectedMoveDrag' | 'applyMoveDrag' | 'applyResizeDrag' | 'applyBoundaryDrag' | 'endCueDrag'> &
   DescriptorValues<ReturnType<typeof import('./cue-drag.js').createWaveformModule>, 'beginCueDrag' | 'isSharedBoundary' | 'beginIndependentEdgeDrag' | 'beginSharedBoundaryZoneDrag' | 'cueDragDurationMs' | 'cueTiming' | 'cueTimingDuration' | 'cueTimingValueFromMs' | 'cueTimingValueToMs' | 'formatCueTiming' | 'captureSelectedMoveTracks' | 'reindexSelectedMoveTracks' | 'restoreSelectedMoveDrag' | 'captureCueDragOriginals' | 'rebaseCueDragToTrack'> &
-  DescriptorValues<ReturnType<typeof import('./gap-drag.js').createWaveformModule>, 'beginGapBoundaryDrag' | 'beginGapMoveDrag' | 'gapMoveTarget' | 'moveGapMoveDrag' | 'scheduleGapMovePreview' | 'clearGapMovePreview' | 'previewGapMoveDrag' | 'endGapMoveDrag' | 'refreshGapBlocks' | 'clearGapBoundaryPreview' | 'appendGapBoundaryPreview' | 'previewGapBoundaryDrag' | 'moveGapBoundaryDrag' | 'scheduleGapPreview' | 'endGapBoundaryDrag' | 'beginGapRangeDrag' | 'gapRangePointerTime' | 'clearGapRangePreviews' | 'layoutGapRangePreview' | 'moveGapRangeDrag' | 'endGapRangeDrag'> &
+  DescriptorValues<ReturnType<typeof import('./gap-drag.js').createWaveformModule>, 'beginGapBoundaryDrag' | 'beginGapCopyDrag' | 'gapCopyTarget' | 'moveGapCopyDrag' | 'scheduleGapCopyPreview' | 'clearGapCopyPreview' | 'previewGapCopyDrag' | 'endGapCopyDrag' | 'refreshGapBlocks' | 'clearGapBoundaryPreview' | 'appendGapBoundaryPreview' | 'previewGapBoundaryDrag' | 'moveGapBoundaryDrag' | 'scheduleGapPreview' | 'endGapBoundaryDrag' | 'beginGapRangeDrag' | 'gapRangePointerTime' | 'clearGapRangePreviews' | 'layoutGapRangePreview' | 'moveGapRangeDrag' | 'endGapRangeDrag'> &
   DescriptorValues<ReturnType<typeof import('./input.js').createWaveformModule>, 'seekFromPointer' | 'seekFromCue' | 'beginCreateCueDrag' | 'captureRowGeometry' | 'trackAtPoint' | 'isCueTimeOccupied' | 'clampCreateCueTime' | 'beginBlockedCueCreateDrag' | 'timeFromPointer' | 'timeFromPointerUnbounded' | 'flashSplitAtTime' | 'getSplitPointAtTime' | 'timeMsAtPoint' | 'beginPlayheadDrag' | 'beginMarqueeDrag' | 'handleWheel'> &
   DescriptorValues<ReturnType<typeof import('./markers.js').createWaveformModule>, 'getMarkers' | 'appendMarkerTrack' | 'appendMarkerElement' | 'refreshMarkerOverlay' | 'openMarkerQuickEdit' | 'syncMarkerQuickEdit' | 'positionMarkerQuickEdit' | 'closeMarkerQuickEdit' | 'findMarkerRowAtClientY' | 'markerPointerGeometry' | 'markerPointerTimeMs' | '_beginMarkerPointerTracking' | '_teardownMarkerPointerTracking' | 'beginMarkerDrag' | 'beginMarkerCreateDrag' | 'moveMarkerDrag' | 'applyMarkerDragTime' | 'markerEdgeAutoScroll' | 'stopMarkerEdgeAutoScroll' | 'clearMarkerDragPreviews' | 'refreshMarkerDragPointerLine' | 'updateMarkerDragPreview' | 'endMarkerDrag'> &
   DescriptorValues<ReturnType<typeof import('./media.js').createWaveformModule>, 'attachPlayer' | 'setMediaAvailable' | 'setPayload' | 'getPayload' | 'setSpectralPayload' | 'setReapeaksWaveform' | 'activeWaveShape' | 'getGapRemoveDetectionData' | 'processFile' | 'waitForPlayerDuration' | 'durationMs' | 'currentTimeMs' | 'centerBasicOnCurrentTime'> &
@@ -110,7 +110,7 @@ export interface GapDragState {
   index?: number; startMs?: number; endMs?: number; original?: Gap;
   originalGaps?: Gap[]; nextGaps?: Gap[]; captureTarget?: HTMLElement;
   changed?: boolean; targetGap?: Gap; deltaMs?: number; startPointerMs?: number;
-  edge?: string; mode?: string; valueMs?: number; removed?: boolean; previews?: HTMLElement[];
+  edge?: string; valueMs?: number; removed?: boolean; previews?: HTMLElement[];
 }
 export interface NavigationSnapshot {
   cueListScrollTop?: number; waveformTopEdgeMs?: number;
@@ -160,6 +160,7 @@ export interface WaveformOptions {
   showBlankWaveformMenu?(...args: unknown[]): void;
   toggleGapRemoved?(...args: unknown[]): void;
   previewGapAt?(...args: unknown[]): void;
+  snapPlayheadBoundary?(timeMs: number, context: { event: MouseEvent; row: WaveformRow }): number;
   seek?(...args: unknown[]): void;
   showGapContextMenu?(...args: unknown[]): void;
   showContextMenu?(...args: unknown[]): void;
@@ -191,7 +192,6 @@ export interface WaveformOptions {
   addExtensionSelection?(...args: unknown[]): void;
   addCueSelection?(...args: unknown[]): void;
   copyGap?(...args: unknown[]): void;
-  moveGap?(...args: unknown[]): void;
   applyGapRange?(...args: unknown[]): void;
   addCueRange?(...args: unknown[]): void;
   onPlayheadDragStateChange?(...args: unknown[]): void;
@@ -226,8 +226,8 @@ export interface WaveformState {
   activeIndex: number; activeExtensionIndex: number; activeOverlayIndex: number;
   activeVisualHit: boolean; activeExtensionVisualHit: boolean; activeOverlayVisualHit: boolean;
   drag: CueDragState | null; createCueDrag: CueCreateState | null;
-  gapRangeDrag: GapDragState | null; gapBoundaryDrag: GapDragState | null; gapMoveDrag: GapDragState | null;
-  gapMovePreviewFrame: number; gapPreviewFrame: number; suppressGapClickUntil: number;
+  gapRangeDrag: GapDragState | null; gapBoundaryDrag: GapDragState | null; gapCopyDrag: GapDragState | null;
+  gapCopyPreviewFrame: number; gapPreviewFrame: number; suppressGapClickUntil: number;
   autoScrolling: boolean; autoScrollTarget: number | null; navigationRestoring: boolean;
   multiFollowRowIndex: number; multiFollowCheckPending: boolean;
   resizeFrame: number; multiVisibleFrame: number; basicRenderFrame: number; cueRefreshFrame: number;
@@ -251,7 +251,7 @@ export interface WaveformState {
   _onPlayerTime: () => void; _onResize: () => void; resizeObserver: ResizeObserver;
   _dragMove: (event: PointerEvent) => void; _dragEnd: (event: PointerEvent) => void;
   _gapBoundaryMove: (event: PointerEvent) => void; _gapBoundaryEnd: (event: PointerEvent) => void;
-  _gapMoveMove: (event: PointerEvent) => void; _gapMoveEnd: (event: PointerEvent) => void;
+  _gapCopyMove: (event: PointerEvent) => void; _gapCopyEnd: (event: PointerEvent) => void;
   _gapRangeMove: (event: PointerEvent) => void; _gapRangeEnd: (event: PointerEvent) => void;
   markerQuickEdit: {markerId: string; element: HTMLElement} | null;
   _markerQuickEditOutside: ((event: PointerEvent) => void) | null;

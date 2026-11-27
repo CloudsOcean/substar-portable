@@ -265,41 +265,11 @@ export function initSubstarMarkersPanel(global, {compact = false} = {}) {
   }
 
 
-  function updateAiCleanupReviewStatusButton(button, marker) {
-    if (!button || !marker) return;
-    const status = aiCleanupReviewMuteState(marker.id);
-    const removed = status.matchesCurrentRange && status.removed;
-    const partiallyRemoved = status.matchesCurrentRange && status.partiallyRemoved;
-    const label = removed ? '已移除'
-      : partiallyRemoved ? '部分移除'
-        : markerUtils().markerReviewStatusLabel(marker);
-    button.textContent = window.MAWE_I18N?.translateText(label) || label;
-    button.classList.toggle('pending', !removed && !partiallyRemoved && marker.review?.status === 'pending');
-    button.classList.toggle('confirmed', !removed && !partiallyRemoved && marker.review?.status === 'confirmed');
-    button.classList.toggle('removed', removed);
-    button.classList.toggle('partially-removed', partiallyRemoved);
-    button.disabled = removed || partiallyRemoved;
-    const title = removed || partiallyRemoved
-      ? (removed ? 'AI 复核区段已移除' : 'AI 复核区段已部分移除')
-      : String(marker.review?.reason || '');
-    button.title = window.MAWE_I18N?.translateText(title) || title;
-    if (marker.review?.reason && !removed && !partiallyRemoved) {
-      button.dataset.markerProjectReason = 'true';
-    } else {
-      delete button.dataset.markerProjectReason;
-    }
-  }
-
-
   function refreshAiCleanupReviewMuteButtons() {
     const list = MaweDom.markersList;
     if (list) {
       list.querySelectorAll('[data-ai-cleanup-review-mute]').forEach((button) => {
         updateAiCleanupReviewMuteButton(button, button.dataset.aiCleanupReviewMute);
-      });
-      list.querySelectorAll('[data-ai-cleanup-review-status]').forEach((button) => {
-        const marker = MaweMarkerEditing.findMarker(button.dataset.aiCleanupReviewStatus);
-        updateAiCleanupReviewStatusButton(button, marker);
       });
     }
     MaweCoreState.waveformEditor?.syncMarkerQuickEdit?.();
@@ -478,27 +448,7 @@ export function initSubstarMarkersPanel(global, {compact = false} = {}) {
 
     const actions = document.createElement('div');
     actions.className = 'markers-item-actions';
-    const reviewActions = document.createElement('div');
-    reviewActions.className = 'markers-review-actions';
-    // 复核三态 toggle（左下角）：无 → 待复核 → 已确认 → 无；每次点击进撤销历史。
-    const reviewToggle = document.createElement('button');
-    reviewToggle.type = 'button';
-    reviewToggle.className = `markers-review-toggle${marker.review ? ' has-review' : ''}${marker.review?.status === 'pending' ? ' pending' : ''}${marker.review?.status === 'confirmed' ? ' confirmed' : ''}`;
-    // 资格可在 gap history 恢复时变化；保持控件身份，刷新时不重建编辑卡片。
-    reviewToggle.dataset.aiCleanupReviewStatus = marker.id;
-    reviewToggle.textContent = utils.markerReviewStatusLabel(marker);
-    if (marker.review?.reason) {
-      reviewToggle.title = marker.review.reason;
-      reviewToggle.dataset.markerProjectReason = 'true';
-    }
-    reviewToggle.addEventListener('click', () => {
-      MaweMarkerEditing.updateMarkerFields(marker.id, { review: utils.nextMarkerReviewStatus(marker) });
-    });
-    updateAiCleanupReviewStatusButton(reviewToggle, marker);
-    reviewActions.appendChild(reviewToggle);
-    const muteButton = createAiCleanupReviewMuteButton(marker.id);
-    reviewActions.appendChild(muteButton);
-    actions.appendChild(reviewActions);
+    actions.appendChild(createAiCleanupReviewMuteButton(marker.id));
     const locateButton = document.createElement('button');
     locateButton.type = 'button';
     locateButton.textContent = '定位试听';
@@ -818,7 +768,6 @@ export function initSubstarMarkersPanel(global, {compact = false} = {}) {
     refreshAiCleanupReviewMuteButtons,
     createAiCleanupReviewMuteButton,
     updateAiCleanupReviewMuteButton,
-    updateAiCleanupReviewStatusButton,
     getSelectedMarkerId: () => selectedMarkerId,
   });
   document.addEventListener('mawe:languagechange', refreshAiCleanupReviewMuteButtons);

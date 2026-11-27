@@ -3,6 +3,11 @@
 .maw-waveform-host .waveform-pane{flex:1;min-height:140px;}
 .maw-waveform-host .waveform-scroll{overflow-y:auto;}
 .maw-waveform-host .waveform-pane.basic-mode .waveform-scroll{overflow:hidden;}
+.maw-waveform-host .waveform-gap-block.maw-gap-outline-only{
+  background-image:none;
+  border:1px solid var(--gap-protected-edge);
+  box-shadow:none;
+}
 .maw-waveform-host .waveform-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;padding:5px 8px;min-height:32px;}
 .maw-waveform-host .waveform-toolbar-controls{display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0;height:auto;max-height:100%;overflow-x:auto;overflow-y:hidden;}
 .maw-waveform-host .waveform-toolbar-controls>button,.maw-waveform-host .waveform-edit-tools{flex-shrink:0;}

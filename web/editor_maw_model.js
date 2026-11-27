@@ -15,7 +15,7 @@
       const cue=cues.get(s.id);
       const lines=projectLines?.(cue);
       if(lines){s.rawText=s.text;s.rawTranslation=s.translation;s.text=lines.source;s.translation=lines.target;s.sourceUpper=lines.sourceUpper;}
-      if(projectToken)s.items=s.items.map(item=>({...item,rawText:item.text,text:projectToken(item.text,cue)}));
+      if(projectToken)s.items=s.items.map(item=>({...item,rawText:item.text,text:projectToken(item.text,cue,item.id)}));
       return s;
     }).sort((a,b)=>a.start-b.start||a.end-b.end||a.id.localeCompare(b.id));
   }

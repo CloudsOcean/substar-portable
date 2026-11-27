@@ -4,7 +4,6 @@ from types import SimpleNamespace
 from substar_core.domain import (ChangeKind, ChangeProvenance, DisplayCue,
     DisplayToken, EditorDocument, EntityState, SourceToken)
 from substar_core.document_operations import apply_document_operation, DocumentOperationError
-from substar_core.editor.calibration.exchange import inspect_calibration, SCHEMA
 
 
 def fixture(deleted=True):
@@ -70,15 +69,6 @@ class DeletedGapTests(unittest.TestCase):
         result = merge(fixture(), ['d2', 'd3'], 'Autumn Festival')
         self.assertEqual(len(result.display_tokens), 3)
         result.validate()
-
-    def test_external_import_preview_handles_deleted_gap(self):
-        revision = SimpleNamespace(document=fixture(), revision_id='revision-test')
-        payload = {'schema_version':SCHEMA, 'project_id':'project-test',
-                   'revision_id':revision.revision_id, 'output':'1|Mid-Autumn Festival'}
-        document, _, result = inspect_calibration('project-test', revision, payload)
-        self.assertEqual(result['merge_count'], 1)
-        self.assertEqual(next(t.state for t in document.display_tokens if t.token_id == 'd1'), EntityState.DELETED)
-        document.validate()
 
 
 if __name__ == '__main__':

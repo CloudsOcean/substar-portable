@@ -4545,7 +4545,6 @@
 .markers-time-field { display: grid; gap: 4px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
 .markers-time-field input { font: 600 12px/1.4 var(--font-mono); }
 .markers-item-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
-.markers-review-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-right: auto; }
 .markers-search-match { color: var(--text-primary); background: var(--accent-tint-strong); border-radius: 2px; }
 .markers-item-actions button {
   padding: 4px 10px; color: var(--text-secondary); background: var(--btn-bg);
@@ -4555,21 +4554,7 @@
 }
 .markers-item-actions button:hover:not(:disabled) { color: var(--text-primary); background: var(--btn-bg-hover); }
 .markers-item-actions button:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
-/* 复核三态 toggle（编辑框左下角）：无 → 待复核 → 已确认 → 无。 */
-.markers-item-actions button.markers-review-toggle { font-weight: 600; }
-.markers-item-actions > button.markers-review-toggle { margin-right: auto; }
-.markers-item-actions button.markers-review-toggle.has-review { color: var(--text-primary); }
-.markers-item-actions button.markers-review-toggle.pending {
-  color: #241503; background: #f5a623; border-color: #f5a623;
-}
-.markers-item-actions button.markers-review-toggle.confirmed {
-  color: #d9f2e3; background: #2b5b3f; border-color: #2b5b3f;
-}
-.markers-item-actions button.markers-review-toggle.removed,
-.markers-item-actions button.markers-review-toggle.partially-removed {
-  color: var(--text-secondary); background: var(--panel-bg, var(--btn-bg));
-  border-color: var(--border); opacity: 0.72;
-}
+.markers-item-actions > .markers-ai-review-mute-toggle { margin-inline-end: auto; }
 .markers-item-actions button.markers-ai-review-mute-toggle.is-muted {
   color: var(--text-primary); border-color: var(--accent-line);
 }

@@ -26,8 +26,7 @@ def fixture(tmp_path):
 
 
 def response(units, index):
-    _, binding = semantic_grouping_binding(units, index, index, index + 1,
-                                          sentence_boundary_policy="unpunctuated")
+    _, binding = semantic_grouping_binding(units, index, index, index + 1)
     return {"schema_version": "substar.semantic-grouping-result.v1", **binding,
             "meaning_groups": [{"alignment_start": index, "alignment_end": index,
                                 "line_breaks_after": [index]}], "exceptions": []}

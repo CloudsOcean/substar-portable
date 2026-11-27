@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded',()=>{const tag=document.createEleme
   <div class="editor-command-bar">
     <div class="command-project-zone">
       <details id="projectMenu" class="editor-command-menu"><summary>项目</summary><div class="editor-command-popover project-popover"><span class="project-list-heading">编辑项目</span><div id="projectList" class="project-list" role="listbox" aria-label="编辑项目"><span class="project-list-empty">读取项目…</span></div></div></details>
-      <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importProjectPackage" type="button">字幕工程</button><button id="importSrtTranslation" type="button">SRT 译文轨道</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
+      <details id="importMenu" class="editor-command-menu"><summary id="importProject">导入</summary><div class="editor-command-popover compact import-popover"><button id="importProjectPackage" type="button">字幕工程</button></div></details><input id="importProjectInput" type="file" accept=".zip,application/zip" hidden>
       <input id="importSrtInput" type="file" accept=".srt,application/x-subrip" hidden>
       <details id="taskInfoMenu" class="editor-command-menu task-info-menu disabled">
         <summary id="taskInfo" aria-disabled="true">任务信息</summary>
@@ -251,17 +251,6 @@ document.addEventListener('DOMContentLoaded',()=>{const tag=document.createEleme
       <header><span id="editorTutorialProgress">案例教程 · 1 / 19</span><button id="exitEditorTutorial" type="button">退出教程</button></header>
       <div class="editor-tutorial-copy"><h2 id="editorTutorialTitle"></h2><p id="editorTutorialDescription"></p></div>
       <footer id="editorTutorialFooter"><button id="editorTutorialNext" type="button">继续</button></footer>
-    </section>
-  </div>
-
-  <div id="srtImportDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="srtImportTitle">
-    <section class="text-dialog" style="width:min(820px,94vw)">
-      <strong id="srtImportTitle">导入 SRT 译文轨道</strong>
-      <p>按时间轴匹配当前字幕，仅写入译文。轨道内夹杂的其他语言完整保留。</p>
-      <label>文件格式<select id="srtImportFormat"><option value="auto">自动识别</option><option value="source">原文单行</option><option value="target">译文单行</option><option value="ab-single">双语单行</option><option value="ab-double">双语双行</option></select></label>
-      <p id="srtImportSummary" role="status"></p>
-      <div id="srtImportRows" style="max-height:45vh;overflow:auto;white-space:pre-wrap"></div>
-      <div><button id="cancelSrtImport" type="button">取消</button><button id="previewSrtImport" type="button">重新匹配</button><button id="applySrtImport" class="primary" type="button" disabled>确认导入匹配项</button></div>
     </section>
   </div>
 

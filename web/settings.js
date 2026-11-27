@@ -30,10 +30,29 @@ let selectedPromptCategory = "segmentation";
 let selectedPromptComponent = null;
 let loadedPromptText = "";
 const connectionStateKey = "substar.settings.connected-providers.v1";
-const shortcutDefaults = {
-  undo: "Ctrl+Z", redo: "Ctrl+Y", play_pause: "Space", hide_cue: "Backspace",
-};
+const shortcuts = window.SubstarShortcuts;
+const shortcutDefaults = shortcuts.defaults;
 const singleKeyShortcutCommands = new Set(["play_pause", "hide_cue"]);
+const shortcutTemplate = $("#shortcutRowTemplate");
+const initialShortcuts = shortcuts.bindings();
+for (const {id,label,description} of shortcuts.actions) {
+  const row = shortcutTemplate.content.firstElementChild.cloneNode(true);
+  row.querySelector("strong").textContent = label;
+  row.querySelector("small").textContent = description;
+  const input = row.querySelector("input");
+  const reset = row.querySelector("button");
+  input.value = initialShortcuts[id];
+  input.setAttribute("aria-label", `${label}快捷键`);
+  if (shortcuts.fixedActions.has(id)) {
+    input.disabled = true;
+    reset.hidden = true;
+  } else {
+    input.dataset.shortcutInput = id;
+    reset.dataset.shortcutReset = id;
+    if (shortcuts.serverActions.has(id)) input.name = "shortcut_" + id;
+  }
+  shortcutTemplate.before(row);
+}
 const providerModelCatalogs = new Map();
 let connectedProviders = (() => {
   try {
@@ -52,19 +71,6 @@ function saveConnectedProviders() {
   }
 }
 
-function shortcutFromEvent(event, { allowSingleKey = false } = {}) {
-  if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return "";
-  if (!event.ctrlKey && !event.altKey && !event.metaKey && !allowSingleKey) return "";
-  const parts = [];
-  if (event.ctrlKey) parts.push("Ctrl");
-  if (event.altKey) parts.push("Alt");
-  if (event.shiftKey) parts.push("Shift");
-  if (event.metaKey) parts.push("Meta");
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
-  parts.push(key === " " ? "Space" : key);
-  return parts.join("+");
-}
-
 function setShortcutMessage(text, error = false) {
   const message = $("#shortcutMessage");
   if (!message) return;
@@ -73,11 +79,19 @@ function setShortcutMessage(text, error = false) {
 }
 
 function assignShortcut(input, value) {
+  const command = input.dataset.shortcutInput;
   const collision = $$('[data-shortcut-input]').find((other) =>
     other !== input && String(other.value || "").toLowerCase() === value.toLowerCase()
   );
   if (collision) {
     setShortcutMessage(`快捷键 ${value} 已分配给另一个命令。`, true);
+    return;
+  }
+  if (!shortcuts.serverActions.has(command)) {
+    try { shortcuts.saveLocal(command, value); }
+    catch (_) { return setShortcutMessage("无法保存此浏览器的快捷键设置。", true); }
+    input.value = value;
+    setShortcutMessage(`已设置为 ${shortcuts.display(value)}。`);
     return;
   }
   input.value = value;
@@ -205,15 +219,20 @@ function syncModelProvider(provider = null) {
 
 const stageDefinitions = {
   segmentation: [
-    ["segmentation", "语义切分", "结合上下文生成更自然的字幕切点"],
-    ["segmentation_repair", "修复 · 切分坏块", "任一切分块验收失败后仅对该块修复一次；模型允许时关闭思考"],
+    ["segmentation", "主模块", "结合上下文生成字幕切点"],
+    ["segmentation_repair", "修复模块", "仅重跑缺失或验收失败的切分块"],
   ],
   translation: [
-    ["translation", "字幕翻译", "结合上下文生成最终 Cue 译文"],
-    ["translation_repair", "修复 · 翻译坏块", "只对未返回或验收失败的意义组修复一次；模型允许时关闭思考"],
+    ["translation", "主模块", "结合上下文生成 Cue 译文"],
+    ["translation_repair", "修复模块", "仅重跑缺失或验收失败的意义组"],
   ],
-  audit: [
-    ["calibration", "AI整理 / AI标点", "两个独立功能共用此调用配置；整理只删词和断句，标点只改标点与大小写"],
+  organize: [
+    ["organize", "主模块", "删除冗余文字并调整断句"],
+    ["organize_repair", "修复模块", "仅重跑缺失或验收失败的整理块"],
+  ],
+  punctuation: [
+    ["punctuation", "主模块", "调整标点与大小写"],
+    ["punctuation_repair", "修复模块", "仅重跑缺失或验收失败的标点块"],
   ],
 };
 
@@ -225,9 +244,9 @@ const reasoningEffortLabels = {
   max: "Max",
 };
 const allReasoningEfforts = Object.keys(reasoningEffortLabels);
-const nonThinkingPreferredStages = new Set([
-  "segmentation_repair", "translation_repair", "audit_repair",
-]);
+const nonThinkingPreferredStages = new Set(
+  Object.values(stageDefinitions).map(([, [repairStage]]) => repairStage),
+);
 const modelSettingsFields = new Set([
   "translation_api_provider", "translation_api_base_url", "translation_api_model",
   "translation_api_auth_mode", "translation_api_timeout_seconds",
@@ -259,9 +278,9 @@ function renderStageSettings(containerId, definitions) {
     </article>`).join("");
 }
 
-renderStageSettings("segmentationStageSettings", stageDefinitions.segmentation);
-renderStageSettings("translationStageSettings", stageDefinitions.translation);
-renderStageSettings("auditStageSettings", stageDefinitions.audit);
+for (const [feature, definitions] of Object.entries(stageDefinitions)) {
+  renderStageSettings(`${feature}StageSettings`, definitions);
+}
 
 function stageModel(stage) {
   return String(
@@ -508,10 +527,6 @@ async function loadRecognitionProfiles() {
     $$('[data-engine-profile]').forEach((button) => {
       button.classList.toggle("hidden", button.dataset.engineProfile !== "qwen_cloud");
     });
-    $$(".stage-config-card[data-stage]").forEach((card) => {
-      const keep = new Set(["segmentation", "segmentation_repair", "translation", "translation_repair", "calibration"]);
-      card.classList.toggle("hidden", !keep.has(card.dataset.stage));
-    });
     const localAssets = $("#environmentAssets")?.closest(".environment-section");
     const localProfiles = $("#environmentProfiles")?.closest(".environment-section");
     localAssets?.classList.add("hidden");
@@ -538,6 +553,7 @@ function setHeader(text, state = "") {
 }
 
 function switchPanel(name) {
+  if (["segmentation", "translation", "audit"].includes(name)) name = "ai-processing";
   if (name === "environment") name = "api";
   if (["shortcuts", "advanced", "updates"].includes(name)) name = "general";
   $$(".category").forEach((button) =>
@@ -553,8 +569,9 @@ function switchPanel(name) {
 
 const promptLanguageLabels = {
   en: "英文", zh: "中文", ja: "日文", ko: "韩文", mixed: "混合语种",
-  default: "默认", generic: "通用", reference: "参考文稿",
-  reconstruct: "标点重建", unpunctuated: "无标点重建",
+  th: "泰文", ar: "阿拉伯文", fr: "法文", de: "德文",
+  es: "西班牙文", pt: "葡萄牙文", ru: "俄文", it: "意大利文",
+  default: "默认", generic: "通用", repair: "修复",
 };
 
 function promptVariantLabel(value) {
@@ -562,7 +579,7 @@ function promptVariantLabel(value) {
     const [source, target] = value.split("_to_");
     return `${promptLanguageLabels[source] || source} → ${promptLanguageLabels[target] || target}`;
   }
-  return promptLanguageLabels[value] || value;
+  return promptLanguageLabels[value.replace(/^target_/, "")] || value;
 }
 
 function promptKindLabel(kind) {
@@ -688,12 +705,37 @@ function renderPromptCategory(categoryId) {
   if (firstFamily?.variants[0]) showPromptRoute(firstFamily, firstFamily.variants[0], true);
 }
 
+function groupPromptFamilies(families) {
+  const byId = new Map(families.map(family => [family.id, family]));
+  const groupedRepair = {
+    semantic_grouping: "semantic_grouping_repair",
+    contextual_translation: "contextual_translation_repair",
+    calibration: "calibration_repair",
+  };
+  const secondary = new Set(Object.values(groupedRepair));
+  return families.filter(family => !secondary.has(family.id)).map(family => {
+    const repair = byId.get(groupedRepair[family.id]);
+    const routes = family.variants.filter(variant => variant.id !== "generic");
+    const generic = family.variants.find(variant => variant.id === "generic");
+    const base = [...family.shared, ...(generic?.files || [])];
+    const repairFiles = repair?.id === "semantic_grouping_repair"
+      ? repair.shared
+      : [...(repair?.shared || []).filter(path => !family.shared.includes(path) && !base.includes(path)),
+        ...(repair?.id === "calibration_repair" ? repair.variants.flatMap(variant => variant.files) : [])];
+    const pinned = [
+      base.length ? {id: "generic", files: [...new Set(base)]} : null,
+      repairFiles.length ? {id: "repair", files: [...new Set(repairFiles)]} : null,
+    ].filter(Boolean);
+    return {...family, variants: [...pinned, ...routes]};
+  });
+}
+
 function renderPromptCatalog(catalog) {
-  promptCatalogData = catalog;
+  promptCatalogData = {...catalog, families: groupPromptFamilies(catalog.families)};
   const stats = catalog.stats;
   $("#promptBadge").textContent = `${stats.components} 项`;
   $("#promptCategoryTabs").innerHTML = catalog.categories.map((category) => {
-    const count = catalog.families.filter((item) => item.category === category.id).length;
+    const count = promptCatalogData.families.filter((item) => item.category === category.id).length;
     return `<button class="prompt-category-tab" type="button" data-prompt-category="${escapeHtml(category.id)}"><b>${escapeHtml(category.title)}</b><small>${escapeHtml(category.description)}</small><i>${count}</i></button>`;
   }).join("");
   renderPromptCategory(catalog.categories.some((item) => item.id === selectedPromptCategory) ? selectedPromptCategory : catalog.categories[0]?.id);
@@ -836,6 +878,7 @@ function buildPayload() {
   delete payload.api_key_set;
   delete payload.alignment_api_key_set;
   delete payload.translation_api_key_set;
+  delete payload.display_order;
   payload.api_key = "";
   payload.alignment_api_key = "";
   payload.clear_api_key = false;
@@ -1382,15 +1425,22 @@ $$('[data-shortcut-input]').forEach((input) => {
   input.addEventListener("focus", () => {
     input.classList.add("is-recording");
     const single = singleKeyShortcutCommands.has(input.dataset.shortcutInput);
-    setShortcutMessage(single ? "请按 Space 或 Backspace；按 Esc 取消。" : "请按下包含 Ctrl、Alt 或 Meta 的组合键；按 Esc 取消。");
+    setShortcutMessage(single ? "请按 Space 或 Backspace；按 Esc 取消。" : "请按下要设置的快捷键；按 Esc 取消。");
   });
   input.addEventListener("blur", () => input.classList.remove("is-recording"));
   input.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (event.key === "Escape") return input.blur();
-    const single = singleKeyShortcutCommands.has(input.dataset.shortcutInput);
-    const shortcut = shortcutFromEvent(event, {allowSingleKey:single});
-    if (!shortcut || (single && !["Space", "Backspace"].includes(shortcut))) {
+    const command = input.dataset.shortcutInput;
+    const single = singleKeyShortcutCommands.has(command);
+    const shortcut = shortcuts.fromEvent(event);
+    const combo = event.ctrlKey || event.altKey || event.metaKey;
+    if (!shortcut || event.repeat) return;
+    if (!combo && /^[0-9]$/.test(shortcut)) {
+      return setShortcutMessage("数字键用于说话人分配。", true);
+    }
+    if ((single && !["Space", "Backspace"].includes(shortcut)) ||
+        (shortcuts.serverActions.has(command) && !single && !combo)) {
       return setShortcutMessage(single ? "此命令只能设置为 Space 或 Backspace。" : "快捷键必须包含 Ctrl、Alt 或 Meta。", true);
     }
     assignShortcut(input, shortcut);
@@ -1399,7 +1449,7 @@ $$('[data-shortcut-input]').forEach((input) => {
 });
 $$('[data-shortcut-reset]').forEach((button) => button.addEventListener("click", () => {
   const command = button.dataset.shortcutReset;
-  assignShortcut(form.elements[`shortcut_${command}`], shortcutDefaults[command]);
+  assignShortcut($(`[data-shortcut-input="${command}"]`), shortcutDefaults[command]);
 }));
 $("#promptFamilyList")?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt-family][data-prompt-variant]");

@@ -1,6 +1,7 @@
 """Generate a batch of media and subtitle files from one saved revision."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from fractions import Fraction
 import json
 import os
@@ -20,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from substar_core.cut_timeline import export_xml, frame_intervals, kept_intervals, projected_subtitles
 from substar_core.export import SubtitleExportMode, render_document_srt, render_document_txt
-from substar_core.media.video_encoding import EncodingError, encode_video, ffmpeg_tool, run_ffmpeg
+from substar_core.media.video_encoding import EncodingCancelled, EncodingError, encode_video, ffmpeg_tool, run_ffmpeg
 
 from .cut_api import inspect_media, revision
 
@@ -39,7 +40,8 @@ _OUTPUT_DIR = tempfile.TemporaryDirectory(prefix="substar-media-exports-")
 _LOCK = threading.Lock()
 _WORKER = threading.Semaphore(1)
 _JOBS: dict[tuple[str, str], dict] = {}
-_TERMINAL = {"ready", "error"}
+_TERMINAL = {"ready", "error", "cancelled"}
+_PRIVATE_FIELDS = {"directory", "workspace", "finished", "bundle_lock", "cancel_event", "publishing"}
 
 
 class VideoOptions(BaseModel):
@@ -73,17 +75,39 @@ class OutputRequest(BaseModel):
     project_files: list[Literal["subtitle-project", "cut-xml"]] = Field(default_factory=list, max_length=2)
 
 
+def _find_job(key):
+    job = _JOBS.get(key)
+    if job is None:
+        raise HTTPException(404, "导出任务已过期或不存在")
+    return job
+
+
+def _public_job(job):
+    result = {name: value for name, value in job.items() if name not in _PRIVATE_FIELDS}
+    result["cancel_requested"] = job["state"] not in _TERMINAL and job["cancel_event"].is_set()
+    result["cancellable"] = job["state"] not in _TERMINAL and not job["publishing"] and not result["cancel_requested"]
+    return result
+
+
 def _snapshot(key):
     with _LOCK:
-        job = _JOBS.get(key)
-        if job is None:
-            raise HTTPException(404, "导出任务已过期或不存在")
-        return {name: value for name, value in job.items() if name not in {"directory", "workspace", "finished", "bundle_lock"}}
+        return _public_job(_find_job(key))
 
 
 def _update(key, **fields):
     with _LOCK:
         _JOBS[key].update(fields)
+
+
+@contextmanager
+def _wait_for_worker(check_cancel):
+    while not _WORKER.acquire(timeout=.25):
+        check_cancel()
+    try:
+        check_cancel()
+        yield
+    finally:
+        _WORKER.release()
 
 
 def _directory(value):
@@ -167,7 +191,8 @@ def start_output(project_id: str, payload: OutputRequest, request: Request):
         if sum(job["state"] not in _TERMINAL for job in _JOBS.values()) >= 8:
             raise HTTPException(429, "导出队列已满，请稍后重试")
         _JOBS[key] = {"id": key[1], "directory": directory, "workspace": directory, "state": "queued", "progress": 0,
-                      "files": [], "bundle_lock": threading.Lock()}
+                      "files": [], "bundle_lock": threading.Lock(), "cancel_event": threading.Event(),
+                      "publishing": False}
     for old in stale:
         shutil.rmtree(old, ignore_errors=True)
     threading.Thread(target=_generate, args=(key, payload, saved, plan, source, directory, destination, cut_content),
@@ -178,6 +203,16 @@ def start_output(project_id: str, payload: OutputRequest, request: Request):
 @router.get("/projects/{project_id}/output-jobs/{job_id}")
 def output_status(project_id: str, job_id: str):
     return _snapshot((project_id, job_id))
+
+
+@router.post("/projects/{project_id}/output-jobs/{job_id}/cancel")
+def cancel_output(project_id: str, job_id: str, request: Request):
+    _same_origin(request)
+    with _LOCK:
+        job = _find_job((project_id, job_id))
+        if job["state"] not in _TERMINAL and not job["publishing"]:
+            job["cancel_event"].set()
+        return _public_job(job)
 
 
 @router.get("/projects/{project_id}/output-jobs/{job_id}/files/{file_index}")
@@ -247,6 +282,13 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
     document = saved.document
     scope = "剪辑" if cut_content else "全片"
 
+    with _LOCK:
+        cancel_event = _JOBS[key]["cancel_event"]
+
+    def check_cancel():
+        if cancel_event.is_set():
+            raise EncodingCancelled()
+
     def filename(label, extension):
         if payload.title:
             title = _safe_export_name(payload.title.strip())
@@ -258,7 +300,7 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
 
     staging = None
     try:
-        with _WORKER:
+        with _wait_for_worker(check_cancel):
             _update(key, state="running")
             workspace.mkdir()
             if destination is not None:
@@ -288,6 +330,7 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
                 for suffix in dict.fromkeys(payload.subtitles.formats):
                     render = render_document_srt if suffix == "srt" else render_document_txt
                     for mode in dict.fromkeys(payload.subtitles.modes):
+                        check_cancel()
                         output = directory / filename(f"{scope}_{_SUBTITLE_LABELS[mode]}", suffix)
                         output.write_text(render(document, mode), encoding="utf-8", newline="\n")
                         outputs.append(output)
@@ -295,34 +338,49 @@ def _generate(key, payload, saved, plan, source, workspace, destination, cut_con
             audio_output = directory / filename(f"{scope}_音频", payload.audio.format) if payload.audio else None
             if video_output or audio_output:
                 _render_media(payload, source, intervals if cut_content else None, rate, video, audio, duration,
-                              video_output, audio_output, update)
+                              video_output, audio_output, update, check_cancel)
                 outputs.extend(output for output in (video_output, audio_output) if output)
             if "subtitle-project" in payload.project_files:
+                check_cancel()
                 _update(key, progress=.99 if outputs else 0)
                 package = directory / filename("字幕工程", "zip")
                 with package.open("wb") as file:
                     for chunk in stream_subtitle_project(project_id=key[0], job_dir=project_job_path(key[0]), revision=saved):
+                        check_cancel()
                         file.write(chunk)
                 outputs.append(package)
             if "cut-xml" in payload.project_files:
+                check_cancel()
                 xml = directory / filename("剪辑方案", "xml")
                 xml.write_text(export_xml(source, intervals, rate,
                                            video["width"] if video else 1920, video["height"] if video else 1080,
                                            video is not None, audio is not None), encoding="utf-8")
                 outputs.append(xml)
+            # Once publishing starts, finish it rather than cancelling a partially saved batch.
+            with _LOCK:
+                check_cancel()
+                _JOBS[key]["publishing"] = True
             if destination is not None:
                 outputs = _publish(outputs, destination)
             files = [{"name": path.name, "bytes": path.stat().st_size} for path in outputs]
             _update(key, state="ready", progress=1, files=files, bundle_name=filename("导出", "zip"),
                     directory=destination or workspace, destination=str(destination) if destination else None,
                     finished=time.monotonic())
+    except EncodingCancelled:
+        shutil.rmtree(workspace, ignore_errors=True)
+        if staging:
+            shutil.rmtree(staging, ignore_errors=True)
+            staging = None
+        _update(key, state="cancelled", finished=time.monotonic())
     except (ValueError, EncodingError, OSError, subprocess.SubprocessError, KeyError) as exc:
         shutil.rmtree(workspace, ignore_errors=True)
         fault = (f"导出目录已有同名文件：{Path(exc.filename2 or exc.filename).name}" if isinstance(exc, FileExistsError)
                  and (exc.filename2 or exc.filename) else getattr(exc, "stderr", None) or str(exc))
         if isinstance(fault, bytes):
             fault = fault.decode("utf-8", "replace")
-        _update(key, state="error", message=fault[-2000:], finished=time.monotonic())
+        with _LOCK:
+            _JOBS[key].update(state="cancelled" if cancel_event.is_set() else "error",
+                              message="" if cancel_event.is_set() else fault[-2000:], finished=time.monotonic())
     except Exception:
         shutil.rmtree(workspace, ignore_errors=True)
         _update(key, state="error", message="导出时遇到异常", finished=time.monotonic())
@@ -361,7 +419,8 @@ def _cut_filters(intervals, rate, video, audio):
     return filters
 
 
-def _render_media(payload, source, intervals, rate, video, audio, duration, video_output, audio_output, update):
+def _render_media(payload, source, intervals, rate, video, audio, duration, video_output, audio_output, update,
+                  check_cancel=lambda: None):
     video_map = f"0:{video['index']}" if video_output else ""
     audio_map = f"0:{audio['index']}" if audio else ""
     filters = []
@@ -406,7 +465,7 @@ def _render_media(payload, source, intervals, rate, video, audio, duration, vide
             audio_args += ["-ar", options.sample_rate]
 
     if not video_output:
-        run_ffmpeg(ffmpeg_tool(), command + audio_args, audio_output, duration, update)
+        run_ffmpeg(ffmpeg_tool(), command + audio_args, audio_output, duration, update, check_cancel=check_cancel)
         return
 
     def args(options):
@@ -422,4 +481,4 @@ def _render_media(payload, source, intervals, rate, video, audio, duration, vide
 
     bitrate = payload.video.bitrate
     encode_video(args, video_output, codec=payload.video.codec, duration=duration,
-                 bitrate=None if bitrate == "auto" else bitrate, update=update)
+                 bitrate=None if bitrate == "auto" else bitrate, update=update, check_cancel=check_cancel)

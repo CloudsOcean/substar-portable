@@ -12,7 +12,6 @@ from substar_core.domain import (
     DocumentProperties,
     EditorDocument,
     EntityState,
-    PresentationSettings,
     SemanticGroup,
     TranslationTrack,
     stable_id,
@@ -490,7 +489,8 @@ def _set_presentation(
     payload = operation["payload"]
     current = document.presentation
     try:
-        presentation = PresentationSettings(
+        presentation = replace(
+            current,
             upper_punctuation=payload.get(
                 "upper_punctuation", current.upper_punctuation
             ),
@@ -502,6 +502,8 @@ def _set_presentation(
             upper_space=payload.get("upper_space", current.upper_space),
             lower_remove=payload.get("lower_remove", current.lower_remove),
             lower_space=payload.get("lower_space", current.lower_space),
+            upper_filter_inline=payload.get("upper_filter_inline", current.upper_filter_inline),
+            lower_filter_inline=payload.get("lower_filter_inline", current.lower_filter_inline),
         )
     except ValueError as exc:
         raise DocumentOperationError(f"invalid presentation setting: {exc}") from exc

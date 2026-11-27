@@ -1,7 +1,7 @@
 // input: waveform class methods with explicit dependencies.
 export function createWaveformModule(dependencies) {
   'use strict';
-  const { PLAYHEAD_DRAG_SEEK_INTERVAL_MS, POINTER_DRAG_THRESHOLD_PX, ROW_GAP, ROW_HEIGHT_PRESETS, ROW_PRESETS, SPLIT_FLASH_DURATION_MS, clamp, roundMs, saveSettings, wheelScrollDelta } = dependencies;
+  const { PLAYHEAD_DRAG_SEEK_INTERVAL_MS, POINTER_DRAG_THRESHOLD_PX, ROW_GAP, ROW_HEIGHT_PRESETS, ROW_PRESETS, SPLIT_FLASH_DURATION_MS, clamp, roundMs, wheelScrollDelta } = dependencies;
 
   class WaveformMethods {
 
@@ -23,9 +23,10 @@ export function createWaveformModule(dependencies) {
       const requestedMs = targetRow && targetRow !== row
         ? this.pointerTimeMs(event, targetRow)
         : this.pointerTimeMs(event, row, geometry, allowCrossRow);
+      const snappedMs = this.options.snapPlayheadBoundary?.(requestedMs, { event, row: targetRow || row }) ?? requestedMs;
       const timeMs = allowCrossRow
-        ? clamp(requestedMs, 0, Math.max(0, this.durationMs))
-        : requestedMs;
+        ? clamp(snappedMs, 0, Math.max(0, this.durationMs))
+        : snappedMs;
       this.options.seek(timeMs / 1000, { dragPreview, mouseClick: !dragPreview });
       this.updatePlayback();
       if (playAfterSeek && this.player?.paused) this.options.togglePlayback?.();
@@ -35,9 +36,11 @@ export function createWaveformModule(dependencies) {
     /** @this {import('./waveform-types.js').WaveformInstance} */
     seekFromCue(event, row, index, playAfterSeek = false, geometry = null, track = 'main') {
       const segment = this.options.getSegments(track)[index];
-      const timeMs = this.options.getClickTarget?.() === 'pointer'
-        ? this.pointerTimeMs(event, row, geometry)
-        : Number(segment?.start);
+      let timeMs = Number(segment?.start);
+      if (this.options.getClickTarget?.() === 'pointer') {
+        const requestedMs = this.pointerTimeMs(event, row, geometry);
+        timeMs = this.options.snapPlayheadBoundary?.(requestedMs, { event, row }) ?? requestedMs;
+      }
       if (!Number.isFinite(timeMs)) return;
       const wasPlaying = this.options.isPlaybackActive?.() ?? !this.player?.paused;
       this.options.seek(timeMs / 1000, { mouseClick: true });
@@ -631,10 +634,18 @@ export function createWaveformModule(dependencies) {
         const current = ROW_PRESETS.indexOf(this.settings.secondsPerRow);
         const next = clamp(current + (scrollDelta > 0 ? 1 : -1), 0, ROW_PRESETS.length - 1);
         if (next !== current) {
-          this.settings.secondsPerRow = ROW_PRESETS[next];
-          this.secondsPerRowSelect.value = String(this.settings.secondsPerRow);
-          saveSettings(this.settings);
-          this.renderMulti();
+          const rowHeight = this.getTimelineRowHeight();
+          const stride = rowHeight + ROW_GAP;
+          const playheadMs = clamp(this.currentTimeMs(), 0, Math.max(0, this.durationMs - 1));
+          const before = Math.floor(playheadMs / (this.settings.secondsPerRow * 1000));
+          const after = Math.floor(playheadMs / (ROW_PRESETS[next] * 1000));
+          const rowTopInViewport = before * stride - this.scroll.scrollTop;
+          const viewportHeight = this.scroll.clientHeight;
+          const rowVisible = rowTopInViewport < viewportHeight && rowTopInViewport + rowHeight > 0;
+          const anchor = rowVisible ? rowTopInViewport : (viewportHeight - rowHeight) / 2;
+          this.manualFollowUntil = Date.now() + 3000;
+          this.setSecondsPerRow(ROW_PRESETS[next], { render: false });
+          this.renderMulti({ scrollTop: after * stride - anchor });
         }
       }
     }

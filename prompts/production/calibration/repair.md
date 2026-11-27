@@ -1,4 +1,4 @@
-# One-pass calibration block repair
+# AI 校准修复
 
 The complete original execution block remains in the request. In this single repair pass, fix every OWN alias that the primary response omitted or that the program could not bind. CONTEXT rows are frozen accepted context.
 

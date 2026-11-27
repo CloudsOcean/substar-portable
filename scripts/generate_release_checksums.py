@@ -18,7 +18,7 @@ ROOT_FILES = {
     "便携版说明.txt",
     "只检测环境.cmd",
     "启动_Substar.cmd",
-    "停止_Substar.cmd",
+    "Substar.exe",
 }
 PACKAGE_DIRECTORIES = (
     ".github",

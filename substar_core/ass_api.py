@@ -91,6 +91,7 @@ class RenderRequest(BaseModel):
     layer_id: str | None = None
     layer_ids: list[str] | None = Field(default=None, max_length=16)
     use_configuration: bool = False
+    swap_preview_tracks: bool = False
 
 
 class ApplyRequest(BaseModel):
@@ -196,7 +197,8 @@ def material(project_id, payload):
             document = latest.document
             if payload.profile is not None:
                 document = _apply_layers(document, payload)
-            return render_configuration(document, payload.options.width, payload.options.height)
+            return render_configuration(document, payload.options.width, payload.options.height,
+                                        swap_preview_tracks=payload.swap_preview_tracks)
         return render_ass(latest.document, payload.options)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -204,8 +206,11 @@ def material(project_id, payload):
 
 @router.post("/projects/{project_id}/ass/export")
 def export_ass(project_id: str, payload: RenderRequest):
+    headers = {"Content-Disposition": 'attachment; filename="captions.ass"'}
+    if payload.use_configuration and payload.swap_preview_tracks:
+        headers["X-Substar-Preview-Tracks-Swapped"] = "true"
     return Response(material(project_id,payload), media_type="text/plain; charset=utf-8",
-                    headers={"Content-Disposition":'attachment; filename="captions.ass"'})
+                    headers=headers)
 
 
 @router.post("/projects/{project_id}/ass/render", status_code=202)

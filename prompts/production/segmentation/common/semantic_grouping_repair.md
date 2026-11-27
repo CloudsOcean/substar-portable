@@ -1,4 +1,4 @@
-# Block-wide Cue boundary patch
+# Cue 边界修复
 
 The complete original execution block is present. Repair every OWN range and every ERROR in this single response. Accepted Cues are marked CONTEXT/FROZEN and are read-only.
 
@@ -12,3 +12,5 @@ The complete original execution block is present. Repair every OWN range and eve
 - Re-plan the complete OWN block. Do not preserve a previous boundary merely because it was structurally valid.
 - Do not correct or rewrite source text.
 - Do not return any CONTEXT/FROZEN range.
+
+沿用本块提供的全部语言规则。语言分段清楚时分别遵循相应语种的切分方式；句内交织时以整句语义和语法连续性为准，避免仅因切换语言而截断短语。

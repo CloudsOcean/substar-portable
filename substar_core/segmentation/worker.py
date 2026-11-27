@@ -149,7 +149,6 @@ def semantic_segmentation_arguments(
         "--progress-file", str(progress_path),
         "--source-kind", "asr",
         "--source-asset-id", request["source_asset_id"],
-        "--sentence-boundary-policy", constraints["sentence_boundary_policy"],
         "--glossary-snapshot", str(glossary_path),
         "--candidate-only",
     ]
@@ -359,7 +358,6 @@ def _semantic_candidate(
             "source_language": provenance.get("source_language"),
             "language_detection": provenance.get("language_detection"),
             "resolved_hard_limit": provenance.get("resolved_hard_limit"),
-            "sentence_boundary_policy": provenance.get("sentence_boundary_policy"),
             "prompt": prompt_audit(
                 provenance.get("semantic_grouping_prompt"), "semantic_grouping"
             ),
@@ -869,6 +867,7 @@ def run(command: WorkerCommand) -> int:
             # failure on Windows. Run the pure algorithm entrypoint in-process
             # and keep its legacy console output isolated from JSONL stdout.
             from scripts.run_semantic_segmentation import main as run_segmentation
+            from substar_core.model_gateway import ModelGatewayRequestError
 
             previous_key = os.environ.get("SUBSTAR_MODEL_API_KEY")
             previous_prompt_root = os.environ.get("SUBSTAR_PROMPT_ROOT")
@@ -949,6 +948,8 @@ def run(command: WorkerCommand) -> int:
                             )
                     except SystemExit as exc:
                         return_code = exc.code if isinstance(exc.code, int) else 1
+                    except ModelGatewayRequestError:
+                        raise
                     except Exception as exc:
                         print(f"{type(exc).__name__}: {exc}", file=stderr, flush=True)
                         raise SegmentationAlgorithmError(
@@ -1071,10 +1072,21 @@ def run(command: WorkerCommand) -> int:
         emit(WorkerMessageType.CANCELLED, {"reason": "requested"})
         return 0
     except BaseException as exc:
+        from substar_core.job_diagnostics import local_failure
+        from substar_core.model_gateway import ModelGatewayRequestError
+
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         error = {"code": "segmentation_worker_failed"}
-        if isinstance(exc, SegmentationAlgorithmError):
-            error["public_message"] = str(exc)
+        if isinstance(exc, ModelGatewayRequestError):
+            error.update(public_message=str(exc), diagnostics=exc.diagnostics)
+        elif isinstance(exc, SegmentationAlgorithmError):
+            failure = local_failure(exc.__cause__) if isinstance(exc.__cause__, OSError) else {
+                "code": "segmentation_algorithm_failed", "message": "字幕切分算法未能生成有效结果",
+            }
+            error.update(public_message=failure["message"], diagnostics=failure)
+        else:
+            failure = local_failure(exc)
+            error.update(public_message=failure["message"], diagnostics=failure)
         emit(WorkerMessageType.ERROR, error)
         return 1
 

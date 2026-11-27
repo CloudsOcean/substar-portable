@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$PlanPath, [Parameter(Mandatory=$true)][int]$LauncherPid)
+param([Parameter(Mandatory=$true)][string]$PlanPath, [Parameter(Mandatory=$true)][int]$LauncherPid, [int]$ConsoleOwnerPid = 0)
 $ErrorActionPreference = 'Stop'
 $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $install = [IO.Path]::GetFullPath($plan.install).TrimEnd('\')
@@ -10,7 +10,7 @@ function ChildPath([string]$base, [string]$name) {
     return $target
 }
 # Validate every recursive move/copy target before any mutation.
-$allowed = @('app.py','launcher.py','substar_core','web','prompts','schemas','scripts','assets','runtime','docs',
+$allowed = @('Substar.exe','app.py','launcher.py','substar_core','web','prompts','schemas','scripts','assets','runtime','docs',
  'portable_manifest.json','requirements-release.txt','release-verification.json','启动_Substar.cmd','停止_Substar.cmd',
  '只检测环境.cmd','便携版说明.txt','README.md','CHANGELOG.md','SECURITY.md','PRIVACY.md','THIRD_PARTY_NOTICES.md','LICENSE')
 foreach ($name in $plan.roots) {
@@ -21,6 +21,10 @@ foreach ($name in $plan.roots) {
 }
 Wait-Process -Id $LauncherPid -ErrorAction SilentlyContinue -Timeout 60
 if (Get-Process -Id $LauncherPid -ErrorAction SilentlyContinue) { throw 'Launcher did not exit' }
+if ($ConsoleOwnerPid -gt 0) {
+    Wait-Process -Id $ConsoleOwnerPid -ErrorAction SilentlyContinue -Timeout 10
+    if (Get-Process -Id $ConsoleOwnerPid -ErrorAction SilentlyContinue) { throw 'Substar window did not close' }
+}
 $moved = @()
 $copied = @()
 try {
@@ -54,6 +58,3 @@ try {
 } finally {
     Remove-Item -LiteralPath $PlanPath -ErrorAction SilentlyContinue
 }
-$pythonExe = ChildPath $install 'runtime\python\python.exe'
-$launcherFile = ChildPath $install 'launcher.py'
-Start-Process -FilePath $pythonExe -ArgumentList @('"'+$launcherFile+'"') -WorkingDirectory $install -WindowStyle Hidden

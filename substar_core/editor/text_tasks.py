@@ -8,6 +8,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import re
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,7 @@ from substar_core.document_operations import apply_document_operation
 from substar_core.editor.application.publication import write_candidate
 from substar_core.editor.translation.regroup import review_request_groups
 from substar_core.language_layout import layout_tokens
-from substar_core.model_gateway import call_text_model
+from substar_core.model_gateway import ModelGatewayError, call_text_model
 from substar_core.model_routing import resolve_stage_request
 from substar_core.prompt_registry import render_prompt
 from substar_core.storage import ProjectStore
@@ -32,9 +33,13 @@ PROMPTS = {kind: render_prompt(f"subtitle_{kind}", variant="default").text for k
 # hyphens, math signs, URL symbols and whitespace never disappear in this validator.
 EDGE_MARKS = '.,?!;:，。？！；：、…—–“”"「」『』《》〈〉（）【】〔〕¿¡()[]{}'
 
+_NO_ADDED_QUOTE_OR_DASH = frozenset('"＂“”„‟«»〝〞〟「」『』—–―⸺⸻')
+
 
 def punctuation_allowed(before: str, after: str) -> bool:
     if not after or after != after.strip() or len(after) > len(before) + 16:
+        return False
+    if _NO_ADDED_QUOTE_OR_DASH.intersection(Counter(after) - Counter(before)):
         return False
     if re.search(r"(?:[A-Za-z]\.){2,}$", before) and not after.endswith("."):
         return False
@@ -189,18 +194,19 @@ def compute(kind, project, artifacts, payload, task_id, progress, cancel_event=N
     blocks = task_blocks(document, settings)
     progress("planning", 0, len(blocks))
     boundary_settings = {**settings, "translation_layout": {}, "translation_mapping_mode": "many_to_many",
-                         "translation_regroup": bool(payload.get("optimize_boundaries")), "_boundary_stage": "calibration",
+                         "translation_regroup": bool(payload.get("optimize_boundaries")), "_boundary_stage": kind,
                          "_cancel_event": cancel_event}
     blocks = review_request_groups(blocks, boundary_settings, progress=lambda n, total: progress("planning", n, total),
                                   cache_directory=cache_root / "boundary-cache")
     check_cancelled()
     tokens = {t.token_id: t for t in document.display_tokens}
-    route = resolve_stage_request(settings, "calibration")
+    main_route = resolve_stage_request(settings, kind)
+    repair_route = resolve_stage_request(settings, f"{kind}_repair")
     prompt = settings["text_task_prompt"]
     all_cues = [c for b in blocks for c in b["cues"]]
     cue_positions = {c["cue_id"]:i for i,c in enumerate(all_cues)}
     baseline_hash = revision.document_hash or document.content_hash()
-    def run(block):
+    def run(block, route, rejection=None):
         check_cancelled()
         start = cue_positions[block["cues"][0]["cue_id"]]
         end = start + len(block["cues"])
@@ -211,13 +217,20 @@ def compute(kind, project, artifacts, payload, task_id, progress, cancel_event=N
                     "limits": {k: v for k, v in settings.items() if k.endswith("_hard_limit")},
                     "count_rules": {"count_spaces": settings.get("english_count_spaces", True), "count_punctuation": settings.get("english_count_punctuation", True)},
                     "language": settings.get("language", "Auto")}
+        request_prompt = prompt
+        if rejection is not None:
+            request_prompt += (
+                "\n\n上次结果未通过验收。请根据以下验收信息重新生成本块的完整 JSON，"
+                "遵循原有字段、词元和上下文限制。\n"
+                f"验收信息：{rejection}"
+            )
         key = fingerprint({"stage": kind, "baseline": baseline_hash, "material": material,
-                           "prompt": prompt, "model": {k:v for k,v in route.items() if k not in {"api_key"}}, "contract": 1})
+                           "prompt": request_prompt, "model": {k:v for k,v in route.items() if k not in {"api_key"}}, "contract": 1})
         cached = load_ai_block_cache(cache_root / "block-cache", key)
         if cached is not None:
             return validate_result(kind, cached, block, document, settings)
         raw, _ = call_text_model(**{k: route[k] for k in ("base_url", "api_key", "auth_mode", "model", "thinking_mode", "reasoning_effort")},
-                                system_prompt=prompt, user_text=json.dumps(material, ensure_ascii=False),
+                                system_prompt=request_prompt, user_text=json.dumps(material, ensure_ascii=False),
                                 max_tokens=int(route["max_tokens"]), temperature=float(route["temperature"]),
                                 timeout=int(settings.get("translation_api_timeout_seconds",300)),
                                 request_attempts=int(settings.get("http_retry_attempts",2)), cancel_event=cancel_event)
@@ -233,9 +246,19 @@ def compute(kind, project, artifacts, payload, task_id, progress, cancel_event=N
         value = validate_result(kind, json.loads(raw, object_pairs_hook=unique_object), block, document, settings)
         save_ai_block_cache(cache_root / "block-cache", key, value)
         return value
+
+    def run_with_repair(block):
+        try:
+            return run(block, main_route)
+        except ModelGatewayError:
+            rejection = "主模块未返回可用结果"
+        except ValueError as exc:
+            rejection = str(exc)
+        return run(block, repair_route, rejection)
+
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,min(len(blocks),50))) as pool:
-        futures = {pool.submit(run,b): i for i,b in enumerate(blocks)}
+        futures = {pool.submit(run_with_repair,b): i for i,b in enumerate(blocks)}
         for future in concurrent.futures.as_completed(futures):
             results[futures[future]] = future.result()
             progress("executing",len(results),len(blocks))

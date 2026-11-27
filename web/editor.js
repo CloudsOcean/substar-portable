@@ -88,6 +88,7 @@
     playbackLastUiAt:0,
     showDeletedTokens:localStorage.getItem("substar.editor.show-deleted-tokens") === "true",
     timelineLayout:"composite",
+    previewTracksSwapped:false,
     referenceChangeByTokenId:new Map(),
     cuePageStart:0,
     indexes:null,
@@ -131,18 +132,24 @@
     return body;
   }
 
-  function shortcutFromEvent(event) {
-    const parts = [];
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-    if (event.metaKey) parts.push("Meta");
-    const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
-    parts.push(key === " " ? "Space" : key);
-    return parts.join("+");
+  const editorShortcuts = window.SubstarShortcuts;
+  let shortcutSettings = {};
+  let shortcutBindings = editorShortcuts.bindings();
+
+  function updateShortcutHints() {
+    shortcutBindings = editorShortcuts.bindings(shortcutSettings);
+    for (const {id,label} of editorShortcuts.actions) {
+      const value = editorShortcuts.display(shortcutBindings[id]);
+      const hint = document.querySelector(`[data-editor-shortcut="${id}"]`);
+      if (hint) hint.textContent = value;
+      const control = {undo:"#undoDocument",redo:"#redoDocument",play_pause:"#mediaPlayToggle",
+        word_timing:"#word-timing-quick-toggle",skip_gaps:"#gap-playback-quick-toggle"}[id];
+      if (control && $(control)) $(control).title = `${label}（${value}）`;
+    }
   }
 
   function applyEditorSettings(settings = {}) {
+    shortcutSettings = settings;
     window.SubstarTranslationLayout.configureModel(settings.qwen_cloud_model);
     state.shortcuts = {
       undo:String(settings.shortcut_undo || "Ctrl+Z"),
@@ -151,8 +158,7 @@
       hideCue:String(settings.shortcut_hide_cue || "Backspace"),
       zoomModifier:String(settings.timeline_zoom_modifier || "Alt"),
     };
-    $("#undoDocument").title = `撤销（${state.shortcuts.undo}）`;
-    $("#redoDocument").title = `重做（${state.shortcuts.redo}）`;
+    updateShortcutHints();
     const preRollStored = localStorage.getItem("substar.editor.forward-snap-pre-roll-ms");
     const preRoll = Math.max(0, Math.min(100,
       preRollStored === null ? 0 : Number(preRollStored)
@@ -364,7 +370,7 @@
     clearMediaRetry();
     state.mediaSwitchPosition ??= {
       time: Number.isFinite(media.currentTime) ? media.currentTime : 0,
-      playing: !media.paused,
+      playing: !media.paused && !media.ended,
     };
     state.mediaHadMetadata = false;
     state.mediaLoadPending = true;
@@ -496,10 +502,13 @@
   function updatePlaybackUi(time, {playing = false, timestamp = 0} = {}) {
     const cue = cueAtPlaybackTime(time);
     state.playbackCueId = cue?.cue_id || null;
-    if (state.followPlayback && state.playbackCueId !== state.activeCueId) activateCue(state.playbackCueId, {
+    // Keep the last editing position when playback enters a gap or reaches the end.
+    if (state.followPlayback && cue && cue.cue_id !== state.activeCueId) activateCue(cue.cue_id, {
       // Cue-list following is event driven: this branch only runs when the
       // playhead crosses a cue boundary while following is enabled.
       scroll:true,
+      keepVisible:true,
+      playbackFollow:true,
       revealTimeline:false
     });
     if (!playing || !state.playbackLastUiAt || timestamp - state.playbackLastUiAt >= 50) {
@@ -547,25 +556,6 @@
     }
   }
 
-  function isTextEditingContext(event) {
-    if (event.isComposing) return true;
-    const editableSelector = [
-      "textarea",
-      "[role='textbox']",
-      "[contenteditable]:not([contenteditable='false'])",
-      "input:not([type])",
-      "input[type='text']",
-      "input[type='search']",
-      "input[type='number']",
-      "input[type='email']",
-      "input[type='url']",
-      "input[type='password']"
-    ].join(",");
-    return event.composedPath().some(node =>
-      node instanceof Element && node.matches(editableSelector)
-    );
-  }
-
   function syncPlaybackFollowAfterSeek() {
     const media = activeMedia();
     const continueFollowing = !!media && !media.paused && !media.ended;
@@ -580,6 +570,7 @@
   }
 
   function bindMediaEvents(media) {
+    media.loop = false;
     const bindings = [];
     const bufferingMessage = "正在缓冲媒体…";
     let bufferingTimer = null;
@@ -600,7 +591,9 @@
       if (position && media.readyState >= HTMLMediaElement.HAVE_METADATA) {
         state.mediaSwitchPosition = null;
         media.currentTime = Number.isFinite(media.duration) ? Math.min(position.time, media.duration) : position.time;
-        if (position.playing) media.play().catch(() => {});
+        if (position.playing && (!Number.isFinite(media.duration) || position.time < media.duration)) {
+          media.play().catch(() => {});
+        }
       }
       clearMediaRetry();
       state.mediaLoadAttempts = 0;
@@ -664,25 +657,27 @@
     });
     ["playing", "ended", "emptied"].forEach(name => on(name, clearBuffering));
     on("timeupdate", event => {
-      if(state.view?.target_units?.length)renderPreview();
-      updatePlaybackUi(event.currentTarget.currentTime, {
+      const time = event.currentTarget.currentTime;
+      updatePlaybackUi(time, {
         playing:!event.currentTarget.paused,
         timestamp:performance.now()
       });
+      if (state.view?.target_units?.length || !state.playbackCueId) renderPreview();
     });
     on("seeked", event => {
       renderPreview();
       const time = Number(event.currentTarget.currentTime) || 0;
       const cue = cueAtPlaybackTime(time);
       state.playbackCueId = cue?.cue_id || null;
-      if (state.followPlayback) {
+      if (state.followPlayback && cue) {
+        const playbackFollow = !event.currentTarget.paused;
         if (state.playbackCueId !== state.activeCueId) {
-          activateCue(state.playbackCueId, {scroll:true, keepVisible:true});
-        } else {
+          activateCue(state.playbackCueId, {scroll:true, keepVisible:true, playbackFollow});
+        } else if (!playbackFollow) {
           centerCueInList(cue, true);
         }
-        state.timelineController?.revealTime(time, false, {keepVisible:true});
       }
+      if (state.followPlayback) state.timelineController?.revealTime(time, false, {keepVisible:true});
       syncPlaybackPosition(time);
     });
     on("play", () => {
@@ -690,11 +685,16 @@
       state.timelineController?.setFollowPlayback?.(true);
       startPlaybackUiLoop();
     });
-    on("pause", () => {
+    const settlePlayback = () => {
       clearBuffering();
       suspendPlaybackFollow();
       stopPlaybackUiLoop();
       syncPlaybackPosition(Number(media.currentTime) || 0);
+    };
+    on("pause", settlePlayback);
+    on("ended", () => {
+      settlePlayback();
+      renderPreview();
     });
     ["play", "pause", "ended", "durationchange", "volumechange"].forEach(name => {
       on(name, syncMediaControls);
@@ -855,11 +855,26 @@
     state.navigationEntries = {hard, ai, reference};
   }
 
-  function projectPunctuation(text, remove = "", space = "") {
+  function punctuationTailStart(text, symbols) {
+    const characters = [...text];
+    let index = text.length;
+    for (let i = characters.length - 1; i >= 0; i -= 1) {
+      const char = characters[i];
+      if (!symbols.includes(char) && !/[\p{P}\s]/u.test(char)) break;
+      index -= char.length;
+    }
+    return index;
+  }
+
+  function projectPunctuation(text, remove = "", space = "", filterInline = true, atLineEnd = true) {
     const removed = new Set([...String(remove || "")]);
     const spaced = new Set([...String(space || "")].filter(char => !removed.has(char)));
-    const value = languageLayout.removeGroupingCommas(text, removed, spaced);
+    const raw = String(text || "");
+    if (!filterInline && !atLineEnd) return raw.replace(/\s+/g, " ").trim();
+    const value = filterInline ? languageLayout.removeGroupingCommas(raw, removed, spaced) : raw;
+    const start = filterInline ? 0 : punctuationTailStart(value, remove + space);
     return value.replace(/[\s\S]/gu, (char, index) => {
+      if (index < start) return char;
       if (char === "." && /[0-9０-９]/.test(value[index - 1] || "")
         && /[0-9０-９]/.test(value[index + 1] || "")) return char;
       return removed.has(char) ? "" : spaced.has(char) ? " " : char;
@@ -874,17 +889,25 @@
     const upper = sourceUpper ? "upper" : "lower";
     const lower = sourceUpper ? "lower" : "upper";
     return {
-      source:languageLayout.formatText(projectPunctuation(source, presentation[`${upper}_remove`], presentation[`${upper}_space`])),
-      target:languageLayout.formatText(projectPunctuation(target, presentation[`${lower}_remove`], presentation[`${lower}_space`])),
+      source:languageLayout.formatText(projectPunctuation(source, presentation[upper + "_remove"], presentation[upper + "_space"], presentation[upper + "_filter_inline"] !== false)),
+      target:languageLayout.formatText(projectPunctuation(target, presentation[lower + "_remove"], presentation[lower + "_space"], presentation[lower + "_filter_inline"] !== false)),
       sourceUpper,
     };
   }
 
-  function projectedSourceTokenText(text, cue = null) {
+  function projectedSourceTokenText(text, cue, tokenId) {
     const presentation = state.view?.presentation || {};
-    const upper = languageLayout.routedSourceUpper(cue ? cueSourceText(cue) : text, presentation);
-    const side = upper ? "upper" : "lower";
-    return projectPunctuation(text, presentation[`${side}_remove`], presentation[`${side}_space`]);
+    const side = languageLayout.routedSourceUpper(cueSourceText(cue), presentation) ? "upper" : "lower";
+    const remove = presentation[side + "_remove"] || "";
+    const space = presentation[side + "_space"] || "";
+    const filterInline = presentation[side + "_filter_inline"] !== false;
+    if (filterInline) return projectPunctuation(text, remove, space);
+    const ids = cue.active_display_token_ids || cue.display_token_ids;
+    let tail = ids.length - 1;
+    while (tail > 0 && punctuationTailStart(state.indexes?.tokenById.get(ids[tail])?.text || "", remove + space) === 0) {
+      tail -= 1;
+    }
+    return projectPunctuation(text, remove, space, false, ids.indexOf(tokenId) >= tail);
   }
 
   function timeLabel(seconds) {
@@ -946,7 +969,8 @@
   function setRevision(payload, {
     deferTimeline = false,
     localProjection = false,
-    preserveCueViewport = true
+    preserveCueViewport = true,
+    initialCueUrl = null
   } = {}) {
     if (!localProjection && state.documentStore?.pending().length) {
       throw new Error("仍有本地编辑尚未保存，已保留输入；请先完成保存再同步版本");
@@ -968,6 +992,14 @@
     state.hardIssueIndex = -1;
     const activeCues = state.view.cue_views.filter(cue => cue.state === "active");
     state.activeCueId = reconciledActiveCueId(previousActiveCue, activeCues, state.view.cue_views);
+    if (initialCueUrl) {
+      try {
+        const cue = window.SubstarCueLink.resolve(initialCueUrl, state.view.cue_views);
+        if (cue) state.activeCueId = cue.cue_id;
+      } catch (_) {
+        // Navigation reports invalid links after the project has been rendered.
+      }
+    }
     const presentation = state.view.presentation || {};
     const presentationInputs = {
       upperPunctuationRemove:presentation.upper_remove || "",
@@ -979,7 +1011,11 @@
       const input = document.getElementById(id);
       if (input) input.value = value;
     });
-    state.cueSelection.reconcile(activeCues.map(cue => cue.cue_id));
+    for (const side of ["upper", "lower"]) {
+      const input = document.getElementById(side + "PunctuationTailOnly");
+      if (input) input.checked = presentation[side + "_filter_inline"] === false;
+    }
+    state.cueSelection.reconcile(state.view.cue_views.map(cue => cue.cue_id));
     assPanel?.sync();
     rebuildViewIndexes();
     try {
@@ -1278,6 +1314,16 @@
     const workbench = $("#editorWorkbench");
     if (value === undefined) return window.EditorRecovery.isWorkbenchInert(workbench);
     window.EditorRecovery.setWorkbenchInert(workbench, $("#refreshDocumentBottom"), value);
+  }
+
+  function setProjectCommandsReady(ready) {
+    for (const group of document.querySelectorAll(".subtitle-command-group,.cue-history-row,.command-right-zone,#versionMenu")) {
+      group.inert = !ready;
+      if (!ready) {
+        if (group.matches("details")) group.open = false;
+        for (const menu of group.querySelectorAll("details[open]")) menu.open = false;
+      }
+    }
   }
 
   async function flushActiveEditorInput() {
@@ -1639,6 +1685,16 @@
 
   async function applyPresentationSettings() {
     if (!state.revision) return;
+    const upperTailOnly = $("#upperPunctuationTailOnly")?.checked;
+    const lowerTailOnly = $("#lowerPunctuationTailOnly")?.checked;
+    const rules = {
+      upper_remove:$("#upperPunctuationRemove").value,
+      upper_space:$("#upperPunctuationSpace").value,
+      upper_filter_inline:upperTailOnly === undefined ? undefined : !upperTailOnly,
+      lower_remove:$("#lowerPunctuationRemove").value,
+      lower_space:$("#lowerPunctuationSpace").value,
+      lower_filter_inline:lowerTailOnly === undefined ? undefined : !lowerTailOnly,
+    };
     try {
       const revision = await withSavedDocument(() => api(projectPath("/presentation"), {
         method:"PUT",
@@ -1646,10 +1702,7 @@
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
           operation_id:`op_presentation_${Date.now().toString(36)}`,
-          upper_remove:$("#upperPunctuationRemove").value,
-          upper_space:$("#upperPunctuationSpace").value,
-          lower_remove:$("#lowerPunctuationRemove").value,
-          lower_space:$("#lowerPunctuationSpace").value
+          ...rules,
         })
       }));
       setRevision(revision);
@@ -1657,7 +1710,7 @@
         kind:"manual", operation:"set_presentation", metadata:{}
       });
       observeEditorTutorialEvent("punctuation_apply", {
-        upperRemove:$("#upperPunctuationRemove").value
+        upperRemove:rules.upper_remove
       });
     } catch (error) {
       ordinaryError(`标点设置保存失败：${error.message}`);
@@ -1710,8 +1763,28 @@
       "#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace",
       "#applyAutoSnap", "#upperPunctuationRemove", "#upperPunctuationSpace",
       "#lowerPunctuationRemove", "#lowerPunctuationSpace", "#applyPunctuation",
+      "#upperPunctuationTailOnly", "#lowerPunctuationTailOnly",
       "#runAiCalibration", "#runAiOrganize", "#organizeOptimizeBoundaries", "#convertOriginal", "#convertSimplified", "#convertTraditional", "#convertTaiwan", "#convertHongKong", "#detectSpeakers"
     ].forEach(selector => { const node = $(selector); if (node) node.disabled = !revision || locked || textProject; });
+    const calibrationTrack = $("#aiCalibrationTrack");
+    const calibrationButton = $("#runFullAiCalibration");
+    if (calibrationTrack && calibrationButton) {
+      const hasTargetText = state.view?.cue_views.some(cue =>
+        cue.state === "active" && cue.target?.editable !== false && cue.target?.target_text?.trim()
+      );
+      const hasSourceText = state.view?.cue_views.some(cue =>
+        cue.state === "active" && (cue.active_display_token_ids.length
+          || (cue.subtitle_track !== "overlay" && cue.source_text?.trim()))
+      );
+      calibrationTrack.options[0].disabled = !hasSourceText;
+      calibrationTrack.options[1].disabled = !hasTargetText;
+      if (calibrationTrack.selectedOptions[0]?.disabled) {
+        if (hasTargetText) calibrationTrack.value = "target";
+        else if (hasSourceText) calibrationTrack.value = "source";
+      }
+      calibrationButton.disabled = !revision || locked || state.operationPending
+        || (calibrationTrack.value === "target" ? !hasTargetText : !hasSourceText);
+    }
     ["#toolReplaceCurrent", "#toolReplaceAll"].forEach(selector => {
       const node = $(selector);
       if (node) node.disabled = node.disabled || state.operationPending;
@@ -2236,7 +2309,7 @@
     }
   }
 
-  function tokenElement(token, {interactive = true} = {}) {
+  function tokenElement(token, {interactive = true, projectedText = token.text} = {}) {
     const button = document.createElement(interactive ? "button" : "span");
     if (interactive) button.type = "button";
     const tone = token.tone;
@@ -2262,8 +2335,6 @@
     button.classList.toggle("review-annotated", annotated);
     if (interactive) button.dataset.tokenId = token.token_id;
     const label = document.createElement("b");
-    const tokenCueId = state.indexes?.tokenToCueId?.get(token.token_id);
-    const projectedText = projectedSourceTokenText(token.text, state.indexes?.cueById?.get(tokenCueId));
     label.textContent = projectedText;
     button.classList.toggle("punctuation-elided", !projectedText);
     const source = sourceTextForToken(token);
@@ -2436,13 +2507,25 @@
     });
     const visibleTokenIds = state.showDeletedTokens ? cue.display_token_ids
       : cue.display_token_ids.filter(id => tokenById.get(id)?.state !== "deleted");
+    const presentation = state.view.presentation || {};
+    const side = projected.sourceUpper ? "upper" : "lower";
+    const remove = presentation[side + "_remove"] || "";
+    const space = presentation[side + "_space"] || "";
+    const filterInline = presentation[side + "_filter_inline"] !== false;
+    let tailToken = visibleTokenIds.length - 1;
+    if (!filterInline) {
+      while (tailToken > 0 && punctuationTailStart(tokenById.get(visibleTokenIds[tailToken])?.text || "", remove + space) === 0) {
+        tailToken -= 1;
+      }
+    }
     visibleTokenIds.forEach((id, tokenIndex) => {
       const token = tokenById.get(id);
       if (!token) return;
       const group = reviewGroupByToken.get(id);
       const joinsPrevious = !!group && group === reviewGroupByToken.get(visibleTokenIds[tokenIndex - 1]);
       const joinsNext = !!group && group === reviewGroupByToken.get(visibleTokenIds[tokenIndex + 1]);
-      const tokenNode = tokenElement(token, {interactive:cue.state === "active"});
+      const projectedText = projectPunctuation(token.text, remove, space, filterInline, tokenIndex >= tailToken);
+      const tokenNode = tokenElement(token, {interactive:cue.state === "active", projectedText});
       tokenNode.classList.toggle("review-joins-previous", joinsPrevious);
       tokenNode.classList.toggle("review-joins-next", joinsNext);
       line.append(tokenNode);
@@ -2454,11 +2537,9 @@
           token.text, nextToken?.text || "", state.trackLanguages?.source
         );
         boundary.className = `virtual-boundary ${boundaryKind}-based`;
-        if (token.state === "active" && nextToken?.state === "active") {
-          const presentation = state.view.presentation;
-          const side = projected.sourceUpper ? "upper" : "lower";
+        if (filterInline && token.state === "active" && nextToken?.state === "active") {
           const comma = token.text.at(-1);
-          const shouldRemove = (presentation[`${side}_remove`] || "") + (presentation[`${side}_space`] || "");
+          const shouldRemove = remove + space;
           const pair = `${token.text} ${nextToken.text}`;
           if ((comma === "," || comma === "，") && shouldRemove.includes(comma) &&
               languageLayout.removeGroupingCommas(pair, new Set([comma]), new Set()) !== pair) {
@@ -2566,6 +2647,27 @@
     return state.view?.properties?.speaker_names || {};
   }
 
+  const usedSpeakerSlots = new Map();
+  function reserveSpeakerSlots(ids) {
+    const storageKey = `substar.editor.used-speaker-slots:${state.projectId}`;
+    const slots = usedSpeakerSlots.get(storageKey) || new Set();
+    try {
+      const stored = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      if (Array.isArray(stored)) stored.forEach(id => slots.add(id));
+    } catch (_) {}
+    const count = slots.size;
+    ids.filter(id => /^speaker_[0-8]$/.test(id)).forEach(id => slots.add(id));
+    usedSpeakerSlots.set(storageKey, slots);
+    if (slots.size !== count) {
+      try { localStorage.setItem(storageKey, JSON.stringify([...slots])); } catch (_) {}
+    }
+    return slots;
+  }
+
+  function nextEditorSpeakerId(ids = window.EditorSpeakers.ids(state.view)) {
+    return window.EditorSpeakers.nextId([...ids, ...reserveSpeakerSlots(ids)]);
+  }
+
   function speakerLabel(speaker) {
     return window.EditorSpeakers.label(speaker, speakerNames());
   }
@@ -2589,6 +2691,7 @@
   function removeSpeaker(id) {
     const revision = state.revision;
     if (!revision || !window.EditorSpeakers.ids(revision.document).includes(id)) return;
+    reserveSpeakerSlots([id]);
     const names = {...speakerNames()};
     const hadName = Object.hasOwn(names, id);
     delete names[id];
@@ -2868,20 +2971,21 @@
         const line=projectedCueLines({...owner,target:{...owner.target,target_text:unit.text}});
         (line.sourceUpper?lower:upper).push(line.target);
       }
-      $("#previewSource").textContent=upper.filter(Boolean).join("\n");
-      $("#previewTarget").textContent=lower.filter(Boolean).join("\n");return;
+      renderPreviewLines(upper.filter(Boolean).join("\n"), lower.filter(Boolean).join("\n"));
+      return;
     }
     if (state.view?.cue_views.some(item => item.source_text != null)) {
       const time = activeMedia()?.currentTime || 0;
       const visible = state.view.cue_views.filter(item => item.state === "active" && item.start <= time && item.end > time && (!overlayPreview || item.subtitle_track !== "overlay"));
       const lines = visible.map(projectedCueLines);
-      $("#previewSource").textContent = lines.map(line => line.sourceUpper ? line.source : line.target).filter(Boolean).join("\n");
-      $("#previewTarget").textContent = lines.map(line => line.sourceUpper ? line.target : line.source).filter(Boolean).join("\n");
+      renderPreviewLines(
+        lines.map(line => line.sourceUpper ? line.source : line.target).filter(Boolean).join("\n"),
+        lines.map(line => line.sourceUpper ? line.target : line.source).filter(Boolean).join("\n")
+      );
       return;
     }
     if (!cue) {
-      $("#previewSource").textContent = "";
-      $("#previewTarget").textContent = "";
+      renderPreviewLines("", "");
       return;
     }
     const projected = projectedCueLines(cue);
@@ -2889,8 +2993,13 @@
     const target = projected.target;
     const first = projected.sourceUpper ? source : target;
     const second = projected.sourceUpper ? target : source;
-    $("#previewSource").textContent = first;
-    $("#previewTarget").textContent = second;
+    renderPreviewLines(first, second);
+  }
+
+  function renderPreviewLines(upper, lower) {
+    if (state.previewTracksSwapped) [upper, lower] = [lower, upper];
+    $("#previewSource").textContent = upper;
+    $("#previewTarget").textContent = lower;
   }
 
   function renderTimeline({deferDraw = false} = {}) {
@@ -2988,8 +3097,8 @@
   }
 
   let cueCenterGeneration = 0;
-  function centerCueInList(cue, keepVisible = false) {
-    if (cue) state.cueListView?.revealCue(cue.cue_id, {align:"center", keepVisible});
+  function centerCueInList(cue, keepVisible = false, followPlayback = false) {
+    if (cue) state.cueListView?.revealCue(cue.cue_id, {align:"center", keepVisible, followPlayback});
   }
 
   function activateCue(cueId, {
@@ -2998,6 +3107,7 @@
     revealTimeline = false,
     centerTimeline = false,
     keepVisible = false,
+    playbackFollow = false,
     explicitNavigation = false,
     preserveCueSelection = false
   } = {}) {
@@ -3021,7 +3131,9 @@
     // Keep the broader guard for in-place edits, where playback-follow scrolling
     // would otherwise pull the row away while the user is typing.
     const searchHasFocus = document.activeElement === $("#toolSearch");
-    if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) centerCueInList(cue, keepVisible);
+    if (scroll && cue && (explicitNavigation || !isEditingText || searchHasFocus)) {
+      centerCueInList(cue, keepVisible, playbackFollow);
+    }
   }
 
   function selectCue(cueId, seek = false, scroll = false, preserveCueSelection = false, keepVisible = false) {
@@ -3048,6 +3160,7 @@
   function selectToken(tokenId, {toggle = false, range = false} = {}) {
     const token = state.indexes?.tokenById?.get(tokenId);
     if (!token) return;
+    state.timelineController?.useListWordShortcutSelection?.();
     state.cueSelection.clear();
     refreshCueSelection();
     // Deleted display tokens remain selectable so the selection menu can
@@ -3848,18 +3961,21 @@
       $("#aiCalibrationMenu").open = false;
       return runPackagedTutorialStage("calibration");
     }
+    const track = $("#aiCalibrationTrack")?.value || "source";
     state.operationPending = true;
+    state.taskPanelDismissed = false;
     const instruction = $("#aiCalibrationInstruction")?.value.trim() || "";
     $("#aiCalibrationMenu").open = false;
     renderHeader();
     renderWorkbenchTask("AI 校准", 2, "AI 校准准备中…");
     try {
-      const result = await withSavedDocument(() => api(projectPath("/ai-calibrate"), {
+      const result = await withSavedDocument(() => api(projectPath("/ai-calibrate-track"), {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           expected_revision_id:state.revision.revision_id,
-          instruction
+          instruction,
+          track
         })
       }));
       state.editorAiTask = {...result, kind:"calibration"};
@@ -4122,7 +4238,7 @@
         if(!await sendOperation(operation))throw Error('编辑尚未保存，请重试');
       },
       async onCreateSpeaker(name) {
-        const id=window.EditorSpeakers.nextId(window.EditorSpeakers.ids(state.view));
+        const id=nextEditorSpeakerId();
         const names={...state.view.properties.speaker_names,[id]:name};
         await sendOperation(contract.setSpeakerNamesOperation(state.revision,names,manualProvenance("set_speaker_names")));
         if(state.view.properties.speaker_names?.[id]!==name)throw new Error("轨道未保存，请重试");
@@ -4140,6 +4256,12 @@
       onAiPlan:(goal,basePlanId) => api(projectPath("/cut-ai"), {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({revision_id:state.revision.revision_id,goal,base_plan_id:basePlanId||null})}),
       onCutExport: exportCutPlan,
       getLayout:() => state.timelineLayout,
+      getPreviewTracksSwapped:() => state.previewTracksSwapped,
+      onPreviewTracksSwapped(value) {
+        state.previewTracksSwapped = value;
+        renderPreview();
+        assPanel.refreshPreviewOrder();
+      },
       getShowTranslations:() => $("#showTranslations").checked,
       getReviewCueIds:() => reviewEnabled ? reviewData.notes.filter(note => note.status === "open").map(note => note.anchor.cue_id) : [],
       onViewportChange({start, end, duration}) {
@@ -4156,6 +4278,10 @@
       thumbnailsUrl:projectPath("/thumbnails"),
       getThumbnailsUrl:() => projectPath("/thumbnails"),
       keyboardTarget:document,
+      shortcutLabel:id => editorShortcuts.display(shortcutBindings[id]),
+      getSelectedListTokens:() => state.selectedTokenIds,
+      canEdit:() => !!state.revision && !$(".command-right-zone").inert &&
+        !workbenchInert() && !editorAiTaskLocksEditor() && !state.historyNavigationPending,
       hideCueShortcut:() => state.shortcuts.hideCue,
       zoomModifier:() => state.shortcuts.zoomModifier,
       spectrogramUrl({start, end}) {
@@ -4212,6 +4338,7 @@
       state.timelineController.setActiveCue(state.activeCueId);
       state.timelineController.setSelectedCue(state.timelineSelectedCueId);
     }
+    updateShortcutHints();
   }
 
   function initializeCueTimeController() {
@@ -4669,6 +4796,7 @@
     state.view = null;
     state.documentStore = null;
     workbenchInert(true);
+    setProjectCommandsReady(false);
     renderHeader();
     const current = () => epoch === projectEpoch && projectId === state.projectId;
     stopTranslationPoll();
@@ -4709,7 +4837,13 @@
       state.editorAiTask = null;
       state.editorAiTaskChecking = !textProject;
       document.body.classList.toggle("editor-ai-task-locked", !textProject);
-      setRevision(revision, {preserveCueViewport:false});
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("project") !== projectId) {
+        url.searchParams.delete("cue_id");
+        url.searchParams.delete("cue");
+      }
+      url.searchParams.set("project", projectId);
+      setRevision(revision, {preserveCueViewport:false, initialCueUrl:url});
       workbenchInert(false);
       // Keep retrying status checks even if the first request fails. Until it
       // succeeds, a real background writer must not be unlocked by a reload.
@@ -4728,6 +4862,16 @@
       restoreOutputJob(projectId);
       refreshOutputMenu();
       state.timelineController?.redraw();
+      const recovered = url.searchParams.get("recovered");
+      if (recovered) {
+        url.searchParams.delete("recovered");
+        ordinaryError(recovered === "draft"
+          ? "已恢复到最后保存版本，未保存修改已保留副本；右键刷新按钮可查看。"
+          : "已恢复到最后保存版本。", "notice");
+      }
+      history.replaceState(null, "", url);
+      navigateCueLink(url, {keepVisible:true});
+      setProjectCommandsReady(true);
       await aiTaskReady;
       if (!current()) return;
       if (!textProject) startEditorAiTaskPoll();
@@ -4738,32 +4882,23 @@
         }
       }
       if (!current()) return;
-      const url = new URL(window.location.href);
-      if(url.searchParams.get("project")!==projectId){url.searchParams.delete("cue_id");url.searchParams.delete("cue");}
-      url.searchParams.set("project", projectId);
-      const recovered = url.searchParams.get("recovered");
-      if (recovered) {
-        url.searchParams.delete("recovered");
-        ordinaryError(recovered === "draft"
-          ? "已恢复到最后保存版本，未保存修改已保留副本；右键刷新按钮可查看。"
-          : "已恢复到最后保存版本。", "notice");
-      }
-      history.replaceState(null, "", url);
-      navigateCueLink(url);
       if (project?.tutorial_case_id && showTutorialIntro) maybeShowTutorialIntro(project.tutorial_case_id);
     } catch (error) {
-      if (current()) ordinaryError(error.message);
+      if (current()) {
+        if ($(".command-right-zone").inert) setMediaMessage("项目载入失败，请重新选择项目或重新加载页面");
+        ordinaryError(error.message);
+      }
     }
   }
 
-  function navigateCueLink(url=new URL(location.href)) {
+  function navigateCueLink(url=new URL(location.href), {keepVisible=false}={}) {
     if(!state.view||url.searchParams.get('project')!==state.projectId)return;
     try{
       const cue=window.SubstarCueLink.resolve(url,state.view.cue_views);if(!cue)return;
       const media=activeMedia();media?.pause();suspendPlaybackFollow();
       if(media?.readyState>=HTMLMediaElement.HAVE_METADATA)media.currentTime=Number(cue.start);
       else state.mediaSwitchPosition={time:Number(cue.start),playing:false};
-      activateCue(cue.cue_id,{scroll:true,revealTimeline:true,centerTimeline:true,explicitNavigation:true});
+      activateCue(cue.cue_id,{scroll:true,revealTimeline:true,centerTimeline:true,explicitNavigation:true,keepVisible});
       requestAnimationFrame(()=>state.timelineController?.revealTime(Number(cue.start),true));
       const canonical=window.SubstarCueLink.url(state.projectId,cue,location.href);
       history.replaceState(null,'',canonical);
@@ -4980,71 +5115,11 @@
   $("#keepConflictCopy").onclick = async () => {
     await refreshEditorRecovery();
   };
-  $("#externalCalibration").onclick = async () => {
-    const epoch = projectEpoch;
-    $("#aiCalibrationMenu").open = false;
-    try {
-      const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部校准生成.txt`, description:"外部校准提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
-      const saved = await flushActiveEditorInput();
-      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
-      const query = new URLSearchParams({revision_id:saved.revision_id, instruction:$("#aiCalibrationInstruction").value});
-      const built = await api(projectPath(`/exchange/external-calibration?${query}`));
-      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
-      return new Blob([built.text], {type:"text/plain;charset=utf-8"});
-      });
-      if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .json 文件`, "completed");
-    } catch(error) { ordinaryError(`生成外部校准材料失败：${error.message}`); }
-  };
-  $("#importExternalCalibration").onclick = () => {
-    $("#aiCalibrationMenu").open = false;
-    if (!state.revision || state.operationPending || editorAiTaskLocksEditor()) return ordinaryError("请先打开项目并等待当前操作完成");
-    $("#externalCalibrationInput").click();
-  };
-  $("#externalCalibrationInput").onchange = async event => {
-    const file = event.target.files?.[0]; event.target.value = "";
-    if (!file) return;
-    const epoch = projectEpoch;
-    try {
-      if (file.size > 20 * 1024 * 1024) throw new Error("校准结果文件不能超过 20 MB");
-      await flushActiveEditorInput();
-      if (epoch !== projectEpoch) return;
-      const submit = apply => {
-        const form = new FormData(); form.append("file",file); form.append("apply",String(apply));
-        return api(projectPath("/external-calibration"),{method:"POST",body:form});
-      };
-      const preview = await submit(false);
-      if (epoch !== projectEpoch) return;
-      if (!window.confirm(`校准结果：修改 ${preview.replacement_count} 个词元，合并 ${preview.merge_count} 组，待复核 ${preview.review_count} 项。应用到当前版本？`)) return;
-      state.operationPending = true;
-      const result = await submit(true);
-      if (epoch !== projectEpoch) return;
-      setRevision(result.revision);
-      await loadRevisionHistory();
-      ordinaryError("外部校准已应用，可通过 AI 校准定位和版本链查看或撤销", "completed");
-    } catch(error) {ordinaryError(`导入校准结果失败：${error.message}`);}
-    finally {if(epoch === projectEpoch) {state.operationPending = false; renderHeader();}}
-  };
-  $("#externalTranslation").onclick = async () => {
-    const epoch = projectEpoch;
-    $("#translationMenu").open = false;
-    try {
-      const result = await systemSaveAs.saveBlob({suggestedName:`${systemSaveAs.safeFilename(state.taskInfo?.display_name || state.projectId)}_外部翻译生成.txt`, description:"外部翻译提示词与字幕材料", mimeType:"text/plain", extension:".txt"}, async () => {
-      const saved = await flushActiveEditorInput();
-      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
-      const query = new URLSearchParams({revision_id:saved.revision_id,
-        source_language:$("#translationSourceLanguage").value,
-        target_language:$("#translationTargetLanguage").value,
-        mapping_mode:$("#translationMappingMode").value});
-      const built = await api(projectPath(`/exchange/external-translation?${query}`));
-      if (epoch !== projectEpoch) throw new Error("项目已切换，请重新生成");
-      return new Blob([built.text], {type:"text/plain;charset=utf-8"});
-      });
-      if (!result.cancelled) ordinaryError(`已保存：${result.filename}；请导入模型生成的 .srt 文件`, "completed");
-    } catch (error) { ordinaryError(`生成外部翻译材料失败：${error.message}`); }
-  };
   const outputMenu = $("#exportMenu");
   const outputForm = $("#outputForm");
   const outputSessions = new Map();
+  const outputCancelRequests = new Set();
+  const outputCancelled = new Error("导出已中止");
   let outputPlanId = null;
 
   function outputPlan() {
@@ -5059,6 +5134,8 @@
   function refreshOutputMenu() {
     const job = outputSessions.get(state.projectId);
     const busy = ["choosing", "submitting", "queued", "running", "saving"].includes(job?.state);
+    const cancelling = job?.cancel_requested || outputCancelRequests.has(job?.id);
+    const canCancel = job?.cancellable && !cancelling;
     const plan = outputPlan();
     const xml = outputForm.querySelector('[name="outputProjectFormat"][value="cut-xml"]');
     xml.disabled = !plan;
@@ -5082,9 +5159,11 @@
     const media = $("#outputVideo").checked || $("#outputAudio").checked || subtitles;
     const project = $("#outputProjectFiles").checked;
     const projectFormats = selectedOutputValues("outputProjectFormat");
-    $("#startOutput").disabled = busy || incomplete || (media && $("#outputEdited").checked && !plan) ||
+    const action = $("#startOutput");
+    action.textContent = cancelling ? "正在中止…" : canCancel ? "中止导出" : "另存为";
+    action.disabled = !canCancel && (busy || incomplete || (media && $("#outputEdited").checked && !plan) ||
       (project && !projectFormats.length) || !(media || project) ||
-      !$("#outputTitle").value.trim();
+      !$("#outputTitle").value.trim());
     $("#exportDocument").textContent = busy
       ? `导出 · ${Math.floor((job.progress || 0) * 100)}%` : "导出";
     $("#outputResult").hidden = !job;
@@ -5094,9 +5173,9 @@
       choosing: "请选择保存位置", submitting: "正在保存工程…", queued: "等待导出…", running: "正在导出",
       saving: "正在写入所选文件", ready: job.savedName ? `已保存 ${job.savedName}` : job.savedFolder
         ? `已保存 ${job.files.length} 个文件到 ${job.savedFolder}` : `已生成 ${job.files?.length || 0} 个文件`,
-      error: "导出失败",
+      error: "导出失败", cancelled: "导出已中止",
     };
-    $("#outputStatus").textContent = [messages[job.state], job.encoder, job.message]
+    $("#outputStatus").textContent = [cancelling ? "正在中止导出" : messages[job.state], job.encoder, job.message]
       .filter(Boolean).join(" · ");
     const destination = $("#outputSavedDestination");
     destination.hidden = !job.destination;
@@ -5128,10 +5207,12 @@
     let job = initial;
     let failedPolls = 0;
     while (true) {
+      const finished = ["ready", "error", "cancelled"].includes(job.state);
+      if (finished) outputCancelRequests.delete(initial.id);
       if (saveAfterExport && job.state === "ready") return job;
       outputSessions.set(project, job);
       if (state.projectId === project) refreshOutputMenu();
-      if (["ready", "error"].includes(job.state)) return job;
+      if (finished) return job;
       await new Promise(resolve => setTimeout(resolve, 1000));
       try {
         const response = await fetch(`${endpoint}/${initial.id}`, {cache:"no-store"});
@@ -5143,6 +5224,20 @@
           job = {state:"error", message:error.status === 404 ? "服务已重启或导出已过期" : error.message};
         }
       }
+    }
+  }
+
+  async function requestOutputCancellation(project, endpoint, job) {
+    outputCancelRequests.add(job.id);
+    refreshOutputMenu();
+    try {
+      const result = await api(`${endpoint}/${encodeURIComponent(job.id)}/cancel`, {method:"POST"});
+      if (!result.cancel_requested && result.state !== "cancelled") outputCancelRequests.delete(job.id);
+    } catch (error) {
+      outputCancelRequests.delete(job.id);
+      if (state.projectId === project) ordinaryError(`中止导出失败：${error.message}`);
+    } finally {
+      if (state.projectId === project) refreshOutputMenu();
     }
   }
 
@@ -5266,6 +5361,10 @@
       if (result.state !== "saved") throw new Error("Windows 保存未完成");
       return {cancelled:false, directory:result.folder};
     } catch (error) {
+      if (error === outputCancelled) {
+        await update("cancelled").catch(() => {});
+        throw error;
+      }
       await update("error", {message:String(error.message || error).slice(0, 1000)}).catch(() => {});
       throw error;
     }
@@ -5278,6 +5377,11 @@
     const project = state.projectId;
     const epoch = projectEpoch;
     const endpoint = projectPath("/output-jobs");
+    const current = outputSessions.get(project);
+    if (current?.cancellable) {
+      await requestOutputCancellation(project, endpoint, current);
+      return;
+    }
     const sequence = nextExportSequence();
     const subtitles = $("#outputSubtitles").checked ? {
       formats: selectedOutputValues("outputSubtitleFormat"),
@@ -5319,6 +5423,7 @@
         sessionStorage.setItem(`substar.output-job:${project}`, job.id);
         if (onJob) await onJob(job);
         const output = await followOutput(project, endpoint, job, true);
+        if (output.state === "cancelled") throw outputCancelled;
         if (output.state !== "ready") throw new Error(output.message || "导出失败");
         generated = output;
         outputSessions.set(project, {...output, state:"saving"});
@@ -5337,9 +5442,11 @@
         outputSessions.set(project, {...generated, savedName:result.filename, savedFolder:result.directory});
       }
     } catch (error) {
-      outputSessions.set(project, generated
-        ? {...generated, message:`保存失败：${error.message}`}
-        : {state:"error", message:error.message});
+      if (error !== outputCancelled) {
+        outputSessions.set(project, generated
+          ? {...generated, message:`保存失败：${error.message}`}
+          : {state:"error", message:error.message});
+      }
     } finally {
       if (state.projectId === project) refreshOutputMenu();
     }
@@ -5570,6 +5677,8 @@
     localStorage.setItem(calibrationInstructionKey(), event.target.value);
   });
   $("#runAiCalibration").onclick = () => runSubtitleTextTask("punctuation");
+  $("#runFullAiCalibration")?.addEventListener("click", runAiCalibration);
+  $("#aiCalibrationTrack")?.addEventListener("change", renderHeader);
   $("#runAiOrganize").onclick = () => runSubtitleTextTask("organize");
   $("#retryFailedTask").onclick = retryFailedTask;
   $("#openModelSettings").onclick = () => { window.location.href = "/settings#api"; };
@@ -5579,95 +5688,6 @@
   $("#importProjectPackage").onclick = () => {
     $("#projectMenu").open = false;
     $("#importProjectInput").click();
-  };
-  let srtImport = null;
-  let srtPreviewSequence = 0;
-  const closeSrtImport = () => {
-    srtImport = null;
-    srtPreviewSequence += 1;
-    $("#srtImportDialog").classList.add("hidden");
-  };
-  const previewSrtImport = async () => {
-    const session = srtImport;
-    if (!session || session.projectId !== state.projectId) return closeSrtImport();
-    const sequence = ++srtPreviewSequence;
-    $("#applySrtImport").disabled = true;
-    $("#srtImportSummary").textContent = "正在匹配…";
-    $("#srtImportRows").replaceChildren();
-    try {
-      const saved = await flushActiveEditorInput();
-      if (session !== srtImport || sequence !== srtPreviewSequence) return;
-      const request = {text:session.text, format:$("#srtImportFormat").value,
-        expected_revision_id:saved.revision_id, request_id:crypto.randomUUID()};
-      const result = await api(`/api/projects/${encodeURIComponent(session.projectId)}/import-srt-translation`, {
-        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(request)
-      });
-      if (session !== srtImport || sequence !== srtPreviewSequence) return;
-      session.request = request;
-      const labels = {source:"原文单行", target:"译文单行", "ab-single":"双语单行", "ab-double":"双语双行"};
-      $("#srtImportSummary").textContent = `${labels[result.format]} · 可导入 ${result.matched} 条 · 跳过 ${result.skipped} 条 · 覆盖已有译文 ${result.overwrites} 条`;
-      const fragment = document.createDocumentFragment();
-      result.rows.forEach(row => {
-        const item = document.createElement("p");
-        item.textContent = `${row.number} · ${row.importable ? (row.overwrite ? "覆盖译文" : "导入译文") : row.reason}\n${row.target || row.text}`;
-        fragment.append(item);
-      });
-      $("#srtImportRows").append(fragment);
-      $("#applySrtImport").disabled = !result.matched;
-    } catch (error) {
-      if (session === srtImport && sequence === srtPreviewSequence) $("#srtImportSummary").textContent = error.message;
-    }
-  };
-  $("#importSrtTranslation").onclick = () => {
-    $("#translationMenu").open = false;
-    if (!state.revision || state.operationPending) return ordinaryError("请先打开项目并等待当前操作完成");
-    $("#importSrtInput").click();
-  };
-  $("#importSrtInput").onchange = async event => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    const epoch = projectEpoch;
-    try {
-      if (file.size > 5_000_000) throw new Error("SRT 文件不能超过 5 MB");
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      const encoding = bytes[0] === 255 && bytes[1] === 254 ? "utf-16le" : bytes[0] === 254 && bytes[1] === 255 ? "utf-16be" : "utf-8";
-      const text = new TextDecoder(encoding, {fatal:true}).decode(bytes);
-      if (epoch !== projectEpoch) return;
-      srtImport = {text, projectId:state.projectId};
-      $("#srtImportFormat").value = "auto";
-      $("#srtImportDialog").classList.remove("hidden");
-      await previewSrtImport();
-    } catch (error) { ordinaryError(`读取 SRT 失败：${error.message}`); }
-  };
-  $("#cancelSrtImport").onclick = closeSrtImport;
-  $("#previewSrtImport").onclick = previewSrtImport;
-  $("#srtImportFormat").onchange = previewSrtImport;
-  $("#applySrtImport").onclick = async () => {
-    const session = srtImport;
-    if (!session?.request || session.projectId !== state.projectId || state.operationPending) return;
-    state.operationPending = true;
-    $("#applySrtImport").disabled = true;
-    $("#cancelSrtImport").disabled = true;
-    $("#previewSrtImport").disabled = true;
-    $("#srtImportFormat").disabled = true;
-    try {
-      const result = await api(`/api/projects/${encodeURIComponent(session.projectId)}/import-srt-translation`, {
-        method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({...session.request, apply:true})
-      });
-      setRevision(result.revision);
-      recordCommittedRevision(state.revision, {kind:"import", operation:"srt_translation_import", metadata:{}});
-      closeSrtImport();
-    } catch (error) {
-      $("#srtImportSummary").textContent = `导入失败：${error.message}。可重试；项目变化时请重新匹配。`;
-      $("#applySrtImport").disabled = false;
-    } finally {
-      state.operationPending = false;
-      $("#cancelSrtImport").disabled = false;
-      $("#previewSrtImport").disabled = false;
-      $("#srtImportFormat").disabled = false;
-      renderHeader();
-    }
   };
   $("#importProjectInput").onchange = async event => {
     const file = event.target.files?.[0];
@@ -5774,7 +5794,7 @@
       return;
     }
     const deletedRow = event.target.closest(".cue-row.deleted");
-    if (deletedRow && !event.target.closest('[data-cue-action="restore"]')) {
+    if (deletedRow && !event.target.closest('[data-cue-select],[data-cue-action="restore"]')) {
       event.preventDefault();
       return;
     }
@@ -5867,9 +5887,17 @@
   });
   $("#cueList").addEventListener("contextmenu", event => {
     if (tokenSplitMode) { splitTokenAtPointer(event); return; }
-    const boundary = event.target.closest("[data-boundary-control]") ||
-      nearestCueControl(event, "[data-boundary-control]");
-    if (!boundary || boundary.disabled) return;
+    const boundary = event.target.closest("[data-boundary-control]");
+    if (!boundary) {
+      if (event.target.closest("input,textarea,select,[contenteditable='true']")) return;
+      const cueId = event.target.closest(".cue-row[data-cue-id]")?.dataset.cueId;
+      if (cueId && state.timelineController?.openCueContextMenu?.(cueId, event.clientX, event.clientY)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+    if (boundary.disabled) return;
     event.preventDefault();
     event.stopPropagation();
     const cueId = boundary.dataset.cueId;
@@ -5942,7 +5970,7 @@
     }
   });
   let cueDrag = null, suppressCueClick = false;
-  function cueOrder() { return (state.view?.cue_views || []).filter(c => c.state === "active").map(c => c.cue_id); }
+  function cueOrder() { return (state.view?.cue_views || []).map(c => c.cue_id); }
   function refreshCueSelection(redrawTimeline = true) {
     const ids=state.cueSelection.ids;
     if (redrawTimeline) state.timelineController?.redraw();
@@ -5955,6 +5983,7 @@
   }
   function selectCueGroup(id, event) {
     if (suppressCueClick) { suppressCueClick=false; return; }
+    state.timelineController?.useCueShortcutSelection?.();
     state.selectedTokenIds.clear();
     state.selectionAnchorTokenId=null;
     refreshTokenSelectionUi();
@@ -5979,6 +6008,7 @@
         width:`${Math.max(2,Math.min(bounds.right,box.right)-left)}px`,
         height:`${Math.max(2,Math.min(bounds.bottom,box.bottom)-top)}px`});
       if (cueDrag.mode==='tokens') {
+        state.timelineController?.useListWordShortcutSelection?.();
         state.cueSelection.clear();refreshCueSelection();
         // Content coordinates remain stable while scrolling and retain rows leaving the DOM window.
         list.querySelectorAll('.cue-row:not(.deleted) .display-token').forEach(node => {
@@ -5994,6 +6024,7 @@
         list.querySelectorAll('.display-token').forEach(node =>
           node.classList.toggle('selected',state.selectedTokenIds.has(node.dataset.tokenId)));
       } else {
+        state.timelineController?.useCueShortcutSelection?.();
         state.selectedTokenIds.clear();state.selectionAnchorTokenId=null;
         list.querySelectorAll('.display-token.selected').forEach(node=>node.classList.remove('selected'));
         const rows=[...list.querySelectorAll('.cue-row:not(.deleted)')];
@@ -6078,7 +6109,7 @@
   });
   document.addEventListener("pointerdown", event => {
     if (event.target.closest(".display-token,.token-selection-menu,.reference-selection-menu,#revisionMenu,#versionMenu")) return;
-    if (event.target.closest("#cueList,#aiReviewMenu") || isTextEditingContext(event)) return;
+    if (event.target.closest("#cueList,#aiReviewMenu") || editorShortcuts.inInput(event, {textOnly:true})) return;
     if (!state.selectedTokenIds.size) return;
     state.selectedTokenIds.clear();
     state.selectionAnchorTokenId = null;
@@ -6117,7 +6148,7 @@
   $("#addSpeaker")?.addEventListener("click", () => {
     if (dockedSpeakerForm()) {
       if (!state.revision) return;
-      const id = window.EditorSpeakers.nextId(window.EditorSpeakers.ids(state.view));
+      const id = nextEditorSpeakerId();
       void sendOperation(contract.setSpeakerNamesOperation(
         state.revision, {...speakerNames(), [id]:window.EditorSpeakers.label(id)}, manualProvenance("set_speaker_names")
       ));
@@ -6127,7 +6158,7 @@
       return;
     }
     const ids = [...document.querySelectorAll("[data-speaker-name]")].map(node => node.dataset.speakerName);
-    const id = window.EditorSpeakers.nextId(ids);
+    const id = nextEditorSpeakerId(ids);
     appendSpeakerInput(id, window.EditorSpeakers.label(id)).focus();
   });
   $("#speakerDialogForm").addEventListener("submit", async event => {
@@ -6260,38 +6291,116 @@
       exitEditorTutorial();
       return;
     }
-    if (event.repeat || !state.projectId || !state.revision) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
-    const shortcut = shortcutFromEvent(event).toLowerCase();
-    if (shortcut === state.shortcuts.undo.toLowerCase()) {
-      event.preventDefault();
-      undoLatestRevision();
-    } else if (shortcut === state.shortcuts.redo.toLowerCase()) {
-      event.preventDefault();
-      redoLatestRevision();
-    }
   });
 
+  function canUseEditorShortcut(event, {menuFocused = false} = {}) {
+    return state.revision && !$(".command-right-zone").inert && !outputMenu.open &&
+      !event.defaultPrevented && (menuFocused || !editorShortcuts.inInput(event));
+  }
+
+  function clearShortcutSelection() {
+    state.cueSelection.clear();
+    state.selectedTokenIds.clear();
+    state.selectionAnchorTokenId = null;
+    state.timelineController?.clearShortcutSelection?.();
+    refreshTokenSelectionUi();
+    refreshCueSelection();
+  }
+
+  function navigateByShortcut(direction) {
+    const cues = state.view.cue_views.filter(cue => cue.state === "active");
+    const at = cues.findIndex(cue => cue.cue_id === state.activeCueId);
+    const time = activeMedia()?.currentTime || 0;
+    const cue = at >= 0 ? cues[at + direction] : direction > 0
+      ? cues.find(cue => cue.start >= time) : cues.findLast(cue => cue.start <= time);
+    if (!cue) return;
+    clearShortcutSelection();
+    activateCue(cue.cue_id, {seek:true, scroll:true, revealTimeline:true, keepVisible:true});
+  }
+
+  function runEditorShortcut(action, digit) {
+    const timeline = state.timelineController;
+    if (action === "play_pause") return toggleMediaPlayback();
+    if (action === "undo") return undoLatestRevision();
+    if (action === "redo") return redoLatestRevision();
+    if (action === "previous_cue" || action === "next_cue") {
+      return navigateByShortcut(action === "previous_cue" ? -1 : 1);
+    }
+    if (action === "seek_back" || action === "seek_forward") {
+      const media = activeMedia();
+      if (!Number.isFinite(media?.duration)) return;
+      clearShortcutSelection();
+      const seconds = Math.max(0, Math.min(media.duration, media.currentTime + (action === "seek_back" ? -1 : 1)));
+      timeline?.seek(seconds);
+      timeline?.revealTime(seconds, true, {keepVisible:true});
+      return;
+    }
+    if (["word_timing","previous_marker","next_marker"].includes(action)) {
+      if (action !== "word_timing") clearShortcutSelection();
+      return timeline?.runShortcut?.(action);
+    }
+    if (editorAiTaskLocksEditor() || state.historyNavigationPending || workbenchInert()) return;
+    return timeline?.runShortcut?.(action, digit);
+  }
+
+  let standaloneAlt = false;
+  let pointerButtons = 0;
+  const cancelStandaloneAlt = () => { standaloneAlt = false; };
+  for (const eventName of ["pointerdown", "pointerup", "pointercancel"]) {
+    window.addEventListener(eventName, event => {
+      pointerButtons = event.buttons;
+      cancelStandaloneAlt();
+    }, {capture:true, passive:true});
+  }
+  for (const eventName of ["wheel", "focusin", "compositionstart"]) {
+    document.addEventListener(eventName, cancelStandaloneAlt, {capture:true, passive:true});
+  }
+  window.addEventListener("blur", () => { pointerButtons = 0; cancelStandaloneAlt(); });
+  window.addEventListener("storage", event => {
+    if (event.key === editorShortcuts.storageKey || event.key === null) updateShortcutHints();
+  });
+  window.addEventListener("focus", loadEditorSettings);
+
   document.addEventListener("keydown", event => {
-    if (outputMenu.contains(event.target)) return;
-    if (event.repeat || shortcutFromEvent(event).toLowerCase() !== state.shortcuts.playPause.toLowerCase()) return;
-    if (isTextEditingContext(event)) return;
+    if (event.key === "Alt") {
+      if (!event.repeat) standaloneAlt = !!canUseEditorShortcut(event) && !event.ctrlKey &&
+        !event.shiftKey && !event.metaKey && !event.getModifierState?.("AltGraph") && !pointerButtons &&
+        !state.timelineController?.hasPointerGesture?.();
+      if (standaloneAlt) event.preventDefault();
+      return;
+    }
+    cancelStandaloneAlt();
+    const menuFocused = !!event.target.closest?.('.ctxmenu.show [role="menuitem"],.ctxmenu.show [role="menuitemradio"]');
+    if (event.key === "Escape" || !canUseEditorShortcut(event, {menuFocused})) return;
+    const key = editorShortcuts.fromEvent(event);
+    if (!key) return;
+    const digit = /^[0-9]$/.test(key) ? key : null;
+    const action = digit !== null ? "speaker" : Object.keys(shortcutBindings).find(id => shortcutBindings[id] === key);
+    if (!action) return;
+    if (menuFocused || !event.repeat) {
+      const handled = state.timelineController?.runMenuShortcut?.(key, {closeUnmatched:!menuFocused, activate:!event.repeat});
+      if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+    }
+    if (menuFocused) return;
     event.preventDefault();
     event.stopPropagation();
-    toggleMediaPlayback();
+    if (!event.repeat || ["seek_back","seek_forward","previous_cue","next_cue"].includes(action)) {
+      runEditorShortcut(action, digit);
+    }
   }, true);
 
-  document.addEventListener("keydown", event => {
-    if (outputMenu.contains(event.target)) return;
-    if (state.timelineController) return;
-    if (shortcutFromEvent(event).toLowerCase() !== state.shortcuts.hideCue.toLowerCase()
-      || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
-    const cue = currentCue();
-    if (!cue || cue.state === "deleted") return;
+  document.addEventListener("keyup", event => {
+    if (event.key !== "Alt") return;
+    const toggle = standaloneAlt && canUseEditorShortcut(event);
+    cancelStandaloneAlt();
+    if (!toggle) return;
     event.preventDefault();
-    cueAction(cue.cue_id, "hide");
-  });
+    runEditorShortcut("skip_gaps");
+  }, true);
 
   document.querySelectorAll("#editorTools > .tool-accordion").forEach(panel => {
     panel.addEventListener("toggle", () => {

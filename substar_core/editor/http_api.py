@@ -11,7 +11,6 @@ from urllib.parse import quote
 
 import json
 import mimetypes
-import shutil
 import sys
 import time
 import uuid
@@ -22,7 +21,6 @@ import zipfile
 from fastapi import Depends, APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
 
 from substar_core.artifacts import atomic_write_json
 from substar_core.ai_progress import ai_progress
@@ -103,19 +101,8 @@ from substar_core.editor.calibration.handler import CALIBRATION_INPUT_SCHEMA
 from substar_core.credential_store import model_provider_credential_ref
 from substar_core.project_exchange import (
     ProjectExchangeError,
-    apply_external_generation_checkpoint,
-    apply_external_prooftranslation,
-    apply_external_split,
-    external_edit_files,
-    external_generation_files,
-    external_prooftranslation_files,
-    external_split_files,
     import_subtitle_project,
-    inspect_external_generation_checkpoint,
-    inspect_external_prooftranslation,
-    inspect_external_split,
     stream_subtitle_project,
-    write_bytes_zip,
 )
 from substar_core.task_info import load_task_info, save_task_info, task_info_settings
 
@@ -251,6 +238,8 @@ class PresentationRequest(BaseModel):
     upper_space: str | None = Field(default=None, max_length=128)
     lower_remove: str | None = Field(default=None, max_length=128)
     lower_space: str | None = Field(default=None, max_length=128)
+    upper_filter_inline: bool | None = None
+    lower_filter_inline: bool | None = None
 
 
 class ScriptConversionRequest(BaseModel):
@@ -1474,33 +1463,6 @@ def preview_project_auto_snap(
     return {**result, "revision_id": latest.revision_id}
 
 
-def _commit_binary_export(
-    filename: str, artifact_type: str, writer: Any
-) -> FileResponse:
-    directory = Path(tempfile.mkdtemp(prefix="substar-export-"))
-    destination = directory / filename
-    try:
-        writer(destination)
-    except OSError as exc:
-        shutil.rmtree(directory, ignore_errors=True)
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "export_build_failed", "message": f"导出文件生成失败：{exc}"},
-        ) from exc
-    except Exception:
-        shutil.rmtree(directory, ignore_errors=True)
-        raise
-    return FileResponse(
-        path=destination,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
-            "X-Substar-Artifact-Type": artifact_type,
-        },
-        background=BackgroundTask(shutil.rmtree, directory, ignore_errors=True),
-    )
-
-
 _SUBTITLE_EXPORT_LABELS = {
     SubtitleExportMode.SOURCE: "原文字幕",
     SubtitleExportMode.TARGET: "译文字幕",
@@ -2157,13 +2119,12 @@ _CALIBRATION_EVIDENCE_KINDS = {
 
 
 @router.post("/projects/{project_id}/ai-calibrate", status_code=202)
+@router.post("/projects/{project_id}/ai-calibrate-track", status_code=202)
 def ai_calibrate_project(
     project_id: str, payload: AiCalibrationRequest, request: Request
 ) -> dict[str, Any]:
     """Apply model-authored punctuation, casing, terminology and ASR corrections."""
     latest = open_project_store(project_id).load_latest()
-    if latest and any(cue.source_text is not None for cue in latest.document.cues):
-        raise HTTPException(422, detail={"message": "无词元字幕项目不支持 AI 校准"})
     if latest is None:
         raise HTTPException(status_code=404, detail={
             "code": "empty_project", "message": "项目还没有文稿版本"
@@ -2172,6 +2133,14 @@ def ai_calibrate_project(
         raise HTTPException(status_code=409, detail={
             "code": "revision_conflict", "message": "AI 校准基于旧版本，请刷新后重试"
         })
+    if payload.track == "target":
+        from substar_core.editor.calibration.text_track import target_calibration_rows
+        if not target_calibration_rows(latest.document):
+            raise HTTPException(422, detail={"message": "当前项目没有可校准的译文"})
+    elif not latest.document.source_tokens:
+        from substar_core.editor.calibration.text_track import source_calibration_rows
+        if not source_calibration_rows(latest.document, "Auto"):
+            raise HTTPException(422, detail={"message": "当前项目没有可校准的原文"})
     service = request.app.state.task_service
     active = service.list_tasks(
         project_id=project_id,
@@ -2204,6 +2173,8 @@ def ai_calibrate_project(
     if language == "Auto":
         language = source_language_for_text(" ".join(t.text for t in latest.document.display_tokens if t.state.value == "active"))
     frozen_settings["language"] = language
+    if payload.track == "target":
+        frozen_settings["calibration_track"] = "target"
     frozen_settings["prompt_snapshot"] = {
         key: asdict(render_prompt(key, variant=calibration_variant(language)))
         for key in ("calibration", "calibration_repair")
@@ -2241,170 +2212,6 @@ def ai_calibrate_project(
         }) from exc
 
 
-def _exchange_prompt_options(project_id: str) -> dict[str, Any]:
-    try:
-        settings = get_project_task_info(project_id)
-    except HTTPException:
-        settings = {}
-    source_language = str(settings.get("language") or "Auto")
-    target_language = str(settings.get("target_language_mode") or "zh-CN")
-    source_limit = int(settings.get("source_hard_limit") or settings.get({
-        "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
-        "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(source_language, "other_hard_limit"), 55))
-    target_limit = int(settings.get("target_hard_limit") or settings.get({
-        "en": "english_hard_limit", "zh-CN": "chinese_hard_limit",
-        "ja": "japanese_hard_limit", "ko": "korean_hard_limit",
-    }.get(target_language, "other_hard_limit"), 55))
-    return {
-        "source_language": source_language,
-        "target_language": target_language,
-        "source_hard_limit": source_limit,
-        "target_hard_limit": target_limit,
-        "glossary": active_glossary(_project_glossary_id(project_id)),
-    }
-
-
-@router.get("/projects/{project_id}/exchange/external-ai-prooftranslation")
-def export_external_ai_prooftranslation(project_id: str, revision_id: str | None = None) -> FileResponse:
-    store = open_project_store(project_id)
-    revision = store.load_revision(revision_id) if revision_id else store.load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    files = external_prooftranslation_files(
-        project_id, revision, **_exchange_prompt_options(project_id)
-    )
-    return _commit_binary_export(
-        f"{project_id}_外部AI校译.zip",
-        "external-ai-prooftranslation",
-        lambda path: write_bytes_zip(path, files),
-    )
-
-
-@router.get("/projects/{project_id}/exchange/external-ai-split")
-def export_external_ai_split(project_id: str, revision_id: str | None = None) -> FileResponse:
-    store = open_project_store(project_id)
-    revision = store.load_revision(revision_id) if revision_id else store.load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    options = _exchange_prompt_options(project_id)
-    try:
-        files = external_split_files(
-            project_id,
-            revision,
-            source_language=options["source_language"],
-            source_hard_limit=options["source_hard_limit"],
-            glossary=options["glossary"],
-        )
-    except ProjectExchangeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _commit_binary_export(
-        f"{project_id}_外部AI切分.zip",
-        "external-ai-split",
-        lambda path: write_bytes_zip(path, files),
-    )
-
-
-@router.get("/projects/{project_id}/exchange/external-ai-edit")
-def export_external_ai_edit(project_id: str, revision_id: str | None = None) -> FileResponse:
-    store = open_project_store(project_id)
-    revision = store.load_revision(revision_id) if revision_id else store.load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    try:
-        files = external_edit_files(
-            project_id, revision, **_exchange_prompt_options(project_id)
-        )
-    except ProjectExchangeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _commit_binary_export(
-        f"{project_id}_外部AI编辑.zip",
-        "external-ai-edit",
-        lambda path: write_bytes_zip(path, files),
-    )
-
-
-@router.get("/projects/{project_id}/exchange/external-ai-generation")
-def export_external_ai_generation(project_id: str, revision_id: str | None = None) -> FileResponse:
-    store = open_project_store(project_id)
-    revision = store.load_revision(revision_id) if revision_id else store.load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    try:
-        files = external_generation_files(
-            project_id, revision, **_exchange_prompt_options(project_id)
-        )
-    except ProjectExchangeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _commit_binary_export(
-        f"{project_id}_外部AI生成.zip",
-        "external-ai-generation",
-        lambda path: write_bytes_zip(path, files),
-    )
-
-
-@router.get("/projects/{project_id}/exchange/external-calibration")
-def export_external_calibration(project_id: str, revision_id: str, instruction: str = Query(default="", max_length=4000)):
-    from substar_core.editor.calibration.exchange import export_calibration
-    revision = open_project_store(project_id).load_revision(revision_id)
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目版本不存在")
-    info = get_project_task_info(project_id)
-    try:
-        text = export_calibration(project_id, revision, task_info_settings(info),
-            active_glossary(_project_glossary_id(project_id), stage="calibration"), instruction)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"text": text, "revision_id": revision.revision_id}
-
-
-@router.post("/projects/{project_id}/external-calibration")
-async def import_external_calibration(project_id: str, request: Request, file: UploadFile = File(...), apply: bool = Form(default=False)):
-    from substar_core.editor.calibration.exchange import inspect_calibration
-    active = request.app.state.task_service.list_tasks(
-        project_id=project_id, states=["queued", "running", "cancelling"], limit=20)
-    if any(task["task_type"] in {"translation", "calibration", "organize", "punctuation"} for task in active):
-        raise HTTPException(status_code=423, detail="当前项目已有 AI 任务正在运行，请等待完成后导入")
-    revision = open_project_store(project_id).load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目版本不存在")
-    try:
-        raw = await file.read(20 * 1024 * 1024 + 1)
-        if len(raw) > 20 * 1024 * 1024:
-            raise ValueError("校准结果文件不能超过 20 MB")
-        payload = json.loads(raw.decode("utf-8-sig"))
-        document, provenance, result = inspect_calibration(project_id, revision, payload)
-    except (ValueError, TypeError, KeyError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    finally:
-        await file.close()
-    if apply:
-        result["revision"] = _save_document(project_id, expected_revision_id=revision.revision_id,
-            document=document, operation="ai_calibration_apply", provenance=provenance)
-    return result
-
-
-@router.get("/projects/{project_id}/exchange/external-translation")
-def export_external_translation(project_id: str, revision_id: str,
-                                source_language: str = "Auto", target_language: str = "zh-CN",
-                                mapping_mode: Literal["many_to_many", "one_to_one"] = "many_to_many"):
-    from substar_core.project_exchange import external_translation_text
-    revision = open_project_store(project_id).load_revision(revision_id)
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目版本不存在")
-    options = _exchange_prompt_options(project_id)
-    info = get_project_task_info(project_id)
-    limit_key = {"zh-CN":"chinese_hard_limit", "en":"english_hard_limit", "ja":"japanese_hard_limit", "ko":"korean_hard_limit"}.get(target_language)
-    target_limit = int(info.get(limit_key) or options["target_hard_limit"])
-    try:
-        text = external_translation_text(revision, source_language=source_language,
-            target_language=target_language, target_hard_limit=target_limit,
-            mapping_mode=mapping_mode, glossary=options["glossary"])
-    except (ProjectExchangeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"text": text, "revision_id": revision.revision_id}
-
-
 @router.get("/projects/{project_id}/exchange/subtitle-project")
 def export_subtitle_project_package(
     project_id: str,
@@ -2432,183 +2239,6 @@ def export_subtitle_project_package(
     )
 
 
-@router.post("/projects/{project_id}/external-ai-prooftranslation")
-async def import_external_ai_prooftranslation(
-    project_id: str,
-    file: UploadFile = File(...),
-    apply: bool = Form(default=False),
-) -> dict[str, Any]:
-    revision = open_project_store(project_id).load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    try:
-        raw = await file.read(20 * 1024 * 1024 + 1)
-        if len(raw) > 20 * 1024 * 1024:
-            raise ProjectExchangeError("外部 AI 校译文件不能超过 20 MB")
-        payload = json.loads(raw.decode("utf-8-sig"))
-        if str(payload.get("revision_id", "")) != revision.revision_id:
-            # Per-item source hashes still permit a partial safe apply.
-            payload = {**payload, "basis_revision_changed": True}
-        inspection = inspect_external_prooftranslation(revision.document, payload)
-    except (UnicodeError, json.JSONDecodeError, ProjectExchangeError) as exc:
-        raise HTTPException(status_code=422, detail={"code": "invalid_external_ai_prooftranslation", "message": str(exc)}) from exc
-    finally:
-        await file.close()
-    tracks = (inspection["source"], inspection["translation"])
-    result: dict[str, Any] = {
-        "schema_version": "substar.external-ai-prooftranslation-inspection.v1",
-        "summary": {
-            "applicable": sum(len(track["applicable"]) for track in tracks),
-            "content_changed": sum(len(track["content_changed"]) for track in tracks),
-            "invalid": sum(len(track["invalid"]) for track in tracks),
-        },
-        **inspection,
-    }
-    applicable = result["summary"]["applicable"]
-    if apply and applicable:
-        document = apply_external_prooftranslation(revision.document, inspection)
-        provenance = ChangeProvenance(
-            kind=ChangeKind.IMPORT,
-            operation="external_ai_prooftranslation",
-            actor="external-ai",
-            metadata={"label": "外部 AI 校译", "applied": applicable},
-        )
-        result["revision"] = _save_document(
-            project_id,
-            expected_revision_id=revision.revision_id,
-            document=document,
-            operation="external_ai_prooftranslation",
-            provenance=provenance,
-        )
-    return result
-
-
-@router.post("/projects/{project_id}/external-ai-split")
-async def import_external_ai_split(
-    project_id: str,
-    file: UploadFile = File(...),
-    apply: bool = Form(default=False),
-) -> dict[str, Any]:
-    revision = open_project_store(project_id).load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    options = _exchange_prompt_options(project_id)
-    try:
-        raw = await file.read(20 * 1024 * 1024 + 1)
-        if len(raw) > 20 * 1024 * 1024:
-            raise ProjectExchangeError("外部 AI 切分文件不能超过 20 MB")
-        payload = json.loads(raw.decode("utf-8-sig"))
-        inspection = inspect_external_split(
-            revision.document,
-            payload,
-            revision_id=revision.revision_id,
-            document_hash=revision.document_hash,
-            source_hard_limit=options["source_hard_limit"],
-        )
-    except (UnicodeError, json.JSONDecodeError, ProjectExchangeError) as exc:
-        raise HTTPException(status_code=422, detail={
-            "code": "invalid_external_ai_split", "message": str(exc)
-        }) from exc
-    finally:
-        await file.close()
-    result = dict(inspection)
-    if apply and inspection["summary"]["applicable"]:
-        document = apply_external_split(revision.document, inspection)
-        provenance = ChangeProvenance(
-            kind=ChangeKind.IMPORT,
-            operation="external_ai_split",
-            actor="external-ai",
-            metadata={
-                "label": "外部 AI 切分",
-                "current_cues": inspection["summary"]["current_cues"],
-                "proposed_cues": inspection["summary"]["proposed_cues"],
-            },
-        )
-        result["revision"] = _save_document(
-            project_id,
-            expected_revision_id=revision.revision_id,
-            document=document,
-            operation="external_ai_split",
-            provenance=provenance,
-        )
-    return result
-
-
-@router.post("/projects/{project_id}/external-ai-generation")
-async def import_external_ai_generation(
-    project_id: str,
-    file: UploadFile = File(...),
-    apply: bool = Form(default=False),
-) -> dict[str, Any]:
-    store = open_project_store(project_id)
-    revision = store.load_latest()
-    if revision is None:
-        raise HTTPException(status_code=404, detail="项目还没有文档版本")
-    options = _exchange_prompt_options(project_id)
-    try:
-        raw = await file.read(20 * 1024 * 1024 + 1)
-        if len(raw) > 20 * 1024 * 1024:
-            raise ProjectExchangeError("外部 AI 生成文件不能超过 20 MB")
-        payload = json.loads(raw.decode("utf-8-sig"))
-        source_revision_id = str(payload.get("source_revision_id", ""))
-        if not source_revision_id:
-            raise ProjectExchangeError("外部 AI 生成文件缺少源项目版本")
-        try:
-            source_revision = store.load_revision(source_revision_id)
-        except KeyError as exc:
-            raise ProjectExchangeError(
-                "外部 AI 生成所依据的源项目版本不存在"
-            ) from exc
-        inspection = inspect_external_generation_checkpoint(
-            source_revision.document,
-            payload,
-            project_id=project_id,
-            revision_id=source_revision.revision_id,
-            document_hash=source_revision.document_hash,
-            source_hard_limit=options["source_hard_limit"],
-            target_hard_limit=options["target_hard_limit"],
-        )
-        proposed_document = apply_external_generation_checkpoint(
-            source_revision.document, inspection
-        )
-    except (UnicodeError, json.JSONDecodeError, ProjectExchangeError) as exc:
-        raise HTTPException(status_code=422, detail={
-            "code": "invalid_external_ai_generation", "message": str(exc)
-        }) from exc
-    finally:
-        await file.close()
-    result = dict(inspection)
-    result["source_revision_id"] = source_revision.revision_id
-    result["current_revision_id"] = revision.revision_id
-    result["summary"] = {
-        **inspection["summary"],
-        "current_cues": len(revision.document.cues),
-        "overwrite_current": source_revision.revision_id != revision.revision_id,
-        "applicable": proposed_document.content_hash() != revision.document_hash,
-    }
-    if apply and result["summary"]["applicable"]:
-        provenance = ChangeProvenance(
-            kind=ChangeKind.IMPORT,
-            operation="external_ai_generation",
-            actor="external-ai",
-            metadata={
-                "label": "外部 AI 生成",
-                "checkpoint": inspection["checkpoint"],
-                "source_revision_id": source_revision.revision_id,
-                "checkpoint_sha256": str(payload["checkpoint_sha256"]),
-                **result["summary"],
-            },
-        )
-        result["revision"] = _save_document(
-            project_id,
-            expected_revision_id=revision.revision_id,
-            document=proposed_document,
-            operation="external_ai_generation",
-            provenance=provenance,
-        )
-    return result
-
-
 @router.post("/project-imports/subtitle-project")
 async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[str, Any]:
     upload_handle = tempfile.NamedTemporaryFile(prefix="substar-upload-", suffix=".zip", delete=False)
@@ -2628,39 +2258,6 @@ async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[
         upload_path.unlink(missing_ok=True)
         await file.close()
     return {"schema_version": "substar.subtitle-project-import.v1", "project_id": project_id}
-
-
-class SrtTranslationImportPayload(BaseModel):
-    text: str = Field(max_length=5_000_000)
-    format: Literal['auto', 'source', 'target', 'ab-single', 'ab-double'] = 'auto'
-    expected_revision_id: str
-    request_id: str = Field(min_length=1, max_length=100)
-    apply: bool = False
-
-
-@router.post('/projects/{project_id}/import-srt-translation')
-def import_srt_translation(project_id: str, payload: SrtTranslationImportPayload):
-    from substar_core.editor.application.srt_import import preview_srt, import_srt
-    store = open_project_store(project_id)
-    try:
-        if payload.apply:
-            revision = import_srt(store, text=payload.text, mode=payload.format,
-                                  expected_revision_id=payload.expected_revision_id, request_id=payload.request_id)
-            return {'revision': revision_payload(revision)}
-        latest = store.load_latest()
-        if latest is None or latest.revision_id != payload.expected_revision_id:
-            raise ProjectConflictError('项目已变化，请重新预览')
-        return preview_srt(latest.document, payload.text, payload.format)
-    except ProjectConflictError as exc:
-        raise HTTPException(status_code=409, detail={'message': str(exc)}) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={'message': str(exc)}) from exc
-
-
-
-
-
-
 
 
 @router.post("/projects/{project_id}/complete")

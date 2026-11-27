@@ -114,6 +114,7 @@ def run(command: WorkerCommand) -> int:
         request = service.AiCalibrationRequest(
             expected_revision_id=str(payload["expected_revision_id"]),
             instruction=str(payload["instruction"]),
+            track=settings.get("calibration_track", "source"),
         )
         result = service.compute_calibration(
             str(command.project_id),

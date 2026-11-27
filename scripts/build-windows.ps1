@@ -68,7 +68,7 @@ try {
     }
     foreach ($file in @(
         'app.py', 'launcher.py', 'portable_manifest.json', 'requirements-release.txt',
-        '启动_Substar.cmd', '停止_Substar.cmd', '只检测环境.cmd', '便携版说明.txt',
+        '启动_Substar.cmd', '只检测环境.cmd', '便携版说明.txt',
         'README.md', 'CHANGELOG.md', 'AGENTS.md', 'SKILL.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
     )) { Copy-RequiredFile $file }
 
@@ -80,6 +80,13 @@ try {
     $nativeExportSource = Join-Path $RepoRoot 'scripts\windows_export.cs'
     & $nativeExportCompiler /nologo /target:winexe /optimize+ /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll "/out:$nativeExportExe" $nativeExportSource
     if ($LASTEXITCODE -ne 0) { throw 'Windows export component compilation failed.' }
+
+    Copy-RequiredFile 'scripts\windows_launcher.cs'
+    $launcherExe = Join-Path $BundleRoot 'Substar.exe'
+    $launcherSource = Join-Path $RepoRoot 'scripts\windows_launcher.cs'
+    $launcherIcon = Join-Path $RepoRoot 'assets\substar.ico'
+    & $nativeExportCompiler /nologo /target:exe /platform:x64 /optimize+ "/win32icon:$launcherIcon" "/out:$launcherExe" $launcherSource
+    if ($LASTEXITCODE -ne 0) { throw 'Substar.exe launcher compilation failed.' }
 
     $sourceCommit = if ($env:GITHUB_SHA -match '^[0-9a-fA-F]{40}$') {
         $env:GITHUB_SHA.ToLowerInvariant()
@@ -202,6 +209,7 @@ try {
         dependencies = $installed
         e2e_project_id = $E2EProjectId
         production_hashes = $hashes
+        launcher_sha256 = (Get-FileHash -LiteralPath $launcherExe -Algorithm SHA256).Hash.ToLowerInvariant()
         gates = [ordered]@{
             system_map = 'passed'; unit_tests = if ($SkipTests) { 'skipped' } else { 'passed' }
             launcher_smoke = 'passed'; segmentation_material_contract = 'passed'
@@ -213,9 +221,9 @@ try {
     $verification | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $BundleRoot 'release-verification.json') -Encoding utf8
 
     $AllowedTopLevel = @(
-        'app.py', 'launcher.py', 'substar_core', 'web', 'prompts', 'schemas', 'scripts', 'assets',
+        'Substar.exe', 'app.py', 'launcher.py', 'substar_core', 'web', 'prompts', 'schemas', 'scripts', 'assets',
         'runtime', 'docs', 'portable_manifest.json', 'requirements-release.txt', 'release-verification.json',
-        '启动_Substar.cmd', '停止_Substar.cmd', '只检测环境.cmd', '便携版说明.txt', 'README.md',
+        '启动_Substar.cmd', '只检测环境.cmd', '便携版说明.txt', 'README.md',
         'CHANGELOG.md', 'AGENTS.md', 'SKILL.md', 'SECURITY.md', 'PRIVACY.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE'
     )
     $unexpected = @(Get-ChildItem -LiteralPath $BundleRoot -Force | Where-Object { $_.Name -notin $AllowedTopLevel } | ForEach-Object Name)

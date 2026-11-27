@@ -276,6 +276,8 @@ class TaskScheduler:
         self._drain_completions(shutting_down=True)
 
     def _dispatch(self) -> None:
+        from substar_core.job_diagnostics import local_failure
+
         for handler in self.registry.handlers():
             if self._stop.is_set() or not self.resources.can_acquire(handler.resources):
                 continue
@@ -289,7 +291,8 @@ class TaskScheduler:
                     continue
                 if not self.resources.acquire(handler.resources):
                     self.service.interrupted(
-                        task["task_id"], task["attempt"], reason="resource_claim_race"
+                        task["task_id"], task["attempt"], reason="resource_claim_race",
+                        error=self._error("resource_claim_race", "The worker resource claim could not be acquired.", retryable=True),
                     )
                     continue
                 try:
@@ -338,7 +341,7 @@ class TaskScheduler:
                                     "worker_start_failed",
                                     "Worker process could not be started.",
                                     retryable=True,
-                                    details={"reason": str(exc)},
+                                    details={"reason": str(exc), "diagnostics": local_failure(exc)},
                                 ),
                             )
                     except Exception as nested:
@@ -697,6 +700,8 @@ class TaskScheduler:
             execution.last_heartbeat = now
 
     def _drain_completions(self, *, shutting_down: bool) -> None:
+        from substar_core.job_diagnostics import local_failure
+
         # Supervisor completion is queued only after stdout is fully parsed, so
         # draining worker events first preserves progress/artifact-before-terminal
         # ordering even when SQLite briefly blocks the scheduler thread.
@@ -785,10 +790,14 @@ class TaskScheduler:
                     self.service.cancelled(completion.task_id, completion.attempt)
                 else:
                     public_worker_message = ""
+                    diagnostics = {}
                     if isinstance(completion.error, Mapping):
                         candidate = completion.error.get("public_message")
                         if isinstance(candidate, str):
                             public_worker_message = candidate.strip()[:1600]
+                        candidate_details = completion.error.get("diagnostics")
+                        if isinstance(candidate_details, Mapping):
+                            diagnostics = dict(candidate_details)
                     failure_message = (
                         f"Worker execution failed:\n{public_worker_message}"
                         if public_worker_message
@@ -804,6 +813,8 @@ class TaskScheduler:
                             details={
                                 "returncode": completion.returncode,
                                 "status": completion.status,
+                                "worker_message": public_worker_message,
+                                "diagnostics": diagnostics,
                                 "protocol_error_count": len(
                                     completion.protocol_errors
                                 ),
@@ -840,6 +851,7 @@ class TaskScheduler:
                             details={
                                 "exception_type": type(exc).__name__,
                                 "reason": str(exc)[:1200],
+                                "diagnostics": local_failure(exc),
                             },
                         ),
                     )

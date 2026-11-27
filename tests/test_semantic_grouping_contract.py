@@ -32,7 +32,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
     def valid_result(self) -> tuple[list[SimpleNamespace], dict, dict]:
         units = source_units()
         _, binding = semantic_grouping_binding(
-            units, 0, 3, 1, sentence_boundary_policy="reference"
+            units, 0, 3, 1
         )
         result = {
             "schema_version": "substar.semantic-grouping-result.v1",
@@ -79,7 +79,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
 
     def test_prompt_treats_hard_limit_as_ceiling_not_length_target(self) -> None:
         prompt = render_prompt("semantic_grouping", variant="en")
-        self.assertEqual("2026-09-06.17", prompt.version)
+        self.assertEqual("2026-11-26.segmentation-languages.2", prompt.version)
         self.assertIn("rejection ceiling", prompt.text)
         self.assertIn("not a preferred length", prompt.text)
         self.assertIn("compare the readability of both resulting Cues", prompt.text)
@@ -110,7 +110,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
             for index, text in enumerate(("A" * 30, "B" * 29, "C" * 30, "D" * 29, "ok"))
         ]
         _, binding = semantic_grouping_binding(
-            units, 0, 4, 1, sentence_boundary_policy="reference"
+            units, 0, 4, 1
         )
         initial = {
             "schema_version": "substar.semantic-grouping-result.v1",
@@ -161,7 +161,7 @@ class SemanticGroupingContractTests(unittest.TestCase):
             for index, text in enumerate(("A" * 30, "B" * 29, "healthy", "group"))
         ]
         _, binding = semantic_grouping_binding(
-            units, 0, 3, 1, sentence_boundary_policy="reference"
+            units, 0, 3, 1
         )
         initial = {
             "schema_version": "substar.semantic-grouping-result.v1",

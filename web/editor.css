@@ -591,21 +591,6 @@ html[data-theme] #cueList .virtual-line .virtual-boundary.review-group-bridge { 
 .text-dialog { display: grid; gap: 14px; }
 .text-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
 .text-dialog textarea { resize: vertical; }
-#srtImportDialog .srt-import-panel { width:min(820px,94vw); max-height:88vh; padding:24px; gap:16px; grid-template-rows:auto auto auto auto minmax(0,1fr) auto; }
-#srtImportTitle { font-size:19px; line-height:1.4; }
-#srtImportDialog .srt-import-description { margin:0; color:var(--muted, #93a1b5); font-size:13px; line-height:1.6; }
-#srtImportDialog label { display:grid; grid-template-columns:80px minmax(0,1fr); align-items:center; gap:12px; font-size:13px; }
-#srtImportFormat { width:100%; min-height:38px; }
-#srtImportSummary { margin:0; padding:12px 14px; border:1px solid var(--border, #2b3748); border-radius:8px; font-size:13px; line-height:1.6; }
-#srtImportRows { display:block; min-height:120px; max-height:45vh; overflow:auto; border:1px solid var(--border, #2b3748); border-radius:8px; scrollbar-gutter:stable; }
-#srtImportRows > p { display:block; margin:0; padding:13px 16px; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; font-size:14px; border-bottom:1px solid var(--border, #2b3748); }
-#srtImportRows > p:last-child { border-bottom:0; }
-#srtImportRows > p::first-line { color:var(--muted, #93a1b5); font-size:12px; }
-#srtImportRows:empty::before { content:"匹配结果将显示在这里"; display:block; padding:36px 16px; text-align:center; color:var(--muted, #93a1b5); font-size:13px; }
-#srtImportDialog .srt-import-actions { padding-top:14px; border-top:1px solid var(--border, #2b3748); display:flex; flex-wrap:wrap; gap:8px; }
-#srtImportDialog .srt-import-actions button { min-height:36px; padding:7px 14px; }
-#srtImportDialog #cancelSrtImport { margin-right:auto; }
-@media (max-width:540px) { #srtImportDialog .srt-import-panel { padding:16px; gap:12px; } #srtImportDialog label { grid-template-columns:1fr; gap:6px; } }
 .task-info-dialog > p { margin: 0; color: var(--editor-muted); font-size: 14px; line-height: 1.5; }
 .task-info-dialog .task-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .task-info-dialog .task-info-grid label { display: grid; gap: 6px; }

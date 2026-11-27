@@ -164,19 +164,56 @@ def opposite_language(source_language: str) -> str:
     return "en" if str(source_language).lower().startswith("zh") else "zh-CN"
 
 
+SEGMENTATION_LANGUAGES = (
+    "zh", "en", "ja", "ko", "th", "ar", "fr", "de", "es", "pt", "ru", "it",
+)
+_LATIN_LANGUAGE_WORDS = {
+    "en": "the and is are was were with from they that this have will would can about which".split(),
+    "fr": "les des une avec dans pour sont cette nous vous est mais pas était étaient leur".split(),
+    "de": "der die das und ein eine nicht auch sich sind für ich wird werden haben aus".split(),
+    "es": "los las una con para pero porque como esta este están estamos tengo nosotros ellos".split(),
+    "pt": "não uma são também você vocês com pelo pela muito isto estão porque nós eles".split(),
+    "it": "gli delle nella allo dagli hanno sono questo questa perché anche molto abbiamo degli cui".split(),
+}
+
+
+def segmentation_prompt_variants(selection: str, units: Iterable[Any]) -> tuple[str, ...]:
+    """Resolve explicit source selections or collect evidence in one execution block."""
+    language = normalize_source_language(selection).lower().split("-")[0]
+    if language not in {"auto", "mixed"}:
+        return (language if language in SEGMENTATION_LANGUAGES else "generic",)
+
+    rows = [str(getattr(unit, "text", "") or "") for unit in units]
+    text = " ".join(rows)
+    found: set[str] = set()
+    if KANA_RE.search(text):
+        found.add("ja")
+    if HAN_RE.search(text) and (
+        "ja" not in found or re.search(r"[\u3400-\u9fff]{8,}", text)
+    ):
+        found.add("zh")
+    if HANGUL_RE.search(text):
+        found.add("ko")
+    if re.search(r"[\u0e01-\u0e5b]", text):
+        found.add("th")
+    if re.search(r"[\u0620-\u064a]", text):
+        found.add("ar")
+    if re.search(r"[ыэъёієїў]|[а-я]{3,}", text.lower()):
+        found.add("ru")
+    words = re.findall(r"[^\W\d_]+", text.lower())
+    non_latin_evidence = found.copy()
+    for code, markers in _LATIN_LANGUAGE_WORDS.items():
+        hits = set(words).intersection(markers)
+        if len(hits) >= 2:
+            found.add(code)
+    if not found or (LATIN_RE.search(text) and found == non_latin_evidence):
+        found.add("generic")
+    return tuple(code for code in (*SEGMENTATION_LANGUAGES, "generic") if code in found)
+
+
 def calibration_variant(source_language: str) -> str:
-    """Return the dedicated calibration prompt route for one source track."""
-    normalized = normalize_source_language(source_language)
-    routes = {
-        "zh-CN": "zh",
-        "en": "en",
-        "ja": "ja",
-        "ko": "ko",
-        "mixed": "mixed",
-    }
-    if normalized not in routes:
-        raise PromptRegistryError(f"校准提示词不支持原文语言：{source_language}")
-    return routes[normalized]
+    """Both tracks use the same rules and supply their language in the request."""
+    return "generic"
 
 
 def translation_variant(source_language: str, target_language: str | None = None) -> str:
@@ -203,6 +240,19 @@ def render_prompt(
     entry = entries.get(key) if isinstance(entries, dict) else None
     if not isinstance(entry, dict):
         raise PromptRegistryError(f"未注册提示词：{key}")
+    if key in {"semantic_grouping", "semantic_grouping_repair"}:
+        variants = entry["variants"]
+        if "generic" in variants:
+            selected = variant.split("+")
+            # The generic route uses only the shared Cue template.
+            files = [path for code in selected if code != "generic"
+                     for path in variants.get(code, [])]
+            if not files:
+                files = list(entry.get("shared", []))
+            entry = {**entry, "variants": {**variants, variant: files}}
+        elif variant not in variants:
+            parts = variant.split("+")
+            variant = "mixed" if len(parts) > 1 else (parts[0] if parts[0] in variants else "en")
     if key in {"contextual_translation", "contextual_translation_repair"}:
         # Old callers may still supply a language pair; only its target selects rules.
         targets = variant.removeprefix("target_").split("+")
@@ -268,7 +318,7 @@ def render_prompt(
     resolved: list[str] = []
     parts: list[str] = []
     production_root = (PROMPT_ROOT / "production").resolve()
-    for relative in files:
+    for relative in dict.fromkeys(files):
         path = (production_root / str(relative)).resolve()
         if path != production_root and production_root not in path.parents:
             raise PromptRegistryError(f"提示词路径越界：{relative}")

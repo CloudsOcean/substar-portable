@@ -166,7 +166,7 @@ def apply_profile(document, profile, cue_ids=None, reset=False, layer_id=None):
     return replace(document, changes=tuple(c for c in document.changes if c.operation != "ass_configuration")+(change,))
 
 
-def render_configuration(document, width=1920, height=1080):
+def render_configuration(document, width=1920, height=1080, *, swap_preview_tracks=False):
     config = resolved_configuration(document)
     grouped = {}
     for cue in document.cues:
@@ -175,13 +175,20 @@ def render_configuration(document, width=1920, height=1080):
     styles, events, header = [], [], None
     for profile_index, (key, ids) in enumerate(grouped.items()):
         profile = config.profiles[key]
+        positions = {}
+        if swap_preview_tracks:
+            sources = [layer for layer in profile.layers if layer.enabled and layer.content == "source"]
+            targets = [layer for layer in profile.layers if layer.enabled and layer.content == "target"]
+            for source, target in zip(sources, targets):
+                positions[source.id] = profile.styles[target.style_id]
+                positions[target.id] = profile.styles[source.style_id]
         for index, layer in enumerate(profile.layers):
             if not layer.enabled:
                 continue
             # All styles use a 1080-high reference; preserve the source aspect ratio.
             result = render_ass(document, AssOptions(width=max(16,min(8192,round(width/height*1080))),
                 height=1080, mode=layer.content, style=profile.styles[layer.style_id],
-                word_highlight=layer.word_highlight), cue_ids=ids)
+                word_highlight=layer.word_highlight), cue_ids=ids, preview_position=positions.get(layer.id))
             prefix = f"P{profile_index}L{index}"
             before, after = result.split("[V4+ Styles]\n", 1)
             style_section, event_section = after.split("[Events]\n", 1)

@@ -15,20 +15,14 @@ def test_prompt_catalog_projects_only_registered_production_components() -> None
     assert catalog["schema_version"] == "substar.prompt-catalog.v1"
     assert catalog["routes_read_only"] is True
     assert catalog["components_editable"] is True
-    assert catalog["stats"] == {
-        "families": 12,
-        "variants": 54,
-        "components": 44,
-        "core_components": 39,
-        "cases": 5,
-    }
     assert [item["id"] for item in catalog["categories"]] == [
-        "segmentation", "translation", "editor", "exchange",
+        "segmentation", "translation", "editor",
     ]
+    assert catalog["stats"]["families"] == len(catalog["families"])
     paths = {item["path"] for item in catalog["components"]}
-    assert "exchange/external_ai_prooftranslation.md" in paths
-    assert "exchange/external_ai_split.md" in paths
-    assert "exchange/external_ai_edit.md" in paths
+    assert not any(path.startswith("exchange/") for path in paths)
+    assert not any(item["id"] == "boundary_evidence" for item in catalog["families"])
+    assert "calibration/common.md" in paths
     assert "experimental/merged_split.md" not in paths
 
 

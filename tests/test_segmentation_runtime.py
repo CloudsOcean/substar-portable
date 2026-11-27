@@ -551,7 +551,7 @@ class SegmentationContractTests(unittest.TestCase):
             for index in range(5)
         ]
         _payload, binding = semantic_grouping_binding(
-            units, 0, 4, 1, sentence_boundary_policy="unpunctuated"
+            units, 0, 4, 1
         )
         partial = {
             "schema_version": "substar.semantic-grouping-result.v1",

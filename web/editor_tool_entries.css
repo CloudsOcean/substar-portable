@@ -77,6 +77,14 @@ body.editor-shell #editorTools .tool-panel fieldset {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--tool-spacing);
 }
+body.editor-shell #editorTools .punctuation-rule-row > .punctuation-inline-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--tool-spacing);
+  color: var(--theme-text);
+  white-space: nowrap;
+}
 body.editor-shell #editorTools .tool-panel legend {
   padding: 0 5px;
   color: var(--theme-text);
@@ -251,8 +259,9 @@ body.editor-shell #editorTools .tool-panel :is(.tool-status,.tool-feedback,#auto
 }
 body.editor-shell #editorTools :is(#toolSearchStatus,#autoSnapStatus,#autoMergeStatus):empty { display: none; }
 
-body.editor-shell #editorTools #experimental-search-panel { padding: 0; }
-body.editor-shell #editorTools #experimental-search-panel + .tool-locator-group { padding: 20px 0 0; }
+body.editor-shell #editorTools #experimental-search-panel { padding: 0; border: 0; }
+body.editor-shell #editorTools .combined-find-panel > .tool-locator-group { margin-top: 16px; }
+body.editor-shell .review-mode #editorTools .combined-find-panel > .tool-locator-group { display: none; }
 body.editor-shell #editorTools #experimental-search-panel :is(input,.search-scope-toggle button) {
   height: var(--tool-large-height);
   min-height: var(--tool-large-height);

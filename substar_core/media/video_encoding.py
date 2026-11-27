@@ -20,6 +20,10 @@ class EncodingError(RuntimeError):
     pass
 
 
+class EncodingCancelled(Exception):
+    pass
+
+
 @lru_cache(maxsize=16)
 def _encoders(tool, modified):
     result = subprocess.run(
@@ -75,8 +79,9 @@ def _video_options(encoder, bitrate, quality, fast):
     return args
 
 
-def run_ffmpeg(tool, args, output, duration, update=lambda progress: None):
+def run_ffmpeg(tool, args, output, duration, update=lambda progress: None, *, check_cancel=lambda: None):
     """Run FFmpeg with a deadline and bounded error reporting."""
+    check_cancel()
     deadline = time.monotonic() + max(900, min(14400, duration * 8))
     with tempfile.TemporaryFile() as errors:
         command = [tool, "-nostdin", "-hide_banner", "-v", "error", "-y",
@@ -93,12 +98,14 @@ def run_ffmpeg(tool, args, output, duration, update=lambda progress: None):
         reader.start()
         try:
             while process.poll() is None:
+                check_cancel()
                 try:
                     process.wait(timeout=.5)
                 except subprocess.TimeoutExpired:
                     pass
                 if time.monotonic() >= deadline:
                     raise EncodingError("FFmpeg 处理超时")
+            check_cancel()
             reader.join()
             if process.returncode:
                 errors.seek(max(0, os.fstat(errors.fileno()).st_size - 5000))
@@ -113,10 +120,11 @@ def run_ffmpeg(tool, args, output, duration, update=lambda progress: None):
 
 
 def encode_video(make_args, output, *, codec, duration, bitrate=None, quality=20, fast=False,
-                 update=lambda progress, encoder, reason: None):
+                 update=lambda progress, encoder, reason: None, check_cancel=lambda: None):
     failures = []
     tools = []
     for tool in _tool_candidates():
+        check_cancel()
         try:
             modified = Path(tool).stat().st_mtime_ns
             tools.append((tool, modified, _encoders(tool, modified)))
@@ -128,6 +136,7 @@ def encode_video(make_args, output, *, codec, duration, bitrate=None, quality=20
         for tool, modified, available in tools:
             if encoder not in available:
                 continue
+            check_cancel()
             attempted_hardware = True
             try:
                 reason = _probe(tool, modified, encoder)
@@ -139,7 +148,7 @@ def encode_video(make_args, output, *, codec, duration, bitrate=None, quality=20
             update(0, label, "")
             try:
                 run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
-                           duration, lambda progress: update(progress, label, ""))
+                           duration, lambda progress: update(progress, label, ""), check_cancel=check_cancel)
                 return label
             except EncodingError as exc:
                 output.unlink(missing_ok=True)
@@ -157,6 +166,6 @@ def encode_video(make_args, output, *, codec, duration, bitrate=None, quality=20
             label = f"CPU ({encoder})"
             update(0, label, reason)
             run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
-                       duration, lambda progress: update(progress, label, reason))
+                       duration, lambda progress: update(progress, label, reason), check_cancel=check_cancel)
             return label
     raise EncodingError(f"没有可用的 {codec.upper()} 编码器。{reason}")

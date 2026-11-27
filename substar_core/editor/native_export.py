@@ -117,8 +117,12 @@ def update_native_output(token: str, body: NativeExportUpdate, request: Request)
                 item.update(state="rendering", job_id=body.job_id)
             case "saved", "rendering":
                 item.update(state="saved", folder=body.folder)
-            case "cancelled", ("choosing" | "dialog" | "selected"):
+            case "cancelled", ("choosing" | "dialog" | "selected" | "cancelled"):
                 item["state"] = "cancelled"
+            case "cancelled" | "error", "rendering" if _snapshot((item["project_id"], item["job_id"]))["state"] == "cancelled":
+                item["state"] = "cancelled"
+            case "error", "cancelled":
+                pass
             case "error", ("choosing" | "dialog" | "selected" | "rendering"):
                 item.update(state="error", message=body.message)
             case _:

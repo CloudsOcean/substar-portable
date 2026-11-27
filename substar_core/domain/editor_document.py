@@ -474,6 +474,8 @@ class PresentationSettings:
     lower_remove: str = ""
     lower_space: str = ""
     translation_layout: Mapping[str, Any] = field(default_factory=dict)
+    upper_filter_inline: bool = False
+    lower_filter_inline: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -487,6 +489,9 @@ class PresentationSettings:
         object.__setattr__(self, "translation_layout", normalize_layout(self.translation_layout))
         for name in ("upper_remove", "upper_space", "lower_remove", "lower_space"):
             object.__setattr__(self, name, str(getattr(self, name) or ""))
+        for name in ("upper_filter_inline", "lower_filter_inline"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be boolean")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -498,6 +503,9 @@ class PresentationSettings:
             "upper_space": self.upper_space,
             "lower_remove": self.lower_remove,
             "lower_space": self.lower_space,
+            # Omitted values keep the serialized form and hash of older revisions.
+            **({"upper_filter_inline": False} if not self.upper_filter_inline else {}),
+            **({"lower_filter_inline": False} if not self.lower_filter_inline else {}),
         }
 
     @classmethod
@@ -511,6 +519,8 @@ class PresentationSettings:
             upper_space=str(value.get("upper_space", "")),
             lower_remove=str(value.get("lower_remove", "")),
             lower_space=str(value.get("lower_space", "")),
+            upper_filter_inline=value.get("upper_filter_inline", True),
+            lower_filter_inline=value.get("lower_filter_inline", True),
         )
 
 

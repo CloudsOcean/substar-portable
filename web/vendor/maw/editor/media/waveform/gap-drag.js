@@ -41,16 +41,15 @@ export function createWaveformModule(dependencies) {
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    beginGapMoveDrag(event, index, row, mode) {
-      if (event.button !== 0 || !['move', 'copy'].includes(mode)) return;
+    beginGapCopyDrag(event, index, row) {
+      if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
       const gaps = this.options.getGapRemoveGaps?.() || [];
       const original = gaps[index];
       if (!original) return;
       const captureTarget = event.currentTarget;
-      this.gapMoveDrag = {
+      this.gapCopyDrag = {
         pointerId: event.pointerId,
         index,
-        mode,
         row,
         captureTarget,
         startClientX: event.clientX,
@@ -64,14 +63,14 @@ export function createWaveformModule(dependencies) {
         moved: false,
       };
       captureTarget.setPointerCapture?.(event.pointerId);
-      window.addEventListener('pointermove', this._gapMoveMove = (moveEvent) => this.moveGapMoveDrag(moveEvent));
-      window.addEventListener('pointerup', this._gapMoveEnd = (upEvent) => this.endGapMoveDrag(upEvent), { once: true });
-      window.addEventListener('pointercancel', this._gapMoveEnd, { once: true });
+      window.addEventListener('pointermove', this._gapCopyMove = (moveEvent) => this.moveGapCopyDrag(moveEvent));
+      window.addEventListener('pointerup', this._gapCopyEnd = (upEvent) => this.endGapCopyDrag(upEvent), { once: true });
+      window.addEventListener('pointercancel', this._gapCopyEnd, { once: true });
     }
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    gapMoveTarget(original, deltaMs) {
+    gapCopyTarget(original, deltaMs) {
       const length = Math.max(1, Number(original?.end) - Number(original?.start));
       const duration = Number(this.durationMs);
       const maxStart = Number.isFinite(duration) && duration > 0
@@ -82,8 +81,8 @@ export function createWaveformModule(dependencies) {
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    moveGapMoveDrag(event) {
-      const drag = this.gapMoveDrag;
+    moveGapCopyDrag(event) {
+      const drag = this.gapCopyDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
       if (!drag.moved) {
         const dx = event.clientX - drag.startClientX;
@@ -95,56 +94,48 @@ export function createWaveformModule(dependencies) {
       event.preventDefault();
       const pointerMs = this.timeFromPointerUnbounded(event, this.gapDragRow(event, drag));
       const deltaMs = roundMs(pointerMs - drag.startPointerMs);
-      drag.targetGap = this.gapMoveTarget(drag.originalGaps[drag.index], deltaMs);
+      drag.targetGap = this.gapCopyTarget(drag.originalGaps[drag.index], deltaMs);
       drag.deltaMs = drag.targetGap.start - drag.originalGaps[drag.index].start;
-      drag.nextGaps = drag.mode === 'copy'
-        ? window.AsrEditorUtils.copyGapRemoveRange(
-          drag.originalGaps, drag.index, drag.deltaMs, this.durationMs,
-        )
-        : window.AsrEditorUtils.moveGapRemoveRange(
-          drag.originalGaps, drag.index, drag.deltaMs, this.durationMs,
-        );
+      drag.nextGaps = window.AsrEditorUtils.copyGapRemoveRange(
+        drag.originalGaps, drag.index, drag.deltaMs, this.durationMs,
+      );
       drag.changed = JSON.stringify(drag.nextGaps) !== JSON.stringify(drag.originalGaps);
-      this.scheduleGapMovePreview(drag);
+      this.scheduleGapCopyPreview(drag);
     }
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    scheduleGapMovePreview(drag) {
-      if (this.gapMovePreviewFrame) return;
-      this.gapMovePreviewFrame = requestAnimationFrame(() => {
-        this.gapMovePreviewFrame = 0;
-        if (this.gapMoveDrag === drag) this.previewGapMoveDrag(drag);
+    scheduleGapCopyPreview(drag) {
+      if (this.gapCopyPreviewFrame) return;
+      this.gapCopyPreviewFrame = requestAnimationFrame(() => {
+        this.gapCopyPreviewFrame = 0;
+        if (this.gapCopyDrag === drag) this.previewGapCopyDrag(drag);
       });
     }
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    clearGapMovePreview() {
+    clearGapCopyPreview() {
       (/** @type {NodeListOf<HTMLElement>} */ (this.content.querySelectorAll('.waveform-gap-drag-preview'))).forEach((element) => element.remove());
     }
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    previewGapMoveDrag(drag) {
-      this.clearGapMovePreview();
+    previewGapCopyDrag(drag) {
+      this.clearGapCopyPreview();
       this.refreshGapBlocks(drag.originalGaps);
       if (!drag.moved) return;
-      if (drag.mode === 'move') {
-        (/** @type {NodeListOf<HTMLElement>} */ (this.content.querySelectorAll(`.waveform-gap-block[data-gap-index="${drag.index}"]`)))
-          .forEach((block) => { block.hidden = true; });
-      }
       const target = drag.targetGap;
       (/** @type {NodeListOf<import('./waveform-types.js').WaveformRow>} */ (this.content.querySelectorAll('.waveform-row'))).forEach((row) => {
         const rowStart = Number(row.dataset.startMs);
         const rowEnd = Number(row.dataset.endMs);
         if (target.end <= rowStart || target.start >= rowEnd) return;
         const preview = document.createElement('div');
-        preview.className = `waveform-gap-block waveform-gap-drag-preview ${drag.mode}`;
+        preview.className = 'waveform-gap-block waveform-gap-drag-preview copy';
         if (target.removed === false) preview.classList.add('restored');
         const label = document.createElement('span');
         label.className = 'waveform-gap-label';
-        label.textContent = drag.mode === 'copy' ? '复制' : '移动';
+        label.textContent = '复制';
         preview.appendChild(label);
         this.layoutGapBlock(preview, target, rowStart, rowEnd);
         row.appendChild(preview);
@@ -153,17 +144,17 @@ export function createWaveformModule(dependencies) {
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    endGapMoveDrag(event) {
-      const drag = this.gapMoveDrag;
+    endGapCopyDrag(event) {
+      const drag = this.gapCopyDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
-      if (event.type === 'pointerup') this.moveGapMoveDrag(event);
-      window.removeEventListener('pointermove', this._gapMoveMove);
-      window.removeEventListener('pointerup', this._gapMoveEnd);
-      window.removeEventListener('pointercancel', this._gapMoveEnd);
+      if (event.type === 'pointerup') this.moveGapCopyDrag(event);
+      window.removeEventListener('pointermove', this._gapCopyMove);
+      window.removeEventListener('pointerup', this._gapCopyEnd);
+      window.removeEventListener('pointercancel', this._gapCopyEnd);
       try { drag.captureTarget.releasePointerCapture?.(event.pointerId); } catch (_) {}
       drag.captureTarget.classList.remove('dragging');
-      this.clearGapMovePreview();
-      this.gapMoveDrag = null;
+      this.clearGapCopyPreview();
+      this.gapCopyDrag = null;
       if (event.type === 'pointercancel' || !drag.moved) {
         this.refreshGapBlocks(drag.originalGaps);
         return;
@@ -173,8 +164,7 @@ export function createWaveformModule(dependencies) {
         this.refreshGapBlocks(drag.originalGaps);
         return;
       }
-      const callback = drag.mode === 'copy' ? this.options.copyGap : this.options.moveGap;
-      callback?.(drag.index, drag.deltaMs);
+      this.options.copyGap?.(drag.index, drag.deltaMs);
     }
 
 
@@ -325,10 +315,9 @@ export function createWaveformModule(dependencies) {
 
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
-    beginGapRangeDrag(event, row, { removed = !event.altKey } = {}) {
+    beginGapRangeDrag(event, row, { removed = !event.altKey, altIsGesture = event.button === 0 && event.altKey } = {}) {
       event.preventDefault();
       event.stopPropagation();
-      const altIsGesture = event.button === 0 && event.altKey;
       const startMs = this.gapRangePointerTime(event, row, altIsGesture);
       this.clearGapRangePreviews();
       this.gapRangeDrag = {

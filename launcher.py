@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import ctypes
 import os
-import socket
 import subprocess
 import sys
 import time
 import uuid
-import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable, Literal
@@ -16,28 +14,28 @@ from urllib.request import Request, urlopen
 
 from substar_core.config import INSTALL_ROOT, PROJECT_ROOT, DATA_ROOT
 from substar_core.process_command import backend_command
-from substar_core.runtime.launch_surface import visible_backend_creation_flags
+from substar_core.runtime.launch_surface import require_visible_backend, visible_backend_creation_flags
 from substar_core.runtime_instance import (
     INSTANCE_SHUTDOWN_TIMEOUT,
     INSTANCE_STARTUP_TIMEOUT,
+    PORT_IN_USE_EXIT_CODE,
+    bind_backend_socket,
     build_id,
+    is_port_in_use,
+    remember_startup_port,
+    remembered_startup_port,
     clear_runtime_record,
     load_runtime_record,
     probe_identity,
-    startup_port,
     write_runtime_record,
 )
 
 
-MUTEX_NAME = "Local\\Substar.Workbench.Singleton"
+MUTEX_NAME = "Global\\Substar.Workbench.Singleton"
 ERROR_ALREADY_EXISTS = 183
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-JOB_OBJECT_TERMINATE = 0x0008
-WAIT_OBJECT_0 = 0x00000000
-WAIT_ABANDONED = 0x00000080
-WAIT_TIMEOUT = 0x00000102
 ERROR_INVALID_PARAMETER = 87
 STILL_ACTIVE = 259
 GRACEFUL_PROCESS_EXIT_TIMEOUT = INSTANCE_SHUTDOWN_TIMEOUT
@@ -119,39 +117,52 @@ def _acquire_mutex() -> tuple[int | None, bool]:
 
 def _port_is_open(port: int) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+        with bind_backend_socket(port):
+            return False
+    except OSError as error:
+        if is_port_in_use(error, port):
             return True
-    except OSError:
+        raise
+
+
+def _foreground_backend_window() -> bool:
+    if os.name != "nt":
+        return False
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = (callback_type, wintypes.LPARAM)
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.IsIconic.argtypes = (wintypes.HWND,)
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetConsoleWindow.restype = wintypes.HWND
+    own_window = kernel32.GetConsoleWindow()
+    found = False
+
+    @callback_type
+    def visit(hwnd, _):
+        nonlocal found
+        if hwnd == own_window:
+            return True
+        title = ctypes.create_unicode_buffer(512)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        if not title.value.startswith("Substar 后端 · ") or not user32.IsWindowVisible(hwnd):
+            return True
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, 9)
+        user32.SetForegroundWindow(hwnd)
+        found = True
         return False
 
+    user32.EnumWindows(visit, 0)
+    return found
 
-def _open_existing(identity: dict, expected_build: str) -> int:
-    try:
-        port = int(identity.get("port", 0))
-        same_install = (
-            Path(str(identity.get("install_root", ""))).resolve()
-            == Path(INSTALL_ROOT).resolve()
-        )
-    except (OSError, TypeError, ValueError):
-        port = 0
-        same_install = False
-    existing_build = str(identity.get("build_id", ""))
-    if (
-        identity.get("app") != "substar-workbench"
-        or not str(identity.get("instance_id", "")).strip()
-        or not 1 <= port <= 65535
-        or not same_install
-        or existing_build != expected_build
-    ):
-        print("[冲突] 已有另一套 Substar 正在运行，未自动关闭。")
-        print(f"  运行目录：{identity.get('install_root', '未知')}")
-        print(f"  运行版本：{existing_build or '未知'}")
-        print(f"  当前版本：{expected_build}")
-        print("请先关闭原 Substar 的 CMD 窗口，再启动当前版本。")
-        return 3
-    url = f"http://127.0.0.1:{port}"
-    print(f"Substar 已在运行：{url}")
-    webbrowser.open(url)
+
+def _open_existing(identity: dict) -> int:
+    print(f"Substar 已在运行：http://127.0.0.1:{identity['port']}")
+    _foreground_backend_window()
     return 0
 
 
@@ -340,132 +351,12 @@ def _record_is_safely_stale(
     return True
 
 
-def _terminate_process_tree(pid: int) -> bool:
-    if os.name != "nt" or pid <= 0:
-        return False
-    result = subprocess.run(
-        ["taskkill", "/PID", str(pid), "/T", "/F"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0
-
-
-def _terminate_named_job(job_name: str) -> bool:
-    if os.name != "nt" or not job_name:
-        return False
-    kernel32 = ctypes.windll.kernel32
-    open_job = kernel32.OpenJobObjectW
-    open_job.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
-    open_job.restype = wintypes.HANDLE
-    handle = open_job(JOB_OBJECT_TERMINATE, False, job_name)
-    if not handle:
-        return False
-    try:
-        terminate_job = kernel32.TerminateJobObject
-        terminate_job.argtypes = (wintypes.HANDLE, wintypes.UINT)
-        terminate_job.restype = wintypes.BOOL
-        return bool(terminate_job(handle, 1))
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _wait_for_mutex(handle: int | None, timeout_seconds: float = 20.0) -> bool:
-    if os.name != "nt":
-        return True
-    if not handle:
-        return False
-    result = ctypes.windll.kernel32.WaitForSingleObject(
-        handle, max(1, int(timeout_seconds * 1000))
-    )
-    return result in {WAIT_OBJECT_0, WAIT_ABANDONED}
-
-
 def _close_handle(handle: int | None) -> None:
     if handle and os.name == "nt":
         ctypes.windll.kernel32.CloseHandle(handle)
 
 
-def _target_matches_instance(
-    record: dict,
-    identity: dict | None,
-    root: Path,
-) -> tuple[bool, int, int]:
-    """Validate the old instance before any forceful termination."""
-
-    target_root = str((identity or record).get("install_root", "")).strip()
-    try:
-        if not target_root or Path(target_root).resolve() != root:
-            return False, 0, 0
-    except OSError:
-        return False, 0, 0
-    record_instance = str(record.get("instance_id", "")).strip()
-    if identity and record_instance and str(identity.get("instance_id", "")) != record_instance:
-        return False, 0, 0
-    try:
-        backend_pid = int((identity or record).get("pid", 0))
-        recorded_pid = int(record.get("pid", backend_pid))
-    except (TypeError, ValueError):
-        return False, 0, 0
-    if backend_pid <= 0 or (recorded_pid and backend_pid != recorded_pid):
-        return False, 0, 0
-    if identity and str(identity.get("app", "")) != "substar-workbench":
-        return False, 0, 0
-    if not _process_matches_record(
-        backend_pid, record.get("backend_start_time_ns"), root
-    ):
-        return False, 0, 0
-    try:
-        launcher_pid = int(record.get("launcher_pid", 0) or 0)
-    except (TypeError, ValueError):
-        launcher_pid = 0
-    if launcher_pid:
-        launcher_state = _recorded_process_state(
-            launcher_pid, record.get("launcher_start_time_ns"), root
-        )
-        if launcher_state == "matching":
-            pass
-        elif launcher_state in {"absent", "different"}:
-            launcher_pid = 0
-        else:
-            return False, 0, 0
-    return True, backend_pid, launcher_pid
-
-
-def _force_stop_instance(record: dict, identity: dict | None, root: Path) -> bool:
-    valid, backend_pid, launcher_pid = _target_matches_instance(record, identity, root)
-    if not valid:
-        print("无法安全确认旧实例属于当前安装目录，未执行强制结束。")
-        return False
-    instance_id = str(record.get("instance_id", ""))
-    expected_job_name = f"Local\\Substar.Workbench.Job.{instance_id}"
-    recorded_job_name = str(record.get("job_name", ""))
-    job_terminated = recorded_job_name == expected_job_name and _terminate_named_job(
-        recorded_job_name
-    )
-    if not job_terminated:
-        _terminate_process_tree(backend_pid)
-    if launcher_pid and launcher_pid != os.getpid():
-        _terminate_process_tree(launcher_pid)
-    port = int((identity or record).get("port", 0) or 0)
-    for _ in range(100):
-        if port and probe_identity(port, timeout=0.1):
-            time.sleep(0.1)
-            continue
-        if launcher_pid and _process_image_path(launcher_pid):
-            time.sleep(0.1)
-            continue
-        if backend_pid and _process_image_path(backend_pid):
-            time.sleep(0.1)
-            continue
-        clear_runtime_record(str(record.get("instance_id", "")) or None)
-        return True
-    print("旧实例未能在规定时间内完全退出，未启动新实例。")
-    return False
-
-
-def _request_graceful_shutdown(port: int, instance_id: str, timeout: float = 1.5) -> bool:
+def _request_graceful_shutdown(port: int, instance_id: str, timeout: float = 1.5, *, token: str = "") -> bool:
     if not port or not instance_id:
         return False
     request = Request(
@@ -474,6 +365,7 @@ def _request_graceful_shutdown(port: int, instance_id: str, timeout: float = 1.5
         headers={
             "Content-Type": "application/json",
             "X-Substar-Instance-ID": instance_id,
+            "X-Substar-Shutdown-Token": token,
         },
         method="POST",
     )
@@ -482,108 +374,6 @@ def _request_graceful_shutdown(port: int, instance_id: str, timeout: float = 1.5
             return 200 <= int(getattr(response, "status", 0)) < 300
     except (OSError, HTTPError, URLError, TimeoutError):
         return False
-
-
-def _wait_for_identity_exit(
-    port: int,
-    instance_id: str,
-    timeout: float = GRACEFUL_PROCESS_EXIT_TIMEOUT,
-) -> bool:
-    deadline = time.monotonic() + max(0.0, timeout)
-    while time.monotonic() < deadline:
-        identity = probe_identity(port, timeout=0.25)
-        if not identity:
-            return True
-        if str(identity.get("instance_id", "")) != instance_id:
-            return False
-        time.sleep(0.1)
-    return False
-
-
-def _recorded_owners_exited(record: dict, root: Path) -> bool:
-    try:
-        backend_pid = int(record.get("pid", 0) or 0)
-        launcher_pid = int(record.get("launcher_pid", 0) or 0)
-    except (AttributeError, TypeError, ValueError):
-        return False
-    owners = (
-        (backend_pid, record.get("backend_start_time_ns")),
-        (launcher_pid, record.get("launcher_start_time_ns")),
-    )
-    for pid, started_at in owners:
-        if pid <= 0:
-            continue
-        if _recorded_process_state(pid, started_at, root) not in {
-            "absent",
-            "different",
-        }:
-            return False
-    return True
-
-
-def _wait_for_recorded_owners_exit(
-    record: dict, root: Path, timeout: float = GRACEFUL_PROCESS_EXIT_TIMEOUT
-) -> bool:
-    deadline = time.monotonic() + max(0.0, timeout)
-    while time.monotonic() < deadline:
-        if _recorded_owners_exited(record, root):
-            return True
-        time.sleep(0.1)
-    return _recorded_owners_exited(record, root)
-
-
-def _stop_running_instance() -> int:
-    root = Path(INSTALL_ROOT).resolve()
-    record = load_runtime_record() or {}
-    if not record:
-        identity = probe_identity(startup_port())
-        if identity:
-            print("停止失败：发现健康实例但缺少可验证的运行记录，未发送关闭请求。")
-            return 2
-        print("Substar 当前没有正在运行的实例。")
-        return 0
-    try:
-        port = int(record.get("port", 0))
-    except (TypeError, ValueError):
-        port = 0
-    identity = probe_identity(port) if port else None
-    if not identity:
-        if _record_is_safely_stale(record, root):
-            clear_runtime_record(str(record.get("instance_id", "")) or None)
-            print("Substar 当前没有正在运行的实例；已清理过期运行记录。")
-            return 0
-        valid, _, _ = _target_matches_instance(record, None, root)
-        if valid:
-            if _force_stop_instance(record, None, root):
-                print("Substar 已停止（身份端点不可用，已严格验证进程后终止）。")
-                return 0
-            return 3
-        print("停止失败：后端身份不可用，且运行记录不能安全确认为 stale；未结束任何进程。")
-        return 2
-    valid, _, _ = _target_matches_instance(record, identity, root)
-    if not valid:
-        print("停止失败：运行记录与健康后端身份不一致，未结束任何进程。")
-        return 2
-    instance_id = str(record.get("instance_id", ""))
-    graceful_requested = _request_graceful_shutdown(port, instance_id)
-    if (
-        graceful_requested
-        and _wait_for_identity_exit(port, instance_id)
-        and _wait_for_recorded_owners_exit(record, root)
-    ):
-        clear_runtime_record(instance_id)
-        print("Substar 已正常停止。")
-        return 0
-    latest_identity = probe_identity(port, timeout=0.4)
-    if not latest_identity and _recorded_owners_exited(record, root):
-        clear_runtime_record(instance_id)
-        print("Substar 已停止。")
-        return 0
-    if not _force_stop_instance(record, latest_identity, root):
-        print("停止失败：优雅关闭未完成，且实例身份无法再次严格验证；未强制结束进程。")
-        return 3
-    print("Substar 已停止（优雅关闭不可用，已使用受验证的强制终止）。")
-    return 0
 
 
 def _create_kill_on_close_job(process: subprocess.Popen, job_name: str) -> int | None:
@@ -661,29 +451,10 @@ def _terminate_owned_process(
         return
 
 
-def _observe_existing_runtime(
-    fallback_port: int,
-    root: Path,
-    timeout: float = 10.0,
-) -> tuple[dict, dict | None]:
-    """Wait through a normal startup, but return immediately for proven stale state."""
-
-    deadline = time.monotonic() + max(0.0, timeout)
-    record: dict = {}
-    while True:
-        record = load_runtime_record() or {}
-        identity = _probe_candidate_identity(record, fallback_port)
-        if identity or (record and _record_is_safely_stale(record, root)):
-            return record, identity
-        if time.monotonic() >= deadline:
-            return record, None
-        time.sleep(0.25)
-
-
 def main() -> int:
     _configure_install_path()
     if len(sys.argv) > 1 and sys.argv[1] in {"--help", "-h"}:
-        print("launcher.py [--stop | --smoke-import]")
+        print("launcher.py [--smoke-import]")
         return 0
     if len(sys.argv) > 1 and sys.argv[1] == "--smoke-import":
         import app as packaged_app
@@ -696,60 +467,90 @@ def main() -> int:
             os._exit(1)
         print("Substar packaged import OK", flush=True)
         os._exit(0)
-    if len(sys.argv) > 1 and sys.argv[1].lower() in {"--stop", "stop"}:
-        return _stop_running_instance()
-    root = Path(INSTALL_ROOT).resolve()
-    port = startup_port()
-    expected_build = build_id(PROJECT_ROOT)
-    _set_console_title(port)
-
-    mutex, owns_mutex = _acquire_mutex()
-    if os.name == "nt" and not mutex:
-        print("[启动失败] 无法创建启动器单实例锁，未启动后端。")
+    if len(sys.argv) > 1:
+        print("请通过 Substar.exe 启动，关闭后端窗口即可退出。")
+        return 2
+    try:
+        require_visible_backend()
+    except RuntimeError as error:
+        print(error)
         return 6
-    if not owns_mutex:
-        existing_record, existing_identity = _observe_existing_runtime(port, root)
-        if existing_identity:
-            _close_handle(mutex)
-            return _open_existing(existing_identity, expected_build)
-        if not existing_record or not _record_is_safely_stale(existing_record, root):
-            _close_handle(mutex)
-            print("[冲突] 已有启动器持有单实例锁，但无法安全确认其运行记录已 stale；未接管或结束任何进程。")
-            return 2
-        clear_runtime_record(str(existing_record.get("instance_id", "")) or None)
-        if not _wait_for_mutex(mutex, timeout_seconds=5.0):
-            _close_handle(mutex)
-            print("[冲突] stale 记录已清理，但原启动器未释放单实例锁；未启动新实例。")
-            return 5
-        owns_mutex = True
-    record = load_runtime_record() or {}
-    identity = _probe_candidate_identity(record, port)
-    if identity:
-        _release_launcher_mutex(mutex, owns_mutex)
-        return _open_existing(identity, expected_build)
-    if record:
-        if not _record_is_safely_stale(record, root):
-            _release_launcher_mutex(mutex, owns_mutex)
-            print("[冲突] 运行记录没有健康身份，但其进程所有权不能安全确认为 stale；未启动新实例。")
-            return 3
-        clear_runtime_record(str(record.get("instance_id", "")) or None)
-    if _port_is_open(port):
-        _release_launcher_mutex(mutex, owns_mutex)
-        print(f"[端口冲突] 127.0.0.1:{port} 已被其他程序占用。")
-        print("请在设置 → Debug 中修改启动端口，或关闭占用该端口的程序。")
-        return 4
 
+    root = Path(INSTALL_ROOT).resolve()
+    port = remembered_startup_port()
+    expected_build = build_id(PROJECT_ROOT)
+    mutex, owns_mutex = _acquire_mutex()
+    if not owns_mutex:
+        _close_handle(mutex)
+        if _foreground_backend_window():
+            return 0
+        print("[启动失败] 已有 Substar 实例，或无法取得整机单实例锁。")
+        return 6 if not mutex else 2
+
+    try:
+        record = load_runtime_record() or {}
+        identity = _probe_candidate_identity(record, port)
+        if identity:
+            return _open_existing(identity)
+        if _foreground_backend_window():
+            return 0
+        if record:
+            if not _record_is_safely_stale(record, root):
+                print("[冲突] 无法确认原 Substar 已退出，请关闭原后端窗口后再试。")
+                return 3
+            clear_runtime_record(str(record.get("instance_id", "")) or None)
+
+        for candidate in range(port, 65536):
+            if _port_is_open(candidate):
+                continue
+            _set_console_title(candidate)
+            result = _run_backend(root, candidate, expected_build)
+            if result != PORT_IN_USE_EXIT_CODE:
+                return result
+        print(f"[端口冲突] 从 {port} 到 65535 没有可用端口。")
+        return 4
+    except OSError as error:
+        print(f"[启动失败] {error}")
+        return 6
+    finally:
+        _release_launcher_mutex(mutex, owns_mutex)
+
+
+def _register_console_close(port: int, instance_id: str, token: str, process):
+    if os.name != "nt":
+        return None
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetConsoleCtrlHandler.argtypes = (callback_type, wintypes.BOOL)
+
+    @callback_type
+    def close(event):
+        if event != 2:  # CTRL_CLOSE_EVENT
+            return False
+        _request_graceful_shutdown(port, instance_id, timeout=0.5, token=token)
+        try:
+            process.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        return True
+
+    return close if kernel32.SetConsoleCtrlHandler(close, True) else None
+
+
+def _run_backend(root: Path, port: int, expected_build: str) -> int:
     instance_id = uuid.uuid4().hex
     env = os.environ.copy()
     env["SUBSTAR_PORT"] = str(port)
-    env["SUBSTAR_OPEN_BROWSER"] = "0"
     env["SUBSTAR_INSTANCE_ID"] = instance_id
+    shutdown_token = uuid.uuid4().hex
+    env["SUBSTAR_SHUTDOWN_TOKEN"] = shutdown_token
     env["SUBSTAR_LAUNCH_SURFACE"] = "visible_console"
     command = backend_command()
     _status(f"Substar 正在启动 · http://127.0.0.1:{port}")
     process: subprocess.Popen | None = None
     job_handle: int | None = None
     backend_log = None
+    close_handler = None
     try:
         log_directory = DATA_ROOT / "logs"
         log_directory.mkdir(parents=True, exist_ok=True)
@@ -795,17 +596,21 @@ def main() -> int:
             "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "launch_surface": "visible_console" if os.name == "nt" else "terminal",
         })
+        close_handler = _register_console_close(port, instance_id, shutdown_token, process)
         startup_deadline = time.monotonic() + INSTANCE_STARTUP_TIMEOUT
         while time.monotonic() < startup_deadline:
             if process.poll() is not None:
                 print(f"后端启动失败，退出码：{process.returncode}")
                 return int(process.returncode or 1)
             ready = probe_identity(port, timeout=0.3)
-            if ready:
-                if os.environ.get("SUBSTAR_LAUNCHER_OPEN_BROWSER", "1") != "0":
-                    webbrowser.open(f"http://127.0.0.1:{port}")
+            if ready and ready.get("instance_id") == instance_id and ready.get("pid") == process.pid:
+                try:
+                    remember_startup_port(port)
+                except OSError as error:
+                    print(f"\n[提示] 无法记住端口 {port}：{error}")
                 _status(
-                    f"Substar 运行中 · http://127.0.0.1:{port} · 关闭本窗口或双击‘停止_Substar.cmd’即可停止"
+                    f"Substar 运行中 · http://127.0.0.1:{port} · 关闭此窗口即退出",
+                    final=True,
                 )
                 break
             time.sleep(0.25)
@@ -817,7 +622,7 @@ def main() -> int:
         return process.wait()
     except KeyboardInterrupt:
         print("\n正在停止 Substar…")
-        _request_graceful_shutdown(port, instance_id)
+        _request_graceful_shutdown(port, instance_id, token=shutdown_token)
         if process is None:
             return 130
         try:
@@ -837,9 +642,8 @@ def main() -> int:
         clear_runtime_record(instance_id)
         if job_handle and os.name == "nt":
             ctypes.windll.kernel32.CloseHandle(job_handle)
-        if mutex and os.name == "nt":
-            ctypes.windll.kernel32.ReleaseMutex(mutex)
-            ctypes.windll.kernel32.CloseHandle(mutex)
+        if close_handler is not None:
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(close_handler, False)
         if backend_log is not None:
             backend_log.close()
 

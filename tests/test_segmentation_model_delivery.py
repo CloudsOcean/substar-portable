@@ -15,8 +15,7 @@ from substar_core.segmentation.material import AlignmentUnit
 def test_single_repair_preserves_model_boundaries_on_delivery(tmp_path, repair_kind):
     units = [AlignmentUnit(index=i, start=i, end=i + .8, text=letter * 30)
              for i, letter in enumerate('ABCD')]
-    _, binding = semantic_grouping_binding(units, 0, 3, 1,
-                                          sentence_boundary_policy='unpunctuated')
+    _, binding = semantic_grouping_binding(units, 0, 3, 1)
     primary = {
         'schema_version': 'substar.semantic-grouping-result.v1', **binding,
         'meaning_groups': [{'alignment_start': 0, 'alignment_end': 3,

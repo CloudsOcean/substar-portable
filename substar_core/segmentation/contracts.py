@@ -270,7 +270,6 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "language_ratio_threshold_percent",
         "japanese_hard_limit",
         "korean_hard_limit",
-        "sentence_boundary_policy",
         "repair_attempts",
         "request_timeout_seconds",
         "task_timeout_seconds",
@@ -279,7 +278,8 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         frozenset(constraints) if isinstance(constraints, Mapping) else frozenset()
     )
     legacy_constraint_fields = constraint_fields - {"language_ratio_threshold_percent"}
-    actual_constraint_fields = actual_constraint_fields - {"other_hard_limit", "preserve_punctuation"}
+    # Old queued requests may carry the retired language-model policy selector.
+    actual_constraint_fields -= {"other_hard_limit", "preserve_punctuation", "sentence_boundary_policy"}
     if actual_constraint_fields not in {
         frozenset(legacy_constraint_fields),
         frozenset(constraint_fields),
@@ -289,9 +289,6 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         raise InvalidTaskError("segmentation constraints fields are invalid")
     if mode == "reference_script" and "reference_break_symbols" not in actual_constraint_fields:
         raise InvalidTaskError("reference_script mode requires break symbols")
-    boundary_policy = str(constraints["sentence_boundary_policy"])
-    if boundary_policy not in {"reference", "reconstruct", "unpunctuated"}:
-        raise InvalidTaskError("sentence_boundary_policy is invalid")
     if "preserve_punctuation" in constraints and not isinstance(constraints["preserve_punctuation"], bool):
         raise InvalidTaskError("constraints.preserve_punctuation must be boolean")
     normalized_constraints = {
@@ -303,7 +300,6 @@ def _request_without_fingerprint(value: Mapping[str, Any]) -> dict[str, Any]:
         "mixed_hard_limit": _integer(constraints["mixed_hard_limit"], "constraints.mixed_hard_limit", 1, 200),
         "japanese_hard_limit": _integer(constraints["japanese_hard_limit"], "constraints.japanese_hard_limit", 1, 200),
         "korean_hard_limit": _integer(constraints["korean_hard_limit"], "constraints.korean_hard_limit", 1, 200),
-        "sentence_boundary_policy": boundary_policy,
         "repair_attempts": _integer(constraints["repair_attempts"], "constraints.repair_attempts", 1, 1),
         "request_timeout_seconds": _integer(constraints["request_timeout_seconds"], "constraints.request_timeout_seconds", 10, 3600),
         "task_timeout_seconds": _integer(constraints["task_timeout_seconds"], "constraints.task_timeout_seconds", 60, 86400),
@@ -431,7 +427,6 @@ def build_segmentation_request(
             "other_hard_limit": int(settings.get("other_hard_limit", 55)),
             "japanese_hard_limit": int(settings.get("japanese_hard_limit", 24)),
             "korean_hard_limit": int(settings.get("korean_hard_limit", 28)),
-            "sentence_boundary_policy": str(settings.get("sentence_boundary_policy", "unpunctuated")),
             "repair_attempts": 1,
             "request_timeout_seconds": min(int(settings.get("translation_api_timeout_seconds", 300)), 3600),
             "task_timeout_seconds": int(settings.get("stage_timeout_seconds", 3600)),

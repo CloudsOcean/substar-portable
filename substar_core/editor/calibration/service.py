@@ -3,7 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Literal, Mapping
 import time
 from pydantic import BaseModel, Field
 from substar_core.artifacts import atomic_write_json
@@ -40,6 +40,7 @@ class BatchReplacement(BaseModel):
     expected_text: str | None = None
 
 class AiCalibrationRequest(BaseModel):
+    track: Literal["source", "target"] = "source"
     expected_revision_id: str = Field(min_length=1)
     instruction: str = Field(default="", max_length=4000)
 
@@ -780,6 +781,9 @@ def calibration_prompts(settings, cues, calibration_glossary, instruction=""):
     calibration_repair_prompt = frozen_prompt(settings,
         "calibration_repair", variant=calibration_prompt_variant
     ).text
+    language_section = f"本次原文轨语言：{resolved_source_language}。以实际语段为准。"
+    calibration_prompt += "\n\n" + language_section
+    calibration_repair_prompt += "\n\n" + language_section
     if instruction.strip():
         instruction_section = (
             "\n\n用户本次补充校准要求：\n"
@@ -811,6 +815,14 @@ def compute_calibration(
         raise ValueError("项目还没有文稿版本")
     if payload.expected_revision_id != latest.revision_id:
         raise ValueError("AI 校准基于旧版本，请刷新后重试")
+    if payload.track == "target" or not latest.document.source_tokens:
+        from .text_track import compute_text_calibration
+        return compute_text_calibration(
+            latest, payload, task_id, project_id=project_id, project_root=project_root,
+            artifact_directory=artifact_directory,
+            settings=dict(settings_snapshot) if settings_snapshot is not None else load_settings(include_secret=True),
+            progress_sink=progress_sink,
+        )
     token_map, cues = _editor_ai_cues(latest)
     blocks = _editor_ai_blocks(cues)
     request_blocks = _calibration_model_blocks(blocks)

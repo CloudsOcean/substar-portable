@@ -62,7 +62,7 @@
       "required": [
         "target_seconds", "english_hard_limit", "chinese_hard_limit",
         "mixed_hard_limit", "japanese_hard_limit", "korean_hard_limit",
-        "sentence_boundary_policy", "repair_attempts", "request_timeout_seconds",
+        "repair_attempts", "request_timeout_seconds",
         "task_timeout_seconds"
       ],
       "properties": {

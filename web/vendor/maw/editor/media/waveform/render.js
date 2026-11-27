@@ -332,11 +332,19 @@ export function createWaveformModule(dependencies) {
     }
 
 
-    /** @this {import('./waveform-types.js').WaveformInstance} */
-    renderMulti() {
+    /**
+     * @this {import('./waveform-types.js').WaveformInstance}
+     * @param {{scrollTop?: number}} [options]
+     */
+    renderMulti({ scrollTop } = {}) {
       const rowDurationMs = this.settings.secondsPerRow * 1000;
       const rowCount = Math.max(1, Math.ceil(this.durationMs / rowDurationMs));
-      this.content.style.height = `${rowCount * (this.getTimelineRowHeight() + ROW_GAP) - ROW_GAP}px`;
+      const height = rowCount * (this.getTimelineRowHeight() + ROW_GAP) - ROW_GAP;
+      this.content.style.height = `${height}px`;
+      // Apply the new scroll position before the virtual rows are rebuilt.
+      if (Number.isFinite(scrollTop)) {
+        this.scroll.scrollTop = clamp(scrollTop, 0, Math.max(0, height - this.scroll.clientHeight));
+      }
       this.multiRange = [-1, -1];
       this.multiFollowCheckPending = true;
       this.renderMultiVisible(true);

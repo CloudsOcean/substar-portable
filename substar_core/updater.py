@@ -19,7 +19,7 @@ from substar_core.config import APP_DATA_DIR, INSTALL_ROOT
 
 REPOSITORY = "CloudsOcean/substar-portable"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
-ROOTS = frozenset({"app.py","launcher.py","substar_core","web","prompts","schemas","scripts","assets",
+ROOTS = frozenset({"Substar.exe","app.py","launcher.py","substar_core","web","prompts","schemas","scripts","assets",
     "runtime","docs","portable_manifest.json","requirements-release.txt","release-verification.json",
     "启动_Substar.cmd","停止_Substar.cmd","只检测环境.cmd","便携版说明.txt","README.md","CHANGELOG.md",
     "SECURITY.md","PRIVACY.md","THIRD_PARTY_NOTICES.md","LICENSE"})
@@ -192,6 +192,7 @@ def launch_pending_update():
     helper = UPDATE_ROOT / "apply-update.ps1"
     helper.write_text((INSTALL_ROOT / "substar_core/update_helper.ps1").read_text(encoding="utf-8"), encoding="utf-8-sig")
     subprocess.Popen(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(helper),
-                      "-PlanPath",str(pending),"-LauncherPid",str(os.getpid())],
+                      "-PlanPath",str(pending),"-LauncherPid",str(os.getpid()),
+                      "-ConsoleOwnerPid",os.environ.get("SUBSTAR_CONSOLE_OWNER_PID", "0")],
                      creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS,
                      stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

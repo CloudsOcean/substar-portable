@@ -5,8 +5,10 @@ import json
 import re
 import time
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 import requests
+from substar_core.job_diagnostics import model_failure, request_failure, response_diagnostics, safe_text
 from substar_core.model_concurrency import model_slot, retry_after_seconds
 
 from substar_core.openai_compat import auth_headers, endpoint_url
@@ -21,12 +23,17 @@ class ModelGatewayError(RuntimeError):
 
 
 class ModelGatewayRequestError(ModelGatewayError):
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(self, message: str, *, status: int | None = None, diagnostics=None) -> None:
         super().__init__(message)
         self.status = status
+        self.diagnostics = dict(diagnostics or {})
 
     @property
     def retryable(self) -> bool:
+        if self.diagnostics.get("code") == "model_finish_error":
+            return False
+        if self.diagnostics.get("provider_code") in {"1113", "1308", "1309", "1310", "1311"} and self.diagnostics.get("official_glm"):
+            return False
         return self.status is None or self.status in {408, 425, 429} or (
             self.status is not None and self.status >= 500
         )
@@ -34,10 +41,6 @@ class ModelGatewayRequestError(ModelGatewayError):
 
 def _response_json_utf8(response: requests.Response) -> Any:
     return json.loads(response.content.decode("utf-8-sig"))
-
-
-def _response_text_utf8(response: requests.Response) -> str:
-    return response.content.decode("utf-8-sig", errors="replace")
 
 
 def _response_text(body: Mapping[str, Any]) -> str:
@@ -156,6 +159,10 @@ def call_text_model(
     body: dict[str, Any] | None = None
     last_error: Exception | None = None
     used_attempts = 0
+    error_context = {
+        "model": safe_text(model, secret=api_key, limit=160),
+        "official_glm": urlsplit(base_url).hostname == "open.bigmodel.cn",
+    }
     for attempt in range(1, attempts + 1):
         if cancel_event is not None and cancel_event.is_set():
             raise InterruptedError("模型请求已取消")
@@ -174,23 +181,42 @@ def call_text_model(
                     timeout=timeout,
                 )
             response.raise_for_status()
-            parsed_body = _response_json_utf8(response)
+            try:
+                parsed_body = _response_json_utf8(response)
+            except ValueError as exc:
+                raise ModelGatewayRequestError(
+                    "模型服务返回的内容不是有效 JSON",
+                    status=response.status_code,
+                    diagnostics={**error_context, **response_diagnostics(response, body={}),
+                                 "code": "invalid_model_response"},
+                ) from exc
             if not isinstance(parsed_body, dict):
-                raise ModelGatewayError("模型 HTTP 响应不是 JSON 对象")
+                raise ModelGatewayRequestError(
+                    "模型服务返回的 JSON 不是对象",
+                    status=response.status_code,
+                    diagnostics={**error_context, **response_diagnostics(response, body={}),
+                                 "code": "invalid_model_response"},
+                )
+            if parsed_body.get("error"):
+                details = response_diagnostics(response, body=parsed_body, secret=api_key)
+                raise ModelGatewayRequestError(
+                    model_failure(base_url, details), status=response.status_code,
+                    diagnostics={**details, **error_context},
+                )
             body = parsed_body
             break
         except requests.RequestException as exc:
             last_error = exc
-            status = getattr(getattr(exc, "response", None), "status_code", None)
+            failure_response = exc.response
+            status = failure_response.status_code if failure_response is not None else None
+            details = (
+                response_diagnostics(failure_response, secret=api_key)
+                if failure_response is not None else request_failure(exc)
+            )
             wrapped = ModelGatewayRequestError(
-                "模型 API 请求失败："
-                + str(exc)
-                + (
-                    " " + _response_text_utf8(exc.response)[:1000]
-                    if getattr(exc, "response", None) is not None
-                    else ""
-                ),
+                details.get("message") or model_failure(base_url, details),
                 status=status,
+                diagnostics={**details, **error_context},
             )
             if wrapped.retryable and attempt < attempts:
                 delay = retry_after_seconds(exc.response, attempt) if status==429 else min(3.0, attempt * 0.75)
@@ -199,14 +225,21 @@ def call_text_model(
                 else: time.sleep(delay)
                 continue
             raise wrapped from exc
-        except ValueError as exc:
-            raise ModelGatewayError("模型 API 返回的 HTTP 内容不是 JSON") from exc
     if body is None:
         raise ModelGatewayError(f"模型 API 请求未完成：{last_error}")
-    finish_reason = body.get("choices", [{}])[0].get("finish_reason")
+    choices = body.get("choices")
+    first_choice = choices[0] if isinstance(choices, list) and choices else None
+    finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
     if finish_reason == "length":
         raise ModelGatewayError(
             f"模型输出达到当前 {payload['max_tokens']} token 上限"
+        )
+    if isinstance(finish_reason, str) and finish_reason in {"content_filter", "sensitive", "network_error", "error"}:
+        raise ModelGatewayRequestError(
+            "模型异常结束 · " + finish_reason,
+            status=response.status_code,
+            diagnostics={**error_context, "code": "model_finish_error", "finish_reason": finish_reason,
+                         "http_status": response.status_code},
         )
     result = _response_text(body)
     usage = body.get("usage", {})

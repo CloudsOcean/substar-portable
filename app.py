@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
+import platform
 import re
 import shutil
 import sys
@@ -10,7 +12,6 @@ import tempfile
 import threading
 import time
 import uuid
-import webbrowser
 import wave
 import requests
 from array import array
@@ -45,6 +46,9 @@ from substar_core.config import (
 from substar_core.model_providers import canonical_provider_id, provider_catalog
 from substar_core.runtime_instance import (
     APP_MARKER,
+    PORT_IN_USE_EXIT_CODE,
+    bind_backend_socket,
+    is_port_in_use,
     TASK_SCHEDULER_SHUTDOWN_TIMEOUT,
     acquire_backend_mutex,
     build_id,
@@ -79,6 +83,7 @@ from substar_core.storage import (
 )
 from substar_core.export import SubtitleExportMode, render_document_srt
 from substar_core.model_catalog import ModelCatalogError, discover_models
+from substar_core.model_routing import MODEL_STAGES, STAGE_SETTING_SUFFIXES
 from substar_core.reasoning_capabilities import reasoning_capabilities
 from substar_core.qwen_enhancement import (
     QWEN_PROMPT_MAX_CHARACTERS,
@@ -131,6 +136,7 @@ from substar_core.creation import (
     reference_document_snapshot,
     subtitle_creation_projection,
 )
+from substar_core.creation.projection import creation_error_report
 from substar_core.recognition.registry import (
     DEFAULT_RECOGNITION_PROFILE,
     get_recognition_profile,
@@ -200,6 +206,7 @@ app = FastAPI(
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
 APP_INSTANCE_ID = os.environ.get("SUBSTAR_INSTANCE_ID", uuid.uuid4().hex)
 APP_BUILD_ID = build_id(PROJECT_ROOT)
+APP_SHUTDOWN_TOKEN = os.environ.get("SUBSTAR_SHUTDOWN_TOKEN") or uuid.uuid4().hex
 _BACKEND_MUTEX_HANDLE: int | None = None
 _OWNS_RUNTIME_RECORD = False
 _UVICORN_SERVER: Any | None = None
@@ -395,6 +402,26 @@ class SettingsPayload(BaseModel):
     stage_audit_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
     stage_audit_repair_max_tokens: int = 65536
     stage_audit_repair_temperature: float = 0.0
+    stage_organize_model: str = ""
+    stage_organize_thinking_mode: str = "enabled"
+    stage_organize_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_organize_max_tokens: int = 65536
+    stage_organize_temperature: float = 0.0
+    stage_organize_repair_model: str = ""
+    stage_organize_repair_thinking_mode: str = "disabled"
+    stage_organize_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_organize_repair_max_tokens: int = 65536
+    stage_organize_repair_temperature: float = 0.0
+    stage_punctuation_model: str = ""
+    stage_punctuation_thinking_mode: str = "enabled"
+    stage_punctuation_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_punctuation_max_tokens: int = 65536
+    stage_punctuation_temperature: float = 0.0
+    stage_punctuation_repair_model: str = ""
+    stage_punctuation_repair_thinking_mode: str = "disabled"
+    stage_punctuation_repair_reasoning_effort: str = Field(default="low", pattern=r"^(low|medium|high|max|xhigh)$")
+    stage_punctuation_repair_max_tokens: int = 65536
+    stage_punctuation_repair_temperature: float = 0.0
     startup_port: int = Field(default=8769, ge=1024, le=65535)
     translation_api_auth_mode: str = "bearer"
     translation_api_timeout_seconds: int = 300
@@ -653,6 +680,7 @@ class Job:
     progress: float = 0.0
     ai_progress: dict[str, Any] | None = None
     error: str = ""
+    error_report: dict[str, Any] | None = None
     files: list[dict[str, Any]] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     attempt: int = 1
@@ -724,6 +752,7 @@ class Job:
             "progress": round(self.progress, 4),
             "ai_progress": self.ai_progress,
             "error": self.error,
+            "error_report": self.error_report,
             "files": [
                 {**item, "url": f'/api/project-creations/{self.id}/files/{item["name"]}'}
                 for item in self.files
@@ -997,6 +1026,28 @@ def _refresh_canonical_job_projection(job: Job) -> None:
         editor_ready=_editor_ready(job.job_dir, verify_document=False),
         cancel_requested=job.cancel_requested,
     )
+    report = None
+    if projection["status"] in {"failed", "interrupted"}:
+        task = next((row for row in (transcription, segmentation)
+                     if row["state"] in {"failed", "interrupted"}), {})
+        task_input = {}
+        reason = ""
+        if task:
+            try:
+                task_input = service.get_task_input(task["task_id"])
+                if not task.get("error"):
+                    attempts = service.store.attempt_rows(task["task_id"])
+                    if attempts:
+                        reason = attempts[-1].get("terminal_reason") or ""
+            except (RuntimeError, TaskNotFoundError):
+                pass
+        report = creation_error_report(task, task_input, fallback=projection["error"], reason=reason)
+        try:
+            manifest = json.loads((INSTALL_ROOT / "portable_manifest.json").read_text(encoding="utf-8"))
+            report["version"] = manifest.get("version")
+        except (OSError, ValueError, AttributeError):
+            pass
+        report.update(platform=platform.system(), project_id=job.id)
     next_ai_progress = (
         dict(segmentation["progress_payload"])
         if isinstance(segmentation.get("progress_payload"), Mapping)
@@ -1014,6 +1065,7 @@ def _refresh_canonical_job_projection(job: Job) -> None:
         job.ai_progress = next_ai_progress
         job.message = str(projection["message"])
         job.error = str(projection["error"])
+        job.error_report = report
         if job.status == "awaiting_edit":
             job.files = [
                 {"name": path.name, "size": path.stat().st_size}
@@ -1729,10 +1781,12 @@ def recognition_profiles() -> dict[str, Any]:
 @app.post("/api/settings")
 def put_settings(payload: SettingsPayload) -> dict[str, Any]:
     values = payload.model_dump()
-    # A settings page opened before the new controls existed must preserve them.
-    for key in ('model_api_concurrency', 'model_api_concurrency_overrides'):
-        if key not in payload.model_fields_set:
-            values.pop(key, None)
+    preserve_when_omitted = {
+        "display_order", "model_api_concurrency", "model_api_concurrency_overrides",
+        *(f"stage_{stage}_{suffix}" for stage in MODEL_STAGES for suffix in STAGE_SETTING_SUFFIXES),
+    }
+    for key in preserve_when_omitted - payload.model_fields_set:
+        values.pop(key, None)
     try:
         return save_settings(values)
     except ValueError as exc:
@@ -2712,6 +2766,9 @@ def request_runtime_shutdown(request: Request) -> dict[str, Any]:
     supplied_identity = request.headers.get("x-substar-instance-id", "").strip()
     if not supplied_identity or supplied_identity != APP_INSTANCE_ID:
         raise HTTPException(status_code=403, detail="runtime instance identity mismatch")
+    supplied_token = request.headers.get("x-substar-shutdown-token", "")
+    if not hmac.compare_digest(APP_SHUTDOWN_TOKEN.encode(), supplied_token.encode()):
+        raise HTTPException(403, detail="请关闭 Substar 后端窗口以退出")
     if _UVICORN_SERVER is None:
         raise HTTPException(
             status_code=503,
@@ -2763,20 +2820,17 @@ def install_app_update(request: Request):
     if request.headers.get("x-substar-instance-id") != APP_INSTANCE_ID:
         raise HTTPException(403,detail="runtime instance identity mismatch")
     if _UVICORN_SERVER is None:
-        raise HTTPException(503,detail="当前启动方式不能自动重启")
+        raise HTTPException(503,detail="当前启动方式不支持应用内安装")
     from substar_core.ass_api import busy as ass_busy
     from substar_core.updater import prepare_install
     scheduler = getattr(app.state,"task_scheduler",None)
     if ass_busy() or _task_service().list_tasks(states=("queued", "running", "cancelling"), limit=1) or (scheduler and scheduler.snapshot().get("active")):
         raise HTTPException(409,detail="请等待识别、翻译或字幕渲染任务完成后更新")
     try:
-        if scheduler:
-            scheduler.shutdown(grace_seconds=5)
         prepare_install(startup_port())
     except (ValueError,OSError) as exc:
-        if scheduler: scheduler.start()
         raise HTTPException(409,detail=str(exc)) from exc
-    return request_runtime_shutdown(request)
+    return {"status": "waiting_for_window_close", "message": "请关闭后端窗口以安装更新。"}
 
 
 def _retry_segmentation_input(job: Job) -> dict[str, Any] | None:
@@ -3256,31 +3310,63 @@ def download_file(job_id: str, filename: str) -> FileResponse:
     return FileResponse(path, filename=safe_name)
 
 
-def main() -> None:
+def main() -> int:
     import logging
     import uvicorn
 
     global _UVICORN_SERVER
-
-    host = "127.0.0.1"
+    require_visible_backend()
     port = startup_port()
+    try:
+        listener = bind_backend_socket(port)
+    except OSError as error:
+        if is_port_in_use(error, port):
+            return PORT_IN_USE_EXIT_CODE
+        raise
     logging.getLogger("asyncio").setLevel(logging.CRITICAL)
-    if os.environ.get("SUBSTAR_OPEN_BROWSER", "1") != "0":
-        threading.Timer(1.0, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     config = uvicorn.Config(
         app=app,
-        host=host,
+        host="127.0.0.1",
         port=port,
         log_level="critical",
         access_log=False,
     )
     server = uvicorn.Server(config)
     _UVICORN_SERVER = server
+    finished = threading.Event()
+    handler = _handle_backend_console_close(server, finished)
     try:
-        server.run()
+        with listener:
+            server.run(sockets=[listener])
+        return 0 if server.started else 1
     finally:
         _UVICORN_SERVER = None
+        finished.set()
+        if handler is not None:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False)
+
+
+def _handle_backend_console_close(server, finished):
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetConsoleCtrlHandler.argtypes = (callback_type, wintypes.BOOL)
+
+    @callback_type
+    def close(event):
+        if event != 2:  # CTRL_CLOSE_EVENT
+            return False
+        server.should_exit = True
+        finished.wait(3.5)
+        return True
+
+    return close if kernel32.SetConsoleCtrlHandler(close, True) else None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/assets/substar-logo.svg?v=20260814-star-1" />
     <title>设置 · Substar</title>
-    <link rel="stylesheet" href="/assets/settings.css?v=20261026-api-select-1" />
+    <link rel="stylesheet" href="/assets/settings.css?v=20261126-ai-processing" />
     <link rel="stylesheet" href="/assets/shell.css?v=20260909-unsaved-1" />
     <link rel="stylesheet" href="/assets/theme/open-props-subset.css?v=20260814-1" />
     <link rel="stylesheet" href="/assets/theme/tokens.css?v=20260908-nav-alignment-1" />
@@ -49,26 +49,8 @@
               ><b>引擎</b></span
             ><i class="asset-sidebar-meta" id="recognitionBadge">读取中</i>
           </button>
-          <button
-            class="category asset-sidebar-item"
-            data-panel="segmentation"
-            type="button"
-          >
-            <span class="asset-sidebar-copy"
-              ><b>切分</b></span
-            >
-          </button>
-          <button
-            class="category asset-sidebar-item"
-            data-panel="translation"
-            type="button"
-          >
-            <span class="asset-sidebar-copy"
-              ><b>翻译</b></span
-            >
-          </button>
-          <button class="category asset-sidebar-item" data-panel="audit" type="button">
-            <span class="asset-sidebar-copy"><b>审校</b></span>
+          <button class="category asset-sidebar-item" data-panel="ai-processing" type="button">
+            <span class="asset-sidebar-copy"><b>AI处理</b></span>
           </button>
           <button class="category asset-sidebar-item" data-panel="prompts" type="button">
             <span class="asset-sidebar-copy"><b>提示词</b></span><i class="asset-sidebar-meta" id="promptBadge">载入中</i>
@@ -97,12 +79,9 @@
               <section class="settings-subsection" aria-labelledby="generalShortcutTitle">
                 <div class="subsection-heading"><h3 id="generalShortcutTitle">快捷键</h3></div>
                 <div class="card shortcut-settings-card">
-                  <div class="shortcut-row"><div><strong>撤销</strong><small>返回上一个编辑器文档版本</small></div><input name="shortcut_undo" data-shortcut-input="undo" readonly aria-label="撤销快捷键"><button type="button" class="secondary" data-shortcut-reset="undo">恢复默认</button></div>
-                  <div class="shortcut-row"><div><strong>重做</strong><small>重新应用刚刚撤销的文档版本</small></div><input name="shortcut_redo" data-shortcut-input="redo" readonly aria-label="重做快捷键"><button type="button" class="secondary" data-shortcut-reset="redo">恢复默认</button></div>
-                  <div class="shortcut-row"><div><strong>播放 / 暂停</strong><small>切换当前音视频播放状态</small></div><input name="shortcut_play_pause" data-shortcut-input="play_pause" readonly aria-label="播放暂停快捷键"><button type="button" class="secondary" data-shortcut-reset="play_pause">恢复默认</button></div>
-                  <div class="shortcut-row"><div><strong>隐藏 Cue</strong><small>隐藏当前 Cue 或时间轴选中的 Cue</small></div><input name="shortcut_hide_cue" data-shortcut-input="hide_cue" readonly aria-label="隐藏 Cue 快捷键"><button type="button" class="secondary" data-shortcut-reset="hide_cue">恢复默认</button></div>
+                  <template id="shortcutRowTemplate"><div class="shortcut-row"><div><strong></strong><small></small></div><input readonly><button type="button" class="secondary">恢复默认</button></div></template>
                   <div class="shortcut-row"><div><strong>时间轴缩放</strong><small>按住修饰键并滚动鼠标滚轮</small></div><select name="timeline_zoom_modifier" aria-label="时间轴缩放修饰键"><option value="Alt">Alt</option><option value="Ctrl">Ctrl</option><option value="Shift">Shift</option><option value="Meta">Meta</option></select><span class="shortcut-wheel-label">＋ 滚轮</span></div>
-                  <p id="shortcutMessage" class="shortcut-message wide">Space 与 Backspace 分别处理播放和 Cue，不冲突。</p>
+                  <p id="shortcutMessage" class="shortcut-message wide">点击快捷键即可修改。</p>
                 </div>
               </section>
               <section class="settings-subsection" aria-labelledby="generalRuntimeTitle">
@@ -282,174 +261,167 @@
             </div>
           </section>
 
-          <section class="settings-panel" data-settings-panel="segmentation">
-                        <div class="card route-choice-card">
-              <div class="field wide">
-                <label>正式切分链路</label>
-                <input type="hidden" name="split_workflow_mode" value="one_step" />
-                <strong>确定性规划 → 语义切分</strong>
-                <small>唯一正式切分链路：程序按时长与停顿规划长节目块，模型只负责语义分组和最终切点。</small>
+          <section class="settings-panel" data-settings-panel="ai-processing">
+            <section class="ai-processing-group">
+              <h2>切分</h2>
+              <div class="card route-choice-card">
+                <div class="field wide">
+                  <label>正式切分链路</label>
+                  <input type="hidden" name="split_workflow_mode" value="one_step" />
+                  <strong>确定性规划 → 语义切分</strong>
+                  <small>唯一正式切分链路：程序按时长与停顿规划长节目块，模型只负责语义分组和最终切点。</small>
+                </div>
               </div>
-            </div>
-            <div class="card">
-              <div class="field">
-                <label>最短 cue（ms）</label
-                ><input
-                  name="minimum_cue_duration_ms"
-                  type="number"
-                  min="0"
-                  max="5000"
-                  value="400"
-                />
-              </div>
-              <div class="field">
-                <label>最长 cue（ms）</label
-                ><input
-                  name="maximum_cue_duration_ms"
-                  type="number"
-                  min="1"
-                  max="60000"
-                  value="7000"
-                />
-              </div>
-              <div class="field">
-                <label>自动吸附阈值（ms）</label
-                ><input
-                  name="snap_threshold_ms"
-                  type="number"
-                  min="0"
-                  max="2000"
-                  value="500"
-                />
-              </div>
-              <div class="field">
-                <label>右端补偿（ms）</label
-                ><input
-                  name="tail_padding_ms"
-                  type="number"
-                  min="0"
-                  max="1000"
-                  value="120"
-                />
-              </div>
-            </div>
-            <div class="stage-settings" id="segmentationStageSettings"></div>
-            <details class="advanced card">
-              <summary>
-                <span
-                  ><b>流水线高级参数</b
-                  ><small>块大小、重叠上下文与有界重试</small></span
-                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
-              </summary>
-              <div class="advanced-grid">
+              <div class="card">
                 <div class="field">
-                  <label>阶段块时长（秒）</label
+                  <label>最短 cue（ms）</label
                   ><input
-                    name="segmentation_chunk_seconds"
+                    name="minimum_cue_duration_ms"
                     type="number"
-                    min="75"
-                    max="100"
+                    min="0"
+                    max="5000"
+                    value="400"
                   />
                 </div>
                 <div class="field">
-                  <label>重叠上下文（秒）</label
+                  <label>最长 cue（ms）</label
                   ><input
-                    name="segmentation_overlap_seconds"
-                    type="number"
-                    min="5"
-                    max="120"
-                  />
-                </div>
-                <div class="field">
-                  <label>每批意义组</label
-                  ><input
-                    name="segmentation_batch_groups"
+                    name="maximum_cue_duration_ms"
                     type="number"
                     min="1"
-                    max="50"
+                    max="60000"
+                    value="7000"
                   />
                 </div>
                 <div class="field">
-                  <label>HTTP 总尝试次数</label
+                  <label>自动吸附阈值（ms）</label
                   ><input
-                    name="http_retry_attempts"
+                    name="snap_threshold_ms"
                     type="number"
-                    min="1"
-                    max="3"
+                    min="0"
+                    max="2000"
+                    value="500"
                   />
                 </div>
                 <div class="field">
-                  <label>单阶段上限（秒）</label
+                  <label>右端补偿（ms）</label
                   ><input
-                    name="stage_timeout_seconds"
+                    name="tail_padding_ms"
                     type="number"
-                    min="60"
-                    max="21600"
+                    min="0"
+                    max="1000"
+                    value="120"
                   />
                 </div>
               </div>
-            </details>
-          </section>
-
-          <section class="settings-panel" data-settings-panel="translation">
-                        <div class="card route-choice-card">
-              <div class="field wide">
-                <label>正式翻译链路</label>
-                <input type="hidden" name="translation_workflow_mode" value="one_step" />
-                <strong>翻译增强</strong>
-                <small>唯一正式翻译链路：直接生成固定 Cue 对应的最终译文。</small>
-              </div>
-            </div>
-            <div class="card">
-              <div class="field wide">
-                <label>基本设置</label>
-                <small>配置双语字幕的显示顺序。</small>
-              </div>
-              <div class="field">
-                <label>双语顺序</label
-                ><select name="display_order">
-                  <option value="source_target">原文在上 · 译文在下</option>
-                  <option value="target_source">译文在上 · 原文在下</option>
-                </select>
-              </div>
-              <p>API 请求并发统一在「通用 → 高级 → 模型 API 并发」设置，翻译与意义组重新分配共享所用模型的额度。</p>
-            </div>
-            <div class="stage-settings" id="translationStageSettings"></div>
-            <details class="advanced card">
-              <summary>
-                <span
-                  ><b>字幕输出高级参数</b
-                  ><small>标点、计数和阅读速度</small></span
-                ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
-              </summary>
-              <div class="advanced-grid">
-                <p class="settings-note">字符数统一按显示文本统计：空格、标点、数字、拉丁字母和其他符号全部计入。</p>
-                <div class="field">
-                  <label>拉丁文字最大 CPS</label
-                  ><input
-                    name="maximum_cps_latin"
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="0.5"
-                  />
+              <div class="stage-settings" id="segmentationStageSettings"></div>
+              <details class="advanced card">
+                <summary>
+                  <span
+                    ><b>流水线高级参数</b
+                    ><small>块大小、重叠上下文与有界重试</small></span
+                  ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+                </summary>
+                <div class="advanced-grid">
+                  <div class="field">
+                    <label>阶段块时长（秒）</label
+                    ><input
+                      name="segmentation_chunk_seconds"
+                      type="number"
+                      min="75"
+                      max="100"
+                    />
+                  </div>
+                  <div class="field">
+                    <label>重叠上下文（秒）</label
+                    ><input
+                      name="segmentation_overlap_seconds"
+                      type="number"
+                      min="5"
+                      max="120"
+                    />
+                  </div>
+                  <div class="field">
+                    <label>每批意义组</label
+                    ><input
+                      name="segmentation_batch_groups"
+                      type="number"
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+                  <div class="field">
+                    <label>HTTP 总尝试次数</label
+                    ><input
+                      name="http_retry_attempts"
+                      type="number"
+                      min="1"
+                      max="3"
+                    />
+                  </div>
+                  <div class="field">
+                    <label>单阶段上限（秒）</label
+                    ><input
+                      name="stage_timeout_seconds"
+                      type="number"
+                      min="60"
+                      max="21600"
+                    />
+                  </div>
                 </div>
-                <div class="field">
-                  <label>中日韩最大 CPS</label
-                  ><input
-                    name="maximum_cps_cjk"
-                    type="number"
-                    min="1"
-                    max="100"
-                    step="0.5"
-                  />
+              </details>
+            </section>
+            <section class="ai-processing-group">
+              <h2>翻译</h2>
+              <div class="card route-choice-card">
+                <div class="field wide">
+                  <label>正式翻译链路</label>
+                  <input type="hidden" name="translation_workflow_mode" value="one_step" />
+                  <strong>翻译增强</strong>
+                  <small>唯一正式翻译链路：直接生成固定 Cue 对应的最终译文。</small>
                 </div>
               </div>
-            </details>
-          </section>
-
-          <section class="settings-panel" data-settings-panel="audit">
-                        <div class="stage-settings" id="auditStageSettings"></div>
+              <div class="stage-settings" id="translationStageSettings"></div>
+              <details class="advanced card">
+                <summary>
+                  <span
+                    ><b>字幕输出高级参数</b
+                    ><small>标点、计数和阅读速度</small></span
+                  ><i><svg class="ui-icon"><use href="/assets/ui-icons.svg#chevron"></use></svg></i>
+                </summary>
+                <div class="advanced-grid">
+                  <p class="settings-note">字符数统一按显示文本统计：空格、标点、数字、拉丁字母和其他符号全部计入。</p>
+                  <div class="field">
+                    <label>拉丁文字最大 CPS</label
+                    ><input
+                      name="maximum_cps_latin"
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="0.5"
+                    />
+                  </div>
+                  <div class="field">
+                    <label>中日韩最大 CPS</label
+                    ><input
+                      name="maximum_cps_cjk"
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="0.5"
+                    />
+                  </div>
+                </div>
+              </details>
+            </section>
+            <section class="ai-processing-group">
+              <h2>整理</h2>
+              <div class="stage-settings" id="organizeStageSettings"></div>
+            </section>
+            <section class="ai-processing-group">
+              <h2>标点</h2>
+              <div class="stage-settings" id="punctuationStageSettings"></div>
+            </section>
           </section>
 
           <section class="settings-panel prompt-settings-panel" data-settings-panel="prompts">
@@ -580,7 +552,8 @@
       </div>
       <p id="unsavedNavigationStatus" class="unsaved-navigation-status" role="status"></p>
     </dialog>
-  <script src="/assets/settings.js?v=20261026-api-select-3"></script>
+  <script src="/assets/editor_shortcuts.js?v=20261126-shortcuts"></script>
+  <script src="/assets/settings.js?v=20261126-shortcuts-calibration-tracks-cue-boundary-cleanup"></script>
   <script src="/assets/settings_updates.js?v=20261009-delta-updates-1"></script>
   </body>
 </html>

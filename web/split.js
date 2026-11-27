@@ -633,7 +633,82 @@
     try { return JSON.stringify(raw, null, 2); } catch (_) { return String(raw); }
   }
 
-  async function copyText(value, successMessage = "已复制") {
+  const openErrorDetails = new Set();
+  let queueRenderKey = "";
+
+  function renderTaskError(job) {
+    const report = job.error_report || {};
+    const raw = taskError(job);
+    const title = report.message || (raw ? "任务未完成，查看错误详情" : "");
+    if (!title) return null;
+    const phase = [report.phase, TASK_STEP_LABELS[report.step]].filter(Boolean).join(" · ");
+    const sections = [
+      ["基本信息", [
+        ["软件", ["Substar", report.version].filter(Boolean).join(" ")],
+        ["运行环境", report.platform], ["失败阶段", phase],
+        ["服务商", report.provider], ["模型", report.model], ["错误来源", report.source],
+      ]],
+      ["诊断信息", [
+        ["错误", report.message || raw], ["错误码", report.provider_code || report.diagnostic_code || report.code],
+        ["Substar 错误码", (report.provider_code || report.diagnostic_code) && report.code],
+        ["HTTP 状态", report.http_status], ["服务商错误类型", report.provider_type],
+        ["返回说明", report.provider_message], ["结束原因", report.finish_reason],
+        ["请求 ID", report.request_id], ["云端任务 ID", report.cloud_task_id],
+        ["进程退出码", report.returncode], ["媒体工具退出码", report.media_exit_code],
+        ["通信错误数", report.protocol_error_count || null],
+        ["校验问题数", report.validation_issue_count], ["项目 ID", report.project_id],
+        ["任务 ID", report.task_id], ["尝试次数", report.attempt],
+      ]],
+    ];
+    const block = document.createElement("div");
+    block.className = "queue-job-error";
+    const headline = document.createElement("div");
+    headline.className = "queue-error-headline";
+    if (phase) {
+      const label = document.createElement("small");
+      label.textContent = phase;
+      headline.append(label);
+    }
+    const cause = document.createElement("strong");
+    cause.textContent = title;
+    headline.append(cause);
+    const details = document.createElement("details");
+    details.open = openErrorDetails.has(job.id);
+    details.addEventListener("toggle", () => {
+      if (!details.isConnected) return;
+      if (details.open) openErrorDetails.add(job.id);
+      else openErrorDetails.delete(job.id);
+    });
+    const summary = document.createElement("summary");
+    summary.textContent = "错误详情";
+    details.append(summary);
+    const lines = ["Substar 报错报告"];
+    for (const [heading, pairs] of sections) {
+      const label = document.createElement("h4");
+      label.textContent = heading;
+      const list = document.createElement("dl");
+      lines.push("", heading);
+      for (const [key, value] of pairs) {
+        if (value == null || value === "" || value === false) continue;
+        const term = document.createElement("dt");
+        term.textContent = key;
+        const description = document.createElement("dd");
+        description.textContent = value;
+        list.append(term, description);
+        lines.push(key + "：" + value);
+      }
+      details.append(label, list);
+    }
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "复制报错";
+    copy.addEventListener("click", () => copyText(lines.join("\n"), "报错已复制", copy));
+    details.append(copy);
+    block.append(headline, details);
+    return block;
+  }
+
+  async function copyText(value, successMessage = "已复制", focusTarget = null) {
     const text = String(value || "");
     if (!text) return;
     try {
@@ -641,12 +716,18 @@
     } catch (_) {
       const area = document.createElement("textarea");
       area.value = text;
-      area.style.position = "fixed";
-      area.style.opacity = "0";
+      area.readOnly = true;
+      area.style.cssText = "position:fixed;left:-10000px;top:0";
       document.body.append(area);
-      area.select();
-      document.execCommand("copy");
-      area.remove();
+      try {
+        area.select();
+        if (!document.execCommand("copy")) return toast("复制失败，请选中详情手动复制");
+      } catch {
+        return toast("复制失败，请选中详情手动复制");
+      } finally {
+        area.remove();
+        focusTarget?.focus({preventScroll:true});
+      }
     }
     toast(successMessage);
   }
@@ -903,6 +984,9 @@
     $("#emptyPipeline").classList.toggle("hidden", active.length > 0);
     container.classList.toggle("hidden", active.length === 0);
     syncPrimaryPanel();
+    const renderKey = JSON.stringify([state.runtimeConnected, state.retryModels, active]);
+    if (renderKey === queueRenderKey) return;
+    queueRenderKey = renderKey;
     container.replaceChildren(...active.map((job) => {
       const percent = normalizedProgress(job);
       const card = document.createElement("article");
@@ -922,36 +1006,7 @@
       const pct = document.createElement("b");
       pct.textContent = `${percent}%`;
       head.append(identity, pct);
-      const errorText = taskError(job);
-      const errorBlock = document.createElement("div");
-      errorBlock.className = "queue-job-error";
-      if (errorText) {
-        const errorValue = document.createElement("pre");
-        errorValue.textContent = errorText;
-        const copyError = document.createElement("button");
-        copyError.type = "button";
-        copyError.textContent = "复制报错";
-        copyError.addEventListener("click", (event) => {
-          event.stopPropagation();
-          copyText(errorText, "报错已复制");
-        });
-        const limited = /\b429\b|\b1302\b|rate.?limit|too many requests|限流|并发数超/.test(errorText.toLowerCase());
-        if (limited) {
-          const explanation = document.createElement("span");
-          explanation.textContent = job.segmentation_task_id
-            ? "模型服务暂时限流，请稍后重试。已验收的切分块会从检查点恢复。"
-            : "模型服务暂时限流，请稍后重试。";
-          const details = document.createElement("details");
-          const summary = document.createElement("summary");
-          summary.textContent = "查看原始错误";
-          details.append(summary, errorValue);
-          const body = document.createElement("div");
-          body.append(explanation, details);
-          errorBlock.append(body, copyError);
-        } else {
-          errorBlock.append(errorValue, copyError);
-        }
-      }
+      const errorBlock = renderTaskError(job);
       const detail = document.createElement("div");
       detail.className = "queue-job-detail";
       const message = document.createElement("span");
@@ -1004,11 +1059,11 @@
             deleteJob(removableJob, card, remove);
           }
         });
-        actions.append(remove);
+        actions.prepend(remove);
       }
       detail.append(actions);
       card.append(head);
-      if (errorText) card.append(errorBlock);
+      if (errorBlock) card.append(errorBlock);
       card.append(makeProgressBar(percent), detail);
       return card;
     }));

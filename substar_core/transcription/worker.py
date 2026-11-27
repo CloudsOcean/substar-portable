@@ -35,15 +35,26 @@ from .contracts import (
 )
 
 
-def _public_transcription_error(exc: BaseException) -> dict[str, str]:
+def _public_transcription_error(exc: BaseException) -> dict[str, Any]:
+    from substar_core.job_diagnostics import local_failure
     from substar_core.qwen_cloud_asr import QwenCloudAsrError
 
     error = {"code": "transcription_worker_failed"}
-    # Only publish an allowlisted explanation, never provider response text,
-    # request URLs, credentials or the private traceback.
-    if isinstance(exc, QwenCloudAsrError) and exc.provider_code == "ASR_RESPONSE_HAVE_NO_WORDS":
-        error["public_message"] = "听写服务未识别出有效词语（ASR_RESPONSE_HAVE_NO_WORDS），可扩大所选范围后重试。"
-    return error
+    if not isinstance(exc, QwenCloudAsrError):
+        failure = local_failure(exc)
+        return {**error, "public_message": failure["message"], "diagnostics": failure}
+    details = dict(exc.diagnostics)
+    code = exc.provider_code
+    message = {
+        "Arrearage": "Qwen ASR 账户欠费或余额不足，请处理欠费或充值后重试",
+        "ASR_RESPONSE_HAVE_NO_WORDS": "听写服务未识别出有效词语，可扩大所选范围后重试",
+    }.get(code) or details.get("message")
+    if not message:
+        suffix = code or (f"HTTP {details['http_status']}" if details.get("http_status") else "")
+        message = f"Qwen ASR 返回错误 · {suffix}" if suffix else "Qwen ASR 处理失败"
+    if code:
+        details["provider_code"] = code
+    return {**error, "public_message": message, "diagnostics": details}
 
 
 _ARTIFACT_CONTRACTS = {

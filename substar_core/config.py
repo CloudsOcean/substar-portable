@@ -25,6 +25,7 @@ from .model_providers import (
     infer_model_provider,
     normalize_provider_profiles,
 )
+from .model_routing import MODEL_STAGES, STAGE_SETTING_SUFFIXES, TEXT_STAGE_FALLBACKS
 from .reasoning_capabilities import reasoning_capabilities
 
 
@@ -181,7 +182,6 @@ DEFAULTS: dict[str, Any] = {
     "audio_denoise_mode": "off",
     "text_cleanup_mode": "mark_conservative",
     "segmentation_strategy": "semantic",
-    "sentence_boundary_policy": "unpunctuated",
     "split_workflow_mode": "one_step",
     "translation_workflow_mode": "one_step",
     "segmentation_chunk_seconds": 90,
@@ -208,6 +208,10 @@ DEFAULTS: dict[str, Any] = {
     "timeline_zoom_modifier": "Alt",
 }
 
+for stage, legacy in TEXT_STAGE_FALLBACKS.items():
+    for suffix in STAGE_SETTING_SUFFIXES:
+        DEFAULTS[f"stage_{stage}_{suffix}"] = DEFAULTS[f"stage_{legacy}_{suffix}"]
+
 ALLOWED_KEYS = set(DEFAULTS)
 
 def apply_declared_model_capabilities(settings: dict[str, Any]) -> dict[str, Any]:
@@ -224,10 +228,7 @@ def apply_declared_model_capabilities(settings: dict[str, Any]) -> dict[str, Any
     cached_capabilities = settings.get("model_reasoning_capabilities", {})
     if not isinstance(cached_capabilities, dict):
         cached_capabilities = {}
-    for stage in (
-        "segmentation", "segmentation_repair", "translation",
-        "translation_repair", "calibration", "audit_repair",
-    ):
+    for stage in MODEL_STAGES:
         model = str(settings.get(f"stage_{stage}_model") or connection_model).strip()
         if not base_url or not model:
             continue
@@ -356,13 +357,17 @@ def load_settings(include_secret: bool = False) -> dict[str, Any]:
     settings = dict(DEFAULTS)
     stored: dict[str, Any] = {}
     settings_path = SETTINGS_FILE
-    stored: dict[str, Any] = {}
     if settings_path.exists():
         try:
             stored = json.loads(settings_path.read_text(encoding="utf-8"))
             settings.update({k: v for k, v in stored.items() if k in ALLOWED_KEYS})
         except (OSError, json.JSONDecodeError):
             pass
+    for stage, legacy in TEXT_STAGE_FALLBACKS.items():
+        for suffix in STAGE_SETTING_SUFFIXES:
+            key = f"stage_{stage}_{suffix}"
+            if key not in stored:
+                settings[key] = settings[f"stage_{legacy}_{suffix}"]
     try:
         settings["startup_port"] = max(
             1024, min(65535, int(settings.get("startup_port", 8769)))
@@ -444,6 +449,7 @@ def settings_for_model_provider(
     model = str(profile.get("model") or "").strip()
     if not base_url or not model:
         raise ValueError("所选模型服务商的地址或模型尚未配置")
+    active_provider = str(settings.get("active_model_provider") or "")
     settings.update(
         active_model_provider=requested,
         translation_api_base_url=base_url,
@@ -451,11 +457,9 @@ def settings_for_model_provider(
         translation_api_auth_mode=str(profile.get("auth_mode") or "bearer"),
         translation_api_timeout_seconds=int(profile.get("timeout_seconds") or 300),
     )
-    for stage in (
-        "segmentation", "segmentation_repair", "translation",
-        "translation_repair", "calibration", "audit_repair",
-    ):
-        settings[f"stage_{stage}_model"] = model
+    if requested != active_provider:
+        for stage in MODEL_STAGES:
+            settings[f"stage_{stage}_model"] = model
     credentials = load_credentials()
     key = resolve_model_provider_credential(credentials, requested)
     settings["translation_api_key_set"] = bool(key)
@@ -489,10 +493,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     )
     merged["active_model_provider"] = provider
     next_model = str(merged.get("translation_api_model", "")).strip()
-    for stage in (
-        "segmentation", "segmentation_repair", "translation",
-        "translation_repair", "calibration", "audit_repair",
-    ):
+    for stage in MODEL_STAGES:
         model_key = f"stage_{stage}_model"
         stage_model = str(merged.get(model_key, "")).strip()
         # Provider changes invalidate every previous provider model ID. Within
@@ -641,14 +642,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
         merged["translation_reasoning_effort"] = DEFAULTS[
             "translation_reasoning_effort"
         ]
-    for stage in (
-        "segmentation",
-        "segmentation_repair",
-        "translation",
-        "translation_repair",
-        "calibration",
-        "audit_repair",
-    ):
+    for stage in MODEL_STAGES:
         thinking_key = f"stage_{stage}_thinking_mode"
         effort_key = f"stage_{stage}_reasoning_effort"
         tokens_key = f"stage_{stage}_max_tokens"
@@ -669,7 +663,7 @@ def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     ):
         merged[key] = bool(merged[key])
     merged["segmentation_strategy"] = "semantic"
-    merged["sentence_boundary_policy"] = "unpunctuated"
+    merged.pop("sentence_boundary_policy", None)
     merged["split_workflow_mode"] = "one_step"
     merged["translation_workflow_mode"] = "one_step"
     merged["segmentation_chunk_seconds"] = max(

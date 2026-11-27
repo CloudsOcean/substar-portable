@@ -17,18 +17,18 @@ import { createWaveformModule as createWaveformWorkspace } from './waveform/work
 import { createWaveformModule as createWaveformScaleControls } from './waveform/scale-controls.js';
 import { createWaveformModule as createWaveformCueDrag } from './waveform/cue-drag.js';
 import { createWaveformModule as createWaveformCueCommands } from './waveform/cue-commands.js';
-import { createWaveformModule as createWaveformGapDrag } from './waveform/gap-drag.js?v=20261118-gap-drag';
-import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261118-visible-bounds-1';
+import { createWaveformModule as createWaveformGapDrag } from './waveform/gap-drag.js?v=20261126-shortcuts';
+import { createWaveformModule as createWaveformMarkers } from './waveform/markers.js?v=20261126-pause-after-scrub';
 import { createWaveformModule as createWaveformCueDragUpdate } from './waveform/cue-drag-update.js';
 import { createWaveformModule as createWaveformPlayback } from './waveform/playback.js';
 import { createThumbnailModule as createEditorThumbnails } from './editor-thumbnails.js';
 import { createWaveformModule as createWaveformThumbnails } from './waveform/thumbnails.js';
 import { createWaveformModule as createWaveformMedia } from './waveform/media.js';
-import { createWaveformModule as createWaveformRender } from './waveform/render.js';
-import { createWaveformModule as createWaveformCueBlocks } from './waveform/cue-blocks.js?v=20261116-playback-3';
+import { createWaveformModule as createWaveformRender } from './waveform/render.js?v=20261123-multi-zoom-anchor';
+import { createWaveformModule as createWaveformCueBlocks } from './waveform/cue-blocks.js?v=20261126-gap-copy';
 import { createWordBlocks as createWaveformWordBlocks } from './waveform/word-blocks.js?v=20261027-word-patch-1';
 import { createWaveformModule as createWaveformCanvas } from './waveform/canvas.js';
-import { createWaveformModule as createWaveformInput } from './waveform/input.js?v=20261116-playback-3';
+import { createWaveformModule as createWaveformInput } from './waveform/input.js?v=20261123-multi-zoom-anchor';
 
 export function initWaveform() {
   'use strict';
@@ -131,8 +131,8 @@ constructor(options) {
       this.createCueDrag = null;
       this.gapRangeDrag = null;
       this.gapBoundaryDrag = null;
-      this.gapMoveDrag = null;
-      this.gapMovePreviewFrame = 0;
+      this.gapCopyDrag = null;
+      this.gapCopyPreviewFrame = 0;
       this.suppressGapClickUntil = 0;
       this.autoScrolling = false;
       this.autoScrollTarget = null;

@@ -1,10 +1,45 @@
 """Explicit, lossless import preview for token-free subtitle projects.
 
-Unlike srt_import (translation replacement), this module never infers a track
-from language or manufactures word timing. Preview output retains every input
-entry and each track's own timing, including unmatched bilingual entries.
+Preserves every input entry and each track's own timing, including unmatched
+bilingual entries.
 """
-from .srt_import import parse_srt
+
+import re
+
+
+_STAMP = r"(\d{2,}):(\d{2}):(\d{2})[,\.](\d{3})"
+_TIMING = re.compile(rf"^{_STAMP}\s+-->\s+{_STAMP}\s*$")
+
+
+def _milliseconds(values):
+    hours, minutes, seconds, milliseconds = values
+    if minutes >= 60 or seconds >= 60:
+        raise ValueError("SRT 分钟或秒数无效")
+    return ((hours * 60 + minutes) * 60 + seconds) * 1000 + milliseconds
+
+
+def parse_srt(text):
+    text = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text or "\ufffd" in text:
+        raise ValueError("请选择有效的 UTF-8 或 UTF-16 SRT 文件")
+    rows = []
+    for block in re.split(r"\n[ \t]*\n+", text):
+        lines = block.splitlines()
+        if len(lines) < 3 or not lines[0].strip().isdigit():
+            raise ValueError("SRT 格式无效：每条须包含序号、时间轴和文字")
+        match = _TIMING.fullmatch(lines[1].strip())
+        if not match:
+            raise ValueError(f"SRT 第 {lines[0]} 条时间轴无效")
+        values = list(map(int, match.groups()))
+        start = _milliseconds(values[:4])
+        end = _milliseconds(values[4:])
+        body = "\n".join(lines[2:]).strip()
+        if end <= start or not body:
+            raise ValueError("SRT 包含空字幕或无效时间范围")
+        rows.append({"number": lines[0].strip(), "start": start, "end": end, "text": body})
+    if len(rows) > 20000:
+        raise ValueError("SRT 最多支持 20000 条")
+    return rows
 
 
 def build_subtitle_document(preview, document_id):

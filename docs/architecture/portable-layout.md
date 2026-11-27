@@ -6,8 +6,8 @@ Substar 便携版继承开发版的生产目录。构建过程只做白名单复
 
 ```text
 Substar/
+├─ Substar.exe                # 带图标的 Windows 启动入口
 ├─ 启动_Substar.cmd
-├─ 停止_Substar.cmd
 ├─ 只检测环境.cmd
 ├─ app.py
 ├─ launcher.py
@@ -58,7 +58,7 @@ Substar/
 <当前固定 Python> <仓库或包内绝对脚本路径> <参数数组>
 ```
 
-Launcher 启动 `app.py`；Scheduler 启动明确列入白名单的 Worker 脚本。不允许 `sys.frozen`、`--backend`、`--worker-script` 或 PyInstaller 资源根分支。
+`Substar.exe` 托管一个可见的后端窗口，委托给现有 Launcher。Launcher 持有整机单实例锁，并记住最后一次成功监听的端口。关闭窗口执行后端收尾。Launcher 启动 `app.py`；Scheduler 启动明确列入白名单的 Worker 脚本。不允许 `sys.frozen`、`--backend`、`--worker-script` 或 PyInstaller 资源根分支。
 
 ## 构建门禁
 

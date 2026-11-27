@@ -76,12 +76,15 @@ export function createWaveformModule(dependencies) {
       const track = document.createElement('div');
       track.className = 'waveform-marker-track';
       track.addEventListener('pointerdown', (event) => {
-        // 空白处不启动任何编辑手势，避免错过尾巴时新增标记或字幕。
+        // 空白处可拖动播放头，不启动标记或字幕编辑。
         // 已有标记自行 stopPropagation，只移动/调整它自己的边界。
         if (event.button !== 0 || event.target !== track) return;
         event.preventDefault();
         event.stopPropagation();
         this.focusWaveform?.();
+        if (this.settings.dragPlayhead && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+          this.beginPlayheadDrag(event, row);
+        }
         const timeMs = this.pointerTimeMs(event, row);
         if (Number.isFinite(timeMs)) {
           this.options.seek(timeMs / 1000, { mouseClick: true });
@@ -216,7 +219,7 @@ export function createWaveformModule(dependencies) {
     }
 
 
-    // 双击 marker 弹出的小型编辑浮层：名称 / 颜色 / 复核三态。
+    // 双击 marker 弹出的小型编辑浮层：名称 / 颜色。
     // 浮层挂载在滚动内容层（随内容滚动），点击浮层以外或 Esc 关闭；
     // 数据变更经 options.onMarkerQuickEditFields 进入 MaweMarkerEditing。
     /** @this {import('./waveform-types.js').WaveformInstance} */
@@ -259,23 +262,8 @@ export function createWaveformModule(dependencies) {
         swatches.appendChild(swatch);
       }
 
-      const reviewToggle = document.createElement('button');
-      reviewToggle.type = 'button';
-      reviewToggle.className = 'markers-review-toggle';
-      reviewToggle.addEventListener('click', () => {
-        const latest = this.getMarkers().find((candidate) => candidate?.id === markerId);
-        if (!latest) {
-          this.closeMarkerQuickEdit();
-          return;
-        }
-        this.options.onMarkerQuickEditFields?.(markerId, { review: utils.nextMarkerReviewStatus(latest) });
-        this.syncMarkerQuickEdit();
-      });
-
-      // 底部行：复核三态在左，删除在右（样式与编辑卡的操作行一致）。
       const actionsRow = document.createElement('div');
       actionsRow.className = 'markers-item-actions';
-      actionsRow.appendChild(reviewToggle);
       const muteButton = window.MaweMarkersPanel?.createAiCleanupReviewMuteButton?.(markerId);
       if (muteButton) actionsRow.appendChild(muteButton);
       const deleteButton = document.createElement('button');
@@ -310,7 +298,7 @@ export function createWaveformModule(dependencies) {
     }
 
 
-    // 打开时 / 每次数据变更后同步浮层的动态状态（激活色、复核按钮文案）。
+    // 打开时 / 每次数据变更后同步浮层的动态状态（激活色、AI 静音控件）。
     /** @this {import('./waveform-types.js').WaveformInstance} */
     syncMarkerQuickEdit() {
       const popup = this.markerQuickEdit?.element;
@@ -325,25 +313,6 @@ export function createWaveformModule(dependencies) {
       (/** @type {NodeListOf<HTMLElement>} */ (popup.querySelectorAll('.markers-color-swatch'))).forEach((swatch) => {
         swatch.classList.toggle('active', swatch.dataset.color === currentColor);
       });
-      const reviewToggle = (/** @type {HTMLElement} */ (popup.querySelector('.markers-review-toggle')));
-      if (reviewToggle) {
-        const updateReviewStatus = window.MaweMarkersPanel?.updateAiCleanupReviewStatusButton;
-        if (typeof updateReviewStatus === 'function') updateReviewStatus(reviewToggle, marker);
-        else {
-          // 管理面板模块未加载时保留普通标记的复核状态呈现。
-          reviewToggle.textContent = utils.markerReviewStatusLabel(marker);
-          reviewToggle.classList.toggle('has-review', Boolean(marker.review));
-          reviewToggle.classList.toggle('pending', marker.review?.status === 'pending');
-          reviewToggle.classList.toggle('confirmed', marker.review?.status === 'confirmed');
-          if (marker.review?.reason) {
-            reviewToggle.title = marker.review.reason;
-            reviewToggle.dataset.markerProjectReason = 'true';
-          } else {
-            reviewToggle.title = '';
-            delete reviewToggle.dataset.markerProjectReason;
-          }
-        }
-      }
       const muteButton = /** @type {HTMLElement|null} */ (popup.querySelector('[data-ai-cleanup-review-mute]'));
       if (muteButton) window.MaweMarkersPanel?.updateAiCleanupReviewMuteButton?.(muteButton, marker.id);
     }

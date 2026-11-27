@@ -28,7 +28,7 @@
     // Padding belongs to the viewport, never to offscreen row compensation.
     const css=typeof getComputedStyle==='function'?getComputedStyle(container):{};
     const baseTop=parseFloat(css.paddingTop)||0,baseBottom=parseFloat(css.paddingBottom)||0;
-    let context=null,indexById=new Map(),heights=createHeightIndex([]),frame=0,generation=0,dead=false,active=null;
+    let context=null,indexById=new Map(),heights=createHeightIndex([]),frame=0,dead=false,active=null;
     let range={start:0,end:0},lastWidth=container.clientWidth,sliderDragging=false;
     const measured=new Map(),nodes=new Map();
     const gapOverlays = new Map();
@@ -191,55 +191,51 @@
       if(changed)schedule();
     }
     function schedule(){if(!frame&&!dead)frame=request(()=>{frame=0;update();});}
-    function revealCue(id,{align='center',keepVisible=false}={}){
-      const i=indexById.get(id);if(i===undefined)return false;
-      const ticket=++generation;
+    function revealCue(id,{align='center',keepVisible=false,followPlayback=false}={}){
+      const index=indexById.get(id);
+      if(index===undefined||(followPlayback&&sliderDragging))return false;
       const row=nodes.get(id);
-      if(keepVisible&&row){
+      if(keepVisible&&row&&!followPlayback){
         const viewportTop=container.getBoundingClientRect().top+container.clientTop;
         const rect=row.getBoundingClientRect();
         if(rect.bottom>viewportTop&&rect.top<viewportTop+container.clientHeight)return true;
       }
-      function locate(){
-        const height=heights.height(i),offset=align==='start'?0:Math.max(0,(viewport()-height)/2);
-        container.scrollTop=Math.max(0,heights.offset(i)-offset+baseTop);
-        update();
-      }
-      locate();
-      const settle = remaining => request(() => {
-        if (dead || ticket !== generation) return;
-        const node = nodes.get(id);
-        if (!node) return;
-        const listRect = container.getBoundingClientRect();
-        const rowRect = node.getBoundingClientRect();
-        const delta = align === 'start'
-          ? rowRect.top - listRect.top - container.clientTop - baseTop
-          : rowRect.top + rowRect.height / 2 - listRect.top - listRect.height / 2;
-        if (Math.abs(delta) > 1) {
-          const before = container.scrollTop;
-          container.scrollTop += delta;
-          if (container.scrollTop !== before) update();
+      const place=()=>{
+        const height=heights.height(index);
+        const top=heights.offset(index)+baseTop;
+        const viewHeight=viewport();
+        let target=top;
+        if(followPlayback){
+          // Keep the reading position until the active cue leaves the viewport.
+          const current=container.scrollTop;
+          const bottom=top+Math.min(height,viewHeight);
+          if(top<current+baseTop)target=top-baseTop;
+          else if(bottom>current+baseTop+viewHeight)target=bottom-baseTop-viewHeight;
+          else return;
+        }else if(align!=='start'){
+          target-=Math.max(0,(viewHeight-height)/2);
         }
-        if (remaining > 1) settle(remaining - 1);
-      });
-      settle(4);
+        const maximum=Math.max(0,container.scrollHeight-container.clientHeight);
+        target=Math.max(0,Math.min(maximum,target));
+        if(Math.abs(target-container.scrollTop)<1)return;
+        container.scrollTop=target;
+        update();
+      };
+      // Mount and measure virtual rows, then correct the position before paint.
+      place();
+      place();
       return true;
     }
     function jumpToPercent(value){
       if(!context?.cues.length)return;
       const percent=Math.max(0,Math.min(100,Number(value)||0));
       if (percent === 0 || percent === 100) {
-        generation++;
         container.scrollTop = percent === 0 ? 0 : heights.total();
         update();
       } else {
         revealCue(context.cues[Math.round(percent/100*(context.cues.length-1))].cue_id,{align:'start'});
       }
     }
-    const userScroll=()=>{generation++;};
-    container.addEventListener('wheel',userScroll,{passive:true});
-    container.addEventListener('pointerdown',userScroll);
-    container.addEventListener('keydown',userScroll);
     container.addEventListener('scroll',schedule,{passive:true});
     container.addEventListener('focusout',schedule);
     function scheduleCueSelection(event) {
@@ -249,7 +245,7 @@
     }
     doc.addEventListener?.('selectionchange',scheduleCueSelection);
     if(positionSlider){
-      positionSlider.addEventListener('pointerdown',()=>{sliderDragging=true;generation++;});
+      positionSlider.addEventListener('pointerdown',()=>{sliderDragging=true;});
       positionSlider.addEventListener('input',()=>jumpToPercent(positionSlider.value));
       positionSlider.addEventListener('keydown',event=>{
         const last=(context?.cues.length||0)-1;if(last<=0||!['ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
@@ -260,7 +256,7 @@
     }
     function render({cues,tokenById,activeCueId,preservePage=false}){
       if(content.parentNode!==container)container.replaceChildren(content);
-      generation++;const a=preservePage?anchor():null;
+      const a=preservePage?anchor():null;
       // If the anchor was removed, retain the next surviving visible row's offset.
       const ids=new Set(cues.map(c=>c.cue_id));
       if(a&&!ids.has(a.id)&&context){for(let i=a.index+1;i<context.cues.length;i++){const id=context.cues[i].cue_id;if(ids.has(id)){a.offset+=heights.offset(i)-heights.offset(a.index);a.id=id;break;}}}
@@ -275,7 +271,7 @@
       return range;
     }
     function setActive(id){active=id;for(const [cueId,node] of nodes)node.classList.toggle('current',cueId===id);}
-    function destroy(){dead=true;generation++;if(frame)cancelAnimationFrame(frame);observer?.disconnect();container.removeEventListener('scroll',schedule);doc.removeEventListener?.('selectionchange',scheduleCueSelection);}
+    function destroy(){dead=true;if(frame)cancelAnimationFrame(frame);observer?.disconnect();container.removeEventListener('scroll',schedule);doc.removeEventListener?.('selectionchange',scheduleCueSelection);}
     return {render,setActive,jumpToPercent,revealCue,refreshGapCoverage,destroy};
   }
   return {createCueListView,createHeightIndex,pageWindow,preservedWindow};

@@ -86,14 +86,12 @@ def _extract_audio(
     timeout_seconds = max(300.0, min(3600.0, media_duration_seconds * 2.0 + 120.0))
     try:
         _run(command, timeout_seconds=timeout_seconds)
-    except subprocess.TimeoutExpired as exc:
+    except subprocess.TimeoutExpired:
         try:
             wav_path.unlink()
         except FileNotFoundError:
             pass
-        raise RuntimeError(
-            f"FFmpeg audio extraction exceeded {int(timeout_seconds)} seconds"
-        ) from exc
+        raise
 
 
 def _sha256(path: Path) -> str:

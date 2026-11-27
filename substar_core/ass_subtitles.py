@@ -132,7 +132,7 @@ def stamp(seconds):
     return f"{hours}:{minutes:02d}:{sec:02d}.{centi:02d}"
 
 
-def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
+def render_ass(document, options: AssOptions | None = None, *, cue_ids=None, preview_position=None):
     options = options or AssOptions()
     style = options.style
     target_style = options.target_style or style
@@ -147,16 +147,19 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"]
     for name, item in (("Source", style), ("Target", target_style)):
         border_style = 3 if item.background else item.border_style
+        position = preview_position or item
         output.append(f"Style: {name},{item.font},{item.size},{ass_color(item.color)},{ass_color(item.highlight)},"
             f"{ass_color(item.outline_color,item.outline_opacity)},{ass_color(item.back_color,item.back_opacity)},{-1 if item.bold else 0},{-1 if item.italic else 0},{-1 if item.underline else 0},{-1 if item.strike_out else 0},{item.scale_x},{item.scale_y},{item.spacing},{item.angle},{border_style},"
-            f"{item.outline},{item.shadow},{item.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{item.margin_y},1")
+            f"{item.outline},{item.shadow},{position.alignment},{item.margin_l if item.margin_l is not None else item.margin_x},{item.margin_r if item.margin_r is not None else item.margin_x},{position.margin_y},1")
     output += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
     import json
     word_timing_overlays = json.loads(document.properties.timeline_json or "{}").get("word_timings", {})
     source_by_id = {t.token_id:t for t in document.source_tokens}
     display = {t.token_id:t for t in document.display_tokens}
     from substar_core.language_layout import layout_tokens
-    from substar_core.presentation import project_cue_lines
+    from substar_core.presentation import (
+        line_punctuation_options, project_cue_lines, project_line, punctuation_tail_start,
+    )
     from substar_core.chinese_script import convert_chinese_script
 
     def event(start, end, name, text, raw=False, overlay=False):
@@ -194,11 +197,16 @@ def render_ass(document, options: AssOptions | None = None, *, cue_ids=None):
             target = convert_chinese_script(target, document.properties.script_projection)
         if cue_mode in {"source", "ab-double"} and source:
             # Highlight only the currently spoken token, retaining full line context.
-            raw_source = layout_tokens(t.text for t in tokens)
             if options.word_highlight and tokens and cue.source_text is None:
                 spans, cursor = [], 0
-                for token in tokens:
-                    shown, _ = project_cue_lines(document, source=token.text, target="", source_upper=source_upper)
+                punctuation = line_punctuation_options(document, source_upper)
+                tail_token = len(tokens) - 1
+                if not punctuation["filter_inline"]:
+                    symbols = punctuation["remove"] + punctuation["space"]
+                    while tail_token > 0 and punctuation_tail_start(tokens[tail_token].text, symbols) == 0:
+                        tail_token -= 1
+                for index, token in enumerate(tokens):
+                    shown = project_line(token.text, at_line_end=index >= tail_token, **punctuation)
                     if document.properties.script_projection != "original":
                         shown = convert_chinese_script(shown, document.properties.script_projection)
                     shown = shown.strip()

@@ -1,4 +1,4 @@
-# Subtitle Cue boundary planning
+# Cue 边界规划通用模板
 
 Process one continuous block of time-ordered ASR word tokens. Grammatical punctuation and native sentence markers may be unavailable. Infer syntax and discourse from the complete word sequence, timing, pauses, speaker changes and supplied context.
 
@@ -23,3 +23,7 @@ Apply this priority order: exact OWN coverage and hard limit; indivisible lexica
 - For every CUE row, look up its starting token's `MAX_END` and verify that the chosen ending alias is not later. This check is mandatory even when the phrase feels indivisible.
 - If a span exceeds the hard limit, split it into as many Cues as necessary. Re-evaluate the strongest legal seam from each new Cue start; do not look for one cut that makes an entire long span fit in only two Cues. The hard limit has no semantic exception: if every option is dependent, use the least damaging boundary before the ceiling.
 - Balance is a soft ranking criterion among natural legal boundaries. Prefer coherent information steps over a succession of small dependent fragments; do not force an overflow or cross a genuine sentence, speaker or discourse boundary to balance lengths.
+
+## 混合语种
+
+随请求提供的语言规则都可使用。语言分段清楚时，按对应语段的规则选择 Cue 边界。句内交织时，按承载整句的语法、词组和语义连续性判断；不要仅因切换语言而强制切分，也不要拆开借词、专名或仍未完成的短语。

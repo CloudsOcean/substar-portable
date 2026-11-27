@@ -16,6 +16,7 @@ from .model_concurrency import model_slot, retry_after_seconds
 
 from .artifacts import atomic_write_json
 from .config import INSTALL_ROOT
+from .job_diagnostics import request_failure, response_diagnostics, safe_text
 
 
 Progress = Callable[[str, float], None]
@@ -29,9 +30,10 @@ _ACTIVE_STATUS_PROGRESS = {"PENDING": 0.40, "RUNNING": 0.46}
 
 
 class QwenCloudAsrError(RuntimeError):
-    def __init__(self, message: str, *, provider_code: str | None = None):
+    def __init__(self, message: str, *, provider_code: str | None = None, diagnostics=None):
         super().__init__(message)
-        self.provider_code = provider_code
+        self.diagnostics = dict(diagnostics or {})
+        self.provider_code = provider_code or self.diagnostics.get("provider_code")
 
 
 
@@ -65,14 +67,6 @@ def _headers(api_key: str, *, async_call: bool = False) -> dict[str, str]:
     return value
 
 
-def _detail(response: requests.Response) -> str:
-    try:
-        body = response.json()
-        return str(body.get("message") or body.get("code") or body)
-    except (ValueError, AttributeError):
-        return response.text.strip()[:1000]
-
-
 def _request(
     method: str,
     url: str,
@@ -81,31 +75,36 @@ def _request(
     timeout: float,
     **kwargs: Any,
 ) -> requests.Response:
-    last_error: Exception | None = None
+    last_error: QwenCloudAsrError | None = None
+    authorization = str((kwargs.get("headers") or {}).get("Authorization", ""))
+    secret = authorization.removeprefix("Bearer ")
     for attempt in range(1, attempts + 1):
         response = None
         try:
             model = (kwargs.get('json') or {}).get('model') if isinstance(kwargs.get('json'), dict) else None
             base = url.split('/services/',1)[0]
-            credential = str((kwargs.get('headers') or {}).get('Authorization',''))
-            with model_slot(base,model,credential) if model else nullcontext():
+            with model_slot(base,model,authorization) if model else nullcontext():
                 response = requests.request(method, url, timeout=timeout, **kwargs)
-            if response.status_code < 400:
+            details = response_diagnostics(response, secret=secret) if response.status_code >= 400 or authorization else {}
+            if response.status_code < 400 and details.get("provider_code", "").lower() in {"", "success", "ok", "200", "0"}:
                 return response
-            if response.status_code not in {408, 409, 425, 429} and response.status_code < 500:
-                raise QwenCloudAsrError(
-                    f"Qwen 云端请求失败（HTTP {response.status_code}）：{_detail(response)}"
-                )
             last_error = QwenCloudAsrError(
-                f"Qwen 云端暂时不可用（HTTP {response.status_code}）：{_detail(response)}"
+                f"Qwen 云端请求失败（HTTP {response.status_code}）：{details.get('provider_message', '')}",
+                diagnostics=details,
             )
+            if last_error.provider_code == "Arrearage" or (
+                response.status_code not in {408, 409, 425, 429} and response.status_code < 500
+            ):
+                raise last_error
         except QwenCloudAsrError:
             raise
         except requests.RequestException as exc:
-            last_error = exc
+            last_error = QwenCloudAsrError(
+                str(exc), diagnostics=request_failure(exc),
+            )
         if attempt < attempts:
             time.sleep(retry_after_seconds(response,attempt) if response is not None and response.status_code==429 else min(8.0, 0.8 * (2 ** (attempt - 1))))
-    raise QwenCloudAsrError(str(last_error or "Qwen 云端请求失败"))
+    raise last_error or QwenCloudAsrError("Qwen 云端请求失败")
 
 
 def get_upload_policy(
@@ -169,10 +168,11 @@ def upload_temporary_file(
             if response.status_code == 200:
                 return f"oss://{key}"
             last_error = QwenCloudAsrError(
-                f"Qwen 临时文件上传失败（HTTP {response.status_code}）：{_detail(response)}"
+                f"Qwen 临时文件上传失败（HTTP {response.status_code}）",
+                diagnostics=response_diagnostics(response, secret=api_key),
             )
-        except (OSError, requests.RequestException) as exc:
-            last_error = exc
+        except requests.RequestException as exc:
+            last_error = QwenCloudAsrError(str(exc), diagnostics=request_failure(exc))
         if attempt < attempts:
             policy = get_upload_policy(
                 api_key=api_key,
@@ -182,7 +182,7 @@ def upload_temporary_file(
                 attempts=attempts,
             )
             time.sleep(min(5.0, attempt * 0.8))
-    raise QwenCloudAsrError(str(last_error or "Qwen 临时文件上传失败"))
+    raise last_error or QwenCloudAsrError("Qwen 临时文件上传失败")
 
 
 def _ffmpeg_executable() -> str:
@@ -196,7 +196,10 @@ def _ffmpeg_executable() -> str:
     resolved = shutil.which("ffmpeg")
     if resolved:
         return resolved
-    raise QwenCloudAsrError("FFmpeg is unavailable for cloud-audio preparation")
+    raise QwenCloudAsrError(
+        "FFmpeg is unavailable for cloud-audio preparation",
+        diagnostics={"code": "ffmpeg_unavailable", "message": "找不到 FFmpeg，无法准备听写音频"},
+    )
 
 
 def _encode_cloud_audio(
@@ -227,7 +230,8 @@ def _encode_cloud_audio(
     except subprocess.TimeoutExpired as exc:
         temporary.unlink(missing_ok=True)
         raise QwenCloudAsrError(
-            f"Cloud-audio encoding exceeded {int(timeout_seconds)} seconds"
+            f"Cloud-audio encoding exceeded {int(timeout_seconds)} seconds",
+            diagnostics={"code": "audio_encode_timeout", "message": "本地音频编码超时"},
         ) from exc
     if (
         completed.returncode != 0
@@ -237,12 +241,14 @@ def _encode_cloud_audio(
         temporary.unlink(missing_ok=True)
         raise QwenCloudAsrError(
             "Cloud-audio encoding failed: "
-            + (completed.stderr.strip() or f"ffmpeg {completed.returncode}")
+            + (completed.stderr.strip() or f"ffmpeg {completed.returncode}"),
+            diagnostics={"code": "audio_encode_failed", "message": "FFmpeg 无法编码听写音频",
+                         "media_exit_code": completed.returncode},
         )
     os.replace(temporary, output)
 
 
-def _transcription_url(output: dict[str, Any]) -> str:
+def _transcription_url(output: dict[str, Any], *, response, api_key: str, task_id: str, request_id) -> str:
     results = output.get("results")
     if isinstance(results, list):
         for result in results:
@@ -250,7 +256,11 @@ def _transcription_url(output: dict[str, Any]) -> str:
                 continue
             if str(result.get("subtask_status", "SUCCEEDED")).upper() in _TERMINAL_FAILURES:
                 raise QwenCloudAsrError(
-                    f"Qwen 云端子任务失败：{result.get('message') or result.get('code') or result}"
+                    "Qwen 云端子任务失败",
+                    diagnostics={
+                        **response_diagnostics(response, body={**result, "request_id": request_id}, secret=api_key),
+                        "cloud_task_id": safe_text(task_id, secret=api_key, limit=160),
+                    },
                 )
             if result.get("transcription_url"):
                 return str(result["transcription_url"])
@@ -768,7 +778,11 @@ def run_qwen_cloud_asr(
         output = response.json().get("output") or {}
         task_id = str(output.get("task_id", ""))
         if not task_id:
-            raise QwenCloudAsrError(f"Qwen 云端没有返回 task_id：{response.text[:1000]}")
+            raise QwenCloudAsrError(
+                "Qwen 云端没有返回 task_id",
+                diagnostics={**response_diagnostics(response, secret=api_key),
+                             "code": "missing_cloud_task_id", "message": "Qwen ASR 返回异常，缺少云端任务 ID"},
+            )
         state.update({"task_id": task_id, "submitted_at": time.time()})
         atomic_write_json(state_path, state)
 
@@ -793,9 +807,18 @@ def run_qwen_cloud_asr(
                 progress(f"Qwen 云端听写：{status}", status_progress)
             last_status = status
         if status == "SUCCEEDED":
-            url = _transcription_url(output)
+            url = _transcription_url(
+                output, response=response, api_key=api_key, task_id=task_id,
+                request_id=body.get("request_id"),
+            )
             if not url:
-                raise QwenCloudAsrError("Qwen 云端任务成功但未返回转写结果 URL")
+                raise QwenCloudAsrError(
+                    "Qwen 云端任务成功但未返回转写结果 URL",
+                    diagnostics={**response_diagnostics(response, secret=api_key),
+                                 "code": "missing_transcription_url",
+                                 "message": "Qwen ASR 未返回转写结果链接",
+                                 "cloud_task_id": safe_text(task_id, secret=api_key, limit=160)},
+                )
             result_response = _request("GET", url, attempts=attempts, timeout=timeout)
             value = result_response.json()
             atomic_write_json(result_path, value)
@@ -809,7 +832,12 @@ def run_qwen_cloud_asr(
             atomic_write_json(state_path, state)
             raise QwenCloudAsrError(
                 f"Qwen 云端听写失败：{output.get('message') or output.get('code') or body}",
-                provider_code=output.get("code"),
+                diagnostics={**response_diagnostics(response, body={**output, "request_id": body.get("request_id")}, secret=api_key),
+                             "cloud_task_id": safe_text(task_id, secret=api_key, limit=160)},
             )
         cancellable_wait(poll_seconds)
-    raise QwenCloudAsrError(f"Qwen 云端听写等待超过 {total_timeout} 秒；任务 {task_id} 已保留，可重试继续查询")
+    raise QwenCloudAsrError(
+        f"Qwen 云端听写等待超过 {total_timeout} 秒；任务 {task_id} 已保留，可重试继续查询",
+        diagnostics={"code": "cloud_result_timeout", "message": "听写已提交，暂未获取到结果，可续跑查询原任务",
+                     "cloud_task_id": safe_text(task_id, secret=api_key, limit=160)},
+    )

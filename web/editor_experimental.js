@@ -287,7 +287,10 @@
       searchContent.id = 'experimental-search-panel';
       search.open = true;
       search.classList.add('combined-search');
-      const locatorGroup = locator.querySelector('.tool-panel');
+      const locatorContent = locator.querySelector('.tool-locator-group');
+      const locatorGroup = toolGroup('定位', [...locatorContent.children]);
+      locatorGroup.className = locatorContent.className;
+      locatorContent.remove();
       const combined = document.createElement('div');
       combined.className = 'tool-panel combined-find-panel';
       combined.append(search, locatorGroup);
@@ -507,16 +510,19 @@
       legend.querySelector(".sidebar-usage")?.remove();
       help.replaceChildren();
       help.classList.add("experimental-help");
+      const shortcutHelp = window.SubstarShortcuts.actions.map(({id,label,key,description}) =>
+        `<dt><kbd data-editor-shortcut="${id}">${window.SubstarShortcuts.display(key)}</kbd> · ${label}</dt><dd>${description}</dd>`
+      ).join("");
       help.innerHTML = `
         <section><h3>字幕编辑</h3><p>点击字幕定位并选中，双击词元修改文字。右键词间连接点拆分；右键句末连接点合并下一条。</p><p>双击句末紫点编辑整句，点击外部保存。新建字幕会直接进入整句编辑。</p></section>
         <section><h3>波形与选区</h3><dl>
           <dt>单击字幕块</dt><dd>选择字幕、定位播放头</dd>
           <dt>拖动字幕块</dt><dd>移动字幕时间；拖动两侧浅色边缘调整起止时间</dd>
-          <dt>字词按钮 / <kbd>Q</kbd></dt><dd>切换词级时间条</dd>
           <dt><kbd>Shift</kbd> + 单击</dt><dd>按顺序连续选择，可跨句选词</dd>
           <dt><kbd>Ctrl</kbd> + 单击</dt><dd>追加或取消单项选择</dd>
         </dl><p>词级与句级选区独立保存，互不干扰。右键词条操作词选区，右键句条操作句选区。</p><p>右键波形空白处可创建字幕；波形齿轮可设置每行时长、行高与振幅。</p></section>
-        <section><h3>标记与空隙</h3><p>右键选中的词条或句条，可添加点标记、线标记或空隙。顺序相邻的选中项合为一段（包含中间停顿），不连续的选区分别创建；点标记位于每段起点。</p><p>蓝标是定位点，白点是范围边界。未展开时拖蓝标移动整个点标记，拖白点展开范围；展开后蓝标只在范围内移动，不带动边界。两侧收拢后恢复点标记。</p><p>蓝标和白点按当前模式吸附词边界或句边界，按住 Alt 暂时取消吸附。双击或右键标记可编辑名称等属性，标记面板可编辑、删除和定位。</p><p>空隙操作决定鼠标编辑方式：拖动边界调整起止，中键拖动圈选；可同时开启或关闭编辑。启用“跳过静音空隙”后，播放跳过已移除区间。</p></section>
+        <section><h3>标记与空隙</h3><p>右键选中的词条或句条，可添加点标记、线标记或空隙。顺序相邻的选中项合为一段（包含中间停顿），不连续的选区分别创建；点标记位于每段起点。</p><p>蓝标是定位点，白点是范围边界。未展开时拖蓝标移动整个点标记，拖白点展开范围；展开后蓝标只在范围内移动，不带动边界。两侧收拢后恢复点标记。</p><p>双击或右键标记可编辑名称等属性，标记面板可编辑、删除和定位。Alt + 左键拖动可精确绘制空隙。启用「跳过空隙」后，播放跳过已移除区间。</p></section>
+        <section><h3>快捷键</h3><p>字幕列表与波形共用键位。正在输入、使用输入法或编辑表单时，按键交给当前控件。方向键定位不会选中字幕。</p><dl>${shortcutHelp}</dl></section>
         <section><h3>波形设置</h3><p>低能量抑制使用加减按钮调节，每次 5%；只改变弱波形的显示，不改变音量和空隙检测结果。</p><p>“隐藏字幕”决定已隐藏字幕在波形中的显示方式：变淡或完全隐藏，并同步句条、译文条和词条。显示画面预览图可开启已有的视频帧导航。</p></section>
         <section><h3>导出</h3><p>勾选“成片是否剪辑”后，视频、音频和字幕使用当前剪辑方案。可同时导出多个字幕格式和版本。工程导出支持字幕工程 ZIP 和剪辑方案 XML。</p><p>标记与选区创建操作支持撤销；批量创建可整批撤销。关闭页面前确认保存完成。</p></section>
 `;
@@ -525,35 +531,14 @@
         const heading = document.createElement("h3"); heading.textContent = "变更标记说明";
         section.append(heading, legend); help.append(section);
       }
-      // Group punctuation rules by language without replacing the existing inputs.
-      const punctuation = tools.querySelector('[data-tool-panel="punctuation"] .tool-panel');
-      const rules = Array.from(punctuation.children);
-      for (const offset of [0, 3]) {
-        const row = document.createElement("fieldset"); row.className = "punctuation-rule-row";
-        rules[offset].before(row);
-        const heading = document.createElement("legend"); heading.textContent = rules[offset].textContent;
-        row.append(heading);
-        rules[offset].remove();
-        ["移除符号", "替换为空格"].forEach((name, index) => {
-          const label = document.createElement("label");
-          label.className = "tool-field";
-          const text = document.createElement("span"); text.textContent = name;
-          const input = rules[offset + index + 1];
-          input.placeholder = index ? "例如：，、" : "例如：。！？";
-          label.append(text, input); row.append(label);
-        });
-      }
-      const punctuationActions = document.createElement("div"); punctuationActions.className = "panel-actions";
-      punctuationActions.append(punctuation.querySelector("#applyPunctuation"));
-      punctuation.append(punctuationActions);
-      function searchGroup(name, nodes) {
+      function toolGroup(name, nodes) {
         const group = document.createElement("fieldset");
         const legend = document.createElement("legend"); legend.textContent = name;
         group.append(legend, ...nodes); return group;
       }
       const replaceActions = document.createElement("div"); replaceActions.className = "replace-actions";
       replaceActions.append(...["#toolSearchNext", "#toolReplaceCurrent", "#toolReplaceAll", "#toolUndoReplace"].map(id => searchContent.querySelector(id)));
-      const findGroup = searchGroup("查找与替换", [
+      const findGroup = toolGroup("查找与替换", [
         searchContent.querySelector(".search-scope-toggle"), searchContent.querySelector("#toolSearch"),
         searchContent.querySelector("#toolReplace"), replaceActions
       ]);
