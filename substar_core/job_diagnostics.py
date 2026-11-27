@@ -30,9 +30,10 @@ def response_diagnostics(response, *, body=None, secret: str = "") -> dict:
     if body is None:
         try:
             body = response.json()
-        except ValueError:
+        except (AttributeError, ValueError):
             body = {}
     body = body if isinstance(body, Mapping) else {}
+    headers = getattr(response, "headers", {}) or {}
     nested = body.get("error")
     error = nested if isinstance(nested, Mapping) else body
     return {
@@ -46,8 +47,8 @@ def response_diagnostics(response, *, body=None, secret: str = "") -> dict:
             ),
             "request_id": safe_text(
                 body.get("request_id") or error.get("request_id")
-                or response.headers.get("x-request-id")
-                or response.headers.get("x-dashscope-request-id"),
+                or headers.get("x-request-id")
+                or headers.get("x-dashscope-request-id"),
                 secret=secret, limit=160,
             ),
         }.items()

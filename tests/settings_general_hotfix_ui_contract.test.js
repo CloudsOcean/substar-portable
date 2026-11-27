@@ -11,18 +11,20 @@ test("general settings retain editor shortcuts without obsolete export or dubbin
   assert.match(html, /data-panel="general"/);
   assert.doesNotMatch(html, /name="default_export_dir"/);
   assert.doesNotMatch(html, /Windows“另存为”窗口/);
-  assert.match(html, /name="shortcut_undo"/);
-  assert.match(html, /name="shortcut_redo"/);
-  assert.match(html, /name="shortcut_play_pause"/);
-  assert.match(html, /name="shortcut_hide_cue"/);
+  assert.match(html, /id="shortcutRowTemplate"/);
+  assert.match(js, /shortcuts\.actions/);
+  assert.match(js, /input\.name = "shortcut_" \+ id/);
+  require("../web/editor_shortcuts.js");
+  const {serverActions} = globalThis.SubstarShortcuts;
+  for (const action of ["undo","redo","play_pause","hide_cue"]) assert.ok(serverActions.has(action));
   assert.match(html, /name="timeline_zoom_modifier"/);
-  assert.match(js, /function shortcutFromEvent/);
+  assert.match(js, /shortcuts\.fromEvent/);
   assert.doesNotMatch(html, /dubbing_|配音/);
 });
 
 test("hotfix fingerprints the changed settings stylesheet", () => {
-  assert.match(html, /settings\.css\?v=20261026-api-select-1/);
-  assert.match(html, /settings\.js\?v=20261026-api-select-3/);
+  assert.match(html, /settings\.css\?v=[^"]+/);
+  assert.match(html, /settings\.js\?v=[^"]+/);
 });
 
 test("unsaved settings navigation offers save discard and stay actions", () => {

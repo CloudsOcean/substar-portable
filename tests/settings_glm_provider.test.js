@@ -74,7 +74,10 @@ test("reasoning choices always expose five canonical levels and provider mapping
 });
 
 test("normal stages default to thinking Low while repair stages prefer non-thinking", () => {
-  assert.match(source, /"segmentation_repair", "translation_repair", "audit_repair"/);
+  for (const stage of ["segmentation_repair", "translation_repair", "organize_repair", "punctuation_repair"]) {
+    assert.match(source, new RegExp('\\["' + stage + '", "修复模块"'));
+  }
+  assert.match(source, /nonThinkingPreferredStages\.has\(stage\)/);
   assert.match(source, /select\.value = preserveEffort && levels\.includes\(current\) \? current : "low"/);
   assert.match(source, /explicitlyConfiguredThinkingStages\.has\(stage\)/);
   assert.match(source, /explicitlyConfiguredEffortStages\.has\(stage\)/);

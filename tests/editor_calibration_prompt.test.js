@@ -14,7 +14,7 @@ assert.doesNotMatch(html, /id="organizeOptimizeBoundaries"[^>]*checked/);
 assert.match(js, /runSubtitleTextTask\("punctuation"\)/);
 assert.match(js, /runSubtitleTextTask\("organize"\)/);
 assert.match(html, /id="exportDocument"[^>]*>导出</);
-assert.match(js, /instruction\s*\n\s*}\)\s*\n\s*}/);
+assert.match(js, /expected_revision_id:state\.revision\.revision_id,\s*instruction,\s*track\s*}\)/);
 assert.match(js, /ai-calibration-instruction:\$\{state\.projectId/);
 assert.match(js, /state\.editorAiTask\.progress[\s\S]*?renderWorkbenchTask/);
 assert.match(js, /projectPath\("\/output-jobs"\)/);

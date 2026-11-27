@@ -85,7 +85,7 @@ test("late project A load cannot overwrite project B session",async()=>{
     refreshTranslationTask:async()=>null,
     loadRevisionHistory:async()=>{},
   };
-  for(const name of ['syncRecoveryDraftButton','restoreOutputJob','refreshOutputMenu','syncCueViewSwitch','renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
+  for(const name of ['setProjectCommandsReady','syncRecoveryDraftButton','restoreOutputJob','refreshOutputMenu','syncCueViewSwitch','renderHeader','renderProjectList','stopTranslationPoll','renderTranslationTask','hideEditorTutorialIntro','applySubtitlePolicy','configureTranslationLanguageDefaults','configureMedia','seedRevisionMetadata','ensureOperationQueue','setMediaMessage','loadProjectMedia','startEditorAiTaskPoll','followTranslationTask','maybeShowTutorialIntro'])context[name]=()=>{};
   vm.createContext(context);vm.runInContext(code,context);
   const a=context.loadProject('A');
   const b=context.loadProject('B');

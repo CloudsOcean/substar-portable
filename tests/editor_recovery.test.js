@@ -177,7 +177,7 @@ test("task unlock reenables subtitle fields and history controls without replaci
   const state={view:{properties:{},cue_views:[]},revision:{document:{properties:{}}},projects:[],revisions:[],
     indexes:{cueById:new Map([['c',{state:'active'}],['deleted',{state:'deleted'}],
       ['text',{source_text:'text'}],['overlay',{source_text:'overlay',subtitle_track:'overlay'}]])}};
-  const context=vm.createContext({state,document:{querySelectorAll:selector=>selector.includes('data-cue-action')?buttons:fields},$:()=>node(),
+  const context=vm.createContext({state,document:{querySelectorAll:selector=>selector.includes('data-cue-action')?buttons:fields},$:selector=>selector.startsWith('#aiCalibrationTrack')?null:node(),
     editorAiTaskLocksEditor:()=>locked,currentProjectBaseName:()=>'',syncCueViewSwitch(){},
     syncRevisionControls:()=>historyUpdates++});
   vm.runInContext(extract('  function renderHeader()', '  function isReferenceToken'),context);
@@ -192,7 +192,7 @@ test("task unlock reenables subtitle fields and history controls without replaci
 test("a truncated successful API response cannot be treated as task completion or saved data",async()=>{
   const context=vm.createContext({projectEpoch:1,fetch:async()=>({ok:true,
     headers:{get:()=>"application/json"},json:async()=>{throw Error('truncated');}})});
-  vm.runInContext(extract('  async function api(', '  function shortcutFromEvent'),context);
+  vm.runInContext(extract('  async function api(', '  const editorShortcuts'),context);
   await assert.rejects(context.api('/api/projects/p/ai-task'),error=>error.code==='invalid_response' && error.status===502);
 });
 

@@ -134,7 +134,7 @@ def test_highlight_survives_punctuation_projection():
     from substar_core.domain import PresentationSettings
     doc=document()
     doc=replace(doc,display_tokens=(replace(doc.display_tokens[0],text='hello,'),doc.display_tokens[1]),
-        presentation=PresentationSettings(upper_remove=','))
+        presentation=PresentationSettings(upper_remove=',', upper_filter_inline=True))
     p=default_profile(doc);p.layers[0].word_highlight=True
     result=render_configuration(apply_profile(doc,p))
     assert r'\c&H0000FFFF&' in result

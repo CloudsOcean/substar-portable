@@ -29,8 +29,8 @@ test("reference break presets follow the selected source language", () => {
 
 test("general settings contain shortcuts and real scheduler limits", () => {
   assert.match(settingsHtml, /data-settings-panel="general"/);
-  assert.match(settingsHtml, /name="shortcut_undo"/);
-  assert.match(settingsHtml, /name="shortcut_redo"/);
+  assert.match(settingsHtml, /id="shortcutRowTemplate"/);
+  assert.match(settingsJs, /input\.name = "shortcut_" \+ id/);
   assert.doesNotMatch(settingsHtml, /data-panel="(?:shortcuts|advanced)"/);
   for (const name of [
     "runtime_worker_concurrency",

@@ -225,7 +225,7 @@ class QwenCloudTranscriptionTests(unittest.TestCase):
             ):
                 run_qwen_cloud_asr(wav, self.settings(root / "checkpoint", "a" * 64), lambda *_: None)
             error = _public_transcription_error(caught.exception)
-            self.assertIn("ASR_RESPONSE_HAVE_NO_WORDS", error["public_message"])
+            self.assertEqual(error["diagnostics"]["provider_code"], "ASR_RESPONSE_HAVE_NO_WORDS")
             self.assertNotIn("private", error["public_message"])
 
     def test_changed_input_fingerprint_cannot_reuse_old_result(self) -> None:

@@ -44,7 +44,7 @@ test('timeout also covers response body loading, not just headers', async () => 
 
 test('play cancellation is quiet, genuine playback errors remain visible', async () => {
   const editor = read('editor.js');
-  const fn = editor.slice(editor.indexOf('  async function toggleMediaPlayback('), editor.indexOf('  function isTextEditingContext('));
+  const fn = editor.slice(editor.indexOf('  async function toggleMediaPlayback('), editor.indexOf('  function syncPlaybackFollowAfterSeek('));
   const errors = [];
   let failure = Object.assign(new Error('paused while starting'), {name:'AbortError'});
   const media = {paused:true, play:async () => {throw failure;}};

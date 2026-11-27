@@ -24,7 +24,7 @@ test("task cards retain error copying without a duplicate runtime panel", () => 
   const html = fs.readFileSync(path.join(__dirname, "..", "web", "split.html"), "utf8");
   assert.doesNotMatch(html, /id="(?:runtimeLog|statusPill|copyRuntimeLog)"/);
   assert.doesNotMatch(source, /renderRuntimeLog|renderTaskProgress|runtimeJobId|#statusPill/);
-  assert.match(source, /copyText\(errorText, "报错已复制"\)/);
+  assert.match(source, /copyText\(lines\.join\("\\n"\), "报错已复制", copy\)/);
 });
 
 test("creation calibration and translation retain independent task cards", () => {

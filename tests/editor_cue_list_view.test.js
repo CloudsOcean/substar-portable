@@ -5,6 +5,7 @@ function fixture(count=1405){
  const frames=new Map();let serial=0,observer;
  class Node {
   constructor(){this.children=[];this.dataset={};this.style={};this.attrs={};this.handlers={};this.classes=new Set();this.classList={contains:n=>this.classes.has(n),toggle:(n,on)=>on?this.classes.add(n):this.classes.delete(n)};}
+  get scrollHeight(){return Math.max(this.clientHeight||0,...this.children.map(node=>parseFloat(node.style.height)||0));}
   get parentNode(){return this.parent;}
   get nextSibling(){return this.parent?.children[this.parent.children.indexOf(this)+1]||null;}
   append(node){this.insertBefore(node,null);}
@@ -21,7 +22,7 @@ function fixture(count=1405){
   getBoundingClientRect(){if(this===container)return {top:0,bottom:600,height:600,width:500};const top=(parseFloat(this.style.top)||0)-container.scrollTop;return {top,bottom:top+this.height,height:this.height,width:500};}
  }
  const doc={activeElement:null,createElement:()=>new Node(),addEventListener(){},removeEventListener(){},getSelection:()=>null};
- const container=new Node();container.ownerDocument=doc;container.clientHeight=600;container.clientWidth=500;container.scrollTop=0;
+ const container=new Node();container.ownerDocument=doc;container.clientTop=0;container.clientHeight=600;container.clientWidth=500;container.scrollTop=0;
  global.document=doc;global.getComputedStyle=n=>({paddingTop:'0',paddingBottom:'0',marginBottom:n.dataset.cueId?'10':'0'});
  global.requestAnimationFrame=fn=>{frames.set(++serial,fn);return serial;};global.cancelAnimationFrame=id=>frames.delete(id);
  global.ResizeObserver=class{constructor(fn){observer=fn;}observe(){}unobserve(){}disconnect(){}};

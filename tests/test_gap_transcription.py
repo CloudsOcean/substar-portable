@@ -134,8 +134,8 @@ def test_no_words_error_has_safe_readable_public_message():
     from substar_core.qwen_cloud_asr import QwenCloudAsrError
     from substar_core.transcription.worker import _public_transcription_error
     error = _public_transcription_error(QwenCloudAsrError('private URL and credential', provider_code='ASR_RESPONSE_HAVE_NO_WORDS'))
-    assert 'ASR_RESPONSE_HAVE_NO_WORDS' in error['public_message']
+    assert error['diagnostics']['provider_code'] == 'ASR_RESPONSE_HAVE_NO_WORDS'
     assert '未识别出有效词语' in error['public_message']
     assert 'private' not in str(error)
-    assert 'public_message' not in _public_transcription_error(QwenCloudAsrError('private secret'))
-    assert 'public_message' not in _public_transcription_error(RuntimeError('ASR_RESPONSE_HAVE_NO_WORDS private'))
+    assert 'private secret' not in str(_public_transcription_error(QwenCloudAsrError('private secret')))
+    assert 'ASR_RESPONSE_HAVE_NO_WORDS' not in str(_public_transcription_error(RuntimeError('ASR_RESPONSE_HAVE_NO_WORDS private')))

@@ -27,7 +27,7 @@ for (const scenario of ["saved", "disabled", "cancelled", "failed", "switched"])
       projectPath:path => "/api/projects/p" + path,
       selectedOutputValues:name => name === "outputSubtitleFormat" ? ["srt"] : ["source"],
       outputPlan:() => null,
-      outputSessions:new Map(),
+      outputSessions:new Map(), outputCancelled:new Error('cancelled'),
       nextExportSequence:() => ({value:1}), commitExportSequence:() => events.push("sequence"),
       refreshOutputMenu(){}, observeEditorTutorialEvent(){},
       outputSaveSpec:() => ({suggestedName:"demo.srt"}),

@@ -9,7 +9,7 @@ from starlette.requests import Request
 import app as backend
 
 
-def _request(instance_id: str) -> Request:
+def _request(instance_id: str, token: str | None = None) -> Request:
     return Request(
         {
             "type": "http",
@@ -21,6 +21,7 @@ def _request(instance_id: str) -> Request:
             "query_string": b"",
             "headers": [
                 (b"x-substar-instance-id", instance_id.encode("ascii")),
+                (b"x-substar-shutdown-token", (token or backend.APP_SHUTDOWN_TOKEN).encode("ascii")),
             ],
             "client": ("127.0.0.1", 50000),
             "server": ("127.0.0.1", 8769),
@@ -33,6 +34,12 @@ class RuntimeHttpTests(unittest.TestCase):
         with patch.object(backend, "APP_INSTANCE_ID", "instance-a"):
             with self.assertRaises(HTTPException) as raised:
                 backend.request_runtime_shutdown(_request("instance-b"))
+        self.assertEqual(raised.exception.status_code, 403)
+
+    def test_runtime_identity_alone_cannot_stop_the_backend(self) -> None:
+        with patch.object(backend, "APP_INSTANCE_ID", "instance-a"):
+            with self.assertRaises(HTTPException) as raised:
+                backend.request_runtime_shutdown(_request("instance-a", "public"))
         self.assertEqual(raised.exception.status_code, 403)
 
     def test_shutdown_requests_uvicorn_exit_after_identity_check(self) -> None:
