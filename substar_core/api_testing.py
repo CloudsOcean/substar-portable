@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 import requests
 
 from .http_client import post
-from .reasoning_capabilities import reasoning_effort_for_request
-from .openai_compat import auth_headers, endpoint_url
+from .reasoning_capabilities import reasoning_effort_for_request, resolve_thinking_mode
+from .openai_compat import auth_headers, endpoint_url, chat_controls
 
 
 class ApiTestError(RuntimeError):
@@ -61,22 +61,18 @@ def test_chat(
     max_tokens: int = 32,
     strict_controls: bool = False,
 ) -> dict[str, Any]:
+    if not strict_controls:
+        thinking_mode = resolve_thinking_mode(base_url, model, thinking_mode)
     wire_effort = reasoning_effort_for_request(base_url, model, reasoning_effort)
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
             {"role": "user", "content": '只返回 JSON：{"substar_ok":true}'}
         ],
-        "max_tokens": max(32, int(max_tokens)),
         "stream": False,
-        "response_format": {"type": "json_object"},
+        **({"response_format": {"type": "json_object"}} if urlparse(base_url).hostname == "open.bigmodel.cn" else {}),
+        **chat_controls(base_url, model, max(32, int(max_tokens)), thinking_mode, wire_effort, 0.0),
     }
-    if thinking_mode == "enabled":
-        payload["thinking"] = {"type": "enabled"}
-        payload["reasoning_effort"] = wire_effort
-    elif thinking_mode == "disabled":
-        payload["thinking"] = {"type": "disabled"}
-        payload["temperature"] = 0
     try:
         response = post(
             endpoint(base_url, "/chat/completions"),
@@ -86,20 +82,6 @@ def test_chat(
         )
     except requests.RequestException as exc:
         raise ApiTestError(f"网络请求失败：{exc}") from exc
-    if not response.ok and not strict_controls and response.status_code in {400, 422}:
-        minimal_payload = {
-            key: value for key, value in payload.items()
-            if key not in {"response_format", "thinking", "reasoning_effort", "temperature"}
-        }
-        try:
-            response = post(
-                endpoint(base_url, "/chat/completions"),
-                headers={**auth_headers(api_key, auth_mode), "Content-Type": "application/json"},
-                json=minimal_payload,
-                timeout=timeout,
-            )
-        except requests.RequestException as exc:
-            raise ApiTestError(f"网络请求失败：{exc}") from exc
     if not response.ok:
         raise ApiTestError(safe_error(response))
     try:

@@ -72,6 +72,27 @@ def configuration(document):
     return Configuration(profiles={"default": default_profile(document)}, default_profile="default")
 
 
+def inherit_cue_profiles(document, parents):
+    """Copy explicit whole-profile or layer assignments to derived cues."""
+    changes = list(document.changes)
+    for index in range(len(changes) - 1, -1, -1):
+        change = changes[index]
+        if change.operation != "ass_configuration" or "ass" not in change.metadata:
+            continue
+        config = Configuration.model_validate(change.metadata["ass"])
+        for child, sources in parents.items():
+            if child in config.cue_profiles:
+                continue
+            parent = next((cid for cid in sources if cid in config.cue_profiles), None)
+            if parent is not None:
+                config.cue_profiles[child] = config.cue_profiles[parent]
+                if parent in config.cue_layers:
+                    config.cue_layers[child] = list(config.cue_layers[parent])
+        changes[index] = replace(change, metadata={**change.metadata, "ass": config.model_dump()})
+        return replace(document, changes=tuple(changes))
+    return document
+
+
 def profile_id(profile):
     return hashlib.sha256(json.dumps(profile.model_dump(), sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
 

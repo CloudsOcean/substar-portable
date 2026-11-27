@@ -7,7 +7,6 @@ import tempfile
 import threading
 import time
 
-from substar_core.config import INSTALL_ROOT
 from substar_core.environment_doctor import _find_tool
 
 
@@ -46,12 +45,6 @@ def _probe(tool, modified, encoder):
     return "" if result.returncode == 0 else next(
         (line.strip() for line in result.stderr.splitlines() if line.strip()), "硬件编码器初始化失败"
     )
-
-
-def _tool_candidates():
-    primary = _find_tool("ffmpeg")
-    alternate = INSTALL_ROOT / "runtime" / "ffmpeg-compat" / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
-    return list(dict.fromkeys(tool for tool in (primary, str(alternate) if alternate.is_file() else "") if tool))
 
 
 def ffmpeg_tool():
@@ -122,50 +115,47 @@ def run_ffmpeg(tool, args, output, duration, update=lambda progress: None, *, ch
 def encode_video(make_args, output, *, codec, duration, bitrate=None, quality=20, fast=False,
                  update=lambda progress, encoder, reason: None, check_cancel=lambda: None):
     failures = []
-    tools = []
-    for tool in _tool_candidates():
-        check_cancel()
-        try:
-            modified = Path(tool).stat().st_mtime_ns
-            tools.append((tool, modified, _encoders(tool, modified)))
-        except (OSError, subprocess.SubprocessError) as exc:
-            failures.append(str(exc))
+    check_cancel()
+    tool = ffmpeg_tool()
+    try:
+        modified = Path(tool).stat().st_mtime_ns
+        available = _encoders(tool, modified)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EncodingError(f"无法读取 FFmpeg 编码器列表：{exc}") from exc
     attempted_hardware = False
     for backend, label in _HARDWARE.items():
         encoder = f"{codec}_{backend}"
-        for tool, modified, available in tools:
-            if encoder not in available:
-                continue
-            check_cancel()
-            attempted_hardware = True
-            try:
-                reason = _probe(tool, modified, encoder)
-            except (OSError, subprocess.SubprocessError) as exc:
-                reason = str(exc)
-            if reason:
-                failures.append(f"{label} · {reason}")
-                continue
-            update(0, label, "")
-            try:
-                run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
-                           duration, lambda progress: update(progress, label, ""), check_cancel=check_cancel)
-                return label
-            except EncodingError as exc:
-                output.unlink(missing_ok=True)
-                message = str(exc)
-                if not any(word in message.lower() for word in (
-                    encoder, "opening encoder", "hardware device", "nvenc", "mfx", "amf", "cuda"
-                )):
-                    raise
-                failures.append(f"{label} · {message.splitlines()[0]}")
+        if encoder not in available:
+            continue
+        check_cancel()
+        attempted_hardware = True
+        try:
+            reason = _probe(tool, modified, encoder)
+        except (OSError, subprocess.SubprocessError) as exc:
+            reason = str(exc)
+        if reason:
+            failures.append(f"{label} · {reason}")
+            continue
+        update(0, label, "")
+        try:
+            run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
+                       duration, lambda progress: update(progress, label, ""), check_cancel=check_cancel)
+            return label
+        except EncodingError as exc:
+            output.unlink(missing_ok=True)
+            message = str(exc)
+            if not any(word in message.lower() for word in (
+                encoder, "opening encoder", "hardware device", "nvenc", "mfx", "amf", "cuda"
+            )):
+                raise
+            failures.append(f"{label} · {message.splitlines()[0]}")
     encoder = _SOFTWARE[codec]
     reason = (failures[0] if failures else
               "硬件编码初始化失败" if attempted_hardware else "没有可用的硬件编码器")
-    for tool, _, available in tools:
-        if encoder in available:
-            label = f"CPU ({encoder})"
-            update(0, label, reason)
-            run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
-                       duration, lambda progress: update(progress, label, reason), check_cancel=check_cancel)
-            return label
+    if encoder in available:
+        label = f"CPU ({encoder})"
+        update(0, label, reason)
+        run_ffmpeg(tool, make_args(_video_options(encoder, bitrate, quality, fast)), output,
+                   duration, lambda progress: update(progress, label, reason), check_cancel=check_cancel)
+        return label
     raise EncodingError(f"没有可用的 {codec.upper()} 编码器。{reason}")

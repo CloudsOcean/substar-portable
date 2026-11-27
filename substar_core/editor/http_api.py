@@ -1026,16 +1026,12 @@ def set_project_task_info(
             from substar_core.media_relink import resolve_selection
             selected = resolve_selection(project_id, payload.media_selection_token)
         current_info = load_task_info(job_dir, project_id) if (job_dir / "task_info.json").exists() else {}
-        info = save_task_info(job_dir, project_id, {
-            **current_info, **payload.model_dump(exclude_unset=True)
-        })
+        from substar_core.task_info import validate_task_info
+        info = validate_task_info({**current_info, **payload.model_dump(exclude_unset=True)}, project_id)
         if selected:
-            from substar_core.media_reference import write_reference
-            write_reference(job_dir, selected)
-            manifest_path = job_dir / "run_manifest.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-            manifest.update(source_path=selected, source_file=Path(selected).name, media_relinked=True)
-            atomic_write_json(manifest_path, manifest)
+            from substar_core.media_reference import relink_media
+            relink_media(job_dir, selected)
+        save_task_info(job_dir, project_id, info)
         return get_project_task_info(project_id)
     except (OSError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1090,7 +1086,8 @@ def _project_media_source(project_id: str) -> tuple[Path, dict[str, Any]]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if referenced:
-        return referenced, {}
+        from substar_core.media_reference import read_reference
+        return referenced, {"media": (read_reference(job_dir) or {}).get("media")}
     manifest_path = job_dir / "run_manifest.json"
     # The manifest is metadata, not the media itself.  Older/interrupted
     # ingests can leave it missing or empty while the uploaded file is still
@@ -1105,11 +1102,8 @@ def _project_media_source(project_id: str) -> tuple[Path, dict[str, Any]]:
         # Fall through to deterministic input-directory discovery.
         manifest = {}
     explicit = str(manifest.get("source_path", "")).strip()
-    if manifest.get("media_relinked"):
-        path = Path(explicit)
-        if not path.is_file():
-            raise HTTPException(status_code=404, detail="文件不存在，请重新链接")
-        return path, manifest
+    if manifest.get("media_relinked") and not Path(explicit).resolve().is_relative_to(job_dir.resolve()):
+        raise HTTPException(status_code=404, detail="请重新选择本机媒体以确认外部路径")
     source_name = Path(str(manifest.get("source_file", ""))).name
     candidates = []
     if explicit:
@@ -1301,7 +1295,8 @@ def _aggregate_peaks(values: list[float], points: int) -> list[float]:
 def get_project_spectrogram(project_id: str, start: float = Query(ge=0), end: float = Query(gt=0)) -> Response:
     from substar_core.media.spectrogram import spectrogram_png
     job_dir = project_job_path(project_id)
-    audio = (job_dir / "audio_16k_mono.wav").resolve()
+    from substar_core.media_reference import waveform_path
+    audio = waveform_path(job_dir).resolve()
     if not audio.is_file() or job_dir.resolve() not in audio.parents:
         raise HTTPException(404, "项目没有可用的音频")
     try:
@@ -1319,7 +1314,8 @@ def get_project_waveform(
     points: int = Query(default=1600, ge=128, le=4096),
 ) -> dict[str, Any]:
     job_dir = project_job_path(project_id)
-    audio = (job_dir / "audio_16k_mono.wav").resolve()
+    from substar_core.media_reference import waveform_path
+    audio = waveform_path(job_dir).resolve()
     if not audio.is_file() or job_dir.resolve() not in audio.parents:
         raise HTTPException(
             status_code=404,
@@ -1419,7 +1415,8 @@ def preview_project_auto_snap(
                 "revision_id": latest.revision_id,
             },
         )
-    audio = (job_dir / "audio_16k_mono.wav").resolve()
+    from substar_core.media_reference import waveform_path
+    audio = waveform_path(job_dir).resolve()
     if not audio.is_file() or job_dir.resolve() not in audio.parents:
         raise HTTPException(
             status_code=404,
@@ -2225,12 +2222,12 @@ def export_subtitle_project_package(
     get_project_task_info(project_id)
     filename = _named_export(project_id, "字幕工程", export_sequence, "zip")
     _project_media_source(project_id)  # Fail before starting a ZIP response.
+    try:
+        content = stream_subtitle_project(project_id=project_id, job_dir=project_job_path(project_id), revision=revision)
+    except ProjectExchangeError as exc:
+        raise HTTPException(422, detail=str(exc)) from exc
     return StreamingResponse(
-        stream_subtitle_project(
-            project_id=project_id,
-            job_dir=project_job_path(project_id),
-            revision=revision,
-        ),
+        content,
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
@@ -2240,11 +2237,11 @@ def export_subtitle_project_package(
 
 
 @router.post("/project-imports/subtitle-project")
-async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[str, Any]:
+def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[str, Any]:
     upload_handle = tempfile.NamedTemporaryFile(prefix="substar-upload-", suffix=".zip", delete=False)
     upload_path = Path(upload_handle.name)
     try:
-        while chunk := await file.read(1024 * 1024):
+        while chunk := file.file.read(1024 * 1024):
             upload_handle.write(chunk)
         upload_handle.flush()
         upload_handle.close()
@@ -2256,7 +2253,7 @@ async def import_subtitle_project_package(file: UploadFile = File(...)) -> dict[
         if not upload_handle.closed:
             upload_handle.close()
         upload_path.unlink(missing_ok=True)
-        await file.close()
+        file.file.close()
     return {"schema_version": "substar.subtitle-project-import.v1", "project_id": project_id}
 
 

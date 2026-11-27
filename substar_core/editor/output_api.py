@@ -75,6 +75,15 @@ class OutputRequest(BaseModel):
     project_files: list[Literal["subtitle-project", "cut-xml"]] = Field(default_factory=list, max_length=2)
 
 
+@contextmanager
+def reserve_update():
+    """Serialize update preparation against export job registration."""
+    with _LOCK:
+        if any(job["state"] not in _TERMINAL for job in _JOBS.values()):
+            raise HTTPException(409, "请等待导出完成后更新")
+        yield
+
+
 def _find_job(key):
     job = _JOBS.get(key)
     if job is None:
@@ -185,6 +194,9 @@ def start_output(project_id: str, payload: OutputRequest, request: Request):
     directory = Path(_OUTPUT_DIR.name) / key[1]
     stale = []
     with _LOCK:
+        from substar_core.updater import installation_pending
+        if installation_pending():
+            raise HTTPException(409, "已准备安装更新，暂时不能启动导出")
         for old_key, job in list(_JOBS.items()):
             if job.get("finished", time.monotonic()) < time.monotonic() - 86400:
                 stale.append(_JOBS.pop(old_key)["workspace"])

@@ -42,7 +42,8 @@ def get_maw_waveform(project_id: str):
     import json
     from .http_api import project_job_path, project_store_path
     root = project_job_path(project_id).resolve()
-    audio = (root / 'audio_16k_mono.wav').resolve()
+    from substar_core.media_reference import waveform_path
+    audio = waveform_path(root).resolve()
     if root not in audio.parents or not audio.is_file():
         raise HTTPException(404, '项目没有可用的波形音频')
     stat = audio.stat()

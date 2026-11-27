@@ -60,7 +60,7 @@
     try {
       if (typeof saveAllBeforeNavigation === 'function') await saveAllBeforeNavigation();
       await api('install',true);
-      status.textContent = '正在退出并更新，完成后会重新打开 Substar。';
+      status.textContent = '请关闭后端窗口以安装更新，完成后手动打开 Substar。';
     } catch(error) { status.textContent = error.message; install.disabled = false; }
   };
   document.querySelector('[data-panel="general"]').addEventListener('click',refresh);

@@ -129,8 +129,11 @@ def _seed_retry(
     if cancelled.is_set():
         raise TranscriptionCancelled()
     audio = source / "audio_16k_mono.wav"
-    if audio.is_file() and audio.stat().st_size > 44:
+    receipt = audio.with_suffix(".complete")
+    from .cloud_pipeline import has_complete_audio
+    if has_complete_audio(audio):
         shutil.copy2(audio, destination / audio.name)
+        shutil.copy2(receipt, destination / receipt.name)
     checkpoint = source / "ingest_chunks"
     if checkpoint.is_dir():
         shutil.copytree(checkpoint, destination / checkpoint.name, dirs_exist_ok=True)

@@ -50,7 +50,8 @@ def validate_units(document, units):
         if start < min(c.start for c in selected) - 1e-6 or end > max(c.end for c in selected) + 1e-6:
             raise ValueError("translation unit must stay within its source evidence")
         speaker = selected[0].speaker
-        spans.setdefault((speaker, unit.get("language", "zh-CN")), []).append((start, end))
+        if any(c.state is EntityState.ACTIVE for c in selected):
+            spans.setdefault((speaker, unit.get("language", "zh-CN")), []).append((start, end))
     for group in spans.values():
         group.sort()
         if any(right[0] < left[1] - 1e-6 for left, right in zip(group, group[1:])):
@@ -164,9 +165,23 @@ def reconcile_units(before, after):
         evidence = [cid for cid in unit["source_cue_ids"] if cid in active_ids]
         live = [cue for cue in active if cue.cue_id in evidence]
         topology_changed = any(cid not in known for cid in unit["source_cue_ids"])
-        if not live or topology_changed or any(
-                cue.start < unit["start"] - 1e-6 or cue.end < unit["end"] - 1e-6
-                for cue in live):
+        descendants = [cue for cue in active if cue.cue_id not in previous
+                       and unit["unit_id"] in cue.mapping.get("target_unit_ids", [])]
+        if descendants:
+            live = [cue for cue in live + descendants if cue.end > unit["start"] and cue.start < unit["end"]]
+            evidence = [cue.cue_id for cue in live]
+        elif not topology_changed:
+            linked = [cue for cue in after.cues if cue.cue_id in unit["source_cue_ids"]]
+            old_linked = [previous[c.cue_id] for c in linked]
+            old_left, old_right = min(c.start for c in old_linked), max(c.end for c in old_linked)
+            left, right = min(c.start for c in linked), max(c.end for c in linked)
+            if (left, right) != (old_left, old_right):
+                scale = (right - left) / (old_right - old_left)
+                unit = dict(unit, start=left + (unit["start"] - old_left) * scale,
+                            end=left + (unit["end"] - old_left) * scale)
+            live = linked
+            evidence = list(unit["source_cue_ids"])
+        else:
             speakers = {previous[cid].speaker for cid in unit["source_cue_ids"] if cid in previous}
             live = [cue for cue in active if cue.speaker in speakers
                     and cue.end > unit["start"] and cue.start < unit["end"]]
@@ -192,7 +207,10 @@ def reconcile_units(before, after):
         text_changed = any(cue.source_text != previous[cue.cue_id].source_text
                            for cue in live if cue.cue_id in previous)
         source_hidden = any(cid not in active_ids and cid in known for cid in unit["source_cue_ids"])
-        if source_hidden or text_changed or changed and any(before_tokens.get(tid) != after_tokens.get(tid) for tid in token_ids):
+        shared_timing_changed = len(source_cues) > 1 and any(
+            (c.start, c.end) != (previous[c.cue_id].start, previous[c.cue_id].end)
+            for c in live if c.cue_id in previous)
+        if source_hidden or shared_timing_changed or text_changed or changed and any(before_tokens.get(tid) != after_tokens.get(tid) for tid in token_ids):
             new_unit["needs_review"] = True
         units.append(new_unit)
     definition_count = sum(len(cue.mapping.get("target_units", [])) for cue in after.cues)

@@ -952,7 +952,12 @@ function renderModelCatalogOptions(models) {
   });
 }
 
+let discoveryGeneration = 0;
 async function discoverModels() {
+  const generation = ++discoveryGeneration;
+  const provider = selectedModelProvider;
+  const endpoint = form.elements.translation_api_base_url.value;
+  const current = () => generation === discoveryGeneration && provider === selectedModelProvider && endpoint === form.elements.translation_api_base_url.value;
   const status = $("#modelDiscoveryStatus");
   const button = $("#refreshModelCatalog");
   $("#officialModelIds").replaceChildren();
@@ -970,6 +975,7 @@ async function discoverModels() {
         api_key: f.translation_api_key.value,
       }),
     });
+    if (!current()) return;
     const models = catalog.models || catalog.data || [];
     providerModelCatalogs.set(selectedModelProvider, models);
     for(const row of $('#modelConcurrencyRows').children)row.refreshModels?.();
@@ -978,13 +984,14 @@ async function discoverModels() {
       ? `已载入 ${models.length} 个可用模型；连接测试与所有 Stage 共用此列表。`
       : "服务商未返回模型列表，仍可手动输入模型 ID。";
   } catch (error) {
-    const cached = providerModelCatalogs.get(selectedModelProvider) || [];
+    if (!current()) return;
+    const cached = providerModelCatalogs.get(provider) || [];
     renderModelCatalogOptions(cached);
     status.textContent = cached.length
       ? `刷新失败，继续使用已载入的 ${cached.length} 个模型：${error.message}`
       : `无法读取模型列表，可手动输入模型 ID：${error.message}`;
   } finally {
-    if (button) button.disabled = false;
+    if (button && generation === discoveryGeneration) button.disabled = false;
   }
 }
 

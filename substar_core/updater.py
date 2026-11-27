@@ -19,7 +19,7 @@ from substar_core.config import APP_DATA_DIR, INSTALL_ROOT
 
 REPOSITORY = "CloudsOcean/substar-portable"
 RELEASES_URL = f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
-ROOTS = frozenset({"Substar.exe","app.py","launcher.py","substar_core","web","prompts","schemas","scripts","assets",
+ROOTS = frozenset({"AGENTS.md","SKILL.md","Substar.exe","app.py","launcher.py","substar_core","web","prompts","schemas","scripts","assets",
     "runtime","docs","portable_manifest.json","requirements-release.txt","release-verification.json",
     "启动_Substar.cmd","停止_Substar.cmd","只检测环境.cmd","便携版说明.txt","README.md","CHANGELOG.md",
     "SECURITY.md","PRIVACY.md","THIRD_PARTY_NOTICES.md","LICENSE"})
@@ -33,6 +33,11 @@ def version_tuple(value):
     match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value))
     if not match: raise ValueError("仅支持正式版版本号")
     return tuple(map(int,match.groups()))
+
+
+def installation_pending():
+    with _lock:
+        return _state.get("status") == "installing"
 
 
 def current_version():
@@ -135,7 +140,9 @@ def validate_archive(archive: Path, destination: Path, expected_version: str):
         raise ValueError("更新包版本与发布信息不符")
     if manifest.get("package_layout") != "transparent-source-runtime":
         raise ValueError("不支持的更新包布局")
-    for required in ("app.py","launcher.py","runtime/python/python.exe","启动_Substar.cmd"):
+    if not any((root / name).is_file() for name in ("Substar.exe", "启动_Substar.cmd")):
+        raise ValueError("更新包缺少启动入口")
+    for required in ("app.py","launcher.py","runtime/python/python.exe"):
         if not (root / required).is_file(): raise ValueError(f"更新包缺少 {required}")
     return root
 
@@ -145,6 +152,7 @@ def download_update(expected_mode=None):
         if _state["status"] in {"downloading","verifying","ready","installing"}: return update_status()
         _state.clear(); _state.update(status="downloading", downloaded=0)
     def work():
+        directory = None
         try:
             release = check_update()
             if not release["available"]: raise ValueError("当前已经是最新正式版")
@@ -169,6 +177,8 @@ def download_update(expected_mode=None):
                 staged = validate_archive(archive,directory / "unpacked",release["version"])
             with _lock: _state.update(status="ready",version=release["version"],staged=str(staged))
         except Exception as exc:
+            if directory is not None:
+                shutil.rmtree(directory, ignore_errors=True)
             with _lock: _state.update(status="failed",error=str(exc))
     threading.Thread(target=work,daemon=True,name="update-download").start()
     return update_status()

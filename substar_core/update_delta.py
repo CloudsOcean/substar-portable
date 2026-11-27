@@ -95,7 +95,9 @@ def verify_manifest(envelope, keys, version, repository, roots):
         total += size
     if any(parent in seen for name in seen for parent in _parents(name)) or total > MAX_BYTES:
         raise ValueError("增量清单路径或总大小无效")
-    for required in ("app.py", "launcher.py", "portable_manifest.json", "runtime/python/python.exe", "启动_Substar.cmd"):
+    if not any(name in files for name in ("Substar.exe", "启动_Substar.cmd")):
+        raise ValueError("更新清单缺少启动入口")
+    for required in ("app.py", "launcher.py", "portable_manifest.json", "runtime/python/python.exe"):
         if required not in files:
             raise ValueError("增量清单缺少必需文件")
     patches = payload.get("patches")

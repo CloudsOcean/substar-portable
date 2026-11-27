@@ -149,7 +149,7 @@ def _run_editor_ai_blocks(
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     api_key = str(settings.get("translation_api_key", "")).strip()
     if not api_key:
-        raise HTTPException(status_code=400, detail={"code": "api_key_missing", "message": "尚未配置翻译 API Key"})
+        raise ValueError("尚未配置模型 API Key")
 
     def run(
         item: tuple[str, list[dict[str, Any]]], active_stage: str, attempt: int,
@@ -224,6 +224,8 @@ def _run_editor_ai_blocks(
                 )
             cache_key = fingerprint({
                 "scope": cache_scope,
+                "endpoint": route["base_url"],
+                "provider": settings.get("active_model_provider"),
                 "stage": active_stage,
                 "model": str(route["model"]),
                 "system_prompt": active_system_prompt,

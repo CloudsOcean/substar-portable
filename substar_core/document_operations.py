@@ -850,12 +850,14 @@ def _purge_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Editor
         for cue_id in requested_cues
         for token_id in cue_map[cue_id].display_token_ids
     }
+    removed_display_ids.difference_update(tid for cue in document.cues if cue.cue_id not in requested_cues for tid in cue.display_token_ids)
     display_map = _token_map(document)
     removed_source_ids = {
         source_id
         for token_id in removed_display_ids
         for source_id in display_map[token_id].source_token_ids
     }
+    removed_source_ids.difference_update(sid for token in document.display_tokens if token.token_id not in removed_display_ids for sid in token.source_token_ids)
     source_tokens = tuple(
         replace(token, index=index)
         for index, token in enumerate(
@@ -923,8 +925,8 @@ def _restore(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
         raise DocumentOperationError("restore the containing cue before restoring its tokens")
 
     restored_ranges = [
-        (cue_map[cue_id].start, cue_map[cue_id].end)
-        for cue_id in requested_cues
+        (cue_map[cue_id].start, cue_map[cue_id].end, cue_map[cue_id].speaker)
+        for cue_id in requested_cues if not _is_manual_cue(document, cue_map[cue_id])
     ]
     displaced_cues = {
         cue.cue_id
@@ -935,7 +937,7 @@ def _restore(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDo
         and any(not _is_manual_cue(document, cue_map[cue_id]) for cue_id in requested_cues)
         and any(
             start < cue.end - 1e-9 and end > cue.start + 1e-9
-            for start, end in restored_ranges
+            for start, end, speaker in restored_ranges if speaker == cue.speaker
         )
     }
     base_provenance = _provenance(operation, "restore")
@@ -1062,12 +1064,10 @@ def _split_cue(document: EditorDocument, operation: Mapping[str, Any]) -> Editor
     )
     cue_index = document.cues.index(cue)
     cues = _reindex((*document.cues[:cue_index], left, right, *document.cues[cue_index + 1 :]))
-    return replace(
-        document,
-        cues=cues,
-        groups=_mark_groups_dirty(document.groups, {cue.group_id}, "structure"),
-        changes=(*document.changes, provenance),
-    )
+    from substar_core.ass_profiles import inherit_cue_profiles
+    result = replace(document, cues=cues, groups=_mark_groups_dirty(document.groups, {cue.group_id}, "structure"),
+                     changes=(*document.changes, provenance))
+    return inherit_cue_profiles(result, {right.cue_id: [cue.cue_id]})
 
 
 def _merge_cues(document: EditorDocument, operation: Mapping[str, Any]) -> EditorDocument:

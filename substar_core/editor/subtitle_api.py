@@ -81,38 +81,47 @@ def create_import(subtitle: UploadFile = File(...), secondary: UploadFile | None
     except (ValueError, OSError) as exc:
         raise HTTPException(422, detail={"message": str(exc)}) from exc
     project_id = datetime.now().strftime("%Y%m%d_%H%M%S_subtitle_") + uuid.uuid4().hex[:6]
-    root = _projects_root() / project_id
-    root.mkdir(parents=True, exist_ok=False)
-    (root / "input").mkdir()
-    (root / "input" / "source.srt").write_text(primary, encoding="utf-8")
-    if second is not None:
-        (root / "input" / "secondary.srt").write_text(second, encoding="utf-8")
-    if source:
-        write_reference(root, source)
-    else:
-        source = root / "input" / ("media" + Path(name).suffix.lower())
-        with source.open("wb") as output:
-            shutil.copyfileobj(media.file, output, length=1024 * 1024)
-    try:
-        subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(root / "audio_16k_mono.wav")],
-                       check=True, capture_output=True, timeout=600,
-                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-    except (OSError, subprocess.SubprocessError) as exc:
-        atomic_write_json(root / "import_failure.json", {"message": "媒体解码失败", "source": name})
-        raise HTTPException(422, detail={"message": "媒体解码失败，未创建可编辑工程；请检查音轨或 FFmpeg"}) from exc
-    document = build_subtitle_document(preview, project_id)
-    if not preserve_punctuation:
-        from substar_core.initial_punctuation import clean_initial_document
-        document = clean_initial_document(document)
-    atomic_write_json(root / "run_manifest.json", {"schema_version": "substar.run-manifest.v1", "source_file": "input/" + source.name,
-                                                   "input_mode": "subtitle", "media": {"duration_seconds": None}})
-    atomic_write_json(root / "subtitle_import.json", preview)
-    title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', Path(name).stem)[:120].strip() or "字幕导入"
-    save_task_info(root, project_id, {"display_name": title, "language": source_language, "target_language_mode": target_language,
-                                     "source_hard_limit": source_hard_limit, "target_hard_limit": target_hard_limit,
-                                     "preserve_punctuation": preserve_punctuation})
-    store = ProjectStore.create(root / "project", project_id=project_id)
-    store.save(document, provenance=ChangeProvenance(ChangeKind.IMPORT, "subtitle_import"))
+    import tempfile
+    parent = _projects_root()
+    parent.mkdir(parents=True, exist_ok=True)
+    final = parent / project_id
+    with tempfile.TemporaryDirectory(prefix=".subtitle-", dir=parent) as directory:
+        root = Path(directory) / project_id
+        root.mkdir()
+        (root / "input").mkdir()
+        (root / "input" / "source.srt").write_text(primary, encoding="utf-8")
+        if second is not None:
+            (root / "input" / "secondary.srt").write_text(second, encoding="utf-8")
+        if source:
+            write_reference(root, source)
+        else:
+            source = root / "input" / ("media" + Path(name).suffix.lower())
+            with source.open("wb") as output:
+                shutil.copyfileobj(media.file, output, length=1024 * 1024)
+        try:
+            subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(root / "audio_16k_mono.wav")],
+                           check=True, capture_output=True, timeout=600,
+                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except (OSError, subprocess.SubprocessError) as exc:
+            atomic_write_json(root / "import_failure.json", {"message": "媒体解码失败", "source": name})
+            raise HTTPException(422, detail={"message": "媒体解码失败，未创建可编辑工程；请检查音轨或 FFmpeg"}) from exc
+        document = build_subtitle_document(preview, project_id)
+        if not preserve_punctuation:
+            from substar_core.initial_punctuation import clean_initial_document
+            document = clean_initial_document(document)
+        atomic_write_json(root / "run_manifest.json", {"schema_version": "substar.run-manifest.v1", "source_file": "input/" + source.name,
+                                                       "input_mode": "subtitle", "media": {"duration_seconds": None}})
+        atomic_write_json(root / "subtitle_import.json", preview)
+        title = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', Path(name).stem)[:120].strip() or "字幕导入"
+        save_task_info(root, project_id, {"display_name": title, "language": source_language, "target_language_mode": target_language,
+                                         "source_hard_limit": source_hard_limit, "target_hard_limit": target_hard_limit,
+                                         "preserve_punctuation": preserve_punctuation})
+        store = ProjectStore.create(root / "project", project_id=project_id)
+        store.save(document, provenance=ChangeProvenance(ChangeKind.IMPORT, "subtitle_import"))
+        root.rename(final)
+        if not media_reference_token:
+            source = final / source.relative_to(root)
+        root = final
     if generate_thumbnails is True:
         from substar_core.media.thumbnails import request_generation
         request_generation(root, source)

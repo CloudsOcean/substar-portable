@@ -3,6 +3,7 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 let collections = [{ id: "global", name: "未分配", kind: "global" }];
 let activeGlossaryId = "all";
 let dirty = false;
+let draftVersion = 0;
 let candidates = [];
 let candidateImports = [];
 let supportsTransfer = false;
@@ -25,6 +26,7 @@ function setHeader(text, state = "") {
 }
 
 function markDirty(message = "词库有未保存修改") {
+  draftVersion++;
   dirty = true;
   setHeader("有未保存修改");
   $("#formMessage").textContent = message;
@@ -183,12 +185,18 @@ async function saveGlossary() {
   button.textContent = "保存中…";
   $("#formMessage").className = "";
   try {
+    const version = draftVersion;
+    const sentCandidates = new Set(candidateImports);
     const result = await api("/api/glossary", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ collections, entries: collectEntries(), imported_candidates: candidateImports }),
     });
-    candidateImports = [];
+    candidateImports = candidateImports.filter(item => !sentCandidates.has(item));
+    if (draftVersion !== version) {
+      setHeader("有新的未保存修改", "dirty");
+      return false;
+    }
     renderLibrary(result);
     dirty = false;
     setHeader(`已保存 ${result.entries.length} 条`, "saved");

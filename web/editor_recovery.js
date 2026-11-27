@@ -52,7 +52,7 @@
     } finally { clearTimeout(timer); }
   }
 
-  function archive(storage, projectId, snapshots) {
+  function archive(storage, projectId, snapshots, writer) {
     const journalKeys = keys(storage, `substar.editor.operations:${projectId}:`);
     // Preserve raw journals too: even an unreadable journal must not be silently lost.
     const journals = journalKeys.map(key => ({key, value:storage.getItem(key)}));
@@ -75,7 +75,10 @@
       if (storage.getItem(key) !== text) throw new Error("恢复草稿写入校验失败");
     }
     // Only detach failed operations after a verified durable copy exists.
-    journalKeys.forEach(key => storage.removeItem(key));
+    journals.forEach(({key, value}) => {
+      const suffix = key.slice(`substar.editor.operations:${projectId}:`.length);
+      if ((!suffix.includes(":") || suffix.split(":").length >= 3 || (writer && key.endsWith(`:${writer}`))) && storage.getItem(key) === value) storage.removeItem(key);
+    });
     return key;
   }
 
@@ -87,12 +90,13 @@
   function preview(raw) {
     let copy;
     try { copy = JSON.parse(raw); } catch (_) { return raw; }
-    const snapshots = copy.snapshots?.length ? copy.snapshots : (copy.journals || []).map(journal => {
+    const snapshots = [...(copy.snapshots || []), ...(copy.journals || []).map(journal => {
       try { return {operations:JSON.parse(journal.value)}; }
       catch (_) { return {unreadableJournal:journal.value}; }
-    });
+    })];
     if (!snapshots.length) snapshots.push(copy);
     const lines = [];
+    const seenOperations = new Set();
     snapshots.forEach((snapshot, index) => {
       lines.push(`—— 刷新前快照 ${index + 1} ——`);
       for (const input of snapshot.inputs || []) {
@@ -100,6 +104,9 @@
       }
       if (snapshot.unreadableJournal) lines.push(snapshot.unreadableJournal, "");
       for (const operation of Array.isArray(snapshot.operations) ? snapshot.operations : []) {
+        const signature = JSON.stringify(operation);
+        if (seenOperations.has(signature)) continue;
+        seenOperations.add(signature);
         const payload = operation.payload || {};
         const value = payload.target_text ?? payload.text;
         lines.push(`待保存操作 · ${operation.type} · ${payload.cue_id || payload.token_id || operation.operation_id || ""}`);
@@ -138,7 +145,7 @@
           await bounded(() => options.verify(projectId), options.verifyWaitMs ?? 10000, "连接检查超时，请确认 Substar 正在运行后重试");
           if (projectId !== options.projectId()) throw new Error("项目已切换，请在当前项目重新刷新");
           const after = JSON.parse(JSON.stringify(options.capture()));
-          const draftKey = archive(options.storage, projectId, [before, after]);
+          const draftKey = archive(options.storage, projectId, [before, after], options.journalWriter?.());
           options.freeze();
           frozen = true;
           options.reload(projectId, {draftKey});

@@ -936,7 +936,8 @@ def _editor_ready(job_dir: Path, *, verify_document: bool = True) -> bool:
         latest = store.load_latest() if verify_document else store.load_summary()
         if latest is None:
             return False
-        audio = job_dir / "audio_16k_mono.wav"
+        from substar_core.media_reference import waveform_path
+        audio = waveform_path(job_dir)
         if not audio.is_file() or audio.stat().st_size <= 44:
             return False
         from substar_core.media_reference import resolve_reference
@@ -2827,7 +2828,9 @@ def install_app_update(request: Request):
     if ass_busy() or _task_service().list_tasks(states=("queued", "running", "cancelling"), limit=1) or (scheduler and scheduler.snapshot().get("active")):
         raise HTTPException(409,detail="请等待识别、翻译或字幕渲染任务完成后更新")
     try:
-        prepare_install(startup_port())
+        from substar_core.editor.output_api import reserve_update
+        with reserve_update():
+            prepare_install(startup_port())
     except (ValueError,OSError) as exc:
         raise HTTPException(409,detail=str(exc)) from exc
     return {"status": "waiting_for_window_close", "message": "请关闭后端窗口以安装更新。"}
@@ -2929,7 +2932,6 @@ def retry_workbench_split_job(job_id: str, payload: CreationRetryRequest | None 
                 "finished_at": time.time(),
             }
         )
-        atomic_write_json(history_path, {**history, "attempts": attempts})
         if replacement is not None and replacement != original:
             renewed = _task_service().create_task(
                 task_type="segmentation", input_schema=replacement["schema_version"],
@@ -2940,6 +2942,9 @@ def retry_workbench_split_job(job_id: str, payload: CreationRetryRequest | None 
             )
             canonical_retry_ids = tuple(t for t in canonical_retry_ids if t != job.segmentation_task_id)
             job.segmentation_task_id = renewed["task_id"]
+        for task_id in canonical_retry_ids:
+            _task_service().retry(task_id)
+        atomic_write_json(history_path, {**history, "attempts": attempts})
         job.input_path = media_path
         job.auxiliary_path = auxiliary_path
         job.attempt += 1
@@ -2950,11 +2955,6 @@ def retry_workbench_split_job(job_id: str, payload: CreationRetryRequest | None 
         _append_runtime_log(job, f"retry requested: attempt {job.attempt}")
         _persist_job(job)
         result = job.public()
-    if canonical_retry_ids or replacement is not None:
-        for task_id in canonical_retry_ids:
-            _task_service().retry(task_id)
-        return JSONResponse(result, status_code=202)
-    threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
     return JSONResponse(result, status_code=202)
 
 
@@ -3280,20 +3280,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 
 @app.post("/api/project-creations/{job_id}/resume")
 def resume_job(job_id: str) -> JSONResponse:
-    _restore_persisted_jobs(job_id)
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="任务不存在")
-        if job.status != "interrupted":
-            raise HTTPException(status_code=409, detail="只有中断任务可以恢复")
-        job.status = "queued"
-        job.message = "正在从已有检查点恢复"
-        job.error = ""
-        _persist_job(job)
-        result = job.public()
-    threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
-    return JSONResponse(result, status_code=202)
+    return retry_workbench_split_job(job_id)
 
 
 @app.get("/api/project-creations/{job_id}/files/{filename}")

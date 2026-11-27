@@ -23,7 +23,7 @@ def _read_mapping(path: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _validate(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
+def validate_task_info(value: Mapping[str, Any], project_id: str) -> dict[str, Any]:
     display_name = str(value.get("display_name", "")).strip()
     if not display_name:
         raise ValueError("任务名称不能为空")
@@ -74,11 +74,11 @@ def load_task_info(job_dir: Path, project_id: str) -> dict[str, Any]:
         raise ValueError("项目缺少 v2 任务信息；旧项目不受支持")
     if current.get("schema_version") != TASK_INFO_SCHEMA:
         raise ValueError("任务信息版本不受支持")
-    return _validate(current, project_id)
+    return validate_task_info(current, project_id)
 
 
 def save_task_info(job_dir: Path, project_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
-    normalized = _validate({**value, "updated_at": datetime.now(timezone.utc).isoformat()}, project_id)
+    normalized = validate_task_info({**value, "updated_at": datetime.now(timezone.utc).isoformat()}, project_id)
     atomic_write_json(job_dir / TASK_INFO_FILENAME, normalized)
     return normalized
 

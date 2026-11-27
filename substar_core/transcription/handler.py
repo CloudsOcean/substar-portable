@@ -258,6 +258,8 @@ def _validate_provider_audit(value: Any, request: Mapping[str, Any]) -> dict[str
 
 
 def _resumable_artifact_directory(context: TaskWorkContext, fingerprint: str) -> str | None:
+    from .cloud_pipeline import has_complete_audio
+    legacy_directory = None
     current_attempt = int(context.task["attempt"])
     for attempt in range(current_attempt - 1, 0, -1):
         candidate = context.attempt_directory.parent / str(attempt) / "artifacts"
@@ -271,9 +273,12 @@ def _resumable_artifact_directory(context: TaskWorkContext, fingerprint: str) ->
             continue
         prepared = candidate / "audio_16k_mono.wav"
         checkpoint = candidate / "ingest_chunks"
-        if (prepared.is_file() and prepared.stat().st_size > 44) or checkpoint.is_dir():
+        if has_complete_audio(prepared) or (checkpoint / "qwen_cloud_state.json").is_file():
             return str(candidate.resolve())
-    return None
+        # Legacy attempts may still identify a retry source. The worker only copies verified audio.
+        if legacy_directory is None and (prepared.is_file() or checkpoint.is_dir()):
+            legacy_directory = str(candidate.resolve())
+    return legacy_directory
 
 
 def _completed_qwen_checkpoint(artifact_directory: str | None, fingerprint: str) -> bool:

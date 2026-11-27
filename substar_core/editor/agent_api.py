@@ -472,8 +472,9 @@ def apply(project_id: str, payload: AgentApply):
                                   "before_target": previous.target.target_text if previous and previous.target else "",
                                   "after_target": cue.target.target_text if cue.target else "",
                                   "editor_url": editor_link(project_id, cue.cue_id, cue.index + 1)})
+        remaining_ids = {cue.cue_id for cue in result.cues}
         for removed in revision.document.cues:
-            if not any(c.cue_id == removed.cue_id for c in result.cues):
+            if removed.cue_id not in remaining_ids:
                 snapshots.append({"cue_id": removed.cue_id, "cue": removed.index + 1, "before": removed.to_dict(), "after": None,
                                   "before_text": source_text(removed, before_tokens), "after_text": "",
                                   "before_target": removed.target.target_text if removed.target else "", "after_target": ""})
@@ -487,7 +488,10 @@ def apply(project_id: str, payload: AgentApply):
         provenance = ChangeProvenance(ChangeKind.AI, "agent_" + feature, actor=run["actor"],
                                       metadata={"agent_run_id": payload.run_id, "request_id": payload.request_id,
                                                 "agent_edit": changes})
-        saved = store.save(result, provenance=provenance, expected_revision_id=revision.revision_id,
+        with _lock:
+            if find_run(read_runs(project_id), payload.run_id)["state"] in TERMINAL:
+                fail(409, "run_terminal", "任务已经结束")
+            saved = store.save(result, provenance=provenance, expected_revision_id=revision.revision_id,
                            receipt={"id": "agent:" + payload.request_id, "hash": key, "result": {"run_id": payload.run_id}})
     except ProjectConflictError:
         fail(409, "revision_conflict", "工程已被修改，请重新读取")

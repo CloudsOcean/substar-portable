@@ -176,7 +176,7 @@ def build_segmentation_material_with_reference_projection(
                     **({"sentence_end": bool(item["sentence_end"]) and offset == len(fragments) - 1} if "sentence_end" in item else {}),
                     "timing": {
                         **dict(item.get("timing") or {}),
-                        "kind": "subdivided" if len(fragments) > 1 or (item.get("timing") or {}).get("kind") == "subdivided" else (
+                        "kind": "subdivided" if len(fragments) > 1 or item.get("timing_source") == "qwen_cloud_estimated" or (item.get("timing") or {}).get("kind") == "subdivided" else (
                             "envelope-inherited" if str(item.get("timing_source", "")).startswith("reference") else (item.get("timing") or {}).get("kind", "native")
                         ),
                         "evidence_sha256": (item.get("timing") or {}).get("evidence_sha256", evidence_hash),

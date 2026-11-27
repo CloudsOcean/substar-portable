@@ -29,7 +29,7 @@ def test_cut_cover_is_reversible_without_changing_source_or_translation(tmp_path
     changed = apply_document_operation(doc,{"operation_id":"cut","type":"set_timeline","payload":{"timeline":state(),"expected_timeline":None}})
     assert changed.cues == doc.cues and changed.source_tokens == doc.source_tokens and changed.display_tokens == doc.display_tokens
     projected = projected_subtitles(changed,kept_intervals(state()["plans"][0],10))
-    assert [(c.start,c.end) for c in projected.cues] == [(0,2),(2,8)]
+    assert [(c.start,c.end) for c in projected.cues] == [(0,8)]
     assert all(c.source_text == "hello" and c.target.target_text == "你好" for c in projected.cues)
     store = ProjectStore.create(tmp_path/"p",project_id="cut")
     provenance = ChangeProvenance(ChangeKind.MANUAL,"cut")

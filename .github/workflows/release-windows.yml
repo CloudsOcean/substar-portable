@@ -35,14 +35,14 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Prepare FFmpeg release binaries
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-release-essentials.zip'
-          $target = Join-Path $env:RUNNER_TEMP 'ffmpeg-release'
-          Invoke-WebRequest 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $target -Force
-          $ffmpeg = Get-ChildItem -LiteralPath $target -Recurse -File -Filter 'ffmpeg.exe' | Select-Object -First 1
-          if (-not $ffmpeg) { throw 'Downloaded FFmpeg archive does not contain ffmpeg.exe.' }
-          "SUBSTAR_FFMPEG_DIR=$($ffmpeg.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $archive = Join-Path $env:RUNNER_TEMP 'substar-ffmpeg.zip'
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/octet-stream' }
+          Invoke-WebRequest 'https://api.github.com/repos/CloudsOcean/substar-portable/releases/assets/799641285' -Headers $headers -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'c06c29bd660c4c4151c77b1eeb0775e4cee9aa5a3133cc427c0cff981b30e45d') { throw 'FFmpeg runtime checksum mismatch.' }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $PWD 'runtime') -Force
       - name: Install release dependencies
         run: python -m pip install -r requirements-release.txt
       - name: Prepare transparent portable runtime
@@ -53,9 +53,7 @@ jobs:
           New-Item -ItemType Directory -Path $runtimePython, $runtimeFfmpeg -Force | Out-Null
           Copy-Item -Path (Join-Path $env:pythonLocation '*') -Destination $runtimePython -Recurse -Force
           foreach ($binary in @('ffmpeg.exe', 'ffprobe.exe')) {
-            $source = Join-Path $env:SUBSTAR_FFMPEG_DIR $binary
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Downloaded FFmpeg archive does not contain $binary." }
-            Copy-Item -LiteralPath $source -Destination (Join-Path $runtimeFfmpeg $binary) -Force
+            if (-not (Test-Path (Join-Path $runtimeFfmpeg $binary) -PathType Leaf)) { throw "Missing $binary" }
           }
           $runtimeFfmpeg | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Install test dependencies
@@ -86,5 +84,6 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ contains(github.ref_name, '-') }}
+          overwrite_files: false
           generate_release_notes: true
           files: Substar-Windows-x64-${{ env.RELEASE_TAG }}.zip

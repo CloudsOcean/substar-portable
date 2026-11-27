@@ -23,3 +23,25 @@ def auth_headers(api_key: str, auth_mode: str = "bearer") -> dict[str, str]:
     if str(auth_mode).strip().lower() == "api-key":
         return {"api-key": api_key}
     return {"Authorization": f"Bearer {api_key}"}
+
+
+def chat_controls(base_url, model, max_tokens, mode, effort, temperature):
+    """Serialize the same chat controls for connectivity checks and actual work."""
+    host = urlsplit(base_url).hostname or ""
+    official = host == "api.openai.com" or host.endswith(".openai.azure.com")
+    reasoning_model = model.lower().startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
+    if official:
+        controls = {"max_completion_tokens": max_tokens}
+        if reasoning_model and mode == "enabled":
+            controls["reasoning_effort"] = effort
+        elif not reasoning_model:
+            controls["temperature"] = temperature
+        return controls
+    controls = {"max_tokens": max_tokens}
+    if mode == "enabled":
+        controls["thinking"] = {"type": "enabled"}
+        controls["reasoning_effort"] = effort
+    elif mode == "disabled":
+        controls["thinking"] = {"type": "disabled"}
+        controls["temperature"] = temperature
+    return controls

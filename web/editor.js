@@ -332,7 +332,7 @@
     initializeTimelineController();
   }
 
-  function loadProjectMedia({retry = false} = {}) {
+  function loadProjectMedia({retry = false, relinked = false} = {}) {
     const media = activeMedia();
     if (!media || !state.projectId) return;
     clearMediaRetry();
@@ -346,7 +346,7 @@
     const base = state.compatiblePreview?.url || projectPath("/media");
     // Cache-bust only recovery attempts. Normal project loads keep the stable
     // URL so the browser can reuse the local file and its range requests.
-    media.src = retry ? `${base}?retry=${Date.now()}` : base;
+    media.src = retry || relinked ? `${base}?retry=${Date.now()}` : base;
     media.load();
   }
 
@@ -1629,6 +1629,8 @@
     event.preventDefault();
     if (!state.projectId) return closeTaskInfoMenu();
     const current = state.projects.find(item => item.project_id === state.projectId);
+    const epoch = projectEpoch;
+    const mediaSelection = $("#taskInfoMediaPath").dataset.selection || "";
     const displayName = $("#taskInfoName").value.trim();
     const sourceLimit = Number($("#taskInfoSourceLimit").value);
     const targetLimit = Number($("#taskInfoTargetLimit").value);
@@ -1642,7 +1644,7 @@
         method:"PUT", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           display_name:displayName,
-          media_selection_token:$("#taskInfoMediaPath").dataset.selection || "",
+          media_selection_token:mediaSelection,
           language:$("#taskInfoSourceLanguage").value,
           target_language_mode:$("#taskInfoTargetLanguage").value,
           translation_layout:window.SubstarTranslationLayout.read("taskInfoLanguageLayout"),
@@ -1654,12 +1656,19 @@
           autosave_retry_count:Number($("#taskInfoAutosaveRetries").value)
         })
       });
+      if (epoch !== projectEpoch) return;
       state.taskInfo = updated;
       state.operationQueue?.configure({
         debounceMs:(updated.autosave_delay_seconds ?? 1) * 1000,
         maxRetries:updated.autosave_retry_count ?? 3
       });
-      if ($("#taskInfoMediaPath").dataset.selection) loadProjectMedia();
+      if (mediaSelection) {
+        const info = await api(projectPath("/media-info"));
+        if (epoch !== projectEpoch) return;
+        state.mediaInfo = info;
+        configureMedia(info.kind);
+        loadProjectMedia({relinked:true});
+      }
       applySubtitlePolicy(updated);
       configureTranslationLanguageDefaults(updated);
       if (current) current.display_name = updated.display_name || displayName;
@@ -2198,8 +2207,10 @@
 
   async function refreshTranslationTask({reloadOnComplete = false} = {}) {
     if (!state.projectId) return null;
+    const epoch = projectEpoch;
     try {
       const task = await api(projectPath("/translation"));
+      if (epoch !== projectEpoch) return null;
       const wasComplete = ["succeeded", "succeeded_with_issues"].includes(state.translationTask?.state)
         && state.translationTask?.result_revision_id === task.result_revision_id;
       renderTranslationTask(task);
@@ -2210,6 +2221,7 @@
       }
       return task;
     } catch (error) {
+      if (epoch !== projectEpoch) return null;
       if (error.status === 404) {
         renderTranslationTask(null);
         return null;
@@ -2270,6 +2282,8 @@
     }
     ordinaryError("");
     state.taskPanelDismissed = false;
+    const epoch = projectEpoch;
+    const path = projectPath("/translation");
     const sourceLanguage = $("#translationSourceLanguage").value;
     const targetLanguage = $("#translationTargetLanguage").value;
     const mappingMode = $("#translationMappingMode").value;
@@ -2285,8 +2299,11 @@
     renderTranslationTask({state:"queued", progress:0, message:"正在启动 AI 翻译…"});
     try {
       await loadTranslationGlossaries();
+      if (epoch !== projectEpoch) return;
       const glossaryIds = Array.from($("#translationGlossaryChoices").querySelectorAll("input:checked"), input => input.value);
-      const task = await withSavedDocument(() => api(projectPath("/translation"), {
+      const task = await withSavedDocument(() => {
+        if (epoch !== projectEpoch) throw new Error("项目已切换");
+        return api(path, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
@@ -2298,10 +2315,13 @@
           regroup,
           glossary_ids:glossaryIds
         })
-      }));
+        });
+      });
+      if (epoch !== projectEpoch) return;
       followTranslationTask(task);
       if (regroupControl) regroupControl.checked = false;
     } catch (error) {
+      if (epoch !== projectEpoch) return;
       ordinaryError(`翻译启动失败：${error.message}`);
       renderTranslationTask({
         state:"failed", progress:0, message:"翻译启动失败", error:error.message
@@ -2335,8 +2355,9 @@
     button.classList.toggle("review-annotated", annotated);
     if (interactive) button.dataset.tokenId = token.token_id;
     const label = document.createElement("b");
-    label.textContent = projectedText;
-    button.classList.toggle("punctuation-elided", !projectedText);
+    label.dataset.projectedText = projectedText;
+    label.textContent = tokenSplitMode ? token.text : projectedText;
+    button.classList.toggle("punctuation-elided", !tokenSplitMode && !projectedText);
     const source = sourceTextForToken(token);
     if (source && source !== token.text) button.title = `原词：${source}`;
     else if (!source) button.title = "人工新增词元";
@@ -3274,11 +3295,13 @@
     state.operationQueue?.destroy();
     const factory = window.EditorOperationQueue;
     if (!factory?.createOperationQueue) throw new Error("编辑队列未加载，请刷新后重试");
-    const journalKey = `substar.editor.operations:${state.projectId}:${state.revision.document.document_id}`;
+    const journalWriter = state.journalWriter ||= globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const journalPrefix = `substar.editor.operations:${state.projectId}:${state.revision.document.document_id}:${journalWriter}`;
+    let previousJournalKey = null;
     let initialOperations = [];
     // Browser reloads and reopening a project must not replay the operation
     // that trapped the previous session. Keep its journal as a recovery copy.
-    if (window.EditorRecovery.archive(localStorage, state.projectId, [])) {
+    if (window.EditorRecovery.archive(localStorage, state.projectId, [], journalWriter)) {
       ordinaryError("已恢复到最后保存版本，未保存修改已保留副本；右键刷新按钮可查看。", "notice");
       syncRecoveryDraftButton();
     }
@@ -3435,8 +3458,14 @@
       onJournal(operations) {
         if (state.recoveryReloading || !queueCurrent()) return;
         try {
-          if (operations.length) localStorage.setItem(journalKey, JSON.stringify(operations));
-          else localStorage.removeItem(journalKey);
+          let nextKey = null;
+          if (operations.length) {
+            state.journalSequence = (state.journalSequence || 0) + 1;
+            nextKey = `${journalPrefix}:${state.journalSequence}`;
+            localStorage.setItem(nextKey, JSON.stringify(operations));
+          }
+          if (previousJournalKey) localStorage.removeItem(previousJournalKey);
+          previousJournalKey = nextKey;
         } catch (_) { ordinaryError("浏览器恢复记录写入失败，编辑仅保留在内存中，请保持此页面打开并完成保存"); }
       },
       onFailed(error) {
@@ -4483,6 +4512,14 @@
 
   function setTokenSplitMode(enabled) {
     tokenSplitMode = enabled;
+    for (const button of document.querySelectorAll("#cueList [data-token-id]")) {
+      const token = state.indexes?.tokenById?.get(button.dataset.tokenId) || state.view?.token_views.find(t => t.token_id === button.dataset.tokenId);
+      const label = button.querySelector("b");
+      if (label && token) {
+        button.classList.toggle("punctuation-elided", !enabled && label.dataset.projectedText === "");
+        label.textContent = enabled ? token.text : (label.dataset.projectedText ?? token.text);
+      }
+    }
     hideTokenSplitCaret();
     $("#splitTokens").setAttribute("aria-pressed", String(enabled));
     $("#cueList").classList.toggle("token-split-mode", enabled);
@@ -4707,6 +4744,7 @@
         storage:localStorage,
         projectId:() => state.projectId,
         capture:captureRecoverySnapshot,
+        journalWriter:() => state.journalWriter,
         pause() {
           state.recoveryPreparing = true;
           state.operationQueue?.pause();

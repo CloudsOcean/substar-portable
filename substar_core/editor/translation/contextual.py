@@ -125,6 +125,8 @@ def api_call(*, settings: dict[str, Any], system_prompt: str,
     wire_system_prompt = system_prompt + "\n\n" + output_contract("TRANSLATE")
     cache_key = fingerprint({
         "scope": cache_scope,
+        "endpoint": route["base_url"],
+        "provider": settings.get("active_model_provider"),
         "stage": stage_name,
         "model": str(route["model"]),
         "system_prompt": wire_system_prompt,
@@ -1278,7 +1280,9 @@ def materialize_presentation(
     presentation.extend(cue for cue in document.cues if cue.state is EntityState.DELETED)
     presentation.sort(key=lambda cue: (cue.start, cue.end, cue.index, cue.cue_id))
     presentation = [replace(cue, index=index) for index, cue in enumerate(presentation)]
-    return replace(document, cues=tuple(presentation)), {
+    from substar_core.ass_profiles import inherit_cue_profiles
+    derived = replace(document, cues=tuple(presentation))
+    return inherit_cue_profiles(derived, {c.cue_id: c.mapping.get("source_cue_ids", []) for c in presentation}), {
         "schema_version": "substar.presentation-plan.v1",
         "groups": [
             {

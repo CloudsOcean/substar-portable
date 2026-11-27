@@ -109,17 +109,26 @@ def frame_intervals(intervals, fps):
     rate = Fraction(fps)
     if rate <= 0 or rate > 240:
         raise ValueError("无效帧率")
-    cursor = Fraction(0)
-    previous = 0
+    if not intervals:
+        return []
+    # Reserve room at the tail before choosing the nearest source frame.
+    # This preserves the cumulative duration while never selecting a frame twice.
+    spans = [(Fraction(str(a)) * rate, Fraction(str(b)) * rate) for a, b in intervals]
+    total = round(sum((end - start for start, end in spans), Fraction()))
+    source_limit = round(spans[-1][1])
+    carried = Fraction()
+    allocated = previous_end = 0
     result = []
-    for a,b in intervals:
-        cursor += Fraction(str(b)) - Fraction(str(a))
-        boundary = round(cursor * rate)
-        length = boundary - previous
-        previous = boundary
-        if length > 0:
-            source = round(Fraction(str(a)) * rate)
-            result.append((float(source/rate),float((source+length)/rate)))
+    for start, end in spans:
+        carried += end - start
+        length = round(carried) - allocated
+        if not length:
+            continue
+        latest_start = source_limit - (total - allocated)
+        first = max(previous_end, min(round(start), latest_start))
+        previous_end = first + length
+        result.append((float(first / rate), float(previous_end / rate)))
+        allocated += length
     return result
 
 
@@ -138,7 +147,9 @@ def projected_subtitles(document, intervals):
             tokens[t].text for t in cue.display_token_ids if tokens[t].state == EntityState.ACTIVE)
         if not text.strip() and cue.target is None:
             continue
-        for start, end in project_range(cue.start, cue.end, intervals):
+        parts = list(project_range(cue.start, cue.end, intervals))
+        if parts:
+            start, end = parts[0][0], parts[-1][1]
             original_ids[f"export_{len(cues)}"] = cue.cue_id
             cues.append(replace(cue, cue_id=f"export_{len(cues)}", index=len(cues), start=start, end=end,
                                 display_token_ids=(), source_text=text, group_id=None))

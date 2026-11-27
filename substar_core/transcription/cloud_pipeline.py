@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import wave
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -66,6 +67,13 @@ def _probe_media(path: Path) -> dict[str, Any]:
     }
 
 
+def has_complete_audio(path: Path) -> bool:
+    try:
+        return path.stat().st_size > 44 and path.with_suffix(".complete").read_text(encoding="ascii") == str(path.stat().st_size)
+    except (OSError, UnicodeError):
+        return False
+
+
 def _extract_audio(
     media_path: Path,
     wav_path: Path,
@@ -74,7 +82,8 @@ def _extract_audio(
     media_duration_seconds: float,
 ) -> None:
     wav_path.parent.mkdir(parents=True, exist_ok=True)
-    if wav_path.is_file() and wav_path.stat().st_size > 44:
+    receipt = wav_path.with_suffix(".complete")
+    if has_complete_audio(wav_path):
         return
     command = [
         _find_tool("ffmpeg") or "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(media_path),
@@ -82,16 +91,21 @@ def _extract_audio(
     ]
     if denoise_mode == "light":
         command.extend(["-af", "afftdn=nr=8:nf=-35"])
-    command.extend(["-c:a", "pcm_s16le", str(wav_path)])
+    partial = wav_path.with_suffix(".partial.wav")
+    command.extend(["-c:a", "pcm_s16le", str(partial)])
     timeout_seconds = max(300.0, min(3600.0, media_duration_seconds * 2.0 + 120.0))
     try:
         _run(command, timeout_seconds=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        try:
-            wav_path.unlink()
-        except FileNotFoundError:
-            pass
-        raise
+        with wave.open(str(partial), "rb") as audio:
+            if (audio.getnchannels(), audio.getsampwidth(), audio.getframerate()) != (1, 2, 16000) or not audio.getnframes():
+                raise ValueError("媒体没有可用的 16kHz 单声道音频")
+            audio.setpos(audio.getnframes() - 1)
+            if len(audio.readframes(1)) != 2:
+                raise ValueError("提取的音频文件不完整")
+        partial.replace(wav_path)
+        atomic_write_text(receipt, str(wav_path.stat().st_size))
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def _sha256(path: Path) -> str:

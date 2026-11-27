@@ -31,7 +31,12 @@ def backend_launch_surface(
 
         def console_window_provider():
             window = kernel32.GetConsoleWindow()
-            return window if window and user32.IsWindowVisible(window) else 0
+            if not window or user32.IsWindowVisible(window):
+                return window
+            name = ctypes.create_unicode_buffer(128)
+            user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+            user32.GetClassNameW(window, name, len(name))
+            return window if name.value == "PseudoConsoleWindow" else 0
     try:
         return VISIBLE_CONSOLE if int(console_window_provider() or 0) else HEADLESS
     except (AttributeError, OSError, TypeError, ValueError):

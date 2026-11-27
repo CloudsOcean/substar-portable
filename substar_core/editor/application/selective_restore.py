@@ -61,6 +61,49 @@ def restore_fields(current, historical, cue_ids, scope):
     result = replace(current, cues=tuple(now[c.cue_id] for c in current.cues),
                      display_tokens=tuple(tokens[t.token_id] for t in current.display_tokens),
                      changes=(*current.changes, provenance))
+    if scope in {"translation", "timing"}:
+        from substar_core.translation_units import all_units, install_units
+        current_units, prior_units = all_units(current), all_units(historical)
+        affected = [u for u in current_units + prior_units if ids.intersection(u["source_cue_ids"])]
+        if any(not set(u["source_cue_ids"]) <= ids for u in affected):
+            raise ValueError("请同时选择共享译文关联的全部字幕")
+        if affected:
+            keep = [u for u in current_units if not ids.intersection(u["source_cue_ids"])]
+            replacements = [u for u in prior_units if ids.intersection(u["source_cue_ids"])]
+            if scope == "translation":
+                current_by_id = {u["unit_id"]: u for u in current_units}
+                restored_units = []
+                for prior in replacements:
+                    existing = current_by_id.get(prior["unit_id"])
+                    evidence = prior["source_cue_ids"]
+                    if existing and existing["source_cue_ids"] == evidence:
+                        start, end = existing["start"], existing["end"]
+                    else:
+                        old_start, old_end = min(old[c].start for c in evidence), max(old[c].end for c in evidence)
+                        start_now, end_now = min(now[c].start for c in evidence), max(now[c].end for c in evidence)
+                        scale = (end_now - start_now) / (old_end - old_start)
+                        start = start_now + (prior["start"] - old_start) * scale
+                        end = start_now + (prior["end"] - old_start) * scale
+                    unit = dict(prior, start=start, end=end)
+                    if any(now[c].target and now[c].target.issue_code == "source_changed" for c in evidence):
+                        unit["needs_review"] = True
+                    restored_units.append(unit)
+                replacements = restored_units
+            if scope == "timing":
+                old_by_id = {u["unit_id"]: u for u in replacements}
+                replacements = []
+                for unit in current_units:
+                    if not ids.intersection(unit["source_cue_ids"]):
+                        continue
+                    prior = old_by_id.get(unit["unit_id"])
+                    if prior is None:
+                        raise ValueError("译文结构已变化，无法只恢复时间")
+                    replacements.append(dict(unit, start=prior["start"], end=prior["end"]))
+            result = install_units(result, keep + replacements, provenance)
+            if scope == "translation":
+                no_units = ids - {cid for u in replacements for cid in u["source_cue_ids"]}
+                result = replace(result, cues=tuple(replace(c, target=now[c.cue_id].target)
+                    if c.cue_id in no_units else c for c in result.cues))
     return synchronize_translation_status(result, changed)
 
 
@@ -98,6 +141,7 @@ def split_token(document, token_id, offset):
     first = min(i for i, s in enumerate(document.source_tokens) if s.token_id in token.source_token_ids)
     remaining = [s for s in document.source_tokens if s.token_id not in token.source_token_ids]
     remaining[first:first] = sources
+    remaining.sort(key=lambda item: item.start)
     source_tokens = tuple(replace(s, index=i) for i, s in enumerate(remaining))
     display_tokens = tuple(part for t in document.display_tokens for part in (displays if t.token_id == token_id else [t]))
     def update_owner(owner):

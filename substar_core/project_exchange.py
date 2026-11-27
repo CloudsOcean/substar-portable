@@ -45,13 +45,16 @@ def _portable_media_entries(entries, job_dir):
     manifest_path=job_dir/'run_manifest.json'
     manifest=json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {}
     media=None
-    if read_reference(job_dir):
+    reference = read_reference(job_dir)
+    if reference:
         media=resolve_reference(job_dir)
+        if reference.get("media"):
+            manifest["media"] = reference["media"]
     else:
         raw=Path(str(manifest.get('source_path') or ''))
         if str(raw) != '.':
             candidate=raw if raw.is_absolute() else job_dir/raw
-            if candidate.is_file(): media=candidate
+            if candidate.is_file() and candidate.resolve().is_relative_to(job_dir.resolve()): media=candidate
         if media is None:
             name=Path(str(manifest.get('source_file') or '')).name
             candidate=job_dir/'input'/name
@@ -134,6 +137,8 @@ def export_subtitle_project(target: Path, *, project_id: str, job_dir: Path, rev
         "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "files": manifest_files,
     }
+    if sum(row["size"] for row in manifest_files) + len(json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")) > MAX_EXPANDED_BYTES:
+        raise ProjectExchangeError("字幕工程超过导入大小限制")
     # Stored entries guarantee every legal export meets the import ratio limit,
     # including silent PCM and repetitive JSON, without a second compression pass.
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
@@ -186,7 +191,11 @@ def _subtitle_project_entries(
     entries: list[tuple[str, Path | None, bytes | None]] = [
         ("document/latest.json", None, document_bytes)
     ]
-    candidates = [job_dir / "audio_16k_mono.wav", *job_dir.rglob("recognition_evidence.json")]
+    from substar_core.media_reference import waveform_path
+    audio = waveform_path(job_dir)
+    if audio.is_file():
+        entries.append(("project/audio_16k_mono.wav", audio, None))
+    candidates = list(job_dir.rglob("recognition_evidence.json"))
     input_dir = job_dir / "input"
     if input_dir.is_dir():
         candidates.extend(path for path in input_dir.iterdir() if path.is_file())
@@ -205,7 +214,12 @@ def _subtitle_project_entries(
             continue
         seen.add(path)
         entries.append((f"project/{path.relative_to(job_dir).as_posix()}", path, None))
-    return _portable_media_entries(entries, job_dir)
+    entries = _portable_media_entries(entries, job_dir)
+    if len(entries) + 1 > MAX_ARCHIVE_FILES:
+        raise ProjectExchangeError("字幕工程文件数量超出导入限制")
+    if sum(path.stat().st_size if path else len(content or b"") for _, path, content in entries) > MAX_EXPANDED_BYTES:
+        raise ProjectExchangeError("字幕工程超过导入大小限制")
+    return entries
 
 
 def stream_subtitle_project(
@@ -213,9 +227,20 @@ def stream_subtitle_project(
 ) -> Iterator[bytes]:
     """Stream a portable project without first building a potentially huge temp ZIP."""
 
+    entries = _subtitle_project_entries(job_dir=job_dir, revision=revision)
+    files = [{"path": name, "size": path.stat().st_size if path else len(content or b""), "sha256": "0" * 64}
+             for name, path, content in entries]
+    manifest = {"schema_version": EXCHANGE_SCHEMA, "source_project_id": project_id,
+                "document_id": revision.document.document_id, "revision_id": revision.revision_id,
+                "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"), "files": files}
+    if sum(row["size"] for row in files) + len(json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")) > MAX_EXPANDED_BYTES:
+        raise ProjectExchangeError("字幕工程超过导入大小限制")
+    return _stream_entries(entries, manifest)
+
+
+def _stream_entries(entries, manifest) -> Iterator[bytes]:
     chunks: "queue.Queue[bytes | BaseException | None]" = queue.Queue(maxsize=8)
     cancelled = threading.Event()
-    entries = _subtitle_project_entries(job_dir=job_dir, revision=revision)
 
     def produce() -> None:
         writer = _StreamingZipWriter(chunks, cancelled)
@@ -245,14 +270,9 @@ def stream_subtitle_project(
                         "size": size,
                         "sha256": digest.hexdigest(),
                     })
-                manifest = {
-                    "schema_version": EXCHANGE_SCHEMA,
-                    "source_project_id": project_id,
-                    "document_id": revision.document.document_id,
-                    "revision_id": revision.revision_id,
-                    "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                    "files": manifest_files,
-                }
+                manifest["files"] = manifest_files
+                if sum(row["size"] for row in manifest_files) + len(json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")) > MAX_EXPANDED_BYTES:
+                    raise ProjectExchangeError("字幕工程超过导入大小限制")
                 archive.writestr(
                     "manifest.json",
                     json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8"),
@@ -376,6 +396,17 @@ def import_subtitle_project(source: BinaryIO, *, projects_root: Path) -> str:
             if document_content is None:
                 raise ProjectExchangeError("字幕工程缺少最新文档")
             document = EditorDocument.from_dict(json.loads(document_content))
+        manifest_path = temporary / "run_manifest.json"
+        if manifest_path.is_file():
+            media_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw_path = str(media_manifest.get("source_path") or media_manifest.get("source_file") or "")
+            name = Path(raw_path).name
+            internal = temporary / "input" / name
+            media_manifest.pop("source_path", None)
+            media_manifest.update(media_relinked=False, source_file=name if internal.is_file() else "")
+            if internal.is_file():
+                media_manifest["source_path"] = "input/" + name
+            atomic_write_json(manifest_path, media_manifest)
         store = ProjectStore.create(temporary / "project", project_id=project_id)
         provenance = ChangeProvenance(
             kind=ChangeKind.IMPORT,

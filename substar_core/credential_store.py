@@ -64,7 +64,7 @@ def canonicalize_credentials(values: Mapping[str, Any]) -> dict[str, str]:
         role: value
         for role, value in cleaned.items()
         if role in CANONICAL_CREDENTIAL_ROLES
-        or (role.startswith(MODEL_PROVIDER_PREFIX) and role[len(MODEL_PROVIDER_PREFIX):].replace("-", "_").isalnum())
+        or (role.startswith(MODEL_PROVIDER_PREFIX) and role[len(MODEL_PROVIDER_PREFIX):].replace("-", "").replace("_", "").isalnum())
     }
 
 

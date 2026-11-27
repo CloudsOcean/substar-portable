@@ -11,7 +11,7 @@ import requests
 from substar_core.job_diagnostics import model_failure, request_failure, response_diagnostics, safe_text
 from substar_core.model_concurrency import model_slot, retry_after_seconds
 
-from substar_core.openai_compat import auth_headers, endpoint_url
+from substar_core.openai_compat import auth_headers, endpoint_url, chat_controls
 from substar_core.reasoning_capabilities import (
     reasoning_effort_for_request,
     resolve_thinking_mode,
@@ -133,18 +133,13 @@ def call_text_model(
             raise ModelGatewayError("模型续接消息必须是 assistant/user 文本")
         messages.append({"role": role, "content": content})
 
+    output_budget = max(1, int(max_tokens))
     payload: dict[str, Any] = {
         "model": str(model),
         "messages": messages,
-        "max_tokens": max(1, int(max_tokens)),
         "stream": False,
+        **chat_controls(base_url, model, output_budget, effective_mode, effective_effort, float(temperature)),
     }
-    if effective_mode == "enabled":
-        payload["thinking"] = {"type": "enabled"}
-        payload["reasoning_effort"] = effective_effort
-    else:
-        payload["thinking"] = {"type": "disabled"}
-        payload["temperature"] = float(temperature)
 
     idempotency_key = hashlib.sha256(
         json.dumps(
@@ -232,7 +227,7 @@ def call_text_model(
     finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
     if finish_reason == "length":
         raise ModelGatewayError(
-            f"模型输出达到当前 {payload['max_tokens']} token 上限"
+            f"模型输出达到当前 {output_budget} token 上限"
         )
     if isinstance(finish_reason, str) and finish_reason in {"content_filter", "sensitive", "network_error", "error"}:
         raise ModelGatewayRequestError(
@@ -262,8 +257,8 @@ def call_text_model(
         ),
         "duration_seconds": round(time.perf_counter() - started, 3),
         "finish_reason": finish_reason,
-        "max_tokens": payload["max_tokens"],
-        "attempted_output_budgets": [payload["max_tokens"]],
+        "max_tokens": output_budget,
+        "attempted_output_budgets": [output_budget],
         "transport_attempt_count": used_attempts,
         "usage": usage,
         "cache_usage": {

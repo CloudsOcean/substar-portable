@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,12 @@ class TranscriptionAudioPrepareTests(unittest.TestCase):
             root = Path(directory)
             source = root / "source.mp4"
             source.write_bytes(b"media")
+            def write_audio(command, **kwargs):
+                with wave.open(command[-1], "wb") as out:
+                    out.setparams((1, 2, 16000, 0, "NONE", ""))
+                    out.writeframes(bytes(320))
+
+            runner.side_effect = write_audio
             _extract_audio(
                 source,
                 root / "audio.wav",

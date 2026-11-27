@@ -76,6 +76,8 @@ def _request(
     **kwargs: Any,
 ) -> requests.Response:
     last_error: QwenCloudAsrError | None = None
+    if method.upper() == "POST":
+        attempts = 1  # Submission has no client idempotency key.
     authorization = str((kwargs.get("headers") or {}).get("Authorization", ""))
     secret = authorization.removeprefix("Bearer ")
     for attempt in range(1, attempts + 1):
@@ -140,15 +142,15 @@ def upload_temporary_file(
         timeout=timeout,
         attempts=attempts,
     )
-    maximum = int(float(policy.get("max_file_size_mb", 1024)) * 1024 * 1024)
-    if path.stat().st_size > maximum:
-        raise QwenCloudAsrError(
-            f"临时上传音频超过当前凭证上限（{policy.get('max_file_size_mb')} MB）"
-        )
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.name) or "audio.mp3"
-    key = f"{str(policy['upload_dir']).rstrip('/')}/{safe_name}"
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
+        maximum = int(float(policy.get("max_file_size_mb", 1024)) * 1024 * 1024)
+        if path.stat().st_size > maximum:
+            raise QwenCloudAsrError(
+                f"临时上传音频超过当前凭证上限（{policy.get('max_file_size_mb')} MB）"
+            )
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", path.name) or "audio.mp3"
+        key = f"{str(policy['upload_dir']).rstrip('/')}/{safe_name}"
         try:
             with path.open("rb") as handle:
                 response = requests.post(
@@ -438,7 +440,7 @@ def _split_qwen_unit_text(text: str) -> list[str]:
 
 
 def _natural_qwen_units(
-    words: list[Any], sentence: dict[str, Any]
+    words: list[Any], sentence: dict[str, Any], sentence_index: int = 0
 ) -> tuple[list[dict[str, Any]], int, int]:
     """Collapse Qwen tokenizer pieces into editor-level natural word units."""
 
@@ -453,6 +455,7 @@ def _natural_qwen_units(
         if pending is None:
             return
         core = str(pending.pop("_core", ""))
+        parents = pending.pop("_native_ids")
         pending["kind"] = (
             "character" if len(core) == 1 and _CJK_TEXT.search(core) else "word"
         )
@@ -466,13 +469,15 @@ def _natural_qwen_units(
                 result.append({**pending, "text": part, "kind": "word",
                     "start": round(start + (end-start) * offset / total, 3),
                     "end": round(start + (end-start) * next_offset / total, 3),
-                    "timing_source": "qwen_cloud_estimated"})
+                    "timing_source": "qwen_cloud_estimated",
+                    "timing": {"kind": "subdivided", "method": "length_proportional",
+                               "native_start": start, "native_end": end, "native_token_ids": list(parents)}})
                 offset = next_offset
         else:
             result.append(pending)
         pending = None
 
-    for word in words:
+    for raw_index, word in enumerate(words):
         if not isinstance(word, dict):
             continue
         raw_core = str(word.get("text", ""))
@@ -483,6 +488,7 @@ def _natural_qwen_units(
             boundary_before_next = True
             continue
         raw_fragment_count += 1
+        parent = f"qwen:{sentence_index}:{raw_index}"
         token = f"{core}{punctuation}"
         start = round(
             float(word.get("begin_time", sentence.get("begin_time", 0))) / 1000,
@@ -501,6 +507,7 @@ def _natural_qwen_units(
         if pending is not None and (re.fullmatch(r"[…，、,；;!?！？]+|\.{2,}", token) or (token == "." and str(pending["text"]).endswith("."))):
             pending["text"] = f"{pending['text']}{token}"
             pending["end"] = max(float(pending["end"]), end)
+            pending["_native_ids"].append(parent)
             boundary_before_next = True
             continue
         if not starts_new and pending is not None and _can_join_qwen_fragments(
@@ -509,6 +516,7 @@ def _natural_qwen_units(
             pending["text"] = f"{pending['text']}{token}"
             pending["_core"] = f"{pending['_core']}{core}"
             pending["end"] = max(float(pending["end"]), end)
+            pending["_native_ids"].append(parent)
             joined_fragment_count += 1
         else:
             flush()
@@ -517,7 +525,7 @@ def _natural_qwen_units(
                 "start": start,
                 "end": end,
                 "timing_source": "qwen_cloud_native",
-                "_core": core,
+                "_core": core, "_native_ids": [parent],
             }
         boundary_before_next = bool(punctuation)
     flush()
@@ -559,7 +567,7 @@ def _parse_result(
                 "speaker_id": speaker_id,
             })
             sentence_units, raw_count, joined_count = _natural_qwen_units(
-                sentence.get("words", []) or [], sentence
+                sentence.get("words", []) or [], sentence, sentence_index
             )
             if sentence_units:
                 for position, unit in enumerate(sentence_units):
@@ -736,9 +744,11 @@ def run_qwen_cloud_asr(
     progress("准备 Qwen 云端听写音频", 0.22)
     _encode_cloud_audio(wav_path, audio_path)
     check_cancelled()
+    if state.get("submission_pending") and not state.get("task_id"):
+        raise QwenCloudAsrError("上次提交结果未知，请先核对云端任务，确认后再创建新任务")
     oss_url = str(state.get("oss_url", ""))
     uploaded_at = float(state.get("uploaded_at", 0) or 0)
-    if not oss_url or time.time() - uploaded_at > 47 * 3600:
+    if not state.get("task_id") and (not oss_url or time.time() - uploaded_at > 47 * 3600):
         progress("上传音频到 Qwen 临时存储", 0.28)
         oss_url = upload_temporary_file(
             audio_path,
@@ -767,14 +777,22 @@ def run_qwen_cloud_asr(
     if not task_id:
         progress("提交 Qwen 云端听写任务", 0.33)
         check_cancelled()
-        response = _request(
-            "POST",
-            f"{base_url}/services/audio/asr/transcription",
-            attempts=attempts,
-            timeout=timeout,
-            headers=_headers(api_key, async_call=True),
-            json=submission_body,
-        )
+        state["submission_pending"] = True
+        atomic_write_json(state_path, state)
+        try:
+            response = _request(
+                "POST",
+                f"{base_url}/services/audio/asr/transcription",
+                attempts=1,
+                timeout=timeout,
+                headers=_headers(api_key, async_call=True),
+                json=submission_body,
+            )
+        except QwenCloudAsrError as exc:
+            if exc.diagnostics.get("http_status") in {400, 401, 403, 404, 422, 429}:
+                state.pop("submission_pending", None)
+                atomic_write_json(state_path, state)
+            raise
         output = response.json().get("output") or {}
         task_id = str(output.get("task_id", ""))
         if not task_id:
@@ -783,6 +801,7 @@ def run_qwen_cloud_asr(
                 diagnostics={**response_diagnostics(response, secret=api_key),
                              "code": "missing_cloud_task_id", "message": "Qwen ASR 返回异常，缺少云端任务 ID"},
             )
+        state.pop("submission_pending", None)
         state.update({"task_id": task_id, "submitted_at": time.time()})
         atomic_write_json(state_path, state)
 

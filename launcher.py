@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import uuid
+import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 from typing import Callable, Literal
@@ -160,9 +161,22 @@ def _foreground_backend_window() -> bool:
     return found
 
 
+def _open_browser(port: int) -> None:
+    if os.environ.get("SUBSTAR_LAUNCHER_OPEN_BROWSER") == "0":
+        return
+    url = f"http://127.0.0.1:{port}"
+    try:
+        if webbrowser.open(url):
+            return
+    except (OSError, webbrowser.Error):
+        pass
+    print(f"请在浏览器中打开 {url}")
+
+
 def _open_existing(identity: dict) -> int:
     print(f"Substar 已在运行：http://127.0.0.1:{identity['port']}")
     _foreground_backend_window()
+    _open_browser(int(identity["port"]))
     return 0
 
 
@@ -482,6 +496,9 @@ def main() -> int:
     mutex, owns_mutex = _acquire_mutex()
     if not owns_mutex:
         _close_handle(mutex)
+        identity = _probe_candidate_identity(load_runtime_record() or {}, port)
+        if identity:
+            return _open_existing(identity)
         if _foreground_backend_window():
             return 0
         print("[启动失败] 已有 Substar 实例，或无法取得整机单实例锁。")
@@ -612,6 +629,7 @@ def _run_backend(root: Path, port: int, expected_build: str) -> int:
                     f"Substar 运行中 · http://127.0.0.1:{port} · 关闭此窗口即退出",
                     final=True,
                 )
+                _open_browser(port)
                 break
             time.sleep(0.25)
         else:
